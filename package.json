@@ -1,0 +1,44 @@
+{
+  "name": "rutacash",
+  "version": "1.0.0",
+  "description": "RutaCash - Sistema de gestión de cobradiario y préstamos",
+  "scripts": {
+    "dev": "vite",
+    "dev:demo": "vite --mode demo",
+    "dev:clean": "vite --mode clean",
+    "build": "tsc && vite build",
+    "build:demo": "tsc && vite build --mode demo",
+    "build:clean": "tsc && vite build --mode clean",
+    "preview": "vite preview",
+    "lint": "eslint . --ext ts,tsx"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  },
+  "dependencies": {
+    "@types/uuid": "^10.0.0",
+    "autoprefixer": "^10.5.0",
+    "clsx": "^2.1.1",
+    "date-fns": "^3.6.0",
+    "dexie": "^3.2.7",
+    "dexie-react-hooks": "^1.1.7",
+    "lucide-react": "^0.414.0",
+    "postcss": "^8.5.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.4",
+    "recharts": "^2.15.4",
+    "tailwindcss": "^3.4.19",
+    "uuid": "^10.0.0",
+    "zod": "^3.25.76",
+    "zustand": "^4.5.7"
+  }
+}
