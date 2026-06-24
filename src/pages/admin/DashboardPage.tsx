@@ -33,13 +33,13 @@ interface DashboardData {
 
 export default function DashboardPage() {
   const { user } = useAuth()
-  const { tenantId, officeId } = useTenant()
+  const { tenantId } = useTenant()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     loadDashboard()
-  }, [tenantId, officeId])
+  }, [tenantId])
 
   async function loadDashboard() {
     setLoading(true)
@@ -48,10 +48,8 @@ export default function DashboardPage() {
       const weekStart = getWeekStart()
       const weekEnd = getWeekEnd()
 
-      // Routes
-      let routesQuery = db.routes.where('tenantId').equals(tenantId)
-      const routes = await routesQuery.toArray()
-      const routeIds = routes.map(r => r.id)
+      // Routes (toda la empresa)
+      const routes = await db.routes.where('tenantId').equals(tenantId).toArray()
 
       // Sales
       const allSales = await db.sales.where('tenantId').equals(tenantId).toArray()
@@ -72,9 +70,8 @@ export default function DashboardPage() {
         .reduce((s, p) => s + p.valor, 0)
 
       // Clients
-      const clientesActivos = await db.clients
-        .where('tenantId').equals(tenantId)
-        .and(c => c.status === 'activo').count()
+      const allClients = await db.clients.where('tenantId').equals(tenantId).toArray()
+      const clientesActivos = allClients.filter(c => c.status === 'activo').length
 
       // Expenses
       const allExpenses = await db.expenses.where('tenantId').equals(tenantId).toArray()
@@ -82,9 +79,8 @@ export default function DashboardPage() {
         .filter(e => e.fecha >= weekStart && e.fecha <= weekEnd)
         .reduce((s, e) => s + e.valor, 0)
 
-      // Pending sync
-      const pagosPendientesSync = await db.payments
-        .where('syncStatus').equals('pending').count()
+      // Pending sync (de los pagos en alcance)
+      const pagosPendientesSync = allPayments.filter(p => p.syncStatus === 'pending').length
 
       // Rutas con mora
       const installments = await db.installments.toArray()
@@ -254,14 +250,14 @@ export default function DashboardPage() {
             <AreaChart data={data.recaudoDiario}>
               <defs>
                 <linearGradient id="recaudoGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#D71920" stopOpacity={0.15} />
-                  <stop offset="95%" stopColor="#D71920" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#2563EB" stopOpacity={0.15} />
+                  <stop offset="95%" stopColor="#2563EB" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <XAxis dataKey="dia" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={(v: number) => formatCurrency(v)} labelStyle={{ fontSize: 12 }} />
-              <Area type="monotone" dataKey="valor" stroke="#D71920" strokeWidth={2} fill="url(#recaudoGrad)" />
+              <Area type="monotone" dataKey="valor" stroke="#2563EB" strokeWidth={2} fill="url(#recaudoGrad)" />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -275,7 +271,7 @@ export default function DashboardPage() {
                 <XAxis type="number" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
                 <YAxis type="category" dataKey="nombre" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={80} />
                 <Tooltip formatter={(v: number) => formatCurrency(v)} />
-                <Bar dataKey="cobrado" fill="#D71920" radius={[0, 6, 6, 0]} />
+                <Bar dataKey="cobrado" fill="#2563EB" radius={[0, 6, 6, 0]} />
               </BarChart>
             </ResponsiveContainer>
           ) : (

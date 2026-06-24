@@ -5,23 +5,26 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { Input, Select } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
+import { getRouteAvailableCapital } from '@/services/cashboxEngine'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
-import type { Route, Office, User } from '@/models/types'
+import { assignCobradorToRoute } from '@/services/routeAssignment'
+import type { Route, User } from '@/models/types'
 
 export default function RoutesPage() {
   const { user } = useAuth()
-  const { tenantId, officeId } = useTenant()
+  const { tenantId, currency } = useTenant()
   const [routes, setRoutes] = useState<Route[]>([])
-  const [offices, setOffices] = useState<Office[]>([])
   const [cobradores, setCobradores] = useState<User[]>([])
   const [salesCounts, setSalesCounts] = useState<Record<string, number>>({})
+  const [disponibleByRoute, setDisponibleByRoute] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Route | null>(null)
@@ -30,40 +33,49 @@ export default function RoutesPage() {
   const [deleting, setDeleting] = useState(false)
   const [checkingId, setCheckingId] = useState<string | null>(null)
   const [form, setForm] = useState({
-    nombre: '', codigo: '', ciudad: '', officeId: '', cobradorId: '',
+    nombre: '', ciudad: '', cobradorId: '',
     tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0,
   })
+
+  // Código interno ordenado y secuencial: RT-001, RT-002, ... (no se pide al usuario).
+  function nextRouteCode(existing: Route[]): string {
+    let max = 0
+    for (const r of existing) {
+      const m = /^RT-(\d+)$/.exec(r.codigo ?? '')
+      if (m) max = Math.max(max, parseInt(m[1], 10))
+    }
+    return `RT-${String(max + 1).padStart(3, '0')}`
+  }
 
   useEffect(() => { load() }, [tenantId])
 
   async function load() {
     setLoading(true)
-    const allOffices = await db.offices.where('tenantId').equals(tenantId).toArray()
-    setOffices(allOffices)
-    let rts = await db.routes.where('tenantId').equals(tenantId).toArray()
-    if (officeId) rts = rts.filter(r => r.officeId === officeId)
+    const rts = await db.routes.where('tenantId').equals(tenantId).toArray()
     setRoutes(rts)
     const cobs = await db.users.where('tenantId').equals(tenantId).and(u => u.rol === 'cobrador').toArray()
     setCobradores(cobs)
     const sc: Record<string, number> = {}
+    const disp: Record<string, number> = {}
     for (const r of rts) {
       sc[r.id] = await db.sales.where('routeId').equals(r.id).and(s => s.status === 'activa').count()
+      disp[r.id] = await getRouteAvailableCapital(r.id)
     }
     setSalesCounts(sc)
+    setDisponibleByRoute(disp)
     setLoading(false)
   }
 
   function openCreate() {
     setEditing(null)
-    const firstOffice = offices[0]?.id ?? ''
-    setForm({ nombre: '', codigo: '', ciudad: '', officeId: officeId || firstOffice, cobradorId: '', tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0 })
+    setForm({ nombre: '', ciudad: '', cobradorId: '', tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0 })
     setModalOpen(true)
   }
 
   function openEdit(route: Route) {
     setEditing(route)
     setForm({
-      nombre: route.nombre, codigo: route.codigo, ciudad: route.ciudad ?? '', officeId: route.officeId,
+      nombre: route.nombre, ciudad: route.ciudad ?? '',
       cobradorId: route.cobradorId ?? '', tasaInteres: route.tasaInteres, tasaLibre: route.tasaLibre,
       montoMaximoPrestamo: route.montoMaximoPrestamo, capitalInicial: route.capitalInicial,
     })
@@ -71,30 +83,33 @@ export default function RoutesPage() {
   }
 
   async function handleSave() {
-    if (!form.nombre || !form.officeId) { toast.error('Nombre y oficina son obligatorios'); return }
+    if (!form.nombre) { toast.error('El nombre de la ruta es obligatorio'); return }
     setSaving(true)
     try {
       if (editing) {
+        // No tocamos cobradorId aquí: lo sincroniza assignCobradorToRoute (lee el previo).
         await db.routes.update(editing.id, {
-          nombre: form.nombre, codigo: form.codigo, ciudad: form.ciudad,
-          officeId: form.officeId, cobradorId: form.cobradorId || undefined,
+          nombre: form.nombre, ciudad: form.ciudad,
           tasaInteres: form.tasaInteres, tasaLibre: form.tasaLibre,
           montoMaximoPrestamo: form.montoMaximoPrestamo, updatedAt: nowISO(),
         })
+        await assignCobradorToRoute(editing.id, form.cobradorId || undefined)
         toast.success('Ruta actualizada')
       } else {
         const route: Route = {
-          id: generateId(), tenantId, officeId: form.officeId,
-          nombre: form.nombre, codigo: form.codigo || `R-${Date.now()}`,
+          id: generateId(), tenantId, officeId: '',
+          nombre: form.nombre, codigo: nextRouteCode(routes),
           ciudad: form.ciudad, tasaInteres: form.tasaInteres, tasaLibre: form.tasaLibre,
           montoMaximoPrestamo: form.montoMaximoPrestamo, capitalInicial: form.capitalInicial,
-          capitalActual: form.capitalInicial, cobradorId: form.cobradorId || undefined,
+          capitalActual: form.capitalInicial, cobradorId: undefined,
           status: 'activa', createdAt: nowISO(), updatedAt: nowISO(),
         }
         await db.routes.add(route)
+        // Vincula el cobrador (y su ruta principal) de forma consistente.
+        if (form.cobradorId) await assignCobradorToRoute(route.id, form.cobradorId)
         if (form.capitalInicial > 0) {
           await db.capitalMovements.add({
-            id: generateId(), tenantId, officeId: form.officeId, routeId: route.id,
+            id: generateId(), tenantId, officeId: '', routeId: route.id,
             tipo: 'ingresoCapital', valor: form.capitalInicial,
             descripcion: 'Capital inicial', fecha: new Date().toISOString().slice(0, 10),
             userId: 'system', createdAt: nowISO(),
@@ -148,7 +163,6 @@ export default function RoutesPage() {
   }
 
   const getCobradorName = (id?: string) => cobradores.find(c => c.id === id)?.nombre
-  const getOfficeName = (id: string) => offices.find(o => o.id === id)?.nombre ?? id
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -176,7 +190,7 @@ export default function RoutesPage() {
                     <MapPin className="w-4 h-4 text-primary-500" />
                     <h3 className="font-semibold text-gray-900 text-sm">{route.nombre}</h3>
                   </div>
-                  <p className="text-xs text-gray-400 ml-6">{route.codigo} · {getOfficeName(route.officeId)}</p>
+                  <p className="text-xs text-gray-400 ml-6">{route.codigo}{route.ciudad ? ` · ${route.ciudad}` : ''}</p>
                 </div>
                 <Badge variant={route.status === 'activa' ? 'success' : 'gray'}>
                   {route.status === 'activa' ? 'Activa' : 'Inactiva'}
@@ -193,7 +207,7 @@ export default function RoutesPage() {
                   <p className="text-xs text-gray-400">Tasa</p>
                 </div>
                 <div className="bg-gray-50 rounded-xl p-3 text-center">
-                  <p className="text-xs font-bold text-amber-600 truncate">{formatCurrency(route.montoMaximoPrestamo)}</p>
+                  <p className="text-xs font-bold text-amber-600 truncate">{formatCurrency(route.montoMaximoPrestamo, currency)}</p>
                   <p className="text-xs text-gray-400">Máx.</p>
                 </div>
               </div>
@@ -205,7 +219,7 @@ export default function RoutesPage() {
                 </div>
                 <div className="flex items-center gap-2 text-xs text-gray-600">
                   <DollarSign className="w-3.5 h-3.5 text-gray-400" />
-                  Capital: {formatCurrency(route.capitalInicial)}
+                  Disponible: {formatCurrency(disponibleByRoute[route.id] ?? route.capitalInicial, currency)}
                 </div>
               </div>
 
@@ -235,20 +249,17 @@ export default function RoutesPage() {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Input label="Nombre de la ruta" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required />
-            <Input label="Código" value={form.codigo} onChange={e => setForm(f => ({ ...f, codigo: e.target.value }))} placeholder="RN-001" />
+            <Input label="Ciudad" value={form.ciudad} onChange={e => setForm(f => ({ ...f, ciudad: e.target.value }))} placeholder="Ej: Barranquilla" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Select label="Oficina" value={form.officeId} onChange={e => setForm(f => ({ ...f, officeId: e.target.value }))}
-              options={offices.map(o => ({ value: o.id, label: o.nombre }))} required />
-            <Select label="Cobrador" value={form.cobradorId} onChange={e => setForm(f => ({ ...f, cobradorId: e.target.value }))}
-              options={cobradores.map(c => ({ value: c.id, label: c.nombre }))} placeholder="Sin asignar" />
-          </div>
+          {editing && <p className="text-xs text-gray-400">Código de ruta: <span className="font-medium text-gray-600">{editing.codigo}</span></p>}
+          <Select label="Cobrador" value={form.cobradorId} onChange={e => setForm(f => ({ ...f, cobradorId: e.target.value }))}
+            options={cobradores.map(c => ({ value: c.id, label: c.nombre }))} placeholder="Sin asignar" />
           <div className="grid grid-cols-2 gap-3">
             <Input label="Tasa de interés (%)" type="number" value={form.tasaInteres} onChange={e => setForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} min={0} max={100} />
-            <Input label="Monto máx. préstamo" type="number" value={form.montoMaximoPrestamo} onChange={e => setForm(f => ({ ...f, montoMaximoPrestamo: Number(e.target.value) }))} />
+            <MoneyInput label="Monto máx. préstamo" currency={currency} value={form.montoMaximoPrestamo} onValueChange={v => setForm(f => ({ ...f, montoMaximoPrestamo: v }))} />
           </div>
           {!editing && (
-            <Input label="Capital inicial" type="number" value={form.capitalInicial} onChange={e => setForm(f => ({ ...f, capitalInicial: Number(e.target.value) }))} hint="Se registrará como movimiento de capital" />
+            <MoneyInput label="Capital inicial" currency={currency} value={form.capitalInicial} onValueChange={v => setForm(f => ({ ...f, capitalInicial: v }))} hint="Se registrará como movimiento de capital" />
           )}
           <div className="flex items-center gap-3">
             <input type="checkbox" id="tasaLibre" checked={form.tasaLibre} onChange={e => setForm(f => ({ ...f, tasaLibre: e.target.checked }))} className="w-4 h-4 text-primary-600" />

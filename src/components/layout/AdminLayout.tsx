@@ -1,15 +1,17 @@
-import { useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, Users, MapPin, Building2, CreditCard, Wallet,
+  LayoutDashboard, Users, MapPin, CreditCard, Wallet,
   ArrowLeftRight, TrendingDown, Archive, BarChart3, CalendarRange,
-  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign
+  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { cn } from '@/lib/utils'
 import { initials } from '@/lib/formatters'
 import { AppModeBanner } from '@/components/ui/AppModeBanner'
+import { CountBadge } from '@/components/ui/CountBadge'
+import { countPendingSaleRequests } from '@/services/saleRequestService'
 
 interface NavItem {
   path: string
@@ -20,10 +22,10 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { path: '/admin/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
-  { path: '/admin/offices', label: 'Oficinas', icon: <Building2 className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
   { path: '/admin/routes', label: 'Rutas', icon: <MapPin className="w-4 h-4" /> },
   { path: '/admin/clients', label: 'Clientes', icon: <Users className="w-4 h-4" /> },
   { path: '/admin/active-sales', label: 'Ventas Activas', icon: <CreditCard className="w-4 h-4" /> },
+  { path: '/admin/sale-authorizations', label: 'Autorizaciones', icon: <ClipboardCheck className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
   { path: '/admin/capital', label: 'Capital', icon: <DollarSign className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
   { path: '/admin/expenses', label: 'Gastos', icon: <TrendingDown className="w-4 h-4" /> },
   { path: '/admin/transfers', label: 'Transferencias', icon: <ArrowLeftRight className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
@@ -36,10 +38,23 @@ const navItems: NavItem[] = [
 ]
 
 export function AdminLayout() {
-  const { user, tenant, office, logout } = useAuth()
+  const { user, tenant, logout } = useAuth()
   const isOnline = useOnlineStatus()
   const navigate = useNavigate()
+  const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [pendingAuth, setPendingAuth] = useState(0)
+
+  // Badge de "Autorizaciones": solicitudes de venta pendientes por revisar.
+  // Se refresca al cambiar de pantalla (p. ej. tras aprobar/rechazar una solicitud).
+  const tenantId = tenant?.id ?? user?.tenantId ?? ''
+  useEffect(() => {
+    let alive = true
+    countPendingSaleRequests(tenantId).then(n => { if (alive) setPendingAuth(n) })
+    return () => { alive = false }
+  }, [tenantId, location.pathname])
+
+  const badges: Record<string, number> = { '/admin/sale-authorizations': pendingAuth }
 
   const handleLogout = () => {
     logout()
@@ -66,10 +81,9 @@ export function AdminLayout() {
       </div>
 
       {/* Tenant/Office info */}
-      {(tenant || office) && (
+      {tenant && (
         <div className="mx-3 mt-3 px-3 py-2.5 bg-primary-800/70 rounded-xl">
-          <p className="text-white text-xs font-medium truncate">{tenant?.nombre}</p>
-          {office && <p className="text-primary-300 text-xs truncate opacity-70">{office.nombre}</p>}
+          <p className="text-white text-xs font-medium truncate">{tenant.nombre}</p>
         </div>
       )}
 
@@ -90,7 +104,8 @@ export function AdminLayout() {
             }
           >
             {item.icon}
-            <span>{item.label}</span>
+            <span className="flex-1">{item.label}</span>
+            {badges[item.path] > 0 && <CountBadge count={badges[item.path]} />}
           </NavLink>
         ))}
       </nav>
@@ -149,11 +164,8 @@ export function AdminLayout() {
           </button>
 
           <div className="flex-1 min-w-0">
-            {office && (
-              <div className="flex items-center gap-1.5 text-sm text-gray-500">
-                <Building2 className="w-3.5 h-3.5" />
-                <span className="truncate">{office.nombre}</span>
-              </div>
+            {tenant && (
+              <span className="text-sm font-medium text-gray-600 truncate">{tenant.nombre}</span>
             )}
           </div>
 

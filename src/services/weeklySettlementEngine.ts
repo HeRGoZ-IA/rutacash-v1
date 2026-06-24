@@ -42,22 +42,19 @@ export async function generateWeeklySettlement(params: {
 
 export async function getAllRoutesWeeklySettlement(params: {
   tenantId: string
-  officeId: string
   semanaInicio: string
   semanaFin: string
 }): Promise<WeeklySettlement[]> {
-  const { tenantId, officeId, semanaInicio, semanaFin } = params
+  const { tenantId, semanaInicio, semanaFin } = params
 
-  const routes = await db.routes
-    .where('officeId').equals(officeId)
-    .and(r => r.tenantId === tenantId)
-    .toArray()
+  // Liquidación por empresa: todas las rutas del tenant (ya no por oficina).
+  const routes = await db.routes.where('tenantId').equals(tenantId).toArray()
 
   const settlements: WeeklySettlement[] = []
   for (const route of routes) {
     const s = await generateWeeklySettlement({
       tenantId,
-      officeId,
+      officeId: route.officeId ?? '',
       routeId: route.id,
       semanaInicio,
       semanaFin,

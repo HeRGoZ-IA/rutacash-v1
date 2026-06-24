@@ -10,13 +10,23 @@ export type TenantStatus = 'activa' | 'suspendida' | 'prueba'
 
 export type TenantPlan = 'basico' | 'operativo' | 'profesional' | 'empresarial'
 
-export type OfficeStatus = 'activa' | 'inactiva'
-
 export type RouteStatus = 'activa' | 'inactiva'
 
 export type ClientStatus = 'activo' | 'inactivo' | 'moroso' | 'perdido'
 
 export type SaleStatus = 'activa' | 'finalizada' | 'perdida' | 'refinanciada'
+
+/**
+ * Estado de desembolso de una venta (App Cobrador).
+ * - undefined: ventas antiguas → se tratan como ya desembolsadas (compatibilidad).
+ * - 'pendiente': venta creada (p. ej. al aprobar una solicitud) pero aún sin desembolsar;
+ *   NO es cobrable hasta que el cobrador confirme el desembolso.
+ * - 'desembolsado': venta activa y cobrable.
+ */
+export type DisbursementStatus = 'pendiente' | 'desembolsado'
+
+/** Estado de una Solicitud de venta (UI: "Solicitud de venta"). */
+export type SaleRequestStatus = 'pending' | 'approved' | 'rejected' | 'disbursed' | 'cancelled'
 
 export type PaymentFrequency = 'diaria' | 'semanal' | 'quincenal' | 'mensual' | 'personalizada'
 
@@ -55,7 +65,6 @@ export type AuditAction =
   | 'CREATE_USER'
   | 'DELETE_USER'
   | 'UPDATE_TENANT'
-  | 'DELETE_OFFICE'
   | 'DELETE_ROUTE'
 
 // --- ENTIDADES ---
@@ -80,24 +89,12 @@ export interface Tenant {
   updatedAt: string
 }
 
-export interface Office {
-  id: string
-  tenantId: string
-  nombre: string
-  pais: string
-  ciudad: string
-  responsable?: string
-  telefono?: string
-  email?: string
-  status: OfficeStatus
-  createdAt: string
-  updatedAt: string
-}
 
 export interface Route {
   id: string
   tenantId: string
-  officeId: string
+  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
+  officeId?: string
   nombre: string
   codigo: string
   ciudad?: string
@@ -125,6 +122,23 @@ export interface User {
   rol: UserRole
   telefono?: string
   avatar?: string
+  /**
+   * Rutas autorizadas para el rol SUPERVISOR (Paquete 3).
+   * Opcional para mantener compatibilidad: cobradores siguen usando `routeId`
+   * (una sola ruta) y los usuarios antiguos sin este campo no se rompen.
+   * Un supervisor con `routeId` heredado se trata como una ruta autorizada.
+   */
+  authorizedRouteIds?: string[]
+  /**
+   * Config de ventas directas del cobrador (App Cobrador).
+   * Decisión: se configura POR USUARIO (cobrador) porque la solicitud de venta
+   * la origina el cobrador; toca menos código que hacerlo por ruta.
+   * - canCreateDirectSales: si puede crear ventas directas (sin autorización).
+   *   undefined/false → SIEMPRE debe enviar solicitud (opción más segura por defecto).
+   * - maxDirectSaleAmount: tope para venta directa. undefined/0 → sin límite.
+   */
+  canCreateDirectSales?: boolean
+  maxDirectSaleAmount?: number
   status: 'activo' | 'inactivo'
   createdAt: string
   updatedAt: string
@@ -133,7 +147,8 @@ export interface User {
 export interface Client {
   id: string
   tenantId: string
-  officeId: string
+  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
+  officeId?: string
   routeId: string
   nombre: string
   documento: string
@@ -153,7 +168,8 @@ export interface Client {
 export interface Sale {
   id: string
   tenantId: string
-  officeId: string
+  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
+  officeId?: string
   routeId: string
   clientId: string
   createdByUserId: string
@@ -165,12 +181,52 @@ export interface Sale {
   numeroCuotas: number
   valorCuota: number
   frecuenciaPago: PaymentFrequency
+  /**
+   * Días de la semana en los que se cobra esta venta.
+   * 0=domingo, 1=lunes, 2=martes, 3=miércoles, 4=jueves, 5=viernes, 6=sábado.
+   * Opcional para mantener compatibilidad con ventas existentes que no lo tengan.
+   * NOTA (Paquete 1): se captura y se guarda, pero el motor de cuotas y el
+   * listado del cobrador aún NO lo consumen. Pendiente Paquete 2.
+   */
+  paymentDays?: number[]
   fechaInicio: string
   fechaFinalEstimada: string
   status: SaleStatus
+  /** App Cobrador: estado de desembolso. undefined = desembolsada (ventas antiguas). */
+  disbursementStatus?: DisbursementStatus
+  /** Solicitud de venta de origen, si la venta nació de una autorización. */
+  saleRequestId?: string
   motivoPerdida?: string
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * Solicitud de venta enviada por un cobrador para autorización del administrador.
+ * Nombres técnicos en inglés; en la UI siempre se llama "Solicitud de venta".
+ */
+export interface SaleRequest {
+  id: string
+  tenantId: string
+  clientId: string
+  routeId: string
+  collectorId: string
+  amount: number
+  interestRate: number
+  totalAmount: number
+  installmentsCount: number
+  installmentValue: number
+  frequency: PaymentFrequency
+  startDate: string
+  paymentDays?: number[]
+  status: SaleRequestStatus
+  requestedAt: string
+  reviewedAt?: string
+  reviewedBy?: string
+  rejectionReason?: string
+  approvalNotes?: string
+  /** Venta creada al aprobar (para enlazar con el desembolso). */
+  saleId?: string
 }
 
 export interface Installment {
@@ -228,11 +284,14 @@ export interface ExpenseCategory {
 export interface Expense {
   id: string
   tenantId: string
-  officeId: string
+  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
+  officeId?: string
   routeId: string
   categoryId: string
   valor: number
   descripcion?: string
+  /** App Cobrador: foto opcional de factura/soporte (Data URL local). */
+  receiptPhotoDataUrl?: string
   fecha: string
   userId: string
   syncStatus: SyncStatus
@@ -242,7 +301,8 @@ export interface Expense {
 export interface CapitalMovement {
   id: string
   tenantId: string
-  officeId: string
+  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
+  officeId?: string
   routeId: string
   tipo: 'ingresoCapital' | 'ajusteCapital'
   valor: number
@@ -255,7 +315,8 @@ export interface CapitalMovement {
 export interface Transfer {
   id: string
   tenantId: string
-  officeId: string
+  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
+  officeId?: string
   routeOrigenId: string
   routeDestinoId?: string
   socioDestinoId?: string
@@ -269,7 +330,8 @@ export interface Transfer {
 export interface Withdrawal {
   id: string
   tenantId: string
-  officeId: string
+  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
+  officeId?: string
   routeId: string
   valor: number
   descripcion?: string
@@ -293,7 +355,8 @@ export interface CashboxMovement {
 export interface WeeklySettlement {
   id: string
   tenantId: string
-  officeId: string
+  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
+  officeId?: string
   routeId: string
   semanaInicio: string
   semanaFin: string

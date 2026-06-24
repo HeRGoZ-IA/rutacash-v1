@@ -10,7 +10,7 @@ import { formatCurrency, getWeekStart, getWeekEnd, formatDate } from '@/lib/form
 import type { Route, CashboxSummary } from '@/models/types'
 
 export default function CashboxPage() {
-  const { tenantId, officeId } = useTenant()
+  const { tenantId } = useTenant()
   const [routes, setRoutes] = useState<Route[]>([])
   const [selectedRoute, setSelectedRoute] = useState('')
   const [summary, setSummary] = useState<CashboxSummary | null>(null)

@@ -26,9 +26,11 @@ export async function getCashboxSummary(
     .filter(p => p.fecha >= desde && p.fecha <= hasta)
     .reduce((sum, p) => sum + p.valor, 0)
 
-  // Préstamos entregados (ventas creadas)
-  const sales = await db.sales
+  // Préstamos entregados (ventas creadas). Las ventas aprobadas pero aún NO
+  // desembolsadas no representan dinero entregado todavía → se excluyen.
+  const allSales = await db.sales
     .where('routeId').equals(routeId).toArray()
+  const sales = allSales.filter(s => s.disbursementStatus !== 'pendiente')
   const prestamosEntregados = sales
     .filter(s => s.fechaInicio >= desde && s.fechaInicio <= hasta)
     .reduce((sum, s) => sum + s.valorVenta, 0)
@@ -103,6 +105,17 @@ export async function getCashboxSummary(
     retiros,
     saldoActual,
   }
+}
+
+/**
+ * Capital disponible de una ruta para entregar nuevos préstamos.
+ * Es el saldo actual de caja (capital + cobros + transferencias entrantes
+ * - préstamos entregados - gastos - transferencias salientes - retiros).
+ * Una venta nueva no puede superar este valor.
+ */
+export async function getRouteAvailableCapital(routeId: string): Promise<number> {
+  const summary = await getCashboxSummary(routeId)
+  return summary.saldoActual
 }
 
 export async function getRoutesCurrentBalance(routeIds: string[]): Promise<Record<string, number>> {

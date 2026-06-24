@@ -9,20 +9,35 @@ import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
-import { resetToDemo, resetCleanDatabase } from '@/data/seed'
+import { resetLocalAppData } from '@/lib/resetApp'
 import { exportJSON } from '@/lib/utils'
 import { nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import type { Tenant } from '@/models/types'
 
+// Monedas de Suramérica y Centroamérica (Paquete 2.5).
+// La moneda guardada sigue siendo el código ISO (string), 100% compatible
+// con tenants existentes; solo se amplió la lista de opciones visibles.
 const MONEDAS = [
   { value: 'COP', label: 'COP - Peso colombiano' },
-  { value: 'USD', label: 'USD - Dólar americano' },
+  { value: 'USD', label: 'USD - Dólar estadounidense' },
   { value: 'EUR', label: 'EUR - Euro' },
   { value: 'MXN', label: 'MXN - Peso mexicano' },
   { value: 'PEN', label: 'PEN - Sol peruano' },
   { value: 'ARS', label: 'ARS - Peso argentino' },
   { value: 'VES', label: 'VES - Bolívar venezolano' },
+  { value: 'CLP', label: 'CLP - Peso chileno' },
+  { value: 'BRL', label: 'BRL - Real brasileño' },
+  { value: 'UYU', label: 'UYU - Peso uruguayo' },
+  { value: 'PYG', label: 'PYG - Guaraní paraguayo' },
+  { value: 'BOB', label: 'BOB - Boliviano' },
+  { value: 'CRC', label: 'CRC - Colón costarricense' },
+  { value: 'GTQ', label: 'GTQ - Quetzal guatemalteco' },
+  { value: 'HNL', label: 'HNL - Lempira hondureño' },
+  { value: 'NIO', label: 'NIO - Córdoba nicaragüense' },
+  { value: 'PAB', label: 'PAB - Balboa panameño' },
+  { value: 'DOP', label: 'DOP - Peso dominicano' },
+  { value: 'SVC', label: 'SVC - Colón salvadoreño' },
 ]
 
 export default function SettingsPage() {
@@ -87,35 +102,43 @@ export default function SettingsPage() {
     } catch { toast.error('Error al guardar') } finally { setSavingTenant(false) }
   }
 
+  // CLEAN: restablece la app por completo (borra TODOS los datos locales) y
+  // recarga en /login; la semilla limpia se vuelve a inicializar desde cero.
   async function handleCleanReset() {
     setCleanResetting(true)
     try {
-      await resetCleanDatabase(tenantId)
-      const refreshed = await db.tenants.get(tenantId)
-      if (refreshed) selectTenant(refreshed)
-      toast.success('Versión limpia reiniciada correctamente.')
-      setCleanResetOpen(false)
-      navigate('/admin/dashboard')
-    } catch { toast.error('Error al reiniciar la versión limpia') } finally { setCleanResetting(false) }
+      await resetLocalAppData()
+      toast.success('App restablecida. Iniciando limpia…')
+      // Redirección dura: recarga el documento y reinicializa la semilla CLEAN.
+      setTimeout(() => location.replace('/login'), 800)
+    } catch {
+      toast.error('Error al restablecer la app')
+      setCleanResetting(false)
+    }
   }
 
+  // DEMO/CLEAN: borra todos los datos locales y recarga. En DEMO la recarga
+  // vuelve a sembrar los datos de demostración; en CLEAN deja la app vacía.
   async function handleReset() {
     setResetting(true)
     try {
-      await db.delete()
-      toast.success('Base de datos reiniciada. Recargando...')
-      setTimeout(() => location.reload(), 1500)
-    } catch { toast.error('Error al reiniciar') } finally { setResetting(false) }
+      await resetLocalAppData()
+      toast.success(IS_CLEAN ? 'App restablecida. Recargando…' : 'Restaurando datos demo…')
+      setTimeout(() => location.replace('/login'), 800)
+    } catch {
+      toast.error('Error al reiniciar')
+      setResetting(false)
+    }
   }
 
   async function handleExport() {
     try {
-      const [tenants, offices, routes, users, clients, sales, installments, payments, expenses, capitalMovements, transfers, withdrawals] = await Promise.all([
-        db.tenants.toArray(), db.offices.toArray(), db.routes.toArray(), db.users.toArray(),
+      const [tenants, routes, users, clients, sales, installments, payments, expenses, capitalMovements, transfers, withdrawals] = await Promise.all([
+        db.tenants.toArray(), db.routes.toArray(), db.users.toArray(),
         db.clients.toArray(), db.sales.toArray(), db.installments.toArray(), db.payments.toArray(),
         db.expenses.toArray(), db.capitalMovements.toArray(), db.transfers.toArray(), db.withdrawals.toArray(),
       ])
-      exportJSON({ tenants, offices, routes, users: users.map(u => ({ ...u, password: '***' })), clients, sales, installments, payments, expenses, capitalMovements, transfers, withdrawals, exportedAt: new Date().toISOString() }, 'rutacash-backup.json')
+      exportJSON({ tenants, routes, users: users.map(u => ({ ...u, password: '***' })), clients, sales, installments, payments, expenses, capitalMovements, transfers, withdrawals, exportedAt: new Date().toISOString() }, 'rutacash-backup.json')
       toast.success('Backup exportado')
     } catch { toast.error('Error al exportar') }
   }
@@ -137,10 +160,7 @@ export default function SettingsPage() {
             Datos de la empresa
           </h2>
           <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input label="Nombre de la empresa" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required placeholder="Ej: Créditos del Norte" />
-              <Input label="Razón social" value={form.nombreLegal} onChange={e => setForm(f => ({ ...f, nombreLegal: e.target.value }))} placeholder="Ej: Créditos del Norte S.A.S." />
-            </div>
+            <Input label="Nombre de la empresa" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required placeholder="Ej: Créditos del Norte" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input label="NIT / Documento" value={form.nit} onChange={e => setForm(f => ({ ...f, nit: e.target.value }))} placeholder="Ej: 900123456-7" />
               <Select label="Moneda principal" value={form.moneda} onChange={e => setForm(f => ({ ...f, moneda: e.target.value }))} options={MONEDAS} required />
@@ -153,7 +173,6 @@ export default function SettingsPage() {
               <Input label="Teléfono" value={form.telefono} onChange={e => setForm(f => ({ ...f, telefono: e.target.value }))} placeholder="Ej: 3001234567" />
               <Input label="Email de contacto" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="admin@miempresa.com" />
             </div>
-            <Input label="Dirección" value={form.direccion} onChange={e => setForm(f => ({ ...f, direccion: e.target.value }))} placeholder="Ej: Cll 45 #23-12" />
             <Input label="Responsable / Contacto principal" value={form.responsable} onChange={e => setForm(f => ({ ...f, responsable: e.target.value }))} placeholder="Nombre del propietario o encargado" />
             <div className="flex items-center justify-between pt-2 border-t border-gray-100">
               <p className="text-xs text-gray-400">
@@ -167,21 +186,23 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Reiniciar versión limpia — solo en modo LIMPIO */}
+      {/* Restablecer app limpia — solo en modo LIMPIO (zona de control local) */}
       {IS_CLEAN && (
-        <div className="bg-white rounded-2xl shadow-card border border-primary-100 p-5">
+        <div className="bg-white rounded-2xl shadow-card border border-red-100 p-5">
           <h2 className="font-semibold text-gray-800 flex items-center gap-2 mb-1">
-            <RotateCcw className="w-4 h-4 text-primary-600" />
-            Reiniciar versión limpia
+            <RotateCcw className="w-4 h-4 text-red-600" />
+            Restablecer app limpia
           </h2>
           <p className="text-xs text-gray-500 mb-4">
-            Esta opción borra todos los datos creados en esta versión limpia y deja la app lista para comenzar desde cero.
+            Borra <span className="font-medium">todos los datos locales de RutaCash en este navegador</span>
+            {' '}(rutas, clientes, ventas, abonos, gastos y sesión) y deja la app lista para comenzar
+            desde cero. Solo afecta a este navegador; no toca otros equipos.
           </p>
-          <div className="flex items-center justify-between p-3 bg-primary-50 rounded-xl border border-primary-100">
+          <div className="flex items-center justify-between p-3 bg-red-50 rounded-xl border border-red-100">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-primary-800">Borrar datos de prueba</p>
-              <p className="text-xs text-primary-600 mt-0.5">
-                Conserva el usuario administrador. Elimina todo lo demás.
+              <p className="text-sm font-medium text-red-800">Dejar la app en cero</p>
+              <p className="text-xs text-red-600 mt-0.5">
+                Tras restablecer, queda solo el administrador inicial y las categorías base.
               </p>
             </div>
             <Button
@@ -191,7 +212,7 @@ export default function SettingsPage() {
               icon={<RotateCcw className="w-3.5 h-3.5" />}
               className="ml-4 flex-shrink-0"
             >
-              Reiniciar
+              Restablecer app limpia
             </Button>
           </div>
         </div>
@@ -202,22 +223,21 @@ export default function SettingsPage() {
         <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-5 space-y-4">
           <h2 className="font-semibold text-gray-800 flex items-center gap-2"><Settings className="w-4 h-4" /> Datos del sistema</h2>
           <div className="space-y-3">
-            <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-xl border border-amber-100">
-              <RefreshCw className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <p className="text-sm font-medium text-amber-800">
-                  {IS_CLEAN ? 'Restablecer al estado inicial' : 'Restaurar datos demo'}
-                </p>
-                <p className="text-xs text-amber-600 mt-0.5">
-                  {IS_CLEAN
-                    ? 'Borra todos los datos actuales y vuelve al estado inicial limpio (sin datos)'
-                    : 'Borra todos los datos actuales y restaura los datos de demostración originales'}
-                </p>
-                <Button variant="danger" size="sm" onClick={() => setResetOpen(true)} className="mt-2">
-                  {IS_CLEAN ? 'Restablecer' : 'Restaurar demo'}
-                </Button>
+            {/* En CLEAN el restablecimiento vive en su tarjeta dedicada arriba. */}
+            {!IS_CLEAN && (
+              <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-xl border border-amber-100">
+                <RefreshCw className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-amber-800">Restaurar datos demo</p>
+                  <p className="text-xs text-amber-600 mt-0.5">
+                    Borra todos los datos actuales y restaura los datos de demostración originales
+                  </p>
+                  <Button variant="danger" size="sm" onClick={() => setResetOpen(true)} className="mt-2">
+                    Restaurar demo
+                  </Button>
+                </div>
               </div>
-            </div>
+            )}
             <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
               <Download className="w-4 h-4 text-gray-600 mt-0.5 flex-shrink-0" />
               <div>
@@ -293,11 +313,11 @@ export default function SettingsPage() {
         </div>
       </Modal>
 
-      {/* Modal: Reiniciar versión limpia */}
+      {/* Modal: Restablecer app limpia */}
       <Modal
         open={cleanResetOpen}
         onClose={() => !cleanResetting && setCleanResetOpen(false)}
-        title="Reiniciar versión limpia"
+        title="Restablecer app limpia"
         footer={
           <>
             <Button variant="secondary" onClick={() => setCleanResetOpen(false)} disabled={cleanResetting}>
@@ -307,9 +327,10 @@ export default function SettingsPage() {
               variant="danger"
               onClick={handleCleanReset}
               loading={cleanResetting}
+              disabled={cleanResetting}
               icon={<RotateCcw className="w-4 h-4" />}
             >
-              Sí, reiniciar
+              Sí, restablecer
             </Button>
           </>
         }
@@ -318,9 +339,16 @@ export default function SettingsPage() {
           <div className="flex items-start gap-3 p-3 bg-red-50 rounded-xl">
             <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
             <p className="text-sm text-red-700">
-              Esta acción eliminará oficinas, rutas, clientes, créditos, pagos, gastos y movimientos creados en esta versión limpia. Se conservará únicamente el usuario administrador inicial. ¿Deseas continuar?
+              Esto eliminará todos los datos locales de RutaCash en este navegador (rutas, clientes,
+              ventas, parcelas, abonos, gastos y la sesión actual) y dejará la app limpia desde cero.
+              <span className="font-semibold"> Esta acción no se puede deshacer.</span>
             </p>
           </div>
+          <p className="text-xs text-gray-500">
+            Solo afecta a este navegador. Quedará el administrador inicial
+            (<span className="font-medium">admin@demo.com / 123456</span>) y las categorías base; la
+            app se recargará en la pantalla de inicio de sesión.
+          </p>
         </div>
       </Modal>
     </div>

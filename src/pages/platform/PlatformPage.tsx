@@ -23,7 +23,7 @@ export default function PlatformPage() {
   const { logout } = useAuth()
   const navigate = useNavigate()
   const [tenants, setTenants] = useState<Tenant[]>([])
-  const [metrics, setMetrics] = useState<Record<string, { offices: number; routes: number; users: number; clients: number; sales: number }>>({})
+  const [metrics, setMetrics] = useState<Record<string, { routes: number; users: number; clients: number; sales: number }>>({})
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -37,14 +37,13 @@ export default function PlatformPage() {
     setTenants(ts)
     const m: typeof metrics = {}
     for (const t of ts) {
-      const [offices, routes, users, clients, sales] = await Promise.all([
-        db.offices.where('tenantId').equals(t.id).count(),
+      const [routes, users, clients, sales] = await Promise.all([
         db.routes.where('tenantId').equals(t.id).count(),
         db.users.where('tenantId').equals(t.id).count(),
         db.clients.where('tenantId').equals(t.id).count(),
         db.sales.where('tenantId').equals(t.id).and(s => s.status === 'activa').count(),
       ])
-      m[t.id] = { offices, routes, users, clients, sales }
+      m[t.id] = { routes, users, clients, sales }
     }
     setMetrics(m)
     setLoading(false)
@@ -98,7 +97,7 @@ export default function PlatformPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {tenants.map(t => {
-              const m = metrics[t.id] ?? { offices: 0, routes: 0, users: 0, clients: 0, sales: 0 }
+              const m = metrics[t.id] ?? { routes: 0, users: 0, clients: 0, sales: 0 }
               return (
                 <div key={t.id} className="bg-white rounded-2xl shadow-card border border-gray-100 p-5 space-y-4">
                   <div className="flex items-start justify-between">
@@ -117,8 +116,8 @@ export default function PlatformPage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-5 gap-1 text-center">
-                    {[['Oficinas', m.offices], ['Rutas', m.routes], ['Usuarios', m.users], ['Clientes', m.clients], ['Ventas', m.sales]].map(([label, val]) => (
+                  <div className="grid grid-cols-4 gap-1 text-center">
+                    {[['Rutas', m.routes], ['Usuarios', m.users], ['Clientes', m.clients], ['Ventas', m.sales]].map(([label, val]) => (
                       <div key={label as string} className="bg-gray-50 rounded-lg p-1.5">
                         <p className="text-xs font-bold text-gray-800">{val}</p>
                         <p className="text-xs text-gray-400 leading-tight">{label}</p>

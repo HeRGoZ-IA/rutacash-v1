@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { CalendarRange, Download, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
-import { Select } from '@/components/ui/Input'
 import { LoadingState } from '@/components/ui/EmptyState'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
@@ -9,13 +8,11 @@ import { useTenant } from '@/hooks/useTenant'
 import { getAllRoutesWeeklySettlement } from '@/services/weeklySettlementEngine'
 import { formatCurrency, formatDate, getWeekStart, getWeekEnd } from '@/lib/formatters'
 import { downloadCSV } from '@/lib/utils'
-import type { WeeklySettlement, Office, Route } from '@/models/types'
+import type { WeeklySettlement, Route } from '@/models/types'
 
 export default function WeeklySettlementPage() {
-  const { tenantId, officeId } = useTenant()
-  const [offices, setOffices] = useState<Office[]>([])
+  const { tenantId } = useTenant()
   const [routes, setRoutes] = useState<Route[]>([])
-  const [selectedOffice, setSelectedOffice] = useState(officeId)
   const [semanaInicio, setSemanaInicio] = useState(getWeekStart())
   const [semanaFin, setSemanaFin] = useState(getWeekEnd())
   const [settlements, setSettlements] = useState<WeeklySettlement[]>([])
@@ -24,20 +21,15 @@ export default function WeeklySettlementPage() {
   useEffect(() => { loadMeta() }, [tenantId])
 
   async function loadMeta() {
-    const [ofs, rts] = await Promise.all([
-      db.offices.where('tenantId').equals(tenantId).toArray(),
-      db.routes.where('tenantId').equals(tenantId).toArray(),
-    ])
-    setOffices(ofs)
+    const rts = await db.routes.where('tenantId').equals(tenantId).toArray()
     setRoutes(rts)
-    if (!officeId && ofs.length > 0) setSelectedOffice(ofs[0].id)
   }
 
   async function generate() {
-    if (!selectedOffice) { toast.error('Selecciona una oficina'); return }
     setLoading(true)
     try {
-      const data = await getAllRoutesWeeklySettlement({ tenantId, officeId: selectedOffice, semanaInicio, semanaFin })
+      // Liquidación de todas las rutas de la empresa.
+      const data = await getAllRoutesWeeklySettlement({ tenantId, semanaInicio, semanaFin })
       setSettlements(data)
       toast.success(`Liquidación generada: ${data.length} ruta(s)`)
     } catch { toast.error('Error al generar liquidación') } finally { setLoading(false) }
@@ -80,8 +72,6 @@ export default function WeeklySettlementPage() {
       </div>
 
       <div className="flex flex-wrap gap-3 items-end">
-        <Select value={selectedOffice} onChange={e => setSelectedOffice(e.target.value)}
-          options={offices.map(o => ({ value: o.id, label: o.nombre }))} placeholder="Seleccionar oficina" className="w-56" />
         <div>
           <label className="block text-xs text-gray-500 mb-1.5">Inicio semana</label>
           <input type="date" value={semanaInicio} onChange={e => setSemanaInicio(e.target.value)}

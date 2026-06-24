@@ -36,6 +36,7 @@ export default function LoginPage() {
   function redirectByRole(rol: string) {
     if (rol === 'superadmin') return navigate('/platform')
     if (rol === 'cobrador') return navigate('/collector/home')
+    if (rol === 'supervisor') return navigate('/supervisor/home')
     return navigate('/admin/dashboard')
   }
 
@@ -61,7 +62,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#1F0A0C] via-gray-900 to-[#1F0A0C] flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-[#1E3A8A] via-gray-900 to-[#1E3A8A] flex items-center justify-center p-4">
       {/* Background pattern */}
       <div className="absolute inset-0 opacity-10">
         <div className="absolute top-0 left-0 w-96 h-96 bg-primary-500 rounded-full -translate-x-1/2 -translate-y-1/2 blur-3xl" />

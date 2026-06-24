@@ -1,13 +1,13 @@
 import { useAuth } from './useAuth'
 
 export function useTenant() {
-  const { tenant, office, route, user } = useAuth()
+  const { tenant, route, user } = useAuth()
   return {
     tenant,
-    office,
     route,
     tenantId: tenant?.id ?? user?.tenantId ?? '',
-    officeId: office?.id ?? user?.officeId ?? '',
+    // Legacy: ya no hay oficinas; se conserva officeId derivado del usuario por compatibilidad.
+    officeId: user?.officeId ?? '',
     routeId: route?.id ?? user?.routeId ?? '',
     currency: tenant?.moneda ?? 'COP',
   }

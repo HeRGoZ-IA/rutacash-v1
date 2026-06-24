@@ -1,12 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { db } from '@/lib/db'
-import type { User, Tenant, Office, Route } from '@/models/types'
+import type { User, Tenant, Route } from '@/models/types'
 
 interface AuthState {
   user: User | null
   tenant: Tenant | null
-  office: Office | null
   route: Route | null
   isAuthenticated: boolean
   isLoading: boolean
@@ -14,7 +13,6 @@ interface AuthState {
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>
   logout: () => void
   selectTenant: (tenant: Tenant) => void
-  selectOffice: (office: Office) => void
   selectRoute: (route: Route) => void
 }
 
@@ -23,7 +21,6 @@ export const useAuth = create<AuthState>()(
     (set, get) => ({
       user: null,
       tenant: null,
-      office: null,
       route: null,
       isAuthenticated: false,
       isLoading: false,
@@ -46,7 +43,6 @@ export const useAuth = create<AuthState>()(
           }
 
           let tenant: Tenant | null = null
-          let office: Office | null = null
           let route: Route | null = null
 
           if (user.rol !== 'superadmin') {
@@ -57,14 +53,11 @@ export const useAuth = create<AuthState>()(
             }
           }
 
-          if (user.officeId) {
-            office = await db.offices.get(user.officeId) ?? null
-          }
           if (user.routeId) {
             route = await db.routes.get(user.routeId) ?? null
           }
 
-          set({ user, tenant, office, route, isAuthenticated: true, isLoading: false })
+          set({ user, tenant, route, isAuthenticated: true, isLoading: false })
           return { success: true }
         } catch (err) {
           set({ isLoading: false })
@@ -73,11 +66,10 @@ export const useAuth = create<AuthState>()(
       },
 
       logout: () => {
-        set({ user: null, tenant: null, office: null, route: null, isAuthenticated: false })
+        set({ user: null, tenant: null, route: null, isAuthenticated: false })
       },
 
       selectTenant: (tenant) => set({ tenant }),
-      selectOffice: (office) => set({ office }),
       selectRoute: (route) => set({ route }),
     }),
     {
@@ -85,7 +77,6 @@ export const useAuth = create<AuthState>()(
       partialize: (state) => ({
         user: state.user,
         tenant: state.tenant,
-        office: state.office,
         route: state.route,
         isAuthenticated: state.isAuthenticated,
       }),

@@ -7,13 +7,16 @@ interface ModalProps {
   onClose: () => void
   title?: string
   children: React.ReactNode
-  size?: 'sm' | 'md' | 'lg' | 'xl'
+  size?: 'sm' | 'md' | 'mdPlus' | 'lg' | 'xl'
   footer?: React.ReactNode
 }
 
 const sizes = {
   sm: 'max-w-md',
   md: 'max-w-lg',
+  // Ancho intermedio cómodo (Paquete 2.5): usado por los modales de
+  // Nuevo cliente y Nueva venta para que queden visualmente equilibrados.
+  mdPlus: 'max-w-xl',
   lg: 'max-w-2xl',
   xl: 'max-w-4xl',
 }

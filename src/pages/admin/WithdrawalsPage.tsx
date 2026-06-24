@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Plus, Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Modal } from '@/components/ui/Modal'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
@@ -12,7 +13,7 @@ import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import type { Withdrawal, Route } from '@/models/types'
 
 export default function WithdrawalsPage() {
-  const { tenantId, officeId } = useTenant()
+  const { tenantId, officeId, currency } = useTenant()
   const { user } = useAuth()
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
@@ -52,21 +53,23 @@ export default function WithdrawalsPage() {
   }
 
   const getRouteName = (id: string) => routes.find(r => r.id === id)?.nombre ?? id
-  const total = withdrawals.reduce((s, w) => s + w.valor, 0)
+  const officeRoutes = routes
+  const visibleWithdrawals = withdrawals
+  const total = visibleWithdrawals.reduce((s, w) => s + w.valor, 0)
 
   return (
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-xl font-bold text-gray-900">Retiros</h1><p className="text-sm text-gray-500 mt-0.5">Total: {formatCurrency(total)}</p></div>
+        <div><h1 className="text-xl font-bold text-gray-900">Retiros</h1><p className="text-sm text-gray-500 mt-0.5">Total: {formatCurrency(total, currency)}</p></div>
         <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>Nuevo retiro</Button>
       </div>
 
       <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
-        {withdrawals.length === 0 ? (
+        {visibleWithdrawals.length === 0 ? (
           <div className="flex justify-center py-12 text-gray-400 text-sm">No hay retiros</div>
         ) : (
           <div className="divide-y divide-gray-50">
-            {withdrawals.map(w => (
+            {visibleWithdrawals.map(w => (
               <div key={w.id} className="flex items-center justify-between px-4 py-3">
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 bg-amber-50 rounded-xl flex items-center justify-center">
@@ -77,7 +80,7 @@ export default function WithdrawalsPage() {
                     <p className="text-xs text-gray-400">{w.descripcion || 'Retiro'} · {formatDate(w.fecha)}</p>
                   </div>
                 </div>
-                <span className="text-sm font-bold text-amber-600">-{formatCurrency(w.valor)}</span>
+                <span className="text-sm font-bold text-amber-600">-{formatCurrency(w.valor, currency)}</span>
               </div>
             ))}
           </div>
@@ -88,9 +91,9 @@ export default function WithdrawalsPage() {
         footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={handleSave} loading={saving}>Registrar</Button></>}>
         <div className="space-y-4">
           <Select label="Ruta" value={form.routeId} onChange={e => setForm(f => ({ ...f, routeId: e.target.value }))}
-            options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
+            options={officeRoutes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Valor" type="number" value={form.valor || ''} onChange={e => setForm(f => ({ ...f, valor: Number(e.target.value) }))} required />
+            <MoneyInput label="Valor" currency={currency} value={form.valor} onValueChange={v => setForm(f => ({ ...f, valor: v }))} required />
             <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
           </div>
           <Textarea label="Descripción" value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} rows={2} />

@@ -26,9 +26,8 @@ export function SetupChecklist() {
   async function loadSteps() {
     setLoading(true)
     try {
-      const [tenant, offices, routes, collectors, clients, sales, payments] = await Promise.all([
+      const [tenant, routes, collectors, clients, sales, payments] = await Promise.all([
         db.tenants.get(tenantId),
-        db.offices.where('tenantId').equals(tenantId).count(),
         db.routes.where('tenantId').equals(tenantId).count(),
         db.users.where('tenantId').equals(tenantId).and(u => u.rol === 'cobrador').count(),
         db.clients.where('tenantId').equals(tenantId).count(),
@@ -48,13 +47,6 @@ export function SetupChecklist() {
             !!tenant.pais &&
             !!tenant.ciudad &&
             !!tenant.moneda,
-        },
-        {
-          id: 'oficina',
-          label: 'Crea tu primera oficina',
-          description: 'Sucursal o sede donde operarás',
-          path: '/admin/offices',
-          done: offices > 0,
         },
         {
           id: 'ruta',

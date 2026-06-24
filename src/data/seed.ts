@@ -6,8 +6,8 @@ import { format, subDays, subWeeks } from 'date-fns'
 import { db } from '@/lib/db'
 import { generateInstallments, calculateTotalWithInterest, estimateFinalDate } from '@/services/installmentEngine'
 import type {
-  Tenant, Office, Route, User, Client, Sale, Payment,
-  ExpenseCategory, Expense, CapitalMovement, Transfer, Withdrawal,
+  Tenant, Route, User, Client, Sale, Payment,
+  ExpenseCategory, Expense, CapitalMovement, Transfer, Withdrawal, SaleRequest,
 } from '@/models/types'
 
 const d = (date: Date) => format(date, 'yyyy-MM-dd')
@@ -53,36 +53,6 @@ export async function seedDatabase() {
     createdAt: new Date(2025, 0, 1).toISOString(),
     updatedAt: now.toISOString(),
   }
-
-  // ---- OFFICES ----
-  const offices: Office[] = [
-    {
-      id: OFFICE1_ID,
-      tenantId: TENANT_ID,
-      nombre: 'Oficina Central Barranquilla',
-      pais: 'Colombia',
-      ciudad: 'Barranquilla',
-      responsable: 'Carlos Mendoza',
-      telefono: '3001112233',
-      email: 'baq@credirutas.com',
-      status: 'activa',
-      createdAt: new Date(2025, 0, 1).toISOString(),
-      updatedAt: now.toISOString(),
-    },
-    {
-      id: OFFICE2_ID,
-      tenantId: TENANT_ID,
-      nombre: 'Oficina Soledad',
-      pais: 'Colombia',
-      ciudad: 'Soledad',
-      responsable: 'María Torres',
-      telefono: '3009998877',
-      email: 'sol@credirutas.com',
-      status: 'activa',
-      createdAt: new Date(2025, 1, 1).toISOString(),
-      updatedAt: now.toISOString(),
-    },
-  ]
 
   // ---- ROUTES ----
   const routes: Route[] = [
@@ -186,6 +156,8 @@ export async function seedDatabase() {
       id: USER_SUPER2_ID,
       tenantId: TENANT_ID,
       officeId: OFFICE1_ID,
+      // Paquete 3: supervisor con varias rutas autorizadas (Norte y Sur).
+      authorizedRouteIds: [ROUTE1_ID, ROUTE2_ID],
       email: 'supervisor@demo.com',
       password: '123456',
       nombre: 'Laura Supervisora',
@@ -200,6 +172,9 @@ export async function seedDatabase() {
       tenantId: TENANT_ID,
       officeId: OFFICE1_ID,
       routeId: ROUTE1_ID,
+      // App Cobrador (demo): puede crear ventas directas hasta $300.000.
+      canCreateDirectSales: true,
+      maxDirectSaleAmount: 300000,
       email: 'cobrador@demo.com',
       password: '123456',
       nombre: 'Juan Cobrador',
@@ -464,14 +439,26 @@ export async function seedDatabase() {
     },
   ]
 
+  // ---- SALE REQUESTS (solicitud de venta demo, pendiente de autorización) ----
+  const reqAmount = 250000
+  const { valorInteres: reqInteres, valorTotal: reqTotal } = calculateTotalWithInterest({ valorVenta: reqAmount, tasaInteres: 20 })
+  void reqInteres
+  const saleRequests: SaleRequest[] = [
+    {
+      id: uuidv4(), tenantId: TENANT_ID, clientId: clientIds[4], routeId: ROUTE1_ID,
+      collectorId: USER_COB1_ID, amount: reqAmount, interestRate: 20, totalAmount: reqTotal,
+      installmentsCount: 30, installmentValue: Math.round(reqTotal / 30), frequency: 'diaria',
+      startDate: d(now), paymentDays: [1, 2, 3, 4, 5, 6], status: 'pending', requestedAt: now.toISOString(),
+    },
+  ]
+
   // ---- INSERTAR EN DB ----
   await db.transaction('rw', [
-    db.tenants, db.offices, db.routes, db.users, db.clients,
+    db.tenants, db.routes, db.users, db.clients,
     db.sales, db.installments, db.payments, db.expenseCategories,
-    db.expenses, db.capitalMovements, db.transfers, db.withdrawals,
+    db.expenses, db.capitalMovements, db.transfers, db.withdrawals, db.saleRequests,
   ], async () => {
     await db.tenants.add(tenant)
-    await db.offices.bulkAdd(offices)
     await db.routes.bulkAdd(routes)
     await db.users.bulkAdd(users)
     await db.clients.bulkAdd(clients)
@@ -487,6 +474,7 @@ export async function seedDatabase() {
     await db.capitalMovements.bulkAdd(capitalMovements)
     await db.transfers.bulkAdd(transfers)
     await db.withdrawals.bulkAdd(withdrawals)
+    await db.saleRequests.bulkAdd(saleRequests)
   })
 
   console.log('[RutaCash] Datos demo cargados exitosamente')
@@ -501,6 +489,20 @@ export async function resetToDemo() {
 // ---- SEED LIMPIO: solo tenant placeholder + admin inicial ----
 const CLEAN_TENANT_ID = 'tenant-main-001'
 const CLEAN_ADMIN_ID = 'user-admin-main-001'
+
+// Paquete 3 — Categorías de gasto predeterminadas (genéricas, hasta que el socio
+// envíe el listado final). Se siembran SOLO cuando la base no tiene categorías
+// (modo limpio / reset), sin duplicar; el admin podrá agregar más en el futuro.
+const DEFAULT_EXPENSE_CATEGORY_NAMES = [
+  'Transporte', 'Alimentación', 'Papelería', 'Combustible',
+  'Comunicación', 'Mantenimiento', 'Otros',
+]
+
+function buildDefaultExpenseCategories(tenantId: string): ExpenseCategory[] {
+  return DEFAULT_EXPENSE_CATEGORY_NAMES.map(nombre => ({
+    id: uuidv4(), tenantId, nombre, activa: true,
+  }))
+}
 
 export async function seedCleanDatabase() {
   const existing = await db.users.count()
@@ -535,9 +537,12 @@ export async function seedCleanDatabase() {
     updatedAt: now.toISOString(),
   }
 
-  await db.transaction('rw', [db.tenants, db.users], async () => {
+  const expenseCategories = buildDefaultExpenseCategories(CLEAN_TENANT_ID)
+
+  await db.transaction('rw', [db.tenants, db.users, db.expenseCategories], async () => {
     await db.tenants.add(tenant)
     await db.users.add(admin)
+    await db.expenseCategories.bulkAdd(expenseCategories)
   })
 
   console.log('[RutaCash] Base de datos limpia inicializada')
@@ -546,17 +551,19 @@ export async function seedCleanDatabase() {
 export async function resetCleanDatabase(tenantId: string) {
   const now = new Date().toISOString()
 
-  await db.offices.where('tenantId').equals(tenantId).delete()
   await db.routes.where('tenantId').equals(tenantId).delete()
   await db.clients.where('tenantId').equals(tenantId).delete()
   await db.sales.where('tenantId').equals(tenantId).delete()
   await db.payments.where('tenantId').equals(tenantId).delete()
   await db.noPaymentVisits.where('tenantId').equals(tenantId).delete()
   await db.expenseCategories.where('tenantId').equals(tenantId).delete()
+  // Re-sembrar categorías predeterminadas tras el reset (la base queda sin categorías).
+  await db.expenseCategories.bulkAdd(buildDefaultExpenseCategories(tenantId))
   await db.expenses.where('tenantId').equals(tenantId).delete()
   await db.capitalMovements.where('tenantId').equals(tenantId).delete()
   await db.transfers.where('tenantId').equals(tenantId).delete()
   await db.withdrawals.where('tenantId').equals(tenantId).delete()
+  await db.saleRequests.where('tenantId').equals(tenantId).delete()
   await db.cashboxMovements.where('tenantId').equals(tenantId).delete()
   await db.weeklySettlements.where('tenantId').equals(tenantId).delete()
   await db.auditLogs.where('tenantId').equals(tenantId).delete()

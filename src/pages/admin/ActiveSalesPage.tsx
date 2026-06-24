@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Plus, CreditCard, Search, Eye, XCircle, CheckCircle, DollarSign } from 'lucide-react'
+import { Plus, CreditCard, Search, XCircle, CheckCircle, DollarSign } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { SaleStatusBadge, InstallmentStatusBadge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -9,8 +10,9 @@ import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
+import { useRouteCapital } from '@/hooks/useRouteCapital'
 import { generateId } from '@/lib/utils'
-import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
+import { formatCurrency, formatDate, today, nowISO, formatPaymentDays } from '@/lib/formatters'
 import {
   generateInstallments, calculateTotalWithInterest,
   estimateFinalDate, calculateInstallmentValue,
@@ -18,8 +20,21 @@ import {
 } from '@/services/installmentEngine'
 import type { Sale, Client, Route, Installment } from '@/models/types'
 
+// Días de pago (1=lunes ... 6=sábado, 0=domingo)
+const WEEK_DAYS = [
+  { value: 1, label: 'Lun' }, { value: 2, label: 'Mar' }, { value: 3, label: 'Mié' },
+  { value: 4, label: 'Jue' }, { value: 5, label: 'Vie' }, { value: 6, label: 'Sáb' },
+  { value: 0, label: 'Dom' },
+]
+
+// Tasa de interés fija seleccionable (Paquete 1: solo 10% o 20%, sin tasa libre)
+const TASA_OPTIONS = [
+  { value: '10', label: '10%' },
+  { value: '20', label: '20%' },
+]
+
 export default function ActiveSalesPage() {
-  const { tenantId, officeId } = useTenant()
+  const { tenantId, officeId, currency } = useTenant()
   const { user } = useAuth()
   const [sales, setSales] = useState<Sale[]>([])
   const [clients, setClients] = useState<Client[]>([])
@@ -35,13 +50,27 @@ export default function ActiveSalesPage() {
   const [motivoPerdida, setMotivoPerdida] = useState('')
   const [saving, setSaving] = useState(false)
   const [paymentSale, setPaymentSale] = useState<Sale | null>(null)
-  const [paymentValor, setPaymentValor] = useState('')
+  const [paymentValor, setPaymentValor] = useState(0)
   const [payingQuick, setPayingQuick] = useState(false)
 
   const [form, setForm] = useState({
     clientId: '', routeId: '', valorVenta: 0, tasaInteres: 20,
     numeroCuotas: 30, frecuenciaPago: 'diaria' as const, fechaInicio: today(),
+    paymentDays: [1, 2, 3, 4, 5, 6] as number[], // Lun-Sáb por defecto
   })
+
+  // Capital disponible de la ruta seleccionada (no se permite vender por encima).
+  const { available: capDisponible } = useRouteCapital(form.routeId)
+  const capExcedido = capDisponible != null && form.valorVenta > capDisponible
+
+  function togglePaymentDay(day: number) {
+    setForm(f => ({
+      ...f,
+      paymentDays: f.paymentDays.includes(day)
+        ? f.paymentDays.filter(d => d !== day)
+        : [...f.paymentDays, day].sort((a, b) => a - b),
+    }))
+  }
 
   useEffect(() => { load() }, [tenantId])
 
@@ -72,22 +101,26 @@ export default function ActiveSalesPage() {
     if (form.valorVenta <= 0) return null
     const { valorInteres, valorTotal } = calculateTotalWithInterest({ valorVenta: form.valorVenta, tasaInteres: form.tasaInteres })
     const valorCuota = calculateInstallmentValue({ valorTotal, numeroCuotas: form.numeroCuotas })
-    const fechaFinal = estimateFinalDate({ fechaInicio: form.fechaInicio, numeroCuotas: form.numeroCuotas, frecuencia: form.frecuenciaPago })
+    const fechaFinal = estimateFinalDate({ fechaInicio: form.fechaInicio, numeroCuotas: form.numeroCuotas, frecuencia: form.frecuenciaPago, paymentDays: form.paymentDays })
     return { valorInteres, valorTotal, valorCuota, fechaFinal }
   })()
 
   async function handleCreateSale() {
-    if (!form.clientId || !form.routeId || form.valorVenta <= 0) {
-      toast.error('Cliente, ruta y valor son obligatorios')
-      return
-    }
+    if (!form.clientId) { toast.error('Debes seleccionar un cliente'); return }
+    if (!form.routeId) { toast.error('Debes seleccionar una ruta'); return }
+    if (form.valorVenta <= 0) { toast.error('El valor del préstamo debe ser mayor a 0'); return }
+    if (capDisponible != null && form.valorVenta > capDisponible) { toast.error(`La venta supera el capital disponible de la ruta (${formatCurrency(capDisponible, currency)})`); return }
+    if (form.numeroCuotas <= 0) { toast.error('El número de cuotas debe ser mayor a 0'); return }
+    if (![10, 20].includes(form.tasaInteres)) { toast.error('La tasa de interés debe ser 10% o 20%'); return }
+    if (form.fechaInicio < today()) { toast.error('La fecha de inicio de cobro no puede ser anterior a hoy'); return }
+    if (form.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
     setSaving(true)
     try {
       const saleId = generateId()
       const { valorInteres, valorTotal } = calculateTotalWithInterest({ valorVenta: form.valorVenta, tasaInteres: form.tasaInteres })
       const valorCuota = calculateInstallmentValue({ valorTotal, numeroCuotas: form.numeroCuotas })
-      const fechaFinalEstimada = estimateFinalDate({ fechaInicio: form.fechaInicio, numeroCuotas: form.numeroCuotas, frecuencia: form.frecuenciaPago })
-      const installments = generateInstallments({ saleId, valorTotal, numeroCuotas: form.numeroCuotas, valorCuota, frecuencia: form.frecuenciaPago, fechaInicio: form.fechaInicio })
+      const fechaFinalEstimada = estimateFinalDate({ fechaInicio: form.fechaInicio, numeroCuotas: form.numeroCuotas, frecuencia: form.frecuenciaPago, paymentDays: form.paymentDays })
+      const installments = generateInstallments({ saleId, valorTotal, numeroCuotas: form.numeroCuotas, valorCuota, frecuencia: form.frecuenciaPago, fechaInicio: form.fechaInicio, paymentDays: form.paymentDays })
       const route = routeMap.get(form.routeId)
       const sale: Sale = {
         id: saleId, tenantId, officeId: route?.officeId ?? officeId,
@@ -95,6 +128,7 @@ export default function ActiveSalesPage() {
         createdByUserId: user?.id ?? '', valorVenta: form.valorVenta,
         tasaInteres: form.tasaInteres, valorInteres, valorTotal, saldo: valorTotal,
         numeroCuotas: form.numeroCuotas, valorCuota, frecuenciaPago: form.frecuenciaPago,
+        paymentDays: form.paymentDays,
         fechaInicio: form.fechaInicio, fechaFinalEstimada, status: 'activa',
         createdAt: nowISO(), updatedAt: nowISO(),
       }
@@ -104,7 +138,7 @@ export default function ActiveSalesPage() {
       })
       toast.success('Venta creada con cuotas generadas')
       setCreateOpen(false)
-      setForm({ clientId: '', routeId: '', valorVenta: 0, tasaInteres: 20, numeroCuotas: 30, frecuenciaPago: 'diaria', fechaInicio: today() })
+      setForm({ clientId: '', routeId: '', valorVenta: 0, tasaInteres: 20, numeroCuotas: 30, frecuenciaPago: 'diaria', fechaInicio: today(), paymentDays: [1, 2, 3, 4, 5, 6] })
       await load()
     } catch {
       toast.error('Error al crear la venta')
@@ -120,7 +154,7 @@ export default function ActiveSalesPage() {
   }
 
   async function handleQuickPayment() {
-    const v = Number(paymentValor)
+    const v = paymentValor
     if (!v || v <= 0) { toast.error('Ingresa un valor válido'); return }
     if (!paymentSale || !user) return
     setPayingQuick(true)
@@ -143,7 +177,7 @@ export default function ActiveSalesPage() {
       await db.sales.update(paymentSale.id, { saldo: newSaldo, status: newStatus, updatedAt: nowISO() })
       toast.success('Pago registrado correctamente')
       setPaymentSale(null)
-      setPaymentValor('')
+      setPaymentValor(0)
       setDetailSale(null)
       await load()
     } catch { toast.error('Error al registrar pago') } finally { setPayingQuick(false) }
@@ -197,7 +231,7 @@ export default function ActiveSalesPage() {
                   <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden md:table-cell">Cuota</th>
                   <th className="text-center text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Estado</th>
                   <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden lg:table-cell">Ruta</th>
-                  <th className="px-4 py-3" />
+                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Fecha</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -205,10 +239,10 @@ export default function ActiveSalesPage() {
                   const client = clientMap.get(s.clientId)
                   const route = routeMap.get(s.routeId)
                   return (
-                    <tr key={s.id} className="hover:bg-gray-50 transition-colors">
+                    <tr key={s.id} onClick={() => openDetail(s)} className="hover:bg-primary-50/40 cursor-pointer transition-colors">
                       <td className="px-4 py-3">
                         <p className="text-sm font-medium text-gray-900">{client?.nombre ?? 'N/A'}</p>
-                        <p className="text-xs text-gray-400">{formatDate(s.fechaInicio)}</p>
+                        <p className="text-xs text-gray-400">{client?.documento ?? ''}</p>
                       </td>
                       <td className="px-4 py-3 text-right hidden sm:table-cell">
                         <p className="text-sm font-medium text-gray-900">{formatCurrency(s.valorTotal)}</p>
@@ -223,9 +257,7 @@ export default function ActiveSalesPage() {
                       </td>
                       <td className="px-4 py-3 text-center"><SaleStatusBadge status={s.status} /></td>
                       <td className="px-4 py-3 hidden lg:table-cell"><span className="text-sm text-gray-600">{route?.nombre}</span></td>
-                      <td className="px-4 py-3">
-                        <Button variant="ghost" size="sm" onClick={() => openDetail(s)} icon={<Eye className="w-3.5 h-3.5" />} />
-                      </td>
+                      <td className="px-4 py-3"><span className="text-sm text-gray-500">{formatDate(s.fechaInicio)}</span></td>
                     </tr>
                   )
                 })}
@@ -236,31 +268,61 @@ export default function ActiveSalesPage() {
       )}
 
       {/* Create Sale Modal */}
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nueva venta / crédito" size="lg"
-        footer={<><Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancelar</Button><Button onClick={handleCreateSale} loading={saving}>Crear venta</Button></>}>
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nueva venta / crédito" size="mdPlus"
+        footer={<><Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancelar</Button><Button onClick={handleCreateSale} loading={saving} disabled={capExcedido}>Crear venta</Button></>}>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Select label="Cliente" value={form.clientId} onChange={e => setForm(f => ({ ...f, clientId: e.target.value }))}
               options={clients.map(c => ({ value: c.id, label: `${c.nombre} - ${c.documento}` }))} placeholder="Seleccionar cliente" required />
             <Select label="Ruta" value={form.routeId} onChange={e => {
               const route = routeMap.get(e.target.value)
-              setForm(f => ({ ...f, routeId: e.target.value, tasaInteres: route?.tasaInteres ?? f.tasaInteres }))
+              // La tasa solo puede ser 10% o 20%: si la ruta trae otra, se usa 20% por defecto
+              setForm(f => ({ ...f, routeId: e.target.value, tasaInteres: route?.tasaInteres === 10 ? 10 : 20 }))
             }} options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
           </div>
           <div className="grid grid-cols-3 gap-3">
-            <Input label="Valor del préstamo" type="number" value={form.valorVenta || ''} onChange={e => setForm(f => ({ ...f, valorVenta: Number(e.target.value) }))} required />
-            <Input label="Tasa interés (%)" type="number" value={form.tasaInteres} onChange={e => setForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} />
-            <Input label="N° cuotas" type="number" value={form.numeroCuotas} onChange={e => setForm(f => ({ ...f, numeroCuotas: Number(e.target.value) }))} />
+            <MoneyInput label="Valor del préstamo" currency={currency} value={form.valorVenta} onValueChange={v => setForm(f => ({ ...f, valorVenta: v }))} required />
+            <Select label="Tasa interés" value={String(form.tasaInteres)} onChange={e => setForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={TASA_OPTIONS} />
+            <Input label="N° cuotas" type="number" min={1} value={form.numeroCuotas} onChange={e => setForm(f => ({ ...f, numeroCuotas: Number(e.target.value) }))} />
           </div>
+          {form.routeId && capDisponible != null && (
+            <div className={`rounded-xl p-3 text-sm border ${capExcedido ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>
+              Capital disponible de la ruta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
+              {capExcedido && <p className="text-xs mt-1 font-medium">El valor supera el capital disponible. Reduce el monto o inyecta capital a la ruta.</p>}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <Select label="Frecuencia de pago" value={form.frecuenciaPago} onChange={e => setForm(f => ({ ...f, frecuenciaPago: e.target.value as any }))} options={freqOptions} />
-            <Input label="Fecha inicio" type="date" value={form.fechaInicio} onChange={e => setForm(f => ({ ...f, fechaInicio: e.target.value }))} />
+            <Input label="Fecha inicio de cobro" type="date" min={today()} value={form.fechaInicio} onChange={e => setForm(f => ({ ...f, fechaInicio: e.target.value }))} hint="No puede ser anterior a hoy" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Días de pago</label>
+            <div className="flex flex-wrap gap-2">
+              {WEEK_DAYS.map(d => {
+                const active = form.paymentDays.includes(d.value)
+                return (
+                  <button
+                    key={d.value}
+                    type="button"
+                    onClick={() => togglePaymentDay(d.value)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                      active
+                        ? 'bg-primary-600 text-white border-primary-600'
+                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="mt-1 text-xs text-gray-400">Selecciona los días en que se cobrará. Para frecuencia semanal puedes dejar un solo día.</p>
           </div>
           {calculated && (
             <div className="bg-primary-50 rounded-xl p-4 grid grid-cols-2 gap-3">
-              <div><p className="text-xs text-gray-500">Interés total</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorInteres)}</p></div>
-              <div><p className="text-xs text-gray-500">Total a pagar</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorTotal)}</p></div>
-              <div><p className="text-xs text-gray-500">Valor cuota</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorCuota)}</p></div>
+              <div><p className="text-xs text-gray-500">Interés total</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorInteres, currency)}</p></div>
+              <div><p className="text-xs text-gray-500">Total a pagar</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorTotal, currency)}</p></div>
+              <div><p className="text-xs text-gray-500">Valor cuota</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorCuota, currency)}</p></div>
               <div><p className="text-xs text-gray-500">Fecha estimada fin</p><p className="font-bold text-primary-700">{formatDate(calculated.fechaFinal)}</p></div>
             </div>
           )}
@@ -274,7 +336,7 @@ export default function ActiveSalesPage() {
             <>
               <Button variant="secondary" onClick={() => setDetailSale(null)}>Cerrar</Button>
               {detailSale.status === 'activa' && (
-                <Button onClick={() => { setPaymentSale(detailSale); setPaymentValor(String(detailSale.valorCuota)) }} icon={<DollarSign className="w-4 h-4" />}>Registrar pago</Button>
+                <Button onClick={() => { setPaymentSale(detailSale); setPaymentValor(detailSale.valorCuota) }} icon={<DollarSign className="w-4 h-4" />}>Registrar pago</Button>
               )}
               {detailSale.status === 'activa' && (
                 <Button variant="danger" onClick={() => { setLostSale(detailSale); setLostOpen(true) }} icon={<XCircle className="w-4 h-4" />}>Marcar perdida</Button>
@@ -287,6 +349,10 @@ export default function ActiveSalesPage() {
               <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400">Total+interés</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorTotal)}</p></div>
               <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs text-gray-400">Saldo</p><p className="font-bold text-amber-600">{formatCurrency(detailSale.saldo)}</p></div>
               <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400">Cuota</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorCuota)}</p></div>
+            </div>
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+              <p className="text-gray-500">Frecuencia: <span className="font-medium text-gray-800 capitalize">{detailSale.frecuenciaPago}</span></p>
+              <p className="text-gray-500">Días de pago: <span className="font-medium text-gray-800">{formatPaymentDays(detailSale.paymentDays)}</span></p>
             </div>
             <div>
               <p className="text-sm font-semibold text-gray-700 mb-2">Cuotas ({detailInstallments.length})</p>
@@ -325,15 +391,15 @@ export default function ActiveSalesPage() {
         {paymentSale && (
           <div className="space-y-4">
             <div className="bg-primary-50 rounded-xl p-4 grid grid-cols-2 gap-3">
-              <div><p className="text-xs text-gray-500">Cuota</p><p className="font-bold text-primary-700">{formatCurrency(paymentSale.valorCuota)}</p></div>
-              <div><p className="text-xs text-gray-500">Saldo pendiente</p><p className="font-bold text-amber-600">{formatCurrency(paymentSale.saldo)}</p></div>
+              <div><p className="text-xs text-gray-500">Cuota</p><p className="font-bold text-primary-700">{formatCurrency(paymentSale.valorCuota, currency)}</p></div>
+              <div><p className="text-xs text-gray-500">Saldo pendiente</p><p className="font-bold text-amber-600">{formatCurrency(paymentSale.saldo, currency)}</p></div>
             </div>
             <div className="grid grid-cols-3 gap-2">
-              <button onClick={() => setPaymentValor(String(paymentSale.valorCuota))} className="py-2 bg-primary-50 text-primary-700 rounded-xl text-xs font-medium hover:bg-primary-100">Cuota completa<br />{formatCurrency(paymentSale.valorCuota)}</button>
-              <button onClick={() => setPaymentValor(String(Math.floor(paymentSale.valorCuota / 2)))} className="py-2 bg-gray-50 text-gray-600 rounded-xl text-xs font-medium hover:bg-gray-100">Mitad<br />{formatCurrency(Math.floor(paymentSale.valorCuota / 2))}</button>
-              <button onClick={() => setPaymentValor(String(paymentSale.saldo))} className="py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-medium hover:bg-emerald-100">Total saldo<br />{formatCurrency(paymentSale.saldo)}</button>
+              <button onClick={() => setPaymentValor(paymentSale.valorCuota)} className="py-2 bg-primary-50 text-primary-700 rounded-xl text-xs font-medium hover:bg-primary-100">Cuota completa<br />{formatCurrency(paymentSale.valorCuota, currency)}</button>
+              <button onClick={() => setPaymentValor(Math.floor(paymentSale.valorCuota / 2))} className="py-2 bg-gray-50 text-gray-600 rounded-xl text-xs font-medium hover:bg-gray-100">Mitad<br />{formatCurrency(Math.floor(paymentSale.valorCuota / 2), currency)}</button>
+              <button onClick={() => setPaymentValor(paymentSale.saldo)} className="py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-medium hover:bg-emerald-100">Total saldo<br />{formatCurrency(paymentSale.saldo, currency)}</button>
             </div>
-            <Input label="Valor del pago" type="number" value={paymentValor} onChange={e => setPaymentValor(e.target.value)} required />
+            <MoneyInput label="Valor del pago" currency={currency} value={paymentValor} onValueChange={setPaymentValor} required />
           </div>
         )}
       </Modal>

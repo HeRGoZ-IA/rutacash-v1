@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from '@/components/ui/Toast'
 import { AdminLayout } from '@/components/layout/AdminLayout'
 import { CollectorLayout } from '@/components/layout/CollectorLayout'
+import { SupervisorLayout } from '@/components/layout/SupervisorLayout'
 import { useAuth } from '@/hooks/useAuth'
 import { seedDatabase, seedCleanDatabase } from '@/data/seed'
 import { IS_CLEAN } from '@/lib/appMode'
@@ -15,7 +16,6 @@ import PlatformPage from '@/pages/platform/PlatformPage'
 
 // Admin
 import DashboardPage from '@/pages/admin/DashboardPage'
-import OfficesPage from '@/pages/admin/OfficesPage'
 import RoutesPage from '@/pages/admin/RoutesPage'
 import ClientsPage from '@/pages/admin/ClientsPage'
 import ActiveSalesPage from '@/pages/admin/ActiveSalesPage'
@@ -28,6 +28,7 @@ import ReportsPage from '@/pages/admin/ReportsPage'
 import WeeklySettlementPage from '@/pages/admin/WeeklySettlementPage'
 import UsersPage from '@/pages/admin/UsersPage'
 import SettingsPage from '@/pages/admin/SettingsPage'
+import SaleAuthorizationsPage from '@/pages/admin/SaleAuthorizationsPage'
 
 // Collector
 import CollectorHomePage from '@/pages/collector/CollectorHomePage'
@@ -37,6 +38,17 @@ import NoPaymentPage from '@/pages/collector/NoPaymentPage'
 import CollectorExpensesPage from '@/pages/collector/CollectorExpensesPage'
 import CollectorSyncPage from '@/pages/collector/CollectorSyncPage'
 import ClientDetailPage from '@/pages/collector/ClientDetailPage'
+import CollectorNewClientPage from '@/pages/collector/CollectorNewClientPage'
+import CollectorNewSalePage from '@/pages/collector/CollectorNewSalePage'
+import CollectorDisbursementsPage from '@/pages/collector/CollectorDisbursementsPage'
+import CollectorDailyReportPage from '@/pages/collector/CollectorDailyReportPage'
+import CollectorCashClosePage from '@/pages/collector/CollectorCashClosePage'
+import CollectorPaymentHistoryPage from '@/pages/collector/CollectorPaymentHistoryPage'
+import CollectorSelectRoutePage from '@/pages/collector/CollectorSelectRoutePage'
+
+// Supervisor
+import SupervisorHomePage from '@/pages/supervisor/SupervisorHomePage'
+import SupervisorRoutePage from '@/pages/supervisor/SupervisorRoutePage'
 
 function RequireAuth({ children, roles }: { children: React.ReactNode; roles?: string[] }) {
   const { isAuthenticated, user } = useAuth()
@@ -64,18 +76,29 @@ export default function App() {
           </RequireAuth>
         } />
 
+        {/* Supervisor (rutas autorizadas, experiencia tipo cobrador) */}
+        <Route path="/supervisor" element={
+          <RequireAuth roles={['supervisor']}>
+            <SupervisorLayout />
+          </RequireAuth>
+        }>
+          <Route index element={<Navigate to="/supervisor/home" replace />} />
+          <Route path="home" element={<SupervisorHomePage />} />
+          <Route path="route/:routeId" element={<SupervisorRoutePage />} />
+        </Route>
+
         {/* Admin panel */}
         <Route path="/admin" element={
-          <RequireAuth roles={['admin', 'supervisor']}>
+          <RequireAuth roles={['admin']}>
             <AdminLayout />
           </RequireAuth>
         }>
           <Route index element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="dashboard" element={<DashboardPage />} />
-          <Route path="offices" element={<OfficesPage />} />
           <Route path="routes" element={<RoutesPage />} />
           <Route path="clients" element={<ClientsPage />} />
           <Route path="active-sales" element={<ActiveSalesPage />} />
+          <Route path="sale-authorizations" element={<SaleAuthorizationsPage />} />
           <Route path="capital" element={<CapitalPage />} />
           <Route path="expenses" element={<ExpensesPage />} />
           <Route path="transfers" element={<TransfersPage />} />
@@ -94,8 +117,16 @@ export default function App() {
           </RequireAuth>
         }>
           <Route index element={<Navigate to="/collector/home" replace />} />
+          <Route path="select-route" element={<CollectorSelectRoutePage />} />
           <Route path="home" element={<CollectorHomePage />} />
           <Route path="route" element={<CollectorRoutePage />} />
+          <Route path="clients/new" element={<CollectorNewClientPage />} />
+          <Route path="new-sale" element={<CollectorNewSalePage />} />
+          <Route path="disbursements" element={<CollectorDisbursementsPage />} />
+          <Route path="daily-report" element={<CollectorDailyReportPage />} />
+          <Route path="cashclose" element={<CollectorCashClosePage />} />
+          <Route path="payment-history" element={<CollectorPaymentHistoryPage />} />
+          <Route path="payment-history/:saleId" element={<CollectorPaymentHistoryPage />} />
           <Route path="payment/:saleId" element={<PaymentPage />} />
           <Route path="no-payment/:saleId" element={<NoPaymentPage />} />
           <Route path="client/:id" element={<ClientDetailPage />} />

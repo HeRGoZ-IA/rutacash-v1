@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Plus, TrendingDown, Search } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { toast } from '@/components/ui/Toast'
@@ -13,7 +14,7 @@ import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import type { Expense, ExpenseCategory, Route } from '@/models/types'
 
 export default function ExpensesPage() {
-  const { tenantId, officeId } = useTenant()
+  const { tenantId, officeId, currency } = useTenant()
   const { user } = useAuth()
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [categories, setCategories] = useState<ExpenseCategory[]>([])
@@ -39,6 +40,7 @@ export default function ExpensesPage() {
     setLoading(false)
   }
 
+  const officeRoutes = routes
   const filtered = filterRoute ? expenses.filter(e => e.routeId === filterRoute) : expenses
   const totalFiltered = filtered.reduce((s, e) => s + e.valor, 0)
 
@@ -67,12 +69,12 @@ export default function ExpensesPage() {
   return (
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-xl font-bold text-gray-900">Gastos</h1><p className="text-sm text-gray-500 mt-0.5">Total: {formatCurrency(totalFiltered)}</p></div>
+        <div><h1 className="text-xl font-bold text-gray-900">Gastos</h1><p className="text-sm text-gray-500 mt-0.5">Total: {formatCurrency(totalFiltered, currency)}</p></div>
         <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>Nuevo gasto</Button>
       </div>
 
       <Select value={filterRoute} onChange={e => setFilterRoute(e.target.value)}
-        options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Todas las rutas" className="w-44" />
+        options={officeRoutes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Todas las rutas" className="w-44" />
 
       <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
         {filtered.length === 0 ? (
@@ -91,7 +93,7 @@ export default function ExpensesPage() {
                     {e.descripcion && <p className="text-xs text-gray-400">{e.descripcion}</p>}
                   </div>
                 </div>
-                <span className="text-sm font-bold text-red-600">-{formatCurrency(e.valor)}</span>
+                <span className="text-sm font-bold text-red-600">-{formatCurrency(e.valor, currency)}</span>
               </div>
             ))}
           </div>
@@ -103,12 +105,12 @@ export default function ExpensesPage() {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Select label="Ruta" value={form.routeId} onChange={e => setForm(f => ({ ...f, routeId: e.target.value }))}
-              options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
+              options={officeRoutes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
             <Select label="Categoría" value={form.categoryId} onChange={e => setForm(f => ({ ...f, categoryId: e.target.value }))}
               options={categories.map(c => ({ value: c.id, label: c.nombre }))} placeholder="Seleccionar categoría" required />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Valor" type="number" value={form.valor || ''} onChange={e => setForm(f => ({ ...f, valor: Number(e.target.value) }))} required />
+            <MoneyInput label="Valor" currency={currency} value={form.valor} onValueChange={v => setForm(f => ({ ...f, valor: v }))} required />
             <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
           </div>
           <Textarea label="Descripción" value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} rows={2} />
