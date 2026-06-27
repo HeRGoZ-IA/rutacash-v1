@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, CreditCard, Search, XCircle, CheckCircle, DollarSign } from 'lucide-react'
+import { Plus, CreditCard, Search, XCircle, DollarSign, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -18,6 +18,7 @@ import {
   estimateFinalDate, calculateInstallmentValue,
   applyPaymentToInstallments, calculateSaleBalance,
 } from '@/services/installmentEngine'
+import { findActiveSaleForClient } from '@/services/saleRequestService'
 import type { Sale, Client, Route, Installment } from '@/models/types'
 
 // Días de pago (1=lunes ... 6=sábado, 0=domingo)
@@ -52,6 +53,9 @@ export default function ActiveSalesPage() {
   const [paymentSale, setPaymentSale] = useState<Sale | null>(null)
   const [paymentValor, setPaymentValor] = useState(0)
   const [payingQuick, setPayingQuick] = useState(false)
+  // Revisión socio 25-jun — alerta de segunda venta activa del mismo cliente.
+  const [activeSale, setActiveSale] = useState<Sale | null>(null)
+  const [confirmSecondOpen, setConfirmSecondOpen] = useState(false)
 
   const [form, setForm] = useState({
     clientId: '', routeId: '', valorVenta: 0, tasaInteres: 20,
@@ -90,6 +94,32 @@ export default function ActiveSalesPage() {
   const clientMap = new Map(clients.map(c => [c.id, c]))
   const routeMap = new Map(routes.map(r => [r.id, r]))
 
+  // Revisión socio 25-jun — clientes del formulario filtrados por la ruta seleccionada.
+  const clientsForRoute = form.routeId ? clients.filter(c => c.routeId === form.routeId) : []
+
+  // Al seleccionar un cliente, detectar si ya tiene una venta activa (para advertir).
+  useEffect(() => {
+    let alive = true
+    if (!form.clientId) { setActiveSale(null); return }
+    findActiveSaleForClient(form.clientId).then(s => { if (alive) setActiveSale(s) })
+    return () => { alive = false }
+  }, [form.clientId])
+
+  // Cambiar de ruta limpia el cliente si ya no pertenece a la nueva ruta.
+  function handleRouteChange(routeId: string) {
+    const route = routeMap.get(routeId)
+    setForm(f => {
+      const keepClient = f.clientId && clients.find(c => c.id === f.clientId)?.routeId === routeId
+      return {
+        ...f,
+        routeId,
+        clientId: keepClient ? f.clientId : '',
+        // La tasa solo puede ser 10% o 20%: si la ruta trae otra, se usa 20% por defecto
+        tasaInteres: route?.tasaInteres === 10 ? 10 : 20,
+      }
+    })
+  }
+
   const filtered = sales.filter(s => {
     const client = clientMap.get(s.clientId)
     const matchSearch = !search || client?.nombre.toLowerCase().includes(search.toLowerCase()) || client?.documento.includes(search)
@@ -105,15 +135,27 @@ export default function ActiveSalesPage() {
     return { valorInteres, valorTotal, valorCuota, fechaFinal }
   })()
 
-  async function handleCreateSale() {
-    if (!form.clientId) { toast.error('Debes seleccionar un cliente'); return }
+  // Valida el formulario. Si pasa y el cliente ya tiene una venta activa, abre la
+  // confirmación de "segunda venta"; si no, crea la venta directamente.
+  function handleCreateSale() {
     if (!form.routeId) { toast.error('Debes seleccionar una ruta'); return }
-    if (form.valorVenta <= 0) { toast.error('El valor del préstamo debe ser mayor a 0'); return }
+    if (!form.clientId) { toast.error('Debes seleccionar un cliente'); return }
+    // El cliente debe pertenecer a la ruta seleccionada.
+    const client = clientMap.get(form.clientId)
+    if (!client || client.routeId !== form.routeId) { toast.error('El cliente seleccionado no pertenece a la ruta'); return }
+    if (form.valorVenta <= 0) { toast.error('El valor de la venta debe ser mayor a 0'); return }
     if (capDisponible != null && form.valorVenta > capDisponible) { toast.error(`La venta supera el capital disponible de la ruta (${formatCurrency(capDisponible, currency)})`); return }
-    if (form.numeroCuotas <= 0) { toast.error('El número de cuotas debe ser mayor a 0'); return }
+    if (form.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return }
     if (![10, 20].includes(form.tasaInteres)) { toast.error('La tasa de interés debe ser 10% o 20%'); return }
     if (form.fechaInicio < today()) { toast.error('La fecha de inicio de cobro no puede ser anterior a hoy'); return }
     if (form.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
+    // Si el cliente ya tiene una venta activa, pedir confirmación antes de crear otra.
+    if (activeSale) { setConfirmSecondOpen(true); return }
+    doCreateSale()
+  }
+
+  async function doCreateSale() {
+    setConfirmSecondOpen(false)
     setSaving(true)
     try {
       const saleId = generateId()
@@ -201,7 +243,7 @@ export default function ActiveSalesPage() {
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Ventas / Créditos</h1>
+          <h1 className="text-xl font-bold text-gray-900">Ventas activas</h1>
           <p className="text-sm text-gray-500 mt-0.5">{filtered.length} registro(s)</p>
         </div>
         <Button onClick={() => setCreateOpen(true)} icon={<Plus className="w-4 h-4" />}>Nueva venta</Button>
@@ -268,22 +310,35 @@ export default function ActiveSalesPage() {
       )}
 
       {/* Create Sale Modal */}
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nueva venta / crédito" size="mdPlus"
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nueva venta" size="mdPlus"
         footer={<><Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancelar</Button><Button onClick={handleCreateSale} loading={saving} disabled={capExcedido}>Crear venta</Button></>}>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
+            <Select label="Ruta" value={form.routeId} onChange={e => handleRouteChange(e.target.value)}
+              options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
             <Select label="Cliente" value={form.clientId} onChange={e => setForm(f => ({ ...f, clientId: e.target.value }))}
-              options={clients.map(c => ({ value: c.id, label: `${c.nombre} - ${c.documento}` }))} placeholder="Seleccionar cliente" required />
-            <Select label="Ruta" value={form.routeId} onChange={e => {
-              const route = routeMap.get(e.target.value)
-              // La tasa solo puede ser 10% o 20%: si la ruta trae otra, se usa 20% por defecto
-              setForm(f => ({ ...f, routeId: e.target.value, tasaInteres: route?.tasaInteres === 10 ? 10 : 20 }))
-            }} options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
+              options={clientsForRoute.map(c => ({ value: c.id, label: `${c.nombre} - ${c.documento}` }))}
+              placeholder={form.routeId ? 'Seleccionar cliente' : 'Selecciona primero la ruta'} disabled={!form.routeId} required />
           </div>
+          {form.routeId && clientsForRoute.length === 0 && (
+            <p className="text-xs text-amber-600">No hay clientes registrados en esta ruta.</p>
+          )}
+          {/* Alerta: el cliente seleccionado ya tiene una venta activa */}
+          {activeSale && (
+            <div className="flex items-start gap-2 p-3 bg-amber-50 rounded-xl border border-amber-200">
+              <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div className="text-xs text-amber-700">
+                <p className="font-semibold">Este cliente ya tiene una venta activa.</p>
+                <p className="mt-0.5">
+                  Venta {formatCurrency(activeSale.valorVenta, currency)} · Saldo {formatCurrency(activeSale.saldo, currency)} · Inicio {formatDate(activeSale.fechaInicio)} · Ruta {routeMap.get(activeSale.routeId)?.nombre ?? '—'}
+                </p>
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-3">
-            <MoneyInput label="Valor del préstamo" currency={currency} value={form.valorVenta} onValueChange={v => setForm(f => ({ ...f, valorVenta: v }))} required />
+            <MoneyInput label="Valor de la venta" currency={currency} value={form.valorVenta} onValueChange={v => setForm(f => ({ ...f, valorVenta: v }))} required />
             <Select label="Tasa interés" value={String(form.tasaInteres)} onChange={e => setForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={TASA_OPTIONS} />
-            <Input label="N° cuotas" type="number" min={1} value={form.numeroCuotas} onChange={e => setForm(f => ({ ...f, numeroCuotas: Number(e.target.value) }))} />
+            <Input label="N° de parcelas" type="number" min={1} value={form.numeroCuotas || ''} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
           </div>
           {form.routeId && capDisponible != null && (
             <div className={`rounded-xl p-3 text-sm border ${capExcedido ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>
@@ -375,6 +430,22 @@ export default function ActiveSalesPage() {
           </div>
         </Modal>
       )}
+
+      {/* Confirmación: segunda venta activa del mismo cliente */}
+      <Modal open={confirmSecondOpen} onClose={() => setConfirmSecondOpen(false)} title="Cliente con venta activa"
+        footer={<><Button variant="secondary" onClick={() => setConfirmSecondOpen(false)}>Cancelar</Button><Button onClick={doCreateSale} loading={saving}>Sí, crear otra venta</Button></>}>
+        <div className="space-y-3">
+          <div className="flex items-start gap-2 p-3 bg-amber-50 rounded-xl border border-amber-200">
+            <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+            <p className="text-sm text-amber-700">Este cliente ya tiene una venta activa. ¿Deseas crear otra venta para este cliente?</p>
+          </div>
+          {activeSale && (
+            <p className="text-sm text-gray-600">
+              Venta actual: <span className="font-semibold">{formatCurrency(activeSale.valorVenta, currency)}</span> · Saldo pendiente: <span className="font-semibold text-amber-600">{formatCurrency(activeSale.saldo, currency)}</span> · Inicio {formatDate(activeSale.fechaInicio)}
+            </p>
+          )}
+        </div>
+      </Modal>
 
       {/* Lost modal */}
       <Modal open={lostOpen} onClose={() => setLostOpen(false)} title="Marcar venta como perdida"

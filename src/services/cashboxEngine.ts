@@ -2,7 +2,7 @@
 // Motor de caja - calcula saldos desde movimientos
 // ============================================================
 import { db } from '@/lib/db'
-import type { CashboxSummary } from '@/models/types'
+import type { CashboxSummary, RouteFinancialSummary } from '@/models/types'
 
 export async function getCashboxSummary(
   routeId: string,
@@ -123,6 +123,55 @@ export async function getRoutesCurrentBalance(routeIds: string[]): Promise<Recor
   for (const routeId of routeIds) {
     const summary = await getCashboxSummary(routeId)
     result[routeId] = summary.saldoActual
+  }
+  return result
+}
+
+/**
+ * Resumen financiero por ruta (revisión socio 25-jun): helper reutilizable que
+ * separa "Base actual" (dinero disponible en caja) de "Cartera en calle" (lo
+ * prestado pendiente por cobrar). Usar en todas las pantallas para evitar
+ * cálculos distintos por vista.
+ *
+ *  - baseActual:      saldo de caja (reusa getRouteAvailableCapital / motor de caja).
+ *  - carteraEnCalle:  Σ saldo de ventas activas YA desembolsadas (capital + interés).
+ *                     NO incluye ventas pendientes de desembolso ni perdidas/cerradas.
+ *  - totalControlado: baseActual + carteraEnCalle.
+ *  - interesPorCobrarEstimado: estimación proporcional (saldo × interés / total).
+ */
+export async function getRouteFinancialSummary(routeId: string): Promise<RouteFinancialSummary> {
+  const baseActual = (await getCashboxSummary(routeId)).saldoActual
+
+  const sales = await db.sales.where('routeId').equals(routeId).toArray()
+  // Solo ventas activas y desembolsadas (las 'pendiente' aún no salieron a la calle).
+  const activas = sales.filter(s => s.status === 'activa' && s.disbursementStatus !== 'pendiente')
+
+  const carteraEnCalle = activas.reduce((sum, s) => sum + Math.max(0, s.saldo), 0)
+
+  // Interés por cobrar estimado: proporción del interés dentro del saldo de cada venta.
+  const interesPorCobrarEstimado = Math.round(activas.reduce((sum, s) => {
+    if (s.valorTotal <= 0) return sum
+    return sum + (Math.max(0, s.saldo) * s.valorInteres) / s.valorTotal
+  }, 0))
+
+  const clientesActivos = new Set(activas.map(s => s.clientId)).size
+
+  return {
+    routeId,
+    baseActual,
+    carteraEnCalle,
+    totalControlado: baseActual + carteraEnCalle,
+    ventasActivas: activas.length,
+    clientesActivos,
+    interesPorCobrarEstimado,
+  }
+}
+
+/** Versión por lote: resumen financiero de varias rutas (clave = routeId). */
+export async function getRoutesFinancialSummary(routeIds: string[]): Promise<Record<string, RouteFinancialSummary>> {
+  const result: Record<string, RouteFinancialSummary> = {}
+  for (const routeId of routeIds) {
+    result[routeId] = await getRouteFinancialSummary(routeId)
   }
   return result
 }

@@ -100,7 +100,7 @@ export default function CollectorNewClientPage() {
 
     if (addSale) {
       if (saleForm.valorVenta <= 0) { toast.error('El valor de la venta debe ser mayor a 0'); return }
-      if (saleForm.numeroCuotas <= 0) { toast.error('El número de parcelas debe ser mayor a 0'); return }
+      if (saleForm.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return }
       if (![10, 20].includes(saleForm.tasaInteres)) { toast.error('La tasa debe ser 10% o 20%'); return }
       if (saleForm.fechaInicio < today()) { toast.error('La fecha de inicio no puede ser anterior a hoy'); return }
       if (saleForm.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
@@ -114,7 +114,7 @@ export default function CollectorNewClientPage() {
     const norm = normalizeDoc(form.documento)
     const all = await db.clients.where('tenantId').equals(user.tenantId).toArray()
     const existing = all.find(c => normalizeDoc(c.documento) === norm)
-    if (existing) { setDup(existing); toast.error('Este documento ya está registrado como cliente.'); return }
+    if (existing) { setDup(existing); toast.error('Este documento ya está registrado en esta empresa.'); return }
 
     setSaving(true)
     try {
@@ -186,15 +186,16 @@ export default function CollectorNewClientPage() {
           value={form.documento}
           onChange={e => { setForm(f => ({ ...f, documento: e.target.value })); if (dup) setDup(null) }}
           onBlur={e => checkDuplicate(e.target.value)}
-          error={dup ? 'Este documento ya está registrado como cliente.' : undefined}
+          error={dup ? 'Este documento ya está registrado en esta empresa.' : undefined}
           required autoFocus
         />
         {dup && (
           <div className="flex items-start gap-2 p-3 bg-red-50 rounded-xl border border-red-100">
             <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-red-700">
-              Ya existe: <span className="font-semibold">{dup.nombre}</span> · Ruta: {dupRouteName}
-            </p>
+            <div className="text-xs text-red-700">
+              <p className="font-semibold">Este documento ya está registrado en esta empresa.</p>
+              <p className="mt-0.5"><span className="font-medium">{dup.nombre}</span> · Ruta: {dupRouteName}</p>
+            </div>
           </div>
         )}
 
@@ -237,7 +238,7 @@ export default function CollectorNewClientPage() {
                 <Select label="Forma de pago" value={saleForm.frecuenciaPago} onChange={e => setSaleForm(f => ({ ...f, frecuenciaPago: e.target.value as Sale['frecuenciaPago'] }))} options={FREQ_OPTIONS} />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <Input label="N° de parcelas" type="number" min={1} value={saleForm.numeroCuotas} onChange={e => setSaleForm(f => ({ ...f, numeroCuotas: Number(e.target.value) }))} />
+                <Input label="N° de parcelas" type="number" min={1} value={saleForm.numeroCuotas || ''} onChange={e => { const v = e.target.value; setSaleForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
                 <Input label="Fecha de inicio" type="date" min={today()} value={saleForm.fechaInicio} onChange={e => setSaleForm(f => ({ ...f, fechaInicio: e.target.value }))} />
               </div>
               <div>

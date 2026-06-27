@@ -504,6 +504,24 @@ function buildDefaultExpenseCategories(tenantId: string): ExpenseCategory[] {
   }))
 }
 
+/**
+ * Seguro de categorías (revisión socio 25-jun): garantiza que cada tenant tenga
+ * categorías de gasto base. Si la base se inicializó sin categorías (caso borde),
+ * las siembra sin duplicar para que el selector de gastos nunca aparezca vacío.
+ * Se ejecuta tanto en CLEAN como en DEMO al iniciar la app.
+ */
+export async function ensureExpenseCategories(): Promise<void> {
+  const tenants = await db.tenants.toArray()
+  for (const t of tenants) {
+    if (t.id === 'platform') continue
+    const count = await db.expenseCategories.where('tenantId').equals(t.id).count()
+    if (count === 0) {
+      await db.expenseCategories.bulkAdd(buildDefaultExpenseCategories(t.id))
+      console.log(`[RutaCash] Categorías de gasto base sembradas para tenant ${t.id}`)
+    }
+  }
+}
+
 export async function seedCleanDatabase() {
   const existing = await db.users.count()
   if (existing > 0) return

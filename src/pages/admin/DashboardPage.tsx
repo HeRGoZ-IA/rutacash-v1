@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/Badge'
 import { LoadingState } from '@/components/ui/EmptyState'
 import { SetupChecklist } from '@/components/ui/SetupChecklist'
 import { db } from '@/lib/db'
+import { getRouteFinancialSummary } from '@/services/cashboxEngine'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatDate, today, getWeekStart, getWeekEnd } from '@/lib/formatters'
@@ -17,8 +18,9 @@ import { es } from 'date-fns/locale'
 import { IS_CLEAN } from '@/lib/appMode'
 
 interface DashboardData {
-  capitalTotal: number
-  carteraActiva: number
+  baseActualTotal: number
+  carteraEnCalle: number
+  totalControlado: number
   recaudoHoy: number
   recaudoSemana: number
   ventasActivas: number
@@ -54,11 +56,17 @@ export default function DashboardPage() {
       // Sales
       const allSales = await db.sales.where('tenantId').equals(tenantId).toArray()
       const ventasActivas = allSales.filter(s => s.status === 'activa')
-      const carteraActiva = ventasActivas.reduce((s, v) => s + v.saldo, 0)
 
-      // Capital
-      const capitalMovs = await db.capitalMovements.where('tenantId').equals(tenantId).toArray()
-      const capitalTotal = capitalMovs.reduce((s, m) => s + m.valor, 0)
+      // Revisión socio 25-jun — Base actual vs Cartera en calle (consolidado de la empresa).
+      // Se calcula con el mismo helper por ruta para evitar cálculos distintos por pantalla.
+      let baseActualTotal = 0
+      let carteraEnCalle = 0
+      for (const r of routes) {
+        const s = await getRouteFinancialSummary(r.id)
+        baseActualTotal += s.baseActual
+        carteraEnCalle += s.carteraEnCalle
+      }
+      const totalControlado = baseActualTotal + carteraEnCalle
 
       // Payments
       const allPayments = await db.payments.where('tenantId').equals(tenantId).toArray()
@@ -128,8 +136,9 @@ export default function DashboardPage() {
       }
 
       setData({
-        capitalTotal,
-        carteraActiva,
+        baseActualTotal,
+        carteraEnCalle,
+        totalControlado,
         recaudoHoy,
         recaudoSemana,
         ventasActivas: ventasActivas.length,
@@ -188,18 +197,25 @@ export default function DashboardPage() {
       {/* KPI Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
-          title="Capital total"
-          value={formatCurrency(data.capitalTotal)}
+          title="Base actual"
+          value={formatCurrency(data.baseActualTotal)}
           icon={<DollarSign className="w-5 h-5" />}
           color="blue"
-          subtitle="Fondos en rutas"
+          subtitle="Disponible en rutas"
         />
         <KPICard
-          title="Cartera activa"
-          value={formatCurrency(data.carteraActiva)}
+          title="Cartera en calle"
+          value={formatCurrency(data.carteraEnCalle)}
           icon={<CreditCard className="w-5 h-5" />}
           color="purple"
-          subtitle={`${data.ventasActivas} ventas`}
+          subtitle={`${data.ventasActivas} ventas activas`}
+        />
+        <KPICard
+          title="Total controlado"
+          value={formatCurrency(data.totalControlado)}
+          icon={<TrendingUp className="w-5 h-5" />}
+          color="green"
+          subtitle="Base + cartera"
         />
         <KPICard
           title="Recaudo hoy"

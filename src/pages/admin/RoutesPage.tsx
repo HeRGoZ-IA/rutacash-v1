@@ -9,22 +9,21 @@ import { MoneyInput } from '@/components/ui/MoneyInput'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
-import { getRouteAvailableCapital } from '@/services/cashboxEngine'
+import { getRouteFinancialSummary } from '@/services/cashboxEngine'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { assignCobradorToRoute } from '@/services/routeAssignment'
-import type { Route, User } from '@/models/types'
+import type { Route, User, RouteFinancialSummary } from '@/models/types'
 
 export default function RoutesPage() {
   const { user } = useAuth()
   const { tenantId, currency } = useTenant()
   const [routes, setRoutes] = useState<Route[]>([])
   const [cobradores, setCobradores] = useState<User[]>([])
-  const [salesCounts, setSalesCounts] = useState<Record<string, number>>({})
-  const [disponibleByRoute, setDisponibleByRoute] = useState<Record<string, number>>({})
+  const [summaryByRoute, setSummaryByRoute] = useState<Record<string, RouteFinancialSummary>>({})
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Route | null>(null)
@@ -55,14 +54,11 @@ export default function RoutesPage() {
     setRoutes(rts)
     const cobs = await db.users.where('tenantId').equals(tenantId).and(u => u.rol === 'cobrador').toArray()
     setCobradores(cobs)
-    const sc: Record<string, number> = {}
-    const disp: Record<string, number> = {}
+    const sum: Record<string, RouteFinancialSummary> = {}
     for (const r of rts) {
-      sc[r.id] = await db.sales.where('routeId').equals(r.id).and(s => s.status === 'activa').count()
-      disp[r.id] = await getRouteAvailableCapital(r.id)
+      sum[r.id] = await getRouteFinancialSummary(r.id)
     }
-    setSalesCounts(sc)
-    setDisponibleByRoute(disp)
+    setSummaryByRoute(sum)
     setLoading(false)
   }
 
@@ -197,30 +193,40 @@ export default function RoutesPage() {
                 </Badge>
               </div>
 
+              {/* Revisión socio 25-jun — Base actual vs Cartera en calle por ruta */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-primary-50 rounded-xl p-3">
+                  <p className="text-sm font-bold text-primary-700 truncate">{formatCurrency(summaryByRoute[route.id]?.baseActual ?? route.capitalInicial, currency)}</p>
+                  <p className="text-xs text-gray-400">Base actual</p>
+                </div>
+                <div className="bg-indigo-50 rounded-xl p-3">
+                  <p className="text-sm font-bold text-indigo-600 truncate">{formatCurrency(summaryByRoute[route.id]?.carteraEnCalle ?? 0, currency)}</p>
+                  <p className="text-xs text-gray-400">Cartera en calle</p>
+                </div>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-2.5 flex items-center justify-between">
+                <p className="text-xs text-gray-400">Total controlado</p>
+                <p className="text-sm font-bold text-gray-800">{formatCurrency(summaryByRoute[route.id]?.totalControlado ?? 0, currency)}</p>
+              </div>
+
               <div className="grid grid-cols-3 gap-2">
-                <div className="bg-gray-50 rounded-xl p-3 text-center">
-                  <p className="text-base font-bold text-primary-600">{salesCounts[route.id] ?? 0}</p>
+                <div className="bg-gray-50 rounded-xl p-2.5 text-center">
+                  <p className="text-base font-bold text-primary-600">{summaryByRoute[route.id]?.ventasActivas ?? 0}</p>
                   <p className="text-xs text-gray-400">Ventas</p>
                 </div>
-                <div className="bg-gray-50 rounded-xl p-3 text-center">
-                  <p className="text-base font-bold text-emerald-600">{route.tasaInteres}%</p>
-                  <p className="text-xs text-gray-400">Tasa</p>
+                <div className="bg-gray-50 rounded-xl p-2.5 text-center">
+                  <p className="text-base font-bold text-emerald-600">{summaryByRoute[route.id]?.clientesActivos ?? 0}</p>
+                  <p className="text-xs text-gray-400">Clientes</p>
                 </div>
-                <div className="bg-gray-50 rounded-xl p-3 text-center">
-                  <p className="text-xs font-bold text-amber-600 truncate">{formatCurrency(route.montoMaximoPrestamo, currency)}</p>
-                  <p className="text-xs text-gray-400">Máx.</p>
+                <div className="bg-gray-50 rounded-xl p-2.5 text-center">
+                  <p className="text-base font-bold text-gray-700">{route.tasaInteres}%</p>
+                  <p className="text-xs text-gray-400">Tasa</p>
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 text-xs text-gray-600">
-                  <Users className="w-3.5 h-3.5 text-gray-400" />
-                  {getCobradorName(route.cobradorId) ?? <span className="text-amber-500">Sin cobrador</span>}
-                </div>
-                <div className="flex items-center gap-2 text-xs text-gray-600">
-                  <DollarSign className="w-3.5 h-3.5 text-gray-400" />
-                  Disponible: {formatCurrency(disponibleByRoute[route.id] ?? route.capitalInicial, currency)}
-                </div>
+              <div className="flex items-center gap-2 text-xs text-gray-600">
+                <Users className="w-3.5 h-3.5 text-gray-400" />
+                {getCobradorName(route.cobradorId) ?? <span className="text-amber-500">Sin cobrador</span>}
               </div>
 
               <div className="flex gap-2 pt-1">

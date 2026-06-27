@@ -10,7 +10,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { getAuthorizedRouteIds } from '@/lib/roles'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
-import { computeSaleFinancials, createDirectSale, createSaleRequest, type SaleInputs } from '@/services/saleRequestService'
+import { computeSaleFinancials, createDirectSale, createSaleRequest, findActiveSaleForClient, type SaleInputs } from '@/services/saleRequestService'
 import { useRouteCapital } from '@/hooks/useRouteCapital'
 import type { Client, Sale } from '@/models/types'
 
@@ -33,6 +33,9 @@ export default function CollectorNewSalePage() {
   const [clients, setClients] = useState<Client[]>([])
   const [routeIds, setRouteIds] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+  // Revisión socio 25-jun — alerta de segunda venta activa del mismo cliente.
+  const [activeSale, setActiveSale] = useState<Sale | null>(null)
+  const [confirmKind, setConfirmKind] = useState<'direct' | 'request' | null>(null)
   const [form, setForm] = useState({
     clientId: params.get('clientId') ?? '',
     valorVenta: 0, tasaInteres: 20, numeroCuotas: 30,
@@ -50,6 +53,14 @@ export default function CollectorNewSalePage() {
     // Solo clientes de las rutas del cobrador
     setClients(all.filter(c => ids.includes(c.routeId)))
   }
+
+  // Al seleccionar un cliente, detectar si ya tiene una venta activa (para advertir).
+  useEffect(() => {
+    let alive = true
+    if (!form.clientId) { setActiveSale(null); return }
+    findActiveSaleForClient(form.clientId).then(s => { if (alive) setActiveSale(s) })
+    return () => { alive = false }
+  }, [form.clientId])
 
   function togglePaymentDay(day: number) {
     setForm(f => ({
@@ -76,7 +87,7 @@ export default function CollectorNewSalePage() {
   function validate(): boolean {
     if (!form.clientId) { toast.error('Selecciona un cliente'); return false }
     if (form.valorVenta <= 0) { toast.error('El valor debe ser mayor a 0'); return false }
-    if (form.numeroCuotas <= 0) { toast.error('El número de parcelas debe ser mayor a 0'); return false }
+    if (form.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return false }
     if (![10, 20].includes(form.tasaInteres)) { toast.error('La tasa debe ser 10% o 20%'); return false }
     if (form.fechaInicio < today()) { toast.error('La fecha de inicio no puede ser anterior a hoy'); return false }
     if (form.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return false }
@@ -97,7 +108,10 @@ export default function CollectorNewSalePage() {
   async function handleDirectSale() {
     if (!validate()) return
     if (capDisponible != null && form.valorVenta > capDisponible) { toast.error(`La venta supera el capital disponible de la ruta (${formatCurrency(capDisponible, currency)})`); return }
+    // Si el cliente ya tiene venta activa, pedir confirmación antes de crear otra.
+    if (activeSale && confirmKind !== 'direct') { setConfirmKind('direct'); return }
     const inputs = buildInputs(); if (!inputs) return
+    setConfirmKind(null)
     setSaving(true)
     try {
       await createDirectSale(inputs)
@@ -108,7 +122,9 @@ export default function CollectorNewSalePage() {
 
   async function handleRequest() {
     if (!validate()) return
+    if (activeSale && confirmKind !== 'request') { setConfirmKind('request'); return }
     const inputs = buildInputs(); if (!inputs) return
+    setConfirmKind(null)
     setSaving(true)
     try {
       await createSaleRequest(inputs)
@@ -138,6 +154,15 @@ export default function CollectorNewSalePage() {
           <Select value={form.clientId} onChange={e => setForm(f => ({ ...f, clientId: e.target.value }))}
             options={clients.map(c => ({ value: c.id, label: `${c.nombre} - ${c.documento}` }))} placeholder="Seleccionar cliente" required />
           {routeIds.length === 0 && <p className="mt-1 text-xs text-amber-600">No tienes rutas asignadas.</p>}
+          {activeSale && (
+            <div className="mt-2 flex items-start gap-2 p-3 bg-amber-50 rounded-xl border border-amber-200">
+              <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div className="text-xs text-amber-700">
+                <p className="font-semibold">Este cliente ya tiene una venta activa.</p>
+                <p className="mt-0.5">Venta {formatCurrency(activeSale.valorVenta, currency)} · Saldo {formatCurrency(activeSale.saldo, currency)} · Inicio {formatDate(activeSale.fechaInicio)}</p>
+              </div>
+            </div>
+          )}
         </div>
 
         <MoneyInput label="Valor de la venta" currency={currency} value={form.valorVenta} onValueChange={v => setForm(f => ({ ...f, valorVenta: v }))} required />
@@ -148,7 +173,7 @@ export default function CollectorNewSalePage() {
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <Input label="N° de parcelas" type="number" min={1} value={form.numeroCuotas} onChange={e => setForm(f => ({ ...f, numeroCuotas: Number(e.target.value) }))} />
+          <Input label="N° de parcelas" type="number" min={1} value={form.numeroCuotas || ''} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
           <Input label="Fecha de inicio" type="date" min={today()} value={form.fechaInicio} onChange={e => setForm(f => ({ ...f, fechaInicio: e.target.value }))} />
         </div>
 
@@ -210,6 +235,27 @@ export default function CollectorNewSalePage() {
           </>
         )}
       </div>
+
+      {/* Confirmación: segunda venta activa del mismo cliente */}
+      {confirmKind && activeSale && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => setConfirmKind(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-5 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+              <div>
+                <p className="font-bold text-gray-900">Cliente con venta activa</p>
+                <p className="text-sm text-gray-600 mt-1">Este cliente ya tiene una venta activa. ¿Deseas crear otra venta para este cliente?</p>
+                <p className="text-xs text-gray-500 mt-2">Venta {formatCurrency(activeSale.valorVenta, currency)} · Saldo {formatCurrency(activeSale.saldo, currency)}</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmKind(null)} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-600">Cancelar</button>
+              <button onClick={() => { confirmKind === 'direct' ? handleDirectSale() : handleRequest() }}
+                className="flex-1 py-2.5 bg-amber-600 text-white rounded-xl text-sm font-medium">Sí, crear otra</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

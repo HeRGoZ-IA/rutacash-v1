@@ -6,12 +6,12 @@ import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Modal } from '@/components/ui/Modal'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
-import { getRouteAvailableCapital } from '@/services/cashboxEngine'
+import { getRouteFinancialSummary } from '@/services/cashboxEngine'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
-import type { CapitalMovement, Route, Withdrawal } from '@/models/types'
+import type { CapitalMovement, Route, Withdrawal, RouteFinancialSummary } from '@/models/types'
 
 // Paquete 3 — Resumen de capital agrupado por ruta.
 interface CapitalGroup {
@@ -21,7 +21,9 @@ interface CapitalGroup {
   capitalInicial: number
   totalInyectado: number
   totalRetirado: number
-  capitalActual: number
+  capitalActual: number   // Base actual (saldo de caja)
+  carteraEnCalle: number  // Pendiente por cobrar en la calle
+  totalControlado: number // Base actual + cartera en calle
   cantidad: number
   ultimoMovimiento?: string
   movements: CapitalMovement[]
@@ -33,8 +35,8 @@ export default function CapitalPage() {
   const [movements, setMovements] = useState<CapitalMovement[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([])
-  // Capital disponible REAL por ruta (saldo de caja), recalculado en cada carga.
-  const [disponibleByRoute, setDisponibleByRoute] = useState<Record<string, number>>({})
+  // Resumen financiero REAL por ruta (Base actual + Cartera en calle), recalculado en cada carga.
+  const [summaryByRoute, setSummaryByRoute] = useState<Record<string, RouteFinancialSummary>>({})
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -54,11 +56,10 @@ export default function CapitalPage() {
     setMovements(movs.sort((a, b) => b.fecha.localeCompare(a.fecha)))
     setRoutes(rts)
     setWithdrawals(wds)
-    // Capital disponible real por ruta (saldo de caja): refleja inyecciones,
-    // ventas entregadas, abonos, gastos, retiros y transferencias.
-    const disp: Record<string, number> = {}
-    for (const r of rts) disp[r.id] = await getRouteAvailableCapital(r.id)
-    setDisponibleByRoute(disp)
+    // Resumen financiero real por ruta: Base actual (saldo de caja) y Cartera en calle.
+    const sum: Record<string, RouteFinancialSummary> = {}
+    for (const r of rts) sum[r.id] = await getRouteFinancialSummary(r.id)
+    setSummaryByRoute(sum)
     setLoading(false)
   }
 
@@ -86,10 +87,13 @@ export default function CapitalPage() {
     const wdByRoute = new Map<string, number>()
     for (const w of withdrawals) wdByRoute.set(w.routeId, (wdByRoute.get(w.routeId) ?? 0) + w.valor)
 
-    const buildGroup = (routeId: string, nombre: string, codigo: string, capitalInicial: number, capitalActual: number): CapitalGroup => {
+    const buildGroup = (routeId: string, nombre: string, codigo: string, capitalInicial: number, summary?: RouteFinancialSummary): CapitalGroup => {
       const movs = movementsView.filter(m => m.routeId === routeId)
+      const capitalActual = summary?.baseActual ?? 0
+      const carteraEnCalle = summary?.carteraEnCalle ?? 0
       return {
-        routeId, nombre, codigo, capitalInicial, capitalActual,
+        routeId, nombre, codigo, capitalInicial, capitalActual, carteraEnCalle,
+        totalControlado: summary?.totalControlado ?? capitalActual,
         totalInyectado: movs.reduce((s, m) => s + m.valor, 0),
         totalRetirado: wdByRoute.get(routeId) ?? 0,
         cantidad: movs.length,
@@ -98,7 +102,7 @@ export default function CapitalPage() {
       }
     }
 
-    const list = routesView.map(r => buildGroup(r.id, r.nombre, r.codigo, r.capitalInicial, disponibleByRoute[r.id] ?? 0))
+    const list = routesView.map(r => buildGroup(r.id, r.nombre, r.codigo, r.capitalInicial, summaryByRoute[r.id]))
 
     // Movimientos cuya ruta ya no existe (o sin routeId) → grupo "Sin ruta".
     const knownRouteIds = new Set(routesView.map(r => r.id))
@@ -106,7 +110,7 @@ export default function CapitalPage() {
     if (orphan.length > 0) {
       list.push({
         routeId: '__none__', nombre: 'Sin ruta', codigo: '—',
-        capitalInicial: 0, capitalActual: 0,
+        capitalInicial: 0, capitalActual: 0, carteraEnCalle: 0, totalControlado: 0,
         totalInyectado: orphan.reduce((s, m) => s + m.valor, 0),
         totalRetirado: 0, cantidad: orphan.length,
         ultimoMovimiento: orphan[0]?.fecha, movements: orphan,
@@ -145,9 +149,13 @@ export default function CapitalPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-2 mt-3">
-                <div className="bg-gray-50 rounded-xl p-2.5">
-                  <p className="text-xs text-gray-400">Capital inicial</p>
-                  <p className="text-sm font-bold text-gray-700">{formatCurrency(g.capitalInicial, currency)}</p>
+                <div className="bg-primary-50 rounded-xl p-2.5">
+                  <p className="text-xs text-gray-400">Base actual</p>
+                  <p className="text-sm font-bold text-primary-700">{g.routeId === '__none__' ? '—' : formatCurrency(g.capitalActual, currency)}</p>
+                </div>
+                <div className="bg-indigo-50 rounded-xl p-2.5">
+                  <p className="text-xs text-gray-400">Cartera en calle</p>
+                  <p className="text-sm font-bold text-indigo-600">{g.routeId === '__none__' ? '—' : formatCurrency(g.carteraEnCalle, currency)}</p>
                 </div>
                 <div className="bg-emerald-50 rounded-xl p-2.5">
                   <p className="text-xs text-gray-400">Total inyectado</p>
@@ -157,11 +165,13 @@ export default function CapitalPage() {
                   <p className="text-xs text-gray-400">Total retirado</p>
                   <p className="text-sm font-bold text-amber-600">{formatCurrency(g.totalRetirado, currency)}</p>
                 </div>
-                <div className="bg-primary-50 rounded-xl p-2.5">
-                  <p className="text-xs text-gray-400">Capital disponible</p>
-                  <p className="text-sm font-bold text-primary-700">{formatCurrency(g.capitalActual, currency)}</p>
-                </div>
               </div>
+              {g.routeId !== '__none__' && (
+                <div className="mt-2 bg-gray-50 rounded-xl p-2.5 flex items-center justify-between">
+                  <p className="text-xs text-gray-400">Total controlado (base + cartera)</p>
+                  <p className="text-sm font-bold text-gray-800">{formatCurrency(g.totalControlado, currency)}</p>
+                </div>
+              )}
 
               <div className="flex items-center justify-between mt-3">
                 <p className="text-xs text-gray-400">

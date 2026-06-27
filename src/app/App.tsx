@@ -5,7 +5,7 @@ import { AdminLayout } from '@/components/layout/AdminLayout'
 import { CollectorLayout } from '@/components/layout/CollectorLayout'
 import { SupervisorLayout } from '@/components/layout/SupervisorLayout'
 import { useAuth } from '@/hooks/useAuth'
-import { seedDatabase, seedCleanDatabase } from '@/data/seed'
+import { seedDatabase, seedCleanDatabase, ensureExpenseCategories } from '@/data/seed'
 import { IS_CLEAN } from '@/lib/appMode'
 
 // Auth
@@ -60,7 +60,10 @@ function RequireAuth({ children, roles }: { children: React.ReactNode; roles?: s
 export default function App() {
   useEffect(() => {
     const seed = IS_CLEAN ? seedCleanDatabase : seedDatabase
-    seed().catch(console.error)
+    // Tras sembrar, garantizar categorías de gasto base (seguro anti-vacío).
+    seed()
+      .then(() => ensureExpenseCategories())
+      .catch(console.error)
   }, [])
 
   return (

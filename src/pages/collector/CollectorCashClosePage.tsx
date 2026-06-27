@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Calculator, TrendingUp, TrendingDown, Banknote } from 'lucide-react'
+import { Calculator, TrendingUp, TrendingDown, Banknote, Wallet, MapPin } from 'lucide-react'
 import { db } from '@/lib/db'
+import { getRouteFinancialSummary } from '@/services/cashboxEngine'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
@@ -17,7 +18,7 @@ export default function CollectorCashClosePage() {
   const { user } = useAuth()
   const { currency } = useTenant()
   const { activeRouteId } = useCollectorRoute()
-  const [data, setData] = useState({ abonos: 0, ventas: 0, gastos: 0 })
+  const [data, setData] = useState({ abonos: 0, ventas: 0, gastos: 0, baseActual: 0, carteraEnCalle: 0 })
   const [loading, setLoading] = useState(true)
 
   const routeId = activeRouteId ?? user?.routeId ?? null
@@ -28,16 +29,19 @@ export default function CollectorCashClosePage() {
     if (!user || !routeId) { setLoading(false); return }
     setLoading(true)
     const todayStr = today()
-    const [payments, sales, expenses] = await Promise.all([
+    const [payments, sales, expenses, summary] = await Promise.all([
       db.payments.where('routeId').equals(routeId).and(p => p.fecha === todayStr).toArray(),
       db.sales.where('routeId').equals(routeId).toArray(),
       db.expenses.where('routeId').equals(routeId).and(e => e.fecha === todayStr).toArray(),
+      getRouteFinancialSummary(routeId),
     ])
     const ventasHoy = sales.filter(s => s.createdAt.slice(0, 10) === todayStr && s.disbursementStatus !== 'pendiente')
     setData({
       abonos: payments.reduce((s, p) => s + p.valor, 0),
       ventas: ventasHoy.reduce((s, x) => s + x.valorVenta, 0),
       gastos: expenses.reduce((s, e) => s + e.valor, 0),
+      baseActual: summary.baseActual,
+      carteraEnCalle: summary.carteraEnCalle,
     })
     setLoading(false)
   }
@@ -53,6 +57,18 @@ export default function CollectorCashClosePage() {
       <div>
         <h1 className="font-bold text-gray-900">Cuadre</h1>
         <p className="text-xs text-gray-500">{formatDate(today())} · resumen del día</p>
+      </div>
+
+      {/* Revisión socio 25-jun — Base actual y Cartera en calle de la ruta */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4">
+          <div className="flex items-center gap-1.5 text-xs text-gray-400"><Wallet className="w-3.5 h-3.5" /> Base actual</div>
+          <p className="text-lg font-bold text-primary-700 mt-1">{formatCurrency(data.baseActual, currency)}</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4">
+          <div className="flex items-center gap-1.5 text-xs text-gray-400"><MapPin className="w-3.5 h-3.5" /> Cartera en calle</div>
+          <p className="text-lg font-bold text-indigo-600 mt-1">{formatCurrency(data.carteraEnCalle, currency)}</p>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-card divide-y divide-gray-50">

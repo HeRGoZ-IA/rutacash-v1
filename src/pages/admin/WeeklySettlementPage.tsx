@@ -145,7 +145,7 @@ export default function WeeklySettlementPage() {
       ) : (
         <div className="flex flex-col items-center justify-center py-16 text-gray-400">
           <CalendarRange className="w-10 h-10 mb-3" />
-          <p className="text-sm">Selecciona una oficina y el rango de semana, luego haz clic en Generar</p>
+          <p className="text-sm">Selecciona una ruta y el rango de semana, luego haz clic en Generar</p>
         </div>
       )}
     </div>

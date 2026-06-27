@@ -136,6 +136,17 @@ export async function countPendingDisbursements(routeId: string): Promise<number
   return sales.filter(s => s.status === 'activa' && s.disbursementStatus === 'pendiente').length
 }
 
+/**
+ * Devuelve la venta activa de un cliente, si existe (revisión socio 25-jun).
+ * "Activa" = estado 'activa', ya sea desembolsada o pendiente de desembolso.
+ * Se usa para advertir al crear una segunda venta al mismo cliente.
+ */
+export async function findActiveSaleForClient(clientId: string): Promise<Sale | null> {
+  if (!clientId) return null
+  const sales = await db.sales.where('clientId').equals(clientId).toArray()
+  return sales.find(s => s.status === 'activa') ?? null
+}
+
 /** Cuenta las solicitudes de venta pendientes por revisar (Administrador). */
 export async function countPendingSaleRequests(tenantId: string): Promise<number> {
   if (!tenantId) return 0

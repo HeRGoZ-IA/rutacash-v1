@@ -410,6 +410,33 @@ export interface CashboxSummary {
   saldoActual: number
 }
 
+/**
+ * Resumen financiero por ruta (revisión socio 25-jun).
+ * Separa dos conceptos que el socio pidió distinguir:
+ *  - baseActual: dinero disponible REAL de la ruta (saldo de caja).
+ *  - carteraEnCalle: lo prestado en la calle pendiente por cobrar (capital + interés)
+ *    en ventas activas YA desembolsadas.
+ */
+export interface RouteFinancialSummary {
+  routeId: string
+  /** Saldo de caja disponible (getRouteAvailableCapital). */
+  baseActual: number
+  /** Saldo pendiente por cobrar de ventas activas desembolsadas (capital + interés). */
+  carteraEnCalle: number
+  /** baseActual + carteraEnCalle: valor total que administra la ruta. */
+  totalControlado: number
+  /** Ventas activas desembolsadas. */
+  ventasActivas: number
+  /** Clientes distintos con venta activa desembolsada. */
+  clientesActivos: number
+  /**
+   * Interés pendiente por cobrar ESTIMADO (proporcional al saldo de cada venta:
+   * saldo × valorInteres / valorTotal). Es una aproximación, no un desglose exacto;
+   * se documenta como estimado hasta que el socio defina el desglose definitivo (V2).
+   */
+  interesPorCobrarEstimado: number
+}
+
 export interface DashboardMetrics {
   capitalTotal: number
   carteraActiva: number

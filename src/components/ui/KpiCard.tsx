@@ -19,17 +19,22 @@ interface KpiCardProps {
  * Tarjeta KPI uniforme (App Cobrador).
  * Estructura idéntica en los 3: mismo ancho/alto/padding/alineación.
  * El valor queda centrado (área flexible) y la etiqueta anclada cerca del fondo.
+ *
+ * Ajuste fino (revisión KPIs): valor en `text-sm` para que montos grandes como
+ * "$ 1.940.000" quepan en la columna de 1/3 en móvil sin desbordarse ni cortarse.
+ * Altura reducida (h-16) y padding horizontal más ajustado (px-1.5) para dar un
+ * poco más de ancho útil al número, manteniendo simetría entre las 3 tarjetas.
  */
 export function KpiCard({ value, label, color = 'primary' }: KpiCardProps) {
   const s = STYLE[color]
   return (
-    <div className={cn('rounded-2xl shadow-card border h-20 px-2 py-2 flex flex-col items-center', s.bg, s.border)}>
-      <div className="flex-1 flex items-center justify-center min-h-0">
-        <p className={cn('text-2xl font-bold leading-none tabular-nums truncate max-w-full', s.value)}>
+    <div className={cn('rounded-2xl shadow-card border h-16 px-1.5 py-2 flex flex-col items-center', s.bg, s.border)}>
+      <div className="flex-1 flex items-center justify-center min-h-0 w-full">
+        <p className={cn('text-sm font-bold leading-none tabular-nums truncate max-w-full text-center', s.value)}>
           {value}
         </p>
       </div>
-      <p className="text-[12px] font-medium text-gray-500 leading-tight text-center">{label}</p>
+      <p className="text-[11px] font-medium text-gray-500 leading-tight text-center">{label}</p>
     </div>
   )
 }
