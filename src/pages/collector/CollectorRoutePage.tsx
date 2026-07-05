@@ -3,13 +3,14 @@ import { Search, CheckCircle, XCircle, Eye } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { PaymentDaysBadges } from '@/components/ui/PaymentDaysBadges'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
-import { formatCurrency, formatDate, today, formatPaymentDays } from '@/lib/formatters'
+import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import {
-  calculateCurrentInstallment, isSaleDueToday, isSaleDisbursed,
+  calculateCurrentInstallment, getLastPaidInstallmentNumber, isSaleDueToday, isSaleDisbursed,
   getCollectionStatus, countOverdueInstallments, getMaxOverdueDays,
   type CollectionStatus,
 } from '@/services/installmentEngine'
@@ -19,6 +20,8 @@ interface RouteItem {
   sale: Sale
   client: Client
   currentInstallment: Installment | null
+  /** Número de la última parcela pagada (avance para el listado). */
+  lastPaidNumber: number
   paidToday: boolean
   dueToday: boolean
   estado: CollectionStatus
@@ -74,6 +77,7 @@ export default function CollectorRoutePage() {
       result.push({
         sale, client,
         currentInstallment: calculateCurrentInstallment(insts),
+        lastPaidNumber: getLastPaidInstallmentNumber(insts),
         paidToday: paidToday.has(sale.id),
         dueToday: isSaleDueToday(sale.paymentDays, insts, now, todayStr),
         estado: getCollectionStatus(insts, now),
@@ -148,7 +152,7 @@ export default function CollectorRoutePage() {
             <ClientCard key={item.sale.id} item={item} currency={currency}
               onPayment={() => navigate(`/collector/payment/${item.sale.id}`)}
               onNoPayment={() => navigate(`/collector/no-payment/${item.sale.id}`)}
-              onView={() => navigate(`/collector/client/${item.client.id}`)} />
+              onView={() => navigate(`/collector/client/${item.client.id}?saleId=${item.sale.id}`)} />
           ))}
         </div>
       )}
@@ -163,7 +167,7 @@ function ClientCard({ item, currency, onPayment, onNoPayment, onView }: {
   onNoPayment: () => void
   onView: () => void
 }) {
-  const { sale, client, currentInstallment, paidToday, dueToday, estado, atrasadas, diasAtraso, ultimoAbono } = item
+  const { sale, client, currentInstallment, lastPaidNumber, paidToday, dueToday, estado, atrasadas, diasAtraso, ultimoAbono } = item
   const notScheduled = !paidToday && !dueToday
   const st = ESTADO_STYLE[estado]
 
@@ -185,7 +189,9 @@ function ClientCard({ item, currency, onPayment, onNoPayment, onView }: {
         </div>
 
         {notScheduled && atrasadas === 0 && (
-          <p className="text-xs text-gray-400 mb-2">Días de cobro: {formatPaymentDays(sale.paymentDays)}</p>
+          <div className="flex items-center flex-wrap gap-1.5 text-xs text-gray-400 mb-2">
+            <span>Días de cobro:</span> <PaymentDaysBadges days={sale.paymentDays} size="sm" />
+          </div>
         )}
 
         <div className="grid grid-cols-3 gap-2 mb-2">
@@ -198,8 +204,8 @@ function ClientCard({ item, currency, onPayment, onNoPayment, onView }: {
             <p className="text-sm font-bold text-primary-600">{formatCurrency(currentInstallment?.valor ?? sale.valorCuota, currency)}</p>
           </div>
           <div className="bg-gray-50 rounded-xl p-2 text-center">
-            <p className="text-xs text-gray-400">N° parcela</p>
-            <p className="text-sm font-bold text-gray-700">{currentInstallment?.numero ?? '-'}/{sale.numeroCuotas}</p>
+            <p className="text-xs text-gray-400">Parcelas</p>
+            <p className="text-sm font-bold text-gray-700">{lastPaidNumber}/{sale.numeroCuotas}</p>
           </div>
         </div>
 

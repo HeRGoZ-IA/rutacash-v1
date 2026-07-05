@@ -66,7 +66,7 @@ export default function CollectorCashClosePage() {
           <p className="text-lg font-bold text-primary-700 mt-1">{formatCurrency(data.baseActual, currency)}</p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4">
-          <div className="flex items-center gap-1.5 text-xs text-gray-400"><MapPin className="w-3.5 h-3.5" /> Cartera en calle</div>
+          <div className="flex items-center gap-1.5 text-xs text-gray-400"><MapPin className="w-3.5 h-3.5" /> Cartera Activa</div>
           <p className="text-lg font-bold text-indigo-600 mt-1">{formatCurrency(data.carteraEnCalle, currency)}</p>
         </div>
       </div>

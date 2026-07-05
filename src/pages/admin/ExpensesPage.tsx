@@ -5,6 +5,8 @@ import { Input, Select, Textarea } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { DateRangeFilter } from '@/components/ui/DateRangeFilter'
+import { ModuleTabs, EXPENSE_TABS } from '@/components/ui/ModuleTabs'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
@@ -20,6 +22,8 @@ export default function ExpensesPage() {
   const [categories, setCategories] = useState<ExpenseCategory[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
   const [filterRoute, setFilterRoute] = useState('')
+  const [desde, setDesde] = useState('')
+  const [hasta, setHasta] = useState('')
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -41,7 +45,11 @@ export default function ExpensesPage() {
   }
 
   const officeRoutes = routes
-  const filtered = filterRoute ? expenses.filter(e => e.routeId === filterRoute) : expenses
+  const filtered = expenses.filter(e =>
+    (!filterRoute || e.routeId === filterRoute) &&
+    (!desde || e.fecha >= desde) &&
+    (!hasta || e.fecha <= hasta)
+  )
   const totalFiltered = filtered.reduce((s, e) => s + e.valor, 0)
 
   async function handleSave() {
@@ -68,13 +76,23 @@ export default function ExpensesPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-6">
+      <ModuleTabs tabs={EXPENSE_TABS} />
       <div className="flex items-center justify-between">
         <div><h1 className="text-xl font-bold text-gray-900">Gastos</h1><p className="text-sm text-gray-500 mt-0.5">Total: {formatCurrency(totalFiltered, currency)}</p></div>
         <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>Nuevo gasto</Button>
       </div>
 
-      <Select value={filterRoute} onChange={e => setFilterRoute(e.target.value)}
-        options={officeRoutes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Todas las rutas" className="w-44" />
+      <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta}
+        onClear={() => { setDesde(''); setHasta('') }}>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Ruta</label>
+          <select value={filterRoute} onChange={e => setFilterRoute(e.target.value)}
+            className="h-9 rounded-lg border border-gray-300 pl-3 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+            <option value="">Todas las rutas</option>
+            {officeRoutes.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+          </select>
+        </div>
+      </DateRangeFilter>
 
       <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
         {filtered.length === 0 ? (
@@ -107,7 +125,7 @@ export default function ExpensesPage() {
             <Select label="Ruta" value={form.routeId} onChange={e => setForm(f => ({ ...f, routeId: e.target.value }))}
               options={officeRoutes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
             <Select label="Categoría" value={form.categoryId} onChange={e => setForm(f => ({ ...f, categoryId: e.target.value }))}
-              options={categories.map(c => ({ value: c.id, label: c.nombre }))} placeholder="Seleccionar categoría" required />
+              options={categories.filter(c => c.activa).map(c => ({ value: c.id, label: c.nombre }))} placeholder="Seleccionar categoría" required />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <MoneyInput label="Valor" currency={currency} value={form.valor} onValueChange={v => setForm(f => ({ ...f, valor: v }))} required />

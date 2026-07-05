@@ -74,16 +74,22 @@ export default function CollectorExpensesPage() {
       {showForm && (
         <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-3">
           <p className="font-semibold text-sm text-gray-700">Registrar gasto</p>
-          {categories.length === 0 ? (
+          {categories.filter(c => c.activa).length === 0 ? (
             <p className="text-xs text-amber-600">No hay categorías de gasto. Pide al administrador que configure las categorías.</p>
           ) : (
-            <div className="grid grid-cols-2 gap-2">
-              {categories.map(c => (
-                <button key={c.id} onClick={() => setForm(f => ({ ...f, categoryId: c.id }))}
-                  className={`py-2.5 rounded-xl text-sm font-medium border transition-colors ${form.categoryId === c.id ? 'bg-primary-600 text-white border-primary-600' : 'bg-gray-50 text-gray-700 border-gray-200'}`}>
-                  {c.nombre}
-                </button>
-              ))}
+            // Selector expandible (dropdown): escala bien aunque haya muchas categorías.
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">Categoría</label>
+              <select
+                value={form.categoryId}
+                onChange={e => setForm(f => ({ ...f, categoryId: e.target.value }))}
+                className="w-full h-12 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
+                <option value="">Seleccionar categoría…</option>
+                {categories.filter(c => c.activa).map(c => (
+                  <option key={c.id} value={c.id}>{c.nombre}</option>
+                ))}
+              </select>
             </div>
           )}
           <div className="relative">

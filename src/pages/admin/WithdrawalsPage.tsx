@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Modal } from '@/components/ui/Modal'
+import { DateRangeFilter } from '@/components/ui/DateRangeFilter'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { getRouteAvailableCapital } from '@/services/cashboxEngine'
@@ -37,6 +38,8 @@ export default function WithdrawalsPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [desde, setDesde] = useState('')
+  const [hasta, setHasta] = useState('')
   const [form, setForm] = useState({ routeId: '', valor: 0, descripcion: '', fecha: today() })
   // Grupo de ruta seleccionado para ver el detalle de sus retiros.
   const [detailGroup, setDetailGroup] = useState<WithdrawalGroup | null>(null)
@@ -78,10 +81,16 @@ export default function WithdrawalsPage() {
 
   const getUserName = (id?: string) => users.find(u => u.id === id)?.nombre
 
+  // Retiros dentro del rango de fecha (los totales agrupados lo respetan;
+  // Base actual es un saldo a la fecha y no depende del filtro).
+  const visibleWithdrawals = withdrawals.filter(w =>
+    (!desde || w.fecha >= desde) && (!hasta || w.fecha <= hasta)
+  )
+
   // ---- Agrupación por ruta (solo presentación; no recalcula saldos contables) ----
   const groups: WithdrawalGroup[] = (() => {
     const buildGroup = (routeId: string, nombre: string, codigo: string, baseActual: number): WithdrawalGroup => {
-      const ws = withdrawals.filter(w => w.routeId === routeId) // ya vienen ordenados desc por fecha
+      const ws = visibleWithdrawals.filter(w => w.routeId === routeId) // ya vienen ordenados desc por fecha
       return {
         routeId, nombre, codigo, baseActual,
         totalRetirado: ws.reduce((s, w) => s + w.valor, 0),
@@ -95,7 +104,7 @@ export default function WithdrawalsPage() {
 
     // Retiros cuya ruta ya no existe (o sin routeId) → grupo "Sin ruta".
     const knownRouteIds = new Set(routes.map(r => r.id))
-    const orphan = withdrawals.filter(w => !w.routeId || !knownRouteIds.has(w.routeId))
+    const orphan = visibleWithdrawals.filter(w => !w.routeId || !knownRouteIds.has(w.routeId))
     if (orphan.length > 0) {
       list.push({
         routeId: '__none__', nombre: 'Sin ruta', codigo: '—', baseActual: 0,
@@ -115,6 +124,10 @@ export default function WithdrawalsPage() {
         </div>
         <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>Nuevo retiro</Button>
       </div>
+
+      {/* Filtro por fecha (compacto) */}
+      <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta}
+        onClear={() => { setDesde(''); setHasta('') }} />
 
       {/* Retiros agrupados por ruta: una tarjeta por ruta */}
       {loading ? (

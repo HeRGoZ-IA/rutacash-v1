@@ -3,18 +3,20 @@ import { useParams } from 'react-router-dom'
 import { Search, ShieldAlert } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { PaymentDaysBadges } from '@/components/ui/PaymentDaysBadges'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { getAuthorizedRouteIds } from '@/lib/roles'
-import { formatCurrency, formatPaymentDays, today } from '@/lib/formatters'
-import { calculateCurrentInstallment, isSaleDueToday } from '@/services/installmentEngine'
+import { formatCurrency, today } from '@/lib/formatters'
+import { calculateCurrentInstallment, getLastPaidInstallmentNumber, isSaleDueToday } from '@/services/installmentEngine'
 import type { Sale, Client, Installment, Route } from '@/models/types'
 
 interface RouteItem {
   sale: Sale
   client: Client
   currentInstallment: Installment | null
+  lastPaidNumber: number
   paidToday: boolean
   dueToday: boolean
 }
@@ -62,7 +64,7 @@ export default function SupervisorRoutePage() {
       const insts = await db.installments.where('saleId').equals(sale.id).toArray()
       const currentInstallment = calculateCurrentInstallment(insts)
       const dueToday = isSaleDueToday(sale.paymentDays, insts, now, todayStr)
-      result.push({ sale, client, currentInstallment, paidToday: paidSales.has(sale.id), dueToday })
+      result.push({ sale, client, currentInstallment, lastPaidNumber: getLastPaidInstallmentNumber(insts), paidToday: paidSales.has(sale.id), dueToday })
     }
     result.sort((a, b) => rank(a) - rank(b))
     setItems(result)
@@ -149,7 +151,7 @@ export default function SupervisorRoutePage() {
 }
 
 function ReviewCard({ item, currency }: { item: RouteItem; currency: string }) {
-  const { sale, client, currentInstallment, paidToday, dueToday } = item
+  const { sale, client, currentInstallment, lastPaidNumber, paidToday, dueToday } = item
   const isOverdue = currentInstallment?.status === 'vencida'
   const notScheduled = !paidToday && !dueToday
 
@@ -169,7 +171,9 @@ function ReviewCard({ item, currency }: { item: RouteItem; currency: string }) {
           </div>
         </div>
         {notScheduled && (
-          <p className="text-xs text-gray-400 mb-2">Días de cobro: {formatPaymentDays(sale.paymentDays)}</p>
+          <div className="flex items-center flex-wrap gap-1.5 text-xs text-gray-400 mb-2">
+            <span>Días de cobro:</span> <PaymentDaysBadges days={sale.paymentDays} size="sm" />
+          </div>
         )}
         <div className="grid grid-cols-3 gap-2">
           <div className="bg-gray-50 rounded-xl p-2 text-center">
@@ -181,8 +185,8 @@ function ReviewCard({ item, currency }: { item: RouteItem; currency: string }) {
             <p className="text-sm font-bold text-primary-600">{formatCurrency(currentInstallment?.valor ?? sale.valorCuota, currency)}</p>
           </div>
           <div className="bg-gray-50 rounded-xl p-2 text-center">
-            <p className="text-xs text-gray-400">N° cuota</p>
-            <p className="text-sm font-bold text-gray-700">{currentInstallment?.numero ?? '-'}/{sale.numeroCuotas}</p>
+            <p className="text-xs text-gray-400">Parcelas</p>
+            <p className="text-sm font-bold text-gray-700">{lastPaidNumber}/{sale.numeroCuotas}</p>
           </div>
         </div>
       </div>

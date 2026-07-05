@@ -204,7 +204,7 @@ export default function DashboardPage() {
           subtitle="Disponible en rutas"
         />
         <KPICard
-          title="Cartera en calle"
+          title="Cartera Activa"
           value={formatCurrency(data.carteraEnCalle)}
           icon={<CreditCard className="w-5 h-5" />}
           color="purple"
@@ -215,7 +215,7 @@ export default function DashboardPage() {
           value={formatCurrency(data.totalControlado)}
           icon={<TrendingUp className="w-5 h-5" />}
           color="green"
-          subtitle="Base + cartera"
+          subtitle="Base + Cartera Activa"
         />
         <KPICard
           title="Recaudo hoy"

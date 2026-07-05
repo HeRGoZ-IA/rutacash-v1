@@ -8,6 +8,7 @@ import { generateInstallments, calculateTotalWithInterest, estimateFinalDate } f
 import type {
   Tenant, Route, User, Client, Sale, Payment,
   ExpenseCategory, Expense, CapitalMovement, Transfer, Withdrawal, SaleRequest,
+  PartnerCashMovement,
 } from '@/models/types'
 
 const d = (date: Date) => format(date, 'yyyy-MM-dd')
@@ -28,6 +29,8 @@ const USER_COB1_ID = 'user-cobrador-001'
 const USER_COB2_ID = 'user-cobrador-002'
 const USER_COB3_ID = 'user-cobrador-003'
 const USER_COB4_ID = 'user-cobrador-004'
+const USER_SOCIO1_ID = 'user-socio-001'
+const USER_SOCIO2_ID = 'user-socio-002'
 
 let _seeding = false
 
@@ -226,6 +229,31 @@ export async function seedDatabase() {
       createdAt: new Date(2025, 1, 5).toISOString(),
       updatedAt: now.toISOString(),
     },
+    // Revisión 2 — Socios (usuarios de control interno para Caja socios y Transferencias).
+    {
+      id: USER_SOCIO1_ID,
+      tenantId: TENANT_ID,
+      email: 'socio1@demo.com',
+      password: '123456',
+      nombre: 'Juan Pérez',
+      rol: 'socio',
+      telefono: '3060001122',
+      status: 'activo',
+      createdAt: new Date(2025, 0, 2).toISOString(),
+      updatedAt: now.toISOString(),
+    },
+    {
+      id: USER_SOCIO2_ID,
+      tenantId: TENANT_ID,
+      email: 'socio2@demo.com',
+      password: '123456',
+      nombre: 'María Inversora',
+      rol: 'socio',
+      telefono: '3060003344',
+      status: 'activo',
+      createdAt: new Date(2025, 0, 2).toISOString(),
+      updatedAt: now.toISOString(),
+    },
   ]
 
   // ---- CLIENTS (20 clientes) ----
@@ -398,6 +426,7 @@ export async function seedDatabase() {
   })
 
   // ---- TRANSFERS ----
+  const transferSocioId = uuidv4()
   const transfers: Transfer[] = [
     {
       id: uuidv4(),
@@ -405,11 +434,54 @@ export async function seedDatabase() {
       officeId: OFFICE1_ID,
       routeOrigenId: ROUTE1_ID,
       routeDestinoId: ROUTE2_ID,
+      origenType: 'route',
+      destinoType: 'route',
       valor: 200000,
       descripcion: 'Refuerzo capital ruta sur',
       fecha: d(subDays(now, 5)),
       userId: USER_ADMIN_ID,
       createdAt: subDays(now, 5).toISOString(),
+    },
+    // Revisión 2 — Transferencia Ruta → Socio (alimenta Caja socios).
+    {
+      id: transferSocioId,
+      tenantId: TENANT_ID,
+      officeId: OFFICE1_ID,
+      routeOrigenId: ROUTE1_ID,
+      routeDestinoId: undefined,
+      socioDestinoId: USER_SOCIO1_ID,
+      origenType: 'route',
+      destinoType: 'partner',
+      valor: 150000,
+      descripcion: 'Reparto de utilidades',
+      fecha: d(subDays(now, 4)),
+      userId: USER_ADMIN_ID,
+      createdAt: subDays(now, 4).toISOString(),
+    },
+  ]
+
+  // ---- PARTNER CASH MOVEMENTS (Caja socios) ----
+  const partnerCashMovements: PartnerCashMovement[] = [
+    // Movimiento generado por la transferencia Ruta → Socio de arriba.
+    {
+      id: uuidv4(), tenantId: TENANT_ID, partnerId: USER_SOCIO1_ID,
+      type: 'ingreso', category: 'transferencia', amount: 150000,
+      description: 'Transferencia de Ruta Norte · Reparto de utilidades',
+      relatedTransferId: transferSocioId, fecha: d(subDays(now, 4)),
+      createdAt: subDays(now, 4).toISOString(), createdBy: USER_ADMIN_ID,
+    },
+    // Movimientos directos de ejemplo.
+    {
+      id: uuidv4(), tenantId: TENANT_ID, partnerId: USER_SOCIO1_ID,
+      type: 'salida', category: 'retiro', amount: 50000,
+      description: 'Retiro personal', fecha: d(subDays(now, 2)),
+      createdAt: subDays(now, 2).toISOString(), createdBy: USER_ADMIN_ID,
+    },
+    {
+      id: uuidv4(), tenantId: TENANT_ID, partnerId: USER_SOCIO2_ID,
+      type: 'ingreso', category: 'inversion', amount: 1000000,
+      description: 'Inversión inicial socia', fecha: d(subDays(now, 10)),
+      createdAt: subDays(now, 10).toISOString(), createdBy: USER_ADMIN_ID,
     },
   ]
 
@@ -457,6 +529,7 @@ export async function seedDatabase() {
     db.tenants, db.routes, db.users, db.clients,
     db.sales, db.installments, db.payments, db.expenseCategories,
     db.expenses, db.capitalMovements, db.transfers, db.withdrawals, db.saleRequests,
+    db.partnerCashMovements,
   ], async () => {
     await db.tenants.add(tenant)
     await db.routes.bulkAdd(routes)
@@ -475,6 +548,7 @@ export async function seedDatabase() {
     await db.transfers.bulkAdd(transfers)
     await db.withdrawals.bulkAdd(withdrawals)
     await db.saleRequests.bulkAdd(saleRequests)
+    await db.partnerCashMovements.bulkAdd(partnerCashMovements)
   })
 
   console.log('[RutaCash] Datos demo cargados exitosamente')
@@ -582,6 +656,7 @@ export async function resetCleanDatabase(tenantId: string) {
   await db.transfers.where('tenantId').equals(tenantId).delete()
   await db.withdrawals.where('tenantId').equals(tenantId).delete()
   await db.saleRequests.where('tenantId').equals(tenantId).delete()
+  await db.partnerCashMovements.where('tenantId').equals(tenantId).delete()
   await db.cashboxMovements.where('tenantId').equals(tenantId).delete()
   await db.weeklySettlements.where('tenantId').equals(tenantId).delete()
   await db.auditLogs.where('tenantId').equals(tenantId).delete()

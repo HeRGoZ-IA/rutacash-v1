@@ -3,6 +3,7 @@ import type {
   Tenant, Route, User, Client, Sale, Installment, Payment,
   NoPaymentVisit, ExpenseCategory, Expense, CapitalMovement, Transfer,
   Withdrawal, CashboxMovement, WeeklySettlement, AuditLog, SaleRequest,
+  PartnerCashMovement,
 } from '@/models/types'
 
 export class RutaCashDB extends Dexie {
@@ -23,6 +24,7 @@ export class RutaCashDB extends Dexie {
   weeklySettlements!: Table<WeeklySettlement>
   auditLogs!: Table<AuditLog>
   saleRequests!: Table<SaleRequest>
+  partnerCashMovements!: Table<PartnerCashMovement>
 
   constructor() {
     super('RutaCashDB')
@@ -68,6 +70,13 @@ export class RutaCashDB extends Dexie {
       transfers: 'id, tenantId, routeOrigenId, routeDestinoId',
       withdrawals: 'id, tenantId, routeId',
       weeklySettlements: 'id, tenantId, routeId, semanaInicio',
+    })
+
+    // v4 (Revisión 2 socio 30-jun): nueva tabla Caja socios. Los campos nuevos
+    // opcionales de Transfer (socioOrigenId, origenType, destinoType) no requieren
+    // índices; se filtran en memoria. No se toca ninguna tabla existente.
+    this.version(4).stores({
+      partnerCashMovements: 'id, tenantId, partnerId, type, relatedTransferId, fecha',
     })
   }
 }

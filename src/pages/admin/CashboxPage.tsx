@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Archive, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Input'
+import { ModuleTabs, CASHBOX_TABS } from '@/components/ui/ModuleTabs'
 import { LoadingState } from '@/components/ui/EmptyState'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
@@ -39,6 +40,7 @@ export default function CashboxPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-6">
+      <ModuleTabs tabs={CASHBOX_TABS} />
       <div className="flex items-center justify-between">
         <div><h1 className="text-xl font-bold text-gray-900">Caja</h1><p className="text-sm text-gray-500 mt-0.5">Resumen de movimientos por ruta</p></div>
         <Button variant="secondary" onClick={loadSummary} icon={<RefreshCw className="w-4 h-4" />}>Actualizar</Button>

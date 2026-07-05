@@ -154,7 +154,7 @@ export default function CapitalPage() {
                   <p className="text-sm font-bold text-primary-700">{g.routeId === '__none__' ? '—' : formatCurrency(g.capitalActual, currency)}</p>
                 </div>
                 <div className="bg-indigo-50 rounded-xl p-2.5">
-                  <p className="text-xs text-gray-400">Cartera en calle</p>
+                  <p className="text-xs text-gray-400">Cartera Activa</p>
                   <p className="text-sm font-bold text-indigo-600">{g.routeId === '__none__' ? '—' : formatCurrency(g.carteraEnCalle, currency)}</p>
                 </div>
                 <div className="bg-emerald-50 rounded-xl p-2.5">
@@ -168,7 +168,7 @@ export default function CapitalPage() {
               </div>
               {g.routeId !== '__none__' && (
                 <div className="mt-2 bg-gray-50 rounded-xl p-2.5 flex items-center justify-between">
-                  <p className="text-xs text-gray-400">Total controlado (base + cartera)</p>
+                  <p className="text-xs text-gray-400">Total controlado (base + Cartera Activa)</p>
                   <p className="text-sm font-bold text-gray-800">{formatCurrency(g.totalControlado, currency)}</p>
                 </div>
               )}

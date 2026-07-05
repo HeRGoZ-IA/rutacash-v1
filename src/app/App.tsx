@@ -29,6 +29,8 @@ import WeeklySettlementPage from '@/pages/admin/WeeklySettlementPage'
 import UsersPage from '@/pages/admin/UsersPage'
 import SettingsPage from '@/pages/admin/SettingsPage'
 import SaleAuthorizationsPage from '@/pages/admin/SaleAuthorizationsPage'
+import PartnerCashPage from '@/pages/admin/PartnerCashPage'
+import ExpenseCategoriesPage from '@/pages/admin/ExpenseCategoriesPage'
 
 // Collector
 import CollectorHomePage from '@/pages/collector/CollectorHomePage'
@@ -104,7 +106,9 @@ export default function App() {
           <Route path="sale-authorizations" element={<SaleAuthorizationsPage />} />
           <Route path="capital" element={<CapitalPage />} />
           <Route path="expenses" element={<ExpensesPage />} />
+          <Route path="expense-categories" element={<ExpenseCategoriesPage />} />
           <Route path="transfers" element={<TransfersPage />} />
+          <Route path="partner-cash" element={<PartnerCashPage />} />
           <Route path="withdrawals" element={<WithdrawalsPage />} />
           <Route path="cashbox" element={<CashboxPage />} />
           <Route path="reports" element={<ReportsPage />} />

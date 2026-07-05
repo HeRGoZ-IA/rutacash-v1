@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Users, ToggleLeft, ToggleRight, Trash2, AlertTriangle } from 'lucide-react'
+import { Plus, Users, ToggleLeft, ToggleRight, Trash2, AlertTriangle, Search } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -29,6 +29,7 @@ export default function UsersPage() {
   const { tenantId, currency } = useTenant()
   const [users, setUsers] = useState<User[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<User | null>(null)
@@ -206,27 +207,44 @@ export default function UsersPage() {
     } else if (u.rol === 'admin') {
       out.push({ label: 'Administrador', variant: 'info' })
       out.push({ label: 'Acceso total', variant: 'gray' })
+    } else if (u.rol === 'socio') {
+      // Socio: usuario para control interno (Transferencias y Caja socios). Sin rutas.
+      out.push({ label: 'Socio', variant: 'purple' })
+      out.push({ label: 'Caja socios · Transferencias', variant: 'gray' })
     } else {
       out.push({ label: rolLabel(u.rol), variant: 'gray' })
     }
     return out
   }
 
+  // Búsqueda por nombre (también email y rol para comodidad).
+  const filteredUsers = users.filter(u => {
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return u.nombre.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || rolLabel(u.rol).toLowerCase().includes(q)
+  })
+
   return (
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-xl font-bold text-gray-900">Usuarios</h1><p className="text-sm text-gray-500 mt-0.5">{users.length} usuario(s)</p></div>
+        <div><h1 className="text-xl font-bold text-gray-900">Usuarios</h1><p className="text-sm text-gray-500 mt-0.5">{filteredUsers.length} de {users.length} usuario(s)</p></div>
         <Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Nuevo usuario</Button>
+      </div>
+
+      <div className="max-w-sm">
+        <Input placeholder="Buscar por nombre, email o rol..." value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />
       </div>
 
       {loading ? (
         <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
       ) : users.length === 0 ? (
         <EmptyState icon={<Users className="w-8 h-8" />} title="No hay usuarios" action={<Button onClick={openCreate}>Crear usuario</Button>} />
+      ) : filteredUsers.length === 0 ? (
+        <EmptyState icon={<Search className="w-8 h-8" />} title="Sin resultados" description="Ningún usuario coincide con la búsqueda." />
       ) : (
         <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
           <div className="divide-y divide-gray-50">
-            {users.map(u => (
+            {filteredUsers.map(u => (
               <div key={u.id} onClick={() => openEdit(u)} className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-primary-50/40 transition-colors">
                 {/* Columna 1: identidad */}
                 <div className="flex items-center gap-3 w-56 flex-shrink-0 min-w-0">

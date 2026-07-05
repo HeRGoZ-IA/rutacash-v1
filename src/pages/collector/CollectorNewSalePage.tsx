@@ -12,7 +12,7 @@ import { getAuthorizedRouteIds } from '@/lib/roles'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import { computeSaleFinancials, createDirectSale, createSaleRequest, findActiveSaleForClient, type SaleInputs } from '@/services/saleRequestService'
 import { useRouteCapital } from '@/hooks/useRouteCapital'
-import type { Client, Sale } from '@/models/types'
+import type { Client, Sale, Route } from '@/models/types'
 
 const TASA_OPTIONS = [{ value: '10', label: '10%' }, { value: '20', label: '20%' }]
 const FREQ_OPTIONS = [
@@ -31,6 +31,7 @@ export default function CollectorNewSalePage() {
   const { currency } = useTenant()
   const { activeRouteId } = useCollectorRoute()
   const [clients, setClients] = useState<Client[]>([])
+  const [routes, setRoutes] = useState<Route[]>([])
   const [routeIds, setRouteIds] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   // Revisión socio 25-jun — alerta de segunda venta activa del mismo cliente.
@@ -49,9 +50,13 @@ export default function CollectorNewSalePage() {
     if (!user) return
     const ids = getAuthorizedRouteIds(user)
     setRouteIds(ids)
-    const all = await db.clients.where('tenantId').equals(user.tenantId).toArray()
+    const [all, rts] = await Promise.all([
+      db.clients.where('tenantId').equals(user.tenantId).toArray(),
+      db.routes.where('tenantId').equals(user.tenantId).toArray(),
+    ])
     // Solo clientes de las rutas del cobrador
     setClients(all.filter(c => ids.includes(c.routeId)))
+    setRoutes(rts)
   }
 
   // Al seleccionar un cliente, detectar si ya tiene una venta activa (para advertir).
@@ -69,14 +74,22 @@ export default function CollectorNewSalePage() {
     }))
   }
 
-  // Reglas de venta directa del cobrador
-  const canDirect = !!user?.canCreateDirectSales
-  const maxAmount = user?.maxDirectSaleAmount && user.maxDirectSaleAmount > 0 ? user.maxDirectSaleAmount : null
-  const withinLimit = !maxAmount || form.valorVenta <= maxAmount
-  const allowDirect = canDirect && withinLimit
-
   // Capital disponible de la ruta del cliente seleccionado.
   const selectedClient = clients.find(c => c.id === form.clientId)
+
+  // ---- Límite efectivo de venta directa (Ajustes post-Revisión 2) ----
+  // El monto máximo para venta directa es el MENOR límite aplicable entre el
+  // límite de la ruta (montoMaximoPrestamo) y el límite del cobrador
+  // (maxDirectSaleAmount). 0/vacío significa "sin límite" en ese lado.
+  const selectedRoute = routes.find(r => r.id === selectedClient?.routeId)
+  const routeLimit = selectedRoute && selectedRoute.montoMaximoPrestamo > 0 ? selectedRoute.montoMaximoPrestamo : Infinity
+  const collectorLimit = user?.maxDirectSaleAmount && user.maxDirectSaleAmount > 0 ? user.maxDirectSaleAmount : Infinity
+  const effectiveLimit = Math.min(routeLimit, collectorLimit) // Infinity si ambos sin límite
+  const hasEffectiveLimit = Number.isFinite(effectiveLimit)
+  const canDirect = !!user?.canCreateDirectSales
+  const withinLimit = !hasEffectiveLimit || form.valorVenta <= effectiveLimit
+  const allowDirect = canDirect && withinLimit
+
   const { available: capDisponible } = useRouteCapital(selectedClient?.routeId)
   const capExcedido = capDisponible != null && form.valorVenta > capDisponible
 
@@ -173,7 +186,7 @@ export default function CollectorNewSalePage() {
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <Input label="N° de parcelas" type="number" min={1} value={form.numeroCuotas || ''} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
+          <Input label="N° de parcelas" type="number" min={1} required value={form.numeroCuotas || ''} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
           <Input label="Fecha de inicio" type="date" min={today()} value={form.fechaInicio} onChange={e => setForm(f => ({ ...f, fechaInicio: e.target.value }))} />
         </div>
 
@@ -211,6 +224,11 @@ export default function CollectorNewSalePage() {
         )}
 
         {/* Acción según autorización */}
+        {allowDirect && hasEffectiveLimit && (
+          <p className="text-xs text-gray-400">
+            Límite venta directa · Ruta: {routeLimit === Infinity ? 'sin límite' : formatCurrency(routeLimit, currency)} · Cobrador: {collectorLimit === Infinity ? 'sin límite' : formatCurrency(collectorLimit, currency)} · Efectivo aplicado: {formatCurrency(effectiveLimit, currency)}
+          </p>
+        )}
         {allowDirect ? (
           <button onClick={handleDirectSale} disabled={saving || capExcedido}
             className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-2xl text-base font-bold flex items-center justify-center gap-2">
@@ -221,11 +239,18 @@ export default function CollectorNewSalePage() {
           <>
             <div className="flex items-start gap-2 p-3 bg-amber-50 rounded-xl border border-amber-100">
               <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-amber-700">
-                {canDirect && !withinLimit
-                  ? `El valor supera tu límite de venta directa (${formatCurrency(maxAmount ?? 0, currency)}). Esta venta requiere autorización del administrador.`
-                  : 'Esta venta requiere autorización del administrador.'}
-              </p>
+              <div className="text-xs text-amber-700">
+                <p>
+                  {canDirect && !withinLimit
+                    ? 'Esta venta supera el límite aprobado para venta directa. Se enviará como solicitud para aprobación.'
+                    : 'Esta venta requiere autorización del administrador.'}
+                </p>
+                {canDirect && (
+                  <p className="mt-1 text-amber-600">
+                    Límite ruta: {routeLimit === Infinity ? 'sin límite' : formatCurrency(routeLimit, currency)} · Límite cobrador: {collectorLimit === Infinity ? 'sin límite' : formatCurrency(collectorLimit, currency)} · Efectivo: {hasEffectiveLimit ? formatCurrency(effectiveLimit, currency) : 'sin límite'}
+                  </p>
+                )}
+              </div>
             </div>
             <button onClick={handleRequest} disabled={saving}
               className="w-full h-12 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white rounded-2xl text-base font-bold flex items-center justify-center gap-2">

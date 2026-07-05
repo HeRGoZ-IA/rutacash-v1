@@ -429,7 +429,7 @@ export default function ClientsPage() {
                   <div className="grid grid-cols-3 gap-3">
                     <MoneyInput label="Valor del préstamo" currency={currency} value={saleForm.valorVenta} onValueChange={v => setSaleForm(f => ({ ...f, valorVenta: v }))} required />
                     <Select label="Tasa interés" value={String(saleForm.tasaInteres)} onChange={e => setSaleForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={TASA_OPTIONS} />
-                    <Input label="N° de parcelas" type="number" min={1} value={saleForm.numeroCuotas || ''} onChange={e => { const v = e.target.value; setSaleForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
+                    <Input label="N° de parcelas" type="number" min={1} required value={saleForm.numeroCuotas || ''} onChange={e => { const v = e.target.value; setSaleForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <Select label="Frecuencia de pago" value={saleForm.frecuenciaPago} onChange={e => setSaleForm(f => ({ ...f, frecuenciaPago: e.target.value as Sale['frecuenciaPago'] }))} options={FREQ_OPTIONS} />

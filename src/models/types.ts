@@ -312,14 +312,35 @@ export interface CapitalMovement {
   createdAt: string
 }
 
+/**
+ * Tipo de entidad que participa en una transferencia (Revisión 2 socio 30-jun).
+ * Una transferencia puede ir Ruta↔Ruta, Ruta↔Socio, Socio↔Ruta o Socio↔Socio.
+ */
+export type TransferEntityType = 'route' | 'partner'
+
 export interface Transfer {
   id: string
   tenantId: string
   /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
   officeId?: string
+  /**
+   * ID de la ruta origen cuando el origen es una RUTA. Se mantiene por
+   * compatibilidad y porque el motor de caja indexa por este campo.
+   * Si el origen es un SOCIO queda como '' (cadena vacía) y se usa socioOrigenId.
+   */
   routeOrigenId: string
+  /** ID de la ruta destino cuando el destino es una RUTA. */
   routeDestinoId?: string
+  /** ID del socio origen cuando el origen es un SOCIO (Revisión 2). */
+  socioOrigenId?: string
+  /** ID del socio destino cuando el destino es un SOCIO. */
   socioDestinoId?: string
+  /**
+   * Tipo de entidad del origen/destino. Opcionales para compatibilidad:
+   * las transferencias antiguas (sin estos campos) se interpretan como 'route'.
+   */
+  origenType?: TransferEntityType
+  destinoType?: TransferEntityType
   valor: number
   descripcion?: string
   fecha: string
@@ -338,6 +359,42 @@ export interface Withdrawal {
   fecha: string
   userId: string
   createdAt: string
+}
+
+/**
+ * Movimiento de Caja socios (Revisión 2 socio 30-jun).
+ * Caja socios es un módulo SEPARADO de la caja de rutas: registra el dinero
+ * asociado a cada socio (usuario con rol 'socio'). Se alimenta de dos formas:
+ *  1. Movimientos creados directamente en el módulo Caja socios.
+ *  2. Movimientos generados automáticamente por una Transferencia que involucra
+ *     a un socio (se enlazan con relatedTransferId).
+ */
+export type PartnerCashType = 'ingreso' | 'salida'
+
+/** Categorías de movimiento de Caja socios. */
+export type PartnerCashCategory =
+  | 'ingreso'          // ingreso genérico con observación
+  | 'reembolso'
+  | 'inversion'
+  | 'retiro'
+  | 'envio_exterior'
+  | 'transferencia'    // generado desde el módulo Transferencias
+  | 'otro'
+
+export interface PartnerCashMovement {
+  id: string
+  tenantId: string
+  /** Usuario con rol 'socio' dueño del movimiento. */
+  partnerId: string
+  type: PartnerCashType
+  category: PartnerCashCategory
+  amount: number
+  description?: string
+  /** Si el movimiento nació de una transferencia, su id (para trazabilidad). */
+  relatedTransferId?: string
+  fecha: string
+  createdAt: string
+  createdBy?: string
 }
 
 export interface CashboxMovement {

@@ -7,7 +7,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatCurrencyInput, parseCurrencyInput, getCurrencySymbol, today, nowISO } from '@/lib/formatters'
-import { applyPaymentToInstallments, calculateSaleBalance } from '@/services/installmentEngine'
+import { applyPaymentToInstallments, calculateSaleBalance, calculateCurrentInstallment } from '@/services/installmentEngine'
 import { buildWhatsAppMessage } from '@/lib/utils'
 import type { Sale, Client, Installment } from '@/models/types'
 
@@ -23,6 +23,9 @@ export default function PaymentPage() {
   const [observacion, setObservacion] = useState('')
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
+  // Número de parcela que se está pagando (capturado al registrar el abono) para
+  // que la pantalla de confirmación muestre la MISMA parcela, no la siguiente.
+  const [paidNumber, setPaidNumber] = useState<number | null>(null)
 
   useEffect(() => { load() }, [saleId])
 
@@ -43,6 +46,10 @@ export default function PaymentPage() {
     if (!v || v <= 0) { toast.error('Ingresa un valor válido'); return }
     if (!sale || !user) return
     if (sale.disbursementStatus === 'pendiente') { toast.error('Esta venta aún no está desembolsada'); return }
+    // Parcela que se está pagando AHORA (antes de aplicar el abono): se conserva
+    // para mostrarla igual en la confirmación.
+    const payingNumber = calculateCurrentInstallment(installments)?.numero ?? null
+    setPaidNumber(payingNumber)
     setSaving(true)
 
     try {
@@ -81,13 +88,13 @@ export default function PaymentPage() {
 
   function openWhatsApp() {
     if (!client?.telefonoPrincipal || !sale) return
-    const insts = installments.filter(i => i.status !== 'pagada')
-    const current = insts[0]
+    // Recibo: usa la parcela recién pagada (o la actual pendiente), en orden correcto.
+    const cuotaActual = paidNumber ?? calculateCurrentInstallment(installments)?.numero ?? 0
     const msg = buildWhatsAppMessage({
       clientName: client.nombre,
       valor,
       saldo: sale.saldo,
-      cuotaActual: current?.numero ?? 0,
+      cuotaActual,
       totalCuotas: sale.numeroCuotas,
       currency,
     })
@@ -97,7 +104,12 @@ export default function PaymentPage() {
 
   if (!sale || !client) return <div className="flex justify-center py-12"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
 
-  const currentInst = installments.find(i => i.status !== 'pagada')
+  // Parcela actual a pagar: primera NO pagada en orden (misma lógica que la ruta
+  // y el detalle del cliente). Corrige el número aleatorio anterior (find sin orden).
+  const currentInst = calculateCurrentInstallment(installments)
+  // En la confirmación se mantiene la parcela recién pagada; antes de guardar se
+  // muestra la parcela actual a pagar.
+  const parcelaNumero = success ? (paidNumber ?? currentInst?.numero) : currentInst?.numero
 
   return (
     <div className="p-4 space-y-4">
@@ -108,7 +120,7 @@ export default function PaymentPage() {
         <div className="grid grid-cols-3 gap-2 mt-3">
           <div className="text-center"><p className="text-xs text-gray-500">Saldo</p><p className="font-bold text-amber-600">{formatCurrency(sale.saldo, currency)}</p></div>
           <div className="text-center"><p className="text-xs text-gray-500">Parcela</p><p className="font-bold text-primary-700">{formatCurrency(sale.valorCuota, currency)}</p></div>
-          <div className="text-center"><p className="text-xs text-gray-500">N° parcela</p><p className="font-bold text-gray-700">{currentInst?.numero ?? '-'}/{sale.numeroCuotas}</p></div>
+          <div className="text-center"><p className="text-xs text-gray-500">N° parcela</p><p className="font-bold text-gray-700"><span className="text-primary-700">{parcelaNumero ?? '-'}</span>/{sale.numeroCuotas}</p></div>
         </div>
       </div>
 
@@ -124,6 +136,11 @@ export default function PaymentPage() {
             <CheckCircle className="w-8 h-8 text-emerald-600" />
           </div>
           <p className="text-lg font-bold text-gray-900">¡Abono registrado!</p>
+          {paidNumber != null && (
+            <span className="inline-flex items-center gap-1.5 bg-primary-50 text-primary-700 border border-primary-200 rounded-full px-3 py-1 text-sm font-semibold">
+              Parcela <span className="font-bold">{paidNumber}</span> de {sale.numeroCuotas} registrada
+            </span>
+          )}
           <p className="text-sm text-gray-500">Nuevo saldo: {formatCurrency(sale.saldo, currency)}</p>
           <button onClick={openWhatsApp} className="flex items-center gap-2 bg-green-500 text-white px-4 py-2.5 rounded-xl text-sm font-medium">
             <MessageSquare className="w-4 h-4" /> Enviar recibo por WhatsApp
@@ -132,6 +149,15 @@ export default function PaymentPage() {
         </div>
       ) : (
         <>
+          {/* Parcela que se está pagando ahora (destacada) */}
+          {parcelaNumero != null && (
+            <div className="flex items-center justify-center">
+              <span className="inline-flex items-center gap-1.5 bg-primary-50 text-primary-700 border border-primary-200 rounded-full px-3 py-1.5 text-sm font-semibold">
+                Pagando parcela <span className="font-bold">{parcelaNumero}</span> de {sale.numeroCuotas}
+              </span>
+            </div>
+          )}
+
           {/* Amount input */}
           <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-3">
             <label className="block text-sm font-semibold text-gray-700">Valor del abono</label>

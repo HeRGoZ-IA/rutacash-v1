@@ -179,6 +179,21 @@ export function calculateCurrentInstallment(installments: Installment[]): Instal
   return sorted.find((i) => i.status !== 'pagada') ?? null
 }
 
+/** ¿La parcela está pagada por completo? (robusto ante status/saldo). */
+function isInstallmentPaid(i: Installment): boolean {
+  return i.status === 'pagada' || (i.pagado > 0 && i.saldo <= 0)
+}
+
+/**
+ * Número de la ÚLTIMA parcela pagada (mayor `numero` completamente pagado).
+ * 0 si aún no hay ninguna pagada. Es el valor que las vistas previas/listados y
+ * el detalle deben mostrar como avance: "última parcela pagada / total".
+ * Se basa en el `numero` de parcela, no en el orden de inserción de Dexie.
+ */
+export function getLastPaidInstallmentNumber(installments: Installment[]): number {
+  return installments.reduce((max, i) => isInstallmentPaid(i) ? Math.max(max, i.numero) : max, 0)
+}
+
 export function calculateSaleBalance(installments: Installment[]): number {
   return installments.reduce((sum, i) => sum + i.saldo, 0)
 }

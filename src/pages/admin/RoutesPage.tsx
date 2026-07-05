@@ -7,6 +7,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Input, Select } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { DateRangeFilter } from '@/components/ui/DateRangeFilter'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { getRouteFinancialSummary } from '@/services/cashboxEngine'
@@ -31,6 +32,9 @@ export default function RoutesPage() {
   const [deleteTarget, setDeleteTarget] = useState<Route | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [checkingId, setCheckingId] = useState<string | null>(null)
+  // Filtro por fecha de creación de la ruta (Revisión 2 — "si aplica").
+  const [desde, setDesde] = useState('')
+  const [hasta, setHasta] = useState('')
   const [form, setForm] = useState({
     nombre: '', ciudad: '', cobradorId: '',
     tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0,
@@ -160,15 +164,26 @@ export default function RoutesPage() {
 
   const getCobradorName = (id?: string) => cobradores.find(c => c.id === id)?.nombre
 
+  // Filtro por fecha de creación de la ruta. No afecta los cálculos financieros
+  // (Base actual / Cartera Activa son saldos a la fecha), solo qué rutas se listan.
+  const visibleRoutes = routes.filter(r => {
+    const fecha = (r.createdAt ?? '').slice(0, 10)
+    return (!desde || fecha >= desde) && (!hasta || fecha <= hasta)
+  })
+
   return (
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Rutas</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{routes.length} ruta(s)</p>
+          <p className="text-sm text-gray-500 mt-0.5">{visibleRoutes.length} de {routes.length} ruta(s)</p>
         </div>
         <Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Nueva ruta</Button>
       </div>
+
+      {/* Filtro por fecha de creación (compacto) */}
+      <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta}
+        onClear={() => { setDesde(''); setHasta('') }} />
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
@@ -176,9 +191,11 @@ export default function RoutesPage() {
         </div>
       ) : routes.length === 0 ? (
         <EmptyState icon={<MapPin className="w-8 h-8" />} title="No hay rutas" description="Crea una ruta para empezar" action={<Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Crear ruta</Button>} />
+      ) : visibleRoutes.length === 0 ? (
+        <EmptyState icon={<MapPin className="w-8 h-8" />} title="Sin rutas en el rango" description="Ninguna ruta fue creada en las fechas seleccionadas." />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {routes.map((route) => (
+          {visibleRoutes.map((route) => (
             <Card key={route.id} className="space-y-4">
               <div className="flex items-start justify-between">
                 <div>
@@ -201,7 +218,7 @@ export default function RoutesPage() {
                 </div>
                 <div className="bg-indigo-50 rounded-xl p-3">
                   <p className="text-sm font-bold text-indigo-600 truncate">{formatCurrency(summaryByRoute[route.id]?.carteraEnCalle ?? 0, currency)}</p>
-                  <p className="text-xs text-gray-400">Cartera en calle</p>
+                  <p className="text-xs text-gray-400">Cartera Activa</p>
                 </div>
               </div>
               <div className="bg-gray-50 rounded-xl p-2.5 flex items-center justify-between">

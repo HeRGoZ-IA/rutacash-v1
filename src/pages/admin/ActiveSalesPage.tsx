@@ -6,17 +6,19 @@ import { MoneyInput } from '@/components/ui/MoneyInput'
 import { SaleStatusBadge, InstallmentStatusBadge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { PaymentDaysBadges } from '@/components/ui/PaymentDaysBadges'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { useRouteCapital } from '@/hooks/useRouteCapital'
 import { generateId } from '@/lib/utils'
-import { formatCurrency, formatDate, today, nowISO, formatPaymentDays } from '@/lib/formatters'
+import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import {
   generateInstallments, calculateTotalWithInterest,
   estimateFinalDate, calculateInstallmentValue,
   applyPaymentToInstallments, calculateSaleBalance,
+  getLastPaidInstallmentNumber,
 } from '@/services/installmentEngine'
 import { findActiveSaleForClient } from '@/services/saleRequestService'
 import type { Sale, Client, Route, Installment } from '@/models/types'
@@ -40,6 +42,8 @@ export default function ActiveSalesPage() {
   const [sales, setSales] = useState<Sale[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
+  // Última parcela pagada por venta (para la columna Parcelas).
+  const [paidBySale, setPaidBySale] = useState<Record<string, number>>({})
   const [search, setSearch] = useState('')
   const [filterRoute, setFilterRoute] = useState('')
   const [loading, setLoading] = useState(true)
@@ -85,6 +89,17 @@ export default function ActiveSalesPage() {
       db.clients.where('tenantId').equals(tenantId).toArray(),
       db.routes.where('tenantId').equals(tenantId).toArray(),
     ])
+    // Parcelas de estas ventas → última parcela pagada por venta.
+    const insts = await db.installments.where('saleId').anyOf(allSales.map(s => s.id)).toArray()
+    const bySale = new Map<string, typeof insts>()
+    for (const i of insts) {
+      const arr = bySale.get(i.saleId) ?? []
+      arr.push(i)
+      bySale.set(i.saleId, arr)
+    }
+    const paid: Record<string, number> = {}
+    for (const s of allSales) paid[s.id] = getLastPaidInstallmentNumber(bySale.get(s.id) ?? [])
+    setPaidBySale(paid)
     setSales(allSales)
     setClients(allClients)
     setRoutes(allRoutes)
@@ -271,6 +286,7 @@ export default function ActiveSalesPage() {
                   <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden sm:table-cell">Venta</th>
                   <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Saldo</th>
                   <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden md:table-cell">Cuota</th>
+                  <th className="text-center text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden sm:table-cell">Parcelas</th>
                   <th className="text-center text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Estado</th>
                   <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden lg:table-cell">Ruta</th>
                   <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Fecha</th>
@@ -287,7 +303,8 @@ export default function ActiveSalesPage() {
                         <p className="text-xs text-gray-400">{client?.documento ?? ''}</p>
                       </td>
                       <td className="px-4 py-3 text-right hidden sm:table-cell">
-                        <p className="text-sm font-medium text-gray-900">{formatCurrency(s.valorTotal)}</p>
+                        {/* Revisión 2 socio 30-jun: "Venta" muestra el valor prestado SIN interés. */}
+                        <p className="text-sm font-medium text-gray-900">{formatCurrency(s.valorVenta)}</p>
                         <p className="text-xs text-gray-400">{s.tasaInteres}% interés</p>
                       </td>
                       <td className="px-4 py-3 text-right">
@@ -295,7 +312,10 @@ export default function ActiveSalesPage() {
                       </td>
                       <td className="px-4 py-3 text-right hidden md:table-cell">
                         <p className="text-sm text-gray-700">{formatCurrency(s.valorCuota)}</p>
-                        <p className="text-xs text-gray-400">{s.numeroCuotas} cuotas</p>
+                      </td>
+                      <td className="px-4 py-3 text-center hidden sm:table-cell">
+                        {/* Parcelas: última pagada / total (no la próxima pendiente). */}
+                        <span className="text-sm font-medium text-gray-700">{paidBySale[s.id] ?? 0}/{s.numeroCuotas}</span>
                       </td>
                       <td className="px-4 py-3 text-center"><SaleStatusBadge status={s.status} /></td>
                       <td className="px-4 py-3 hidden lg:table-cell"><span className="text-sm text-gray-600">{route?.nombre}</span></td>
@@ -338,7 +358,7 @@ export default function ActiveSalesPage() {
           <div className="grid grid-cols-3 gap-3">
             <MoneyInput label="Valor de la venta" currency={currency} value={form.valorVenta} onValueChange={v => setForm(f => ({ ...f, valorVenta: v }))} required />
             <Select label="Tasa interés" value={String(form.tasaInteres)} onChange={e => setForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={TASA_OPTIONS} />
-            <Input label="N° de parcelas" type="number" min={1} value={form.numeroCuotas || ''} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
+            <Input label="N° de parcelas" type="number" min={1} required value={form.numeroCuotas || ''} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
           </div>
           {form.routeId && capDisponible != null && (
             <div className={`rounded-xl p-3 text-sm border ${capExcedido ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>
@@ -405,9 +425,9 @@ export default function ActiveSalesPage() {
               <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs text-gray-400">Saldo</p><p className="font-bold text-amber-600">{formatCurrency(detailSale.saldo)}</p></div>
               <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400">Cuota</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorCuota)}</p></div>
             </div>
-            <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-sm">
               <p className="text-gray-500">Frecuencia: <span className="font-medium text-gray-800 capitalize">{detailSale.frecuenciaPago}</span></p>
-              <p className="text-gray-500">Días de pago: <span className="font-medium text-gray-800">{formatPaymentDays(detailSale.paymentDays)}</span></p>
+              <div className="flex items-center gap-1.5 text-gray-500">Días de pago: <PaymentDaysBadges days={detailSale.paymentDays} size="sm" /></div>
             </div>
             <div>
               <p className="text-sm font-semibold text-gray-700 mb-2">Cuotas ({detailInstallments.length})</p>
