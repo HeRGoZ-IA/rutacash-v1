@@ -6,6 +6,9 @@ import { LoadingState } from '@/components/ui/EmptyState'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
+import { useAuth } from '@/hooks/useAuth'
+import { getAccessibleRouteIdSet } from '@/lib/scope'
+import { filterAccessibleRoutes, filterByAccessibleRoute } from '@/lib/permissions'
 import { formatCurrency, formatDate, today, getWeekStart, getWeekEnd } from '@/lib/formatters'
 import { downloadCSV } from '@/lib/utils'
 
@@ -13,6 +16,7 @@ type ReportType = 'pagos' | 'ventas' | 'gastos' | 'caja_diaria'
 
 export default function ReportsPage() {
   const { tenantId } = useTenant()
+  const { user } = useAuth()
   const [reportType, setReportType] = useState<ReportType>('pagos')
   const [fechaDesde, setFechaDesde] = useState(getWeekStart())
   const [fechaHasta, setFechaHasta] = useState(today())
@@ -23,12 +27,14 @@ export default function ReportsPage() {
     setLoading(true)
     try {
       let data: Record<string, unknown>[] = []
+      // RESTRICCIÓN POR RUTAS: todo reporte/exportación se recorta ANTES de agregar.
+      const scope = await getAccessibleRouteIdSet(user, tenantId)
 
       if (reportType === 'pagos') {
-        const payments = await db.payments.where('tenantId').equals(tenantId).toArray()
+        const payments = (await db.payments.where('tenantId').equals(tenantId).toArray()).filter(p => scope.has(p.routeId))
         const filtered = payments.filter(p => p.fecha >= fechaDesde && p.fecha <= fechaHasta)
         const clients = await db.clients.where('tenantId').equals(tenantId).toArray()
-        const routes = await db.routes.where('tenantId').equals(tenantId).toArray()
+        const routes = filterAccessibleRoutes(user, await db.routes.where('tenantId').equals(tenantId).toArray())
         const clientMap = new Map(clients.map(c => [c.id, c]))
         const routeMap = new Map(routes.map(r => [r.id, r]))
         data = filtered.map(p => ({
@@ -43,10 +49,10 @@ export default function ReportsPage() {
       }
 
       if (reportType === 'ventas') {
-        const sales = await db.sales.where('tenantId').equals(tenantId).toArray()
+        const sales = (await db.sales.where('tenantId').equals(tenantId).toArray()).filter(s => scope.has(s.routeId))
         const filtered = sales.filter(s => s.createdAt.slice(0, 10) >= fechaDesde && s.createdAt.slice(0, 10) <= fechaHasta)
         const clients = await db.clients.where('tenantId').equals(tenantId).toArray()
-        const routes = await db.routes.where('tenantId').equals(tenantId).toArray()
+        const routes = filterAccessibleRoutes(user, await db.routes.where('tenantId').equals(tenantId).toArray())
         const clientMap = new Map(clients.map(c => [c.id, c]))
         const routeMap = new Map(routes.map(r => [r.id, r]))
         data = filtered.map(s => ({
@@ -65,10 +71,10 @@ export default function ReportsPage() {
       }
 
       if (reportType === 'gastos') {
-        const expenses = await db.expenses.where('tenantId').equals(tenantId).toArray()
+        const expenses = (await db.expenses.where('tenantId').equals(tenantId).toArray()).filter(e => scope.has(e.routeId))
         const filtered = expenses.filter(e => e.fecha >= fechaDesde && e.fecha <= fechaHasta)
         const cats = await db.expenseCategories.where('tenantId').equals(tenantId).toArray()
-        const routes = await db.routes.where('tenantId').equals(tenantId).toArray()
+        const routes = filterAccessibleRoutes(user, await db.routes.where('tenantId').equals(tenantId).toArray())
         const catMap = new Map(cats.map(c => [c.id, c]))
         const routeMap = new Map(routes.map(r => [r.id, r]))
         data = filtered.map(e => ({
@@ -81,9 +87,9 @@ export default function ReportsPage() {
       }
 
       if (reportType === 'caja_diaria') {
-        const payments = await db.payments.where('tenantId').equals(tenantId).toArray()
-        const expenses = await db.expenses.where('tenantId').equals(tenantId).toArray()
-        const routes = await db.routes.where('tenantId').equals(tenantId).toArray()
+        const payments = (await db.payments.where('tenantId').equals(tenantId).toArray()).filter(p => scope.has(p.routeId))
+        const expenses = (await db.expenses.where('tenantId').equals(tenantId).toArray()).filter(e => scope.has(e.routeId))
+        const routes = filterAccessibleRoutes(user, await db.routes.where('tenantId').equals(tenantId).toArray())
         const routeMap = new Map(routes.map(r => [r.id, r]))
 
         const byDate: Record<string, Record<string, number>> = {}

@@ -21,6 +21,7 @@ import {
   getLastPaidInstallmentNumber,
 } from '@/services/installmentEngine'
 import { findActiveSaleForClient } from '@/services/saleRequestService'
+import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import type { Sale, Client, Route, Installment } from '@/models/types'
 
 // Días de pago (1=lunes ... 6=sábado, 0=domingo)
@@ -80,15 +81,19 @@ export default function ActiveSalesPage() {
     }))
   }
 
-  useEffect(() => { load() }, [tenantId])
+  useEffect(() => { load() }, [tenantId, user])
 
   async function load() {
     setLoading(true)
-    const [allSales, allClients, allRoutes] = await Promise.all([
+    const [rawSales, rawClients, rawRoutes] = await Promise.all([
       db.sales.where('tenantId').equals(tenantId).toArray(),
       db.clients.where('tenantId').equals(tenantId).toArray(),
       db.routes.where('tenantId').equals(tenantId).toArray(),
     ])
+    // RESTRICCIÓN POR RUTAS: ventas, clientes y rutas limitados a los autorizados.
+    const allSales = filterByAccessibleRoute(user, rawSales)
+    const allClients = filterByAccessibleRoute(user, rawClients)
+    const allRoutes = filterAccessibleRoutes(user, rawRoutes)
     // Parcelas de estas ventas → última parcela pagada por venta.
     const insts = await db.installments.where('saleId').anyOf(allSales.map(s => s.id)).toArray()
     const bySale = new Map<string, typeof insts>()
@@ -154,6 +159,7 @@ export default function ActiveSalesPage() {
   // confirmación de "segunda venta"; si no, crea la venta directamente.
   function handleCreateSale() {
     if (!form.routeId) { toast.error('Debes seleccionar una ruta'); return }
+    if (!canAccessRoute(user, form.routeId)) { toast.error('No tienes permiso sobre esa ruta.'); return }
     if (!form.clientId) { toast.error('Debes seleccionar un cliente'); return }
     // El cliente debe pertenecer a la ruta seleccionada.
     const client = clientMap.get(form.clientId)

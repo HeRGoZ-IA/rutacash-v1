@@ -6,12 +6,15 @@ import { ModuleTabs, CASHBOX_TABS } from '@/components/ui/ModuleTabs'
 import { LoadingState } from '@/components/ui/EmptyState'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
+import { useAuth } from '@/hooks/useAuth'
 import { getCashboxSummary } from '@/services/cashboxEngine'
+import { filterAccessibleRoutes, canAccessRoute } from '@/lib/permissions'
 import { formatCurrency, getWeekStart, getWeekEnd, formatDate } from '@/lib/formatters'
 import type { Route, CashboxSummary } from '@/models/types'
 
 export default function CashboxPage() {
   const { tenantId } = useTenant()
+  const { user } = useAuth()
   const [routes, setRoutes] = useState<Route[]>([])
   const [selectedRoute, setSelectedRoute] = useState('')
   const [summary, setSummary] = useState<CashboxSummary | null>(null)
@@ -19,17 +22,20 @@ export default function CashboxPage() {
   const [fechaDesde, setFechaDesde] = useState(getWeekStart())
   const [fechaHasta, setFechaHasta] = useState(getWeekEnd())
 
-  useEffect(() => { loadRoutes() }, [tenantId])
+  useEffect(() => { loadRoutes() }, [tenantId, user])
   useEffect(() => { if (selectedRoute) loadSummary() }, [selectedRoute, fechaDesde, fechaHasta])
 
   async function loadRoutes() {
-    const rts = await db.routes.where('tenantId').equals(tenantId).toArray()
+    // RESTRICCIÓN POR RUTAS: solo rutas autorizadas en el selector de caja.
+    const rts = filterAccessibleRoutes(user, await db.routes.where('tenantId').equals(tenantId).toArray())
     setRoutes(rts)
     if (rts.length > 0) setSelectedRoute(rts[0].id)
   }
 
   async function loadSummary() {
     if (!selectedRoute) return
+    // Guard de datos: nunca calcular caja de una ruta no autorizada.
+    if (!canAccessRoute(user, selectedRoute)) { setSummary(null); return }
     setLoading(true)
     const s = await getCashboxSummary(selectedRoute, fechaDesde, fechaHasta)
     setSummary(s)

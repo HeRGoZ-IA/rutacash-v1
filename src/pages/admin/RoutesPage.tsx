@@ -17,10 +17,11 @@ import { generateId } from '@/lib/utils'
 import { formatCurrency, nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { assignCobradorToRoute } from '@/services/routeAssignment'
+import { filterAccessibleRoutes, authorizedRouteIdsOf } from '@/lib/permissions'
 import type { Route, User, RouteFinancialSummary } from '@/models/types'
 
 export default function RoutesPage() {
-  const { user } = useAuth()
+  const { user, refreshUser } = useAuth()
   const { tenantId, currency } = useTenant()
   const [routes, setRoutes] = useState<Route[]>([])
   const [cobradores, setCobradores] = useState<User[]>([])
@@ -54,7 +55,9 @@ export default function RoutesPage() {
 
   async function load() {
     setLoading(true)
-    const rts = await db.routes.where('tenantId').equals(tenantId).toArray()
+    const all = await db.routes.where('tenantId').equals(tenantId).toArray()
+    // RESTRICCIÓN POR RUTAS: el Administrador solo ve sus rutas autorizadas.
+    const rts = filterAccessibleRoutes(user, all)
     setRoutes(rts)
     const cobs = await db.users.where('tenantId').equals(tenantId).and(u => u.rol === 'cobrador').toArray()
     setCobradores(cobs)
@@ -115,6 +118,14 @@ export default function RoutesPage() {
             userId: 'system', createdAt: nowISO(),
           })
         }
+        // AUTO-ASIGNACIÓN: si un Administrador limitado por rutas crea una ruta, se
+        // agrega automáticamente a sus rutas autorizadas (sin darle acceso a las demás).
+        if (user && user.rol === 'admin' && authorizedRouteIdsOf(user).length > 0) {
+          const next = [...new Set([...authorizedRouteIdsOf(user), route.id])]
+          await db.users.update(user.id, { authorizedRouteIds: next, updatedAt: nowISO() })
+          await refreshUser()
+        }
+        if (user) await logAction({ tenantId, userId: user.id, userRole: user.rol, routeId: route.id, action: 'CREATE_ROUTE', entityType: 'Route', entityId: route.id, descripcion: `Ruta creada: ${route.nombre}` })
         toast.success('Ruta creada')
       }
       setModalOpen(false)
@@ -125,11 +136,14 @@ export default function RoutesPage() {
   async function toggleStatus(route: Route) {
     const newStatus = route.status === 'activa' ? 'inactiva' : 'activa'
     await db.routes.update(route.id, { status: newStatus, updatedAt: nowISO() })
+    if (user) await logAction({ tenantId, userId: user.id, userRole: user.rol, routeId: route.id, action: 'BLOCK_ROUTE', entityType: 'Route', entityId: route.id, descripcion: `Ruta ${newStatus}: ${route.nombre}`, before: { status: route.status }, after: { status: newStatus } })
     toast.success(`Ruta ${newStatus === 'activa' ? 'activada' : 'desactivada'}`)
     await load()
   }
 
   async function requestDelete(route: Route) {
+    // El Administrador NO elimina rutas; solo el Super Admin (y sin movimientos).
+    if (user?.rol !== 'superadmin') { toast.error('Solo el Super Admin puede eliminar rutas. Puedes inactivarla.'); return }
     setCheckingId(route.id)
     try {
       const [clients, sales, payments, expenses, capital, withdrawals, transOrigen, transDest] = await Promise.all([
@@ -275,6 +289,11 @@ export default function RoutesPage() {
             <Input label="Ciudad" value={form.ciudad} onChange={e => setForm(f => ({ ...f, ciudad: e.target.value }))} placeholder="Ej: Barranquilla" />
           </div>
           {editing && <p className="text-xs text-gray-400">Código de ruta: <span className="font-medium text-gray-600">{editing.codigo}</span></p>}
+          {!editing && user?.rol === 'admin' && authorizedRouteIdsOf(user).length > 0 && (
+            <div className="text-xs text-primary-700 bg-primary-50 border border-primary-100 rounded-xl px-3 py-2">
+              La nueva ruta será asignada automáticamente a tu usuario.
+            </div>
+          )}
           <Select label="Cobrador" value={form.cobradorId} onChange={e => setForm(f => ({ ...f, cobradorId: e.target.value }))}
             options={cobradores.map(c => ({ value: c.id, label: c.nombre }))} placeholder="Sin asignar" />
           <div className="grid grid-cols-2 gap-3">

@@ -13,6 +13,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
+import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import type { Expense, ExpenseCategory, Route } from '@/models/types'
 
 export default function ExpensesPage() {
@@ -29,7 +30,7 @@ export default function ExpensesPage() {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ routeId: '', categoryId: '', valor: 0, descripcion: '', fecha: today() })
 
-  useEffect(() => { load() }, [tenantId])
+  useEffect(() => { load() }, [tenantId, user])
 
   async function load() {
     setLoading(true)
@@ -38,9 +39,10 @@ export default function ExpensesPage() {
       db.expenseCategories.where('tenantId').equals(tenantId).toArray(),
       db.routes.where('tenantId').equals(tenantId).toArray(),
     ])
-    setExpenses(exps.sort((a, b) => b.fecha.localeCompare(a.fecha)))
+    // RESTRICCIÓN POR RUTAS: gastos y rutas limitados a las autorizadas.
+    setExpenses(filterByAccessibleRoute(user, exps).sort((a, b) => b.fecha.localeCompare(a.fecha)))
     setCategories(cats)
-    setRoutes(rts)
+    setRoutes(filterAccessibleRoutes(user, rts))
     setLoading(false)
   }
 
@@ -54,6 +56,7 @@ export default function ExpensesPage() {
 
   async function handleSave() {
     if (!form.routeId || !form.categoryId || form.valor <= 0) { toast.error('Ruta, categoría y valor son requeridos'); return }
+    if (!canAccessRoute(user, form.routeId)) { toast.error('No tienes permiso sobre esa ruta.'); return }
     setSaving(true)
     try {
       const route = routes.find(r => r.id === form.routeId)

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useOpBase } from '@/hooks/useOpBase'
 import { ChevronLeft, AlertTriangle, Save } from 'lucide-react'
 import { Input, Select } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -10,6 +11,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { getAuthorizedRouteIds } from '@/lib/roles'
+import { can } from '@/lib/permissions'
 import { generateId } from '@/lib/utils'
 import { nowISO, normalizeDoc, formatCurrency, formatDate, today } from '@/lib/formatters'
 import { computeSaleFinancials, buildSaleWithInstallments, buildSaleRequest, type SaleInputs } from '@/services/saleRequestService'
@@ -28,6 +30,7 @@ const WEEK_DAYS = [
 
 export default function CollectorNewClientPage() {
   const navigate = useNavigate()
+  const base = useOpBase()
   const [params] = useSearchParams()
   const { user } = useAuth()
   const { currency } = useTenant()
@@ -68,7 +71,9 @@ export default function CollectorNewClientPage() {
   }
 
   // Reglas de venta directa del cobrador
-  const canDirect = !!user?.canCreateDirectSales
+  // Venta directa por CAPACIDAD central (no por el flag legacy): Cobrador y Supervisor
+  // NUNCA la tienen → siempre solicitud pendiente de autorización.
+  const canDirect = can(user, 'sale.createDirect', { routeId: form.routeId })
   const maxAmount = user?.maxDirectSaleAmount && user.maxDirectSaleAmount > 0 ? user.maxDirectSaleAmount : null
   const withinLimit = !maxAmount || saleForm.valorVenta <= maxAmount
   const allowDirect = canDirect && withinLimit
@@ -132,8 +137,8 @@ export default function CollectorNewClientPage() {
       if (!addSale) {
         await db.clients.add(client)
         toast.success('Cliente registrado')
-        if (params.get('returnTo') === 'new-sale') navigate(`/collector/new-sale?clientId=${client.id}`)
-        else navigate('/collector/home')
+        if (params.get('returnTo') === 'new-sale') navigate(`${base}/new-sale?clientId=${client.id}`)
+        else navigate(`${base}/home`)
         return
       }
 
@@ -163,7 +168,7 @@ export default function CollectorNewClientPage() {
         })
         toast.success('Cliente creado y solicitud de venta enviada al administrador')
       }
-      navigate('/collector/home')
+      navigate(`${base}/home`)
     } catch { toast.error('Error al guardar') } finally { setSaving(false) }
   }
 

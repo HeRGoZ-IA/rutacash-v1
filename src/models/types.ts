@@ -4,7 +4,7 @@
 
 // --- ENUMS ---
 
-export type UserRole = 'superadmin' | 'admin' | 'supervisor' | 'cobrador' | 'socio'
+export type UserRole = 'superadmin' | 'admin' | 'socio' | 'supervisor' | 'cobrador' | 'secretario'
 
 export type TenantStatus = 'activa' | 'suspendida' | 'prueba'
 
@@ -66,6 +66,31 @@ export type AuditAction =
   | 'DELETE_USER'
   | 'UPDATE_TENANT'
   | 'DELETE_ROUTE'
+  // --- Modelo de roles y permisos (nuevas acciones auditables) ---
+  | 'CREATE_TENANT'
+  | 'SUSPEND_TENANT'
+  | 'CREATE_ROUTE'
+  | 'BLOCK_ROUTE'
+  | 'ASSIGN_ROUTE'
+  | 'UNASSIGN_ROUTE'
+  | 'BLOCK_USER'
+  | 'CHANGE_ROLE'
+  | 'CHANGE_PERMISSIONS'
+  | 'RESET_PASSWORD'
+  | 'CHANGE_PASSWORD'
+  | 'APPROVE_SALE_REQUEST'
+  | 'REJECT_SALE_REQUEST'
+  | 'CHANGE_SALE_CONDITIONS'
+  | 'PHONE_CONFIRMATION'
+  | 'CONFIRM_DISBURSEMENT'
+  | 'CORRECT_PAYMENT'
+  | 'REVERSE_PAYMENT'
+  | 'REQUEST_PAYMENT_ADJUSTMENT'
+  | 'APPROVE_PAYMENT_ADJUSTMENT'
+  | 'REJECT_PAYMENT_ADJUSTMENT'
+  | 'MODIFY_CASHBOX'
+  | 'CLOSE_PERIOD'
+  | 'REOPEN_PERIOD'
 
 // --- ENTIDADES ---
 
@@ -123,22 +148,32 @@ export interface User {
   telefono?: string
   avatar?: string
   /**
-   * Rutas autorizadas para el rol SUPERVISOR (Paquete 3).
-   * Opcional para mantener compatibilidad: cobradores siguen usando `routeId`
-   * (una sola ruta) y los usuarios antiguos sin este campo no se rompen.
-   * Un supervisor con `routeId` heredado se trata como una ruta autorizada.
+   * Rutas autorizadas del usuario (modelo centralizado ROL + CAPACIDADES + RUTAS).
+   * Aplica a admin, socio, supervisor, cobrador y secretario. El SUPERADMIN no se
+   * limita por este campo (accede a todas las rutas de la empresa).
+   * Opcional para compatibilidad: si no existe, se usa `routeId` como fallback
+   * (una sola ruta). Ver helpers en `src/lib/roles.ts` y `src/lib/permissions.ts`.
    */
   authorizedRouteIds?: string[]
   /**
-   * Config de ventas directas del cobrador (App Cobrador).
-   * Decisión: se configura POR USUARIO (cobrador) porque la solicitud de venta
-   * la origina el cobrador; toca menos código que hacerlo por ruta.
-   * - canCreateDirectSales: si puede crear ventas directas (sin autorización).
-   *   undefined/false → SIEMPRE debe enviar solicitud (opción más segura por defecto).
-   * - maxDirectSaleAmount: tope para venta directa. undefined/0 → sin límite.
+   * @deprecated LEGADO (modelo de roles y permisos). La validación funcional con el
+   * socio determinó que el COBRADOR NO crea ventas directas: toda venta suya es una
+   * solicitud pendiente de autorización. Este campo se conserva solo por compatibilidad
+   * y la migración lo pone en `false` para cobradores. La capacidad real de venta
+   * directa se resuelve en `src/lib/permissions.ts` (capability `sale.createDirect`),
+   * que hoy únicamente tienen admin y superadmin.
    */
   canCreateDirectSales?: boolean
+  /** @deprecated LEGADO: tope de venta directa del cobrador (ver canCreateDirectSales). */
   maxDirectSaleAmount?: number
+  /**
+   * Capacidades ADICIONALES otorgadas explícitamente a este usuario, por encima de
+   * las predeterminadas de su rol (delegación). Un administrador solo puede otorgar
+   * capacidades que él mismo posee. Ver `Capability` en src/lib/permissions.ts.
+   */
+  grantedCapabilities?: string[]
+  /** Capacidades RETIRADAS explícitamente (tienen prioridad sobre las del rol/otorgadas). */
+  revokedCapabilities?: string[]
   status: 'activo' | 'inactivo'
   createdAt: string
   updatedAt: string
@@ -227,6 +262,23 @@ export interface SaleRequest {
   approvalNotes?: string
   /** Venta creada al aprobar (para enlazar con el desembolso). */
   saleId?: string
+  // --- Trazabilidad de autorización (modelo de roles y permisos) ---
+  /** Quien originó la solicitud (cobrador/supervisor). Igual a collectorId salvo casos especiales. */
+  requestedBy?: string
+  /**
+   * Condiciones SOLICITADAS (originales), congeladas al crear la solicitud. No se
+   * sobrescriben aunque el revisor cambie porcentaje/frecuencia/días al aprobar.
+   */
+  requestedInterestRate?: number
+  requestedFrequency?: PaymentFrequency
+  requestedPaymentDays?: number[]
+  /** Condiciones FINALES aprobadas (si el revisor las modificó). */
+  approvedInterestRate?: number
+  approvedFrequency?: PaymentFrequency
+  approvedPaymentDays?: number[]
+  /** Confirmación telefónica con el cliente (Secretario / autorizador). */
+  phoneConfirmed?: boolean
+  phoneConfirmationNote?: string
 }
 
 export interface Installment {
@@ -240,6 +292,18 @@ export interface Installment {
   status: InstallmentStatus
   diasMora: number
 }
+
+/**
+ * Estado de un pago en el flujo de CORRECCIÓN CONTROLADA (no destructiva).
+ * - undefined / 'active': pago normal vigente (compatibilidad con pagos antiguos).
+ * - 'reversed': pago original que fue corregido; PERMANECE como histórico inalterado
+ *   (no se borra) y queda enlazado con su corrección vía `correctedByPaymentId`.
+ * - 'reversal': asiento de reversión (valor negativo) que anula contablemente al
+ *   original; enlaza con él vía `reversesPaymentId`.
+ * - 'correction': pago corregido nuevo que reemplaza al original; enlaza con el
+ *   original vía `correctionOfPaymentId`.
+ */
+export type PaymentState = 'active' | 'reversed' | 'reversal' | 'correction'
 
 export interface Payment {
   id: string
@@ -256,6 +320,58 @@ export interface Payment {
   lng?: number
   syncStatus: SyncStatus
   createdAt: string
+  // --- Corrección controlada de pagos (trazabilidad; ver paymentCorrectionService) ---
+  /** Estado del pago. undefined = 'active' (pagos antiguos). */
+  state?: PaymentState
+  /** En un asiento de reversión: id del pago original que anula. */
+  reversesPaymentId?: string
+  /** En el pago original corregido: id del pago corregido que lo reemplaza. */
+  correctedByPaymentId?: string
+  /** En el pago corregido: id del pago original al que corrige. */
+  correctionOfPaymentId?: string
+  /** Motivo de la corrección (obligatorio al corregir). */
+  correctionReason?: string
+  /** Usuario que ejecutó la corrección/reversión. */
+  correctedBy?: string
+  /** Fecha/hora de la corrección/reversión. */
+  correctedAt?: string
+}
+
+/** Estado de una Solicitud de ajuste de pago (periodos cerrados). */
+export type PaymentAdjustmentStatus = 'pending' | 'approved' | 'rejected'
+
+/**
+ * Solicitud de ajuste de pago (CORRECCIÓN CONTROLADA en periodo CERRADO).
+ * Cuando el pago ya fue incluido en una liquidación/cuadre cerrado, el Secretario
+ * NO puede corregirlo directamente: genera esta solicitud, que debe aprobar un
+ * Administrador autorizado para la ruta o el Super Admin. Al aprobarse se ejecuta
+ * la reversión + reemplazo (nunca se elimina el pago original).
+ */
+export interface PaymentAdjustmentRequest {
+  id: string
+  tenantId: string
+  routeId: string
+  paymentId: string
+  clientId: string
+  saleId: string
+  requestedBy: string
+  requestedByRole: UserRole
+  requestedAt: string
+  /** Condiciones originales del pago (para evidencia antes/después). */
+  originalValor: number
+  originalFecha: string
+  /** Corrección solicitada. */
+  reason: string
+  newValor: number
+  newFecha?: string
+  observacion?: string
+  status: PaymentAdjustmentStatus
+  reviewedBy?: string
+  reviewedAt?: string
+  rejectionReason?: string
+  /** Al aprobarse: ids resultantes de la reversión y del pago corregido. */
+  resultingReversalId?: string
+  resultingPaymentId?: string
 }
 
 export interface NoPaymentVisit {
@@ -427,16 +543,33 @@ export interface WeeklySettlement {
   retiros: number
   saldoFinal: number
   createdAt: string
+  /**
+   * Estado del periodo/liquidación (corrección controlada de pagos).
+   * Una liquidación registrada representa una semana CERRADA. undefined = 'cerrada'
+   * (compatibilidad con liquidaciones existentes). Los pagos con fecha dentro del
+   * rango [semanaInicio, semanaFin] de una liquidación 'cerrada' NO son corregibles
+   * directamente por el Secretario: requieren Solicitud de ajuste de pago.
+   */
+  status?: 'abierta' | 'cerrada'
 }
 
 export interface AuditLog {
   id: string
   tenantId: string
   userId: string
+  /** Rol del usuario al momento de la acción (trazabilidad). */
+  userRole?: UserRole
+  /** Ruta relacionada, cuando aplique. */
+  routeId?: string
   action: AuditAction
   entityType: string
   entityId: string
   descripcion: string
+  /** Valores anteriores / nuevos (para acciones que modifican datos). */
+  before?: Record<string, unknown>
+  after?: Record<string, unknown>
+  /** Motivo, cuando la acción lo exige (correcciones, rechazos, ajustes). */
+  motivo?: string
   metadata?: Record<string, unknown>
   createdAt: string
 }

@@ -8,7 +8,7 @@ import { generateInstallments, calculateTotalWithInterest, estimateFinalDate } f
 import type {
   Tenant, Route, User, Client, Sale, Payment,
   ExpenseCategory, Expense, CapitalMovement, Transfer, Withdrawal, SaleRequest,
-  PartnerCashMovement,
+  PartnerCashMovement, WeeklySettlement,
 } from '@/models/types'
 
 const d = (date: Date) => format(date, 'yyyy-MM-dd')
@@ -31,6 +31,7 @@ const USER_COB3_ID = 'user-cobrador-003'
 const USER_COB4_ID = 'user-cobrador-004'
 const USER_SOCIO1_ID = 'user-socio-001'
 const USER_SOCIO2_ID = 'user-socio-002'
+const USER_SECRETARIO_ID = 'user-secretario-001'
 
 let _seeding = false
 
@@ -146,6 +147,8 @@ export async function seedDatabase() {
       id: USER_ADMIN_ID,
       tenantId: TENANT_ID,
       officeId: OFFICE1_ID,
+      // Administrador delegado con rutas autorizadas explícitas (todas, en demo).
+      authorizedRouteIds: [ROUTE1_ID, ROUTE2_ID, ROUTE3_ID, ROUTE4_ID],
       email: 'admin@demo.com',
       password: '123456',
       nombre: 'Admin Credirutas',
@@ -229,10 +232,11 @@ export async function seedDatabase() {
       createdAt: new Date(2025, 1, 5).toISOString(),
       updatedAt: now.toISOString(),
     },
-    // Revisión 2 — Socios (usuarios de control interno para Caja socios y Transferencias).
+    // Socios — ahora usuarios FUNCIONALES con login y rutas autorizadas (solo consulta).
     {
       id: USER_SOCIO1_ID,
       tenantId: TENANT_ID,
+      authorizedRouteIds: [ROUTE1_ID, ROUTE2_ID],
       email: 'socio1@demo.com',
       password: '123456',
       nombre: 'Juan Pérez',
@@ -245,6 +249,7 @@ export async function seedDatabase() {
     {
       id: USER_SOCIO2_ID,
       tenantId: TENANT_ID,
+      authorizedRouteIds: [ROUTE3_ID, ROUTE4_ID],
       email: 'socio2@demo.com',
       password: '123456',
       nombre: 'María Inversora',
@@ -252,6 +257,20 @@ export async function seedDatabase() {
       telefono: '3060003344',
       status: 'activo',
       createdAt: new Date(2025, 0, 2).toISOString(),
+      updatedAt: now.toISOString(),
+    },
+    // Secretario — Clientes, Autorizaciones y Corrección de pagos (rutas Norte y Sur).
+    {
+      id: USER_SECRETARIO_ID,
+      tenantId: TENANT_ID,
+      authorizedRouteIds: [ROUTE1_ID, ROUTE2_ID],
+      email: 'secretario@demo.com',
+      password: '123456',
+      nombre: 'Sofía Secretaria',
+      rol: 'secretario',
+      telefono: '3070004455',
+      status: 'activo',
+      createdAt: new Date(2025, 0, 3).toISOString(),
       updatedAt: now.toISOString(),
     },
   ]
@@ -511,6 +530,19 @@ export async function seedDatabase() {
     },
   ]
 
+  // ---- WEEKLY SETTLEMENT CERRADA (para demostrar corrección en periodo cerrado) ----
+  // Semana cerrada de la Ruta Norte: los pagos con fecha dentro de este rango NO
+  // son corregibles directamente por el Secretario (exigen solicitud de ajuste).
+  const settlements: WeeklySettlement[] = [
+    {
+      id: uuidv4(), tenantId: TENANT_ID, routeId: ROUTE1_ID,
+      semanaInicio: d(subDays(now, 14)), semanaFin: d(subDays(now, 8)),
+      saldoAnterior: 0, ingresoCapital: 0, cobros: 0, prestamosEntregados: 0,
+      gastos: 0, transferenciasEntradas: 0, transferenciasSalidas: 0, retiros: 0,
+      saldoFinal: 0, status: 'cerrada', createdAt: subDays(now, 7).toISOString(),
+    },
+  ]
+
   // ---- SALE REQUESTS (solicitud de venta demo, pendiente de autorización) ----
   const reqAmount = 250000
   const { valorInteres: reqInteres, valorTotal: reqTotal } = calculateTotalWithInterest({ valorVenta: reqAmount, tasaInteres: 20 })
@@ -529,7 +561,7 @@ export async function seedDatabase() {
     db.tenants, db.routes, db.users, db.clients,
     db.sales, db.installments, db.payments, db.expenseCategories,
     db.expenses, db.capitalMovements, db.transfers, db.withdrawals, db.saleRequests,
-    db.partnerCashMovements,
+    db.partnerCashMovements, db.weeklySettlements,
   ], async () => {
     await db.tenants.add(tenant)
     await db.routes.bulkAdd(routes)
@@ -549,6 +581,7 @@ export async function seedDatabase() {
     await db.withdrawals.bulkAdd(withdrawals)
     await db.saleRequests.bulkAdd(saleRequests)
     await db.partnerCashMovements.bulkAdd(partnerCashMovements)
+    await db.weeklySettlements.bulkAdd(settlements)
   })
 
   console.log('[RutaCash] Datos demo cargados exitosamente')
@@ -560,9 +593,10 @@ export async function resetToDemo() {
   location.reload()
 }
 
-// ---- SEED LIMPIO: solo tenant placeholder + admin inicial ----
+// ---- SEED LIMPIO: Super Admin inicial + empresa inicial + primer Administrador ----
 const CLEAN_TENANT_ID = 'tenant-main-001'
 const CLEAN_ADMIN_ID = 'user-admin-main-001'
+const CLEAN_SUPERADMIN_ID = 'user-superadmin-main-001'
 
 // Paquete 3 — Categorías de gasto predeterminadas (genéricas, hasta que el socio
 // envíe el listado final). Se siembran SOLO cuando la base no tiene categorías
@@ -617,6 +651,21 @@ export async function seedCleanDatabase() {
     updatedAt: now.toISOString(),
   }
 
+  // Super Admin inicial del sistema (plataforma) — capaz de crear empresas y el
+  // primer Administrador. El nuevo modelo exige un Super Admin como acceso raíz.
+  const superadmin: User = {
+    id: CLEAN_SUPERADMIN_ID,
+    tenantId: 'platform',
+    email: 'superadmin@demo.com',
+    password: '123456',
+    nombre: 'Super Admin',
+    rol: 'superadmin',
+    status: 'activo',
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  }
+
+  // Administrador inicial de la empresa (para que quede operable de inmediato).
   const admin: User = {
     id: CLEAN_ADMIN_ID,
     tenantId: CLEAN_TENANT_ID,
@@ -633,11 +682,11 @@ export async function seedCleanDatabase() {
 
   await db.transaction('rw', [db.tenants, db.users, db.expenseCategories], async () => {
     await db.tenants.add(tenant)
-    await db.users.add(admin)
+    await db.users.bulkAdd([superadmin, admin])
     await db.expenseCategories.bulkAdd(expenseCategories)
   })
 
-  console.log('[RutaCash] Base de datos limpia inicializada')
+  console.log('[RutaCash] Base de datos limpia inicializada (Super Admin + empresa + Administrador)')
 }
 
 export async function resetCleanDatabase(tenantId: string) {

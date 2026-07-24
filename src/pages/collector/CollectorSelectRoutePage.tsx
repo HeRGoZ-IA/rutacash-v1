@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useOpBase } from '@/hooks/useOpBase'
 import { MapPin, ChevronRight, ArrowRight } from 'lucide-react'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
@@ -22,6 +23,7 @@ export default function CollectorSelectRoutePage() {
   const { currency } = useTenant()
   const { activeRouteId, setActiveRouteId } = useCollectorRoute()
   const navigate = useNavigate()
+  const base = useOpBase()
   const [summaries, setSummaries] = useState<RouteSummary[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -48,7 +50,7 @@ export default function CollectorSelectRoutePage() {
 
   function enter(routeId: string) {
     setActiveRouteId(routeId)
-    navigate('/collector/home')
+    navigate(`${base}/home`)
   }
 
   return (

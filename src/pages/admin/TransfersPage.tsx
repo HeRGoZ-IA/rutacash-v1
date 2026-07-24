@@ -11,9 +11,10 @@ import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
-import { getPartners, createPartnerMovement } from '@/services/partnerCashService'
+import { createPartnerMovement } from '@/services/partnerCashService'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
+import { filterAccessibleRoutes, authorizedRouteIdsOf, isPartnerInScope, isTransferInScope } from '@/lib/permissions'
 import type { Transfer, Route, User, TransferEntityType } from '@/models/types'
 
 // Entidad participante (ruta o socio) para la vista agrupada (Revisión 2).
@@ -57,7 +58,10 @@ export default function TransfersPage() {
   // Origen/destino codificados como `route:id` / `partner:id`
   const [form, setForm] = useState({ origen: '', destino: '', valor: 0, descripcion: '', fecha: today() })
 
-  useEffect(() => { load() }, [tenantId])
+  useEffect(() => { load() }, [tenantId, user])
+
+  // Rutas del socio (relación socio↔ruta) para decidir alcance de transferencias/caja socios.
+  const partnerRouteIds = (socioId: string) => authorizedRouteIdsOf(users.find(u => u.id === socioId))
 
   async function load() {
     setLoading(true)
@@ -66,10 +70,16 @@ export default function TransfersPage() {
       db.routes.where('tenantId').equals(tenantId).toArray(),
       db.users.where('tenantId').equals(tenantId).toArray(),
     ])
-    setTransfers(ts.sort((a, b) => b.fecha.localeCompare(a.fecha)))
-    setRoutes(rts)
+    // RESTRICCIÓN POR RUTAS: rutas autorizadas, socios vinculados a ellas y
+    // transferencias cuyas DOS entidades están en alcance (antes de agregar).
+    const socioRoute = (id: string) => authorizedRouteIdsOf(us.find(u => u.id === id))
+    const scopedRoutes = filterAccessibleRoutes(user, rts)
+    const scopedPartners = us.filter(u => u.rol === 'socio' && isPartnerInScope(user, authorizedRouteIdsOf(u)))
+    const scopedTransfers = ts.filter(t => isTransferInScope(user, t, socioRoute))
+    setTransfers(scopedTransfers.sort((a, b) => b.fecha.localeCompare(a.fecha)))
+    setRoutes(scopedRoutes)
     setUsers(us)
-    setPartners(us.filter(u => u.rol === 'socio'))
+    setPartners(scopedPartners)
     setLoading(false)
   }
 
@@ -102,19 +112,24 @@ export default function TransfersPage() {
     if (!destino) { toast.error('Selecciona el destino'); return }
     if (form.valor <= 0) { toast.error('El valor debe ser mayor a 0'); return }
     if (form.origen === form.destino) { toast.error('Origen y destino no pueden ser iguales'); return }
+    const transferId = generateId()
+    const t: Transfer = {
+      id: transferId, tenantId, officeId,
+      origenType: origen.type, destinoType: destino.type,
+      routeOrigenId: origen.type === 'route' ? origen.id : '',
+      routeDestinoId: destino.type === 'route' ? destino.id : undefined,
+      socioOrigenId: origen.type === 'partner' ? origen.id : undefined,
+      socioDestinoId: destino.type === 'partner' ? destino.id : undefined,
+      valor: form.valor, descripcion: form.descripcion, fecha: form.fecha,
+      userId: user?.id ?? '', createdAt: nowISO(),
+    }
+    // Guard de datos: AMBAS entidades (origen y destino) deben estar en alcance.
+    if (!isTransferInScope(user, t, partnerRouteIds)) {
+      toast.error('No puedes transferir desde/hacia una ruta o socio fuera de tu alcance.')
+      return
+    }
     setSaving(true)
     try {
-      const transferId = generateId()
-      const t: Transfer = {
-        id: transferId, tenantId, officeId,
-        origenType: origen.type, destinoType: destino.type,
-        routeOrigenId: origen.type === 'route' ? origen.id : '',
-        routeDestinoId: destino.type === 'route' ? destino.id : undefined,
-        socioOrigenId: origen.type === 'partner' ? origen.id : undefined,
-        socioDestinoId: destino.type === 'partner' ? destino.id : undefined,
-        valor: form.valor, descripcion: form.descripcion, fecha: form.fecha,
-        userId: user?.id ?? '', createdAt: nowISO(),
-      }
       await db.transfers.add(t)
 
       // Impacto en Caja socios: si un socio participa, se crea su movimiento.

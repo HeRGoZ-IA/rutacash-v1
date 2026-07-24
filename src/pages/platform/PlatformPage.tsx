@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Building2, Users, CheckCircle, PauseCircle } from 'lucide-react'
+import { Plus, Building2, CheckCircle, PauseCircle, LogIn } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
@@ -8,6 +8,7 @@ import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
 import { formatDate, nowISO } from '@/lib/formatters'
+import { logAction } from '@/services/auditService'
 import type { Tenant, TenantPlan, TenantStatus } from '@/models/types'
 import { useAuth } from '@/hooks/useAuth'
 import { useNavigate } from 'react-router-dom'
@@ -20,8 +21,15 @@ const PLANS: { value: TenantPlan; label: string }[] = [
 ]
 
 export default function PlatformPage() {
-  const { logout } = useAuth()
+  const { logout, user, selectTenant } = useAuth()
   const navigate = useNavigate()
+
+  // Super Admin entra al panel operativo de una empresa (acceptance: operar dentro
+  // de empresas). Fija el tenant en sesión y navega al panel admin.
+  function enterCompany(t: Tenant) {
+    selectTenant(t)
+    navigate('/admin/dashboard')
+  }
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [metrics, setMetrics] = useState<Record<string, { routes: number; users: number; clients: number; sales: number }>>({})
   const [loading, setLoading] = useState(true)
@@ -55,6 +63,7 @@ export default function PlatformPage() {
     try {
       const t: Tenant = { id: generateId(), ...form, status: 'prueba', createdAt: nowISO(), updatedAt: nowISO() }
       await db.tenants.add(t)
+      if (user) await logAction({ tenantId: t.id, userId: user.id, userRole: user.rol, action: 'CREATE_TENANT', entityType: 'Tenant', entityId: t.id, descripcion: `Empresa creada: ${t.nombre}` })
       toast.success('Empresa creada')
       setModalOpen(false)
       await load()
@@ -64,6 +73,7 @@ export default function PlatformPage() {
   async function toggleStatus(t: Tenant) {
     const ns: TenantStatus = t.status === 'activa' ? 'suspendida' : 'activa'
     await db.tenants.update(t.id, { status: ns, updatedAt: nowISO() })
+    if (user) await logAction({ tenantId: t.id, userId: user.id, userRole: user.rol, action: ns === 'suspendida' ? 'SUSPEND_TENANT' : 'UPDATE_TENANT', entityType: 'Tenant', entityId: t.id, descripcion: `Empresa ${ns}: ${t.nombre}` })
     toast.success(`Empresa ${ns}`)
     await load()
   }
@@ -129,10 +139,16 @@ export default function PlatformPage() {
                     <p className="text-xs text-gray-400">Vence: {formatDate(t.fechaVencimiento)}</p>
                   )}
 
-                  <button onClick={() => toggleStatus(t)}
-                    className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-medium border transition-colors ${t.status === 'activa' ? 'text-red-600 border-red-100 bg-red-50 hover:bg-red-100' : 'text-emerald-600 border-emerald-100 bg-emerald-50 hover:bg-emerald-100'}`}>
-                    {t.status === 'activa' ? <><PauseCircle className="w-4 h-4" /> Suspender</> : <><CheckCircle className="w-4 h-4" /> Activar</>}
-                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => enterCompany(t)} disabled={t.status === 'suspendida'}
+                      className="flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-medium border text-primary-600 border-primary-100 bg-primary-50 hover:bg-primary-100 disabled:opacity-40 transition-colors">
+                      <LogIn className="w-4 h-4" /> Entrar
+                    </button>
+                    <button onClick={() => toggleStatus(t)}
+                      className={`flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-medium border transition-colors ${t.status === 'activa' ? 'text-red-600 border-red-100 bg-red-50 hover:bg-red-100' : 'text-emerald-600 border-emerald-100 bg-emerald-50 hover:bg-emerald-100'}`}>
+                      {t.status === 'activa' ? <><PauseCircle className="w-4 h-4" /> Suspender</> : <><CheckCircle className="w-4 h-4" /> Activar</>}
+                    </button>
+                  </div>
                 </div>
               )
             })}

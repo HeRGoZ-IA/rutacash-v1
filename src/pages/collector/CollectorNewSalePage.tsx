@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useOpBase } from '@/hooks/useOpBase'
 import { ChevronLeft, UserPlus, FileText, Send, AlertTriangle } from 'lucide-react'
 import { Input, Select } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -9,6 +10,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { getAuthorizedRouteIds } from '@/lib/roles'
+import { can } from '@/lib/permissions'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import { computeSaleFinancials, createDirectSale, createSaleRequest, findActiveSaleForClient, type SaleInputs } from '@/services/saleRequestService'
 import { useRouteCapital } from '@/hooks/useRouteCapital'
@@ -26,6 +28,7 @@ const WEEK_DAYS = [
 
 export default function CollectorNewSalePage() {
   const navigate = useNavigate()
+  const base = useOpBase()
   const [params] = useSearchParams()
   const { user } = useAuth()
   const { currency } = useTenant()
@@ -86,7 +89,9 @@ export default function CollectorNewSalePage() {
   const collectorLimit = user?.maxDirectSaleAmount && user.maxDirectSaleAmount > 0 ? user.maxDirectSaleAmount : Infinity
   const effectiveLimit = Math.min(routeLimit, collectorLimit) // Infinity si ambos sin límite
   const hasEffectiveLimit = Number.isFinite(effectiveLimit)
-  const canDirect = !!user?.canCreateDirectSales
+  // Venta directa: se resuelve por CAPACIDAD central (no por el flag legacy del cobrador).
+  // El Cobrador NO tiene `sale.createDirect` → siempre enviará solicitud.
+  const canDirect = can(user, 'sale.createDirect', { routeId: selectedClient?.routeId })
   const withinLimit = !hasEffectiveLimit || form.valorVenta <= effectiveLimit
   const allowDirect = canDirect && withinLimit
 
@@ -127,9 +132,9 @@ export default function CollectorNewSalePage() {
     setConfirmKind(null)
     setSaving(true)
     try {
-      await createDirectSale(inputs)
+      await createDirectSale(inputs, user ?? undefined)
       toast.success('Venta creada y activa para recaudo')
-      navigate('/collector/route')
+      navigate(`${base}/route`)
     } catch { toast.error('Error al crear la venta') } finally { setSaving(false) }
   }
 
@@ -140,9 +145,9 @@ export default function CollectorNewSalePage() {
     setConfirmKind(null)
     setSaving(true)
     try {
-      await createSaleRequest(inputs)
+      await createSaleRequest(inputs, user ?? undefined)
       toast.success('Solicitud de venta enviada al administrador')
-      navigate('/collector/home')
+      navigate(`${base}/home`)
     } catch { toast.error('Error al enviar la solicitud') } finally { setSaving(false) }
   }
 
@@ -160,7 +165,7 @@ export default function CollectorNewSalePage() {
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className="block text-sm font-medium text-gray-700">Cliente</label>
-            <button onClick={() => navigate('/collector/clients/new?returnTo=new-sale')} className="text-xs font-semibold text-primary-600 flex items-center gap-1">
+            <button onClick={() => navigate(`${base}/clients/new?returnTo=new-sale`)} className="text-xs font-semibold text-primary-600 flex items-center gap-1">
               <UserPlus className="w-3.5 h-3.5" /> Nuevo cliente
             </button>
           </div>

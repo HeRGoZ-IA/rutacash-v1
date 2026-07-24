@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { useOpBase } from '@/hooks/useOpBase'
 import { ChevronLeft, MessageSquare, CreditCard } from 'lucide-react'
 import { InstallmentStatusBadge } from '@/components/ui/Badge'
 import { db } from '@/lib/db'
@@ -36,6 +37,7 @@ export default function ClientDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [params] = useSearchParams()
   const navigate = useNavigate()
+  const base = useOpBase()
   const { user } = useAuth()
   const { currency } = useTenant()
   const [client, setClient] = useState<Client | null>(null)
@@ -156,7 +158,7 @@ export default function ClientDetailPage() {
 
             {selectedSale.status === 'activa' && (
               <div className="flex gap-2">
-                <button onClick={() => navigate(`/collector/payment/${selectedSale.id}`)}
+                <button onClick={() => navigate(`${base}/payment/${selectedSale.id}`)}
                   className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2">
                   <CreditCard className="w-4 h-4" /> Registrar abono
                 </button>

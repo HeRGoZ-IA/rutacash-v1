@@ -17,6 +17,7 @@ import {
   getPartners, buildPartnerSummaries, createPartnerMovement,
   type PartnerCashSummary,
 } from '@/services/partnerCashService'
+import { isPartnerInScope, authorizedRouteIdsOf } from '@/lib/permissions'
 import type { PartnerCashMovement, PartnerCashCategory, PartnerCashType, User } from '@/models/types'
 
 // Categorías por tipo (Revisión 2).
@@ -55,7 +56,7 @@ export default function PartnerCashPage() {
     category: 'ingreso' as PartnerCashCategory, amount: 0, description: '', fecha: today(),
   })
 
-  useEffect(() => { load() }, [tenantId])
+  useEffect(() => { load() }, [tenantId, user])
 
   async function load() {
     setLoading(true)
@@ -63,8 +64,12 @@ export default function PartnerCashPage() {
       getPartners(tenantId),
       db.partnerCashMovements.where('tenantId').equals(tenantId).toArray(),
     ])
-    setPartners(ps)
-    setMovements(movs)
+    // RESTRICCIÓN POR RUTAS: el Administrador solo ve socios vinculados a sus rutas
+    // (relación socio↔ruta) y sus movimientos. Super Admin: todos.
+    const scopedPartners = ps.filter(p => isPartnerInScope(user, authorizedRouteIdsOf(p)))
+    const partnerIds = new Set(scopedPartners.map(p => p.id))
+    setPartners(scopedPartners)
+    setMovements(movs.filter(m => partnerIds.has(m.partnerId)))
     setLoading(false)
   }
 
@@ -88,6 +93,8 @@ export default function PartnerCashPage() {
   async function handleSave() {
     if (!form.partnerId) { toast.error('Selecciona un socio'); return }
     if (form.amount <= 0) { toast.error('El valor debe ser mayor a 0'); return }
+    // Guard de datos: el socio debe estar dentro del alcance del usuario.
+    if (!partners.some(p => p.id === form.partnerId)) { toast.error('Socio fuera de tu alcance.'); return }
     setSaving(true)
     try {
       await createPartnerMovement({

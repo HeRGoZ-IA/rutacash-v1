@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, MapPin, CreditCard, Wallet,
   ArrowLeftRight, TrendingDown, Archive, BarChart3, CalendarRange,
-  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck
+  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
@@ -12,6 +12,9 @@ import { initials } from '@/lib/formatters'
 import { AppModeBanner } from '@/components/ui/AppModeBanner'
 import { CountBadge } from '@/components/ui/CountBadge'
 import { countPendingSaleRequests } from '@/services/saleRequestService'
+import { countPendingAdjustmentRequests } from '@/services/paymentCorrectionService'
+import { hasOperationalRoutes } from '@/lib/permissions'
+import { AdminNoRoutes } from '@/components/layout/AdminNoRoutes'
 
 interface NavItem {
   path: string
@@ -26,6 +29,7 @@ const navItems: NavItem[] = [
   { path: '/admin/clients', label: 'Clientes', icon: <Users className="w-4 h-4" /> },
   { path: '/admin/active-sales', label: 'Ventas Activas', icon: <CreditCard className="w-4 h-4" /> },
   { path: '/admin/sale-authorizations', label: 'Autorizaciones', icon: <ClipboardCheck className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
+  { path: '/admin/payment-adjustments', label: 'Ajustes de pago', icon: <Receipt className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
   { path: '/admin/capital', label: 'Capital', icon: <DollarSign className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
   { path: '/admin/expenses', label: 'Gastos', icon: <TrendingDown className="w-4 h-4" /> },
   { path: '/admin/transfers', label: 'Transferencias', icon: <ArrowLeftRight className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
@@ -44,17 +48,21 @@ export function AdminLayout() {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [pendingAuth, setPendingAuth] = useState(0)
+  const [pendingAdj, setPendingAdj] = useState(0)
 
-  // Badge de "Autorizaciones": solicitudes de venta pendientes por revisar.
-  // Se refresca al cambiar de pantalla (p. ej. tras aprobar/rechazar una solicitud).
+  // Badges: solicitudes de venta y de ajuste de pago pendientes por revisar.
   const tenantId = tenant?.id ?? user?.tenantId ?? ''
   useEffect(() => {
     let alive = true
     countPendingSaleRequests(tenantId).then(n => { if (alive) setPendingAuth(n) })
+    countPendingAdjustmentRequests(tenantId).then(n => { if (alive) setPendingAdj(n) })
     return () => { alive = false }
   }, [tenantId, location.pathname])
 
-  const badges: Record<string, number> = { '/admin/sale-authorizations': pendingAuth }
+  const badges: Record<string, number> = {
+    '/admin/sale-authorizations': pendingAuth,
+    '/admin/payment-adjustments': pendingAdj,
+  }
 
   const handleLogout = () => {
     logout()
@@ -199,9 +207,10 @@ export function AdminLayout() {
           </div>
         )}
 
-        {/* Page content */}
+        {/* Page content. FAIL CLOSED: un Administrador sin rutas autorizadas no accede
+            a ninguna pantalla operativa; solo ve la pantalla informativa + su cuenta. */}
         <main className="flex-1 overflow-y-auto">
-          <Outlet />
+          {user?.rol === 'admin' && !hasOperationalRoutes(user) ? <AdminNoRoutes /> : <Outlet />}
         </main>
       </div>
     </div>

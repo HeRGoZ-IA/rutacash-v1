@@ -15,6 +15,7 @@ import { useRouteCapital } from '@/hooks/useRouteCapital'
 import { generateId } from '@/lib/utils'
 import { nowISO, formatDate, today, formatCurrency, normalizeDoc } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
+import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import {
   calculateTotalWithInterest, calculateInstallmentValue,
   estimateFinalDate, generateInstallments,
@@ -102,7 +103,7 @@ export default function ClientsPage() {
     return { valorInteres, valorTotal, valorCuota, fechaFinal }
   })()
 
-  useEffect(() => { load() }, [tenantId])
+  useEffect(() => { load() }, [tenantId, user])
 
   async function load() {
     setLoading(true)
@@ -110,10 +111,12 @@ export default function ClientsPage() {
       db.clients.where('tenantId').equals(tenantId).toArray(),
       db.routes.where('tenantId').equals(tenantId).toArray(),
     ])
-    setClients(allClients)
-    setRoutes(allRoutes)
+    // RESTRICCIÓN POR RUTAS: clientes y rutas se limitan a las autorizadas.
+    const scopedClients = filterByAccessibleRoute(user, allClients)
+    setClients(scopedClients)
+    setRoutes(filterAccessibleRoutes(user, allRoutes))
     const sc: Record<string, number> = {}
-    for (const c of allClients) {
+    for (const c of scopedClients) {
       sc[c.id] = await db.sales.where('clientId').equals(c.id).and(s => s.status === 'activa').count()
     }
     setSalesCount(sc)
@@ -181,6 +184,8 @@ export default function ClientsPage() {
     if (!form.direccionPrincipal.trim()) { toast.error('La dirección de la casa es obligatoria'); return }
     if (!form.direccionSecundaria.trim()) { toast.error('La dirección del negocio es obligatoria'); return }
     if (!form.routeId) { toast.error('Debes seleccionar una ruta'); return }
+    // Guard de datos: no permitir crear/editar en una ruta no autorizada (fail-closed).
+    if (!canAccessRoute(user, form.routeId)) { toast.error('No tienes permiso sobre esa ruta.'); return }
 
     // Validación global de documento duplicado (re-chequeo autoritativo antes de guardar,
     // por si el onBlur no se disparó). Aplica al crear cliente normal y con crédito.

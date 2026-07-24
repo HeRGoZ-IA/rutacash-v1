@@ -13,6 +13,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatDate } from '@/lib/formatters'
 import { approveSaleRequest, rejectSaleRequest } from '@/services/saleRequestService'
 import { logAction } from '@/services/auditService'
+import { canAccessRoute, filterByAccessibleRoute } from '@/lib/permissions'
 import type { SaleRequest, Client, Route, User, Sale, SaleRequestStatus } from '@/models/types'
 
 const STATUS_META: Record<SaleRequestStatus, { label: string; variant: 'warning' | 'success' | 'danger' | 'info' | 'gray' }> = {
@@ -48,7 +49,7 @@ export default function SaleAuthorizationsPage() {
   // del contenedor con overflow de la tabla). Se oculta sobre Aprobar/Rechazar.
   const [tipPos, setTipPos] = useState<{ x: number; y: number } | null>(null)
 
-  useEffect(() => { load() }, [tenantId])
+  useEffect(() => { load() }, [tenantId, user])
 
   async function load() {
     setLoading(true)
@@ -58,8 +59,10 @@ export default function SaleAuthorizationsPage() {
       db.routes.where('tenantId').equals(tenantId).toArray(),
       db.users.where('tenantId').equals(tenantId).toArray(),
     ])
-    reqs.sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
-    setRequests(reqs)
+    // RESTRICCIÓN POR RUTAS: solo solicitudes de rutas autorizadas.
+    const scopedReqs = filterByAccessibleRoute(user, reqs)
+    scopedReqs.sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
+    setRequests(scopedReqs)
     setClientMap(new Map(clients.map(c => [c.id, c])))
     setRouteMap(new Map(routes.map(r => [r.id, r])))
     setUserMap(new Map(users.map(u => [u.id, u])))
@@ -77,9 +80,10 @@ export default function SaleAuthorizationsPage() {
   // Aprobación rápida desde la fila (mismo flujo que el modal, con anti doble-clic).
   async function handleApproveRow(req: SaleRequest) {
     if (!user || rowWorkingId) return
+    if (!canAccessRoute(user, req.routeId)) { toast.error('No tienes permiso sobre la ruta de esta solicitud.'); return }
     setRowWorkingId(req.id)
     try {
-      await approveSaleRequest(req, user.id)
+      await approveSaleRequest(req, user)
       await logAction({ tenantId, userId: user.id, action: 'CREATE_SALE', entityType: 'SaleRequest', entityId: req.id, descripcion: `Solicitud de venta aprobada (${formatCurrency(req.amount, currency)})` })
       toast.success('Solicitud aprobada. Venta creada, pendiente de desembolso por el cobrador.')
       await load()
@@ -93,9 +97,10 @@ export default function SaleAuthorizationsPage() {
 
   async function handleApprove() {
     if (!detail || !user) return
+    if (!canAccessRoute(user, detail.routeId)) { toast.error('No tienes permiso sobre la ruta de esta solicitud.'); return }
     setWorking(true)
     try {
-      await approveSaleRequest(detail, user.id)
+      await approveSaleRequest(detail, user)
       await logAction({ tenantId, userId: user.id, action: 'CREATE_SALE', entityType: 'SaleRequest', entityId: detail.id, descripcion: `Solicitud de venta aprobada (${formatCurrency(detail.amount, currency)})` })
       toast.success('Solicitud aprobada. Venta creada, pendiente de desembolso por el cobrador.')
       setDetail(null)
@@ -105,10 +110,11 @@ export default function SaleAuthorizationsPage() {
 
   async function handleReject() {
     if (!detail || !user) return
+    if (!canAccessRoute(user, detail.routeId)) { toast.error('No tienes permiso sobre la ruta de esta solicitud.'); return }
     if (!rejectReason.trim()) { toast.error('Indica el motivo del rechazo'); return }
     setWorking(true)
     try {
-      await rejectSaleRequest(detail, user.id, rejectReason.trim())
+      await rejectSaleRequest(detail, user, rejectReason.trim())
       await logAction({ tenantId, userId: user.id, action: 'UPDATE_SALE', entityType: 'SaleRequest', entityId: detail.id, descripcion: `Solicitud de venta rechazada: ${rejectReason.trim()}` })
       toast.success('Solicitud rechazada')
       setDetail(null)

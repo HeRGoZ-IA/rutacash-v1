@@ -5,31 +5,35 @@ import { LoadingState } from '@/components/ui/EmptyState'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
+import { useAuth } from '@/hooks/useAuth'
 import { getAllRoutesWeeklySettlement } from '@/services/weeklySettlementEngine'
+import { filterAccessibleRoutes, filterByAccessibleRoute } from '@/lib/permissions'
 import { formatCurrency, formatDate, getWeekStart, getWeekEnd } from '@/lib/formatters'
 import { downloadCSV } from '@/lib/utils'
 import type { WeeklySettlement, Route } from '@/models/types'
 
 export default function WeeklySettlementPage() {
   const { tenantId } = useTenant()
+  const { user } = useAuth()
   const [routes, setRoutes] = useState<Route[]>([])
   const [semanaInicio, setSemanaInicio] = useState(getWeekStart())
   const [semanaFin, setSemanaFin] = useState(getWeekEnd())
   const [settlements, setSettlements] = useState<WeeklySettlement[]>([])
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => { loadMeta() }, [tenantId])
+  useEffect(() => { loadMeta() }, [tenantId, user])
 
   async function loadMeta() {
-    const rts = await db.routes.where('tenantId').equals(tenantId).toArray()
-    setRoutes(rts)
+    // RESTRICCIÓN POR RUTAS: solo rutas autorizadas.
+    setRoutes(filterAccessibleRoutes(user, await db.routes.where('tenantId').equals(tenantId).toArray()))
   }
 
   async function generate() {
     setLoading(true)
     try {
-      // Liquidación de todas las rutas de la empresa.
-      const data = await getAllRoutesWeeklySettlement({ tenantId, semanaInicio, semanaFin })
+      // Liquidación de todas las rutas de la empresa, RECORTADA a las autorizadas
+      // ANTES de mostrar y agregar (los totales se calculan sobre lo autorizado).
+      const data = filterByAccessibleRoute(user, await getAllRoutesWeeklySettlement({ tenantId, semanaInicio, semanaFin }))
       setSettlements(data)
       toast.success(`Liquidación generada: ${data.length} ruta(s)`)
     } catch { toast.error('Error al generar liquidación') } finally { setLoading(false) }

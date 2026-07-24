@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useOpBase } from '@/hooks/useOpBase'
 import { XCircle } from 'lucide-react'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
@@ -19,6 +20,7 @@ const MOTIVOS = [
 export default function NoPaymentPage() {
   const { saleId } = useParams<{ saleId: string }>()
   const navigate = useNavigate()
+  const base = useOpBase()
   const { user } = useAuth()
   const [sale, setSale] = useState<Sale | null>(null)
   const [client, setClient] = useState<Client | null>(null)
@@ -49,7 +51,7 @@ export default function NoPaymentPage() {
         fecha: today(), syncStatus: navigator.onLine ? 'synced' : 'pending', createdAt: nowISO(),
       })
       toast.success('Visita sin pago registrada')
-      navigate('/collector/route')
+      navigate(`${base}/route`)
     } catch { toast.error('Error al guardar') } finally { setSaving(false) }
   }
 

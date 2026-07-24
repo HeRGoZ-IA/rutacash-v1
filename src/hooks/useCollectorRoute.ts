@@ -1,22 +1,8 @@
-import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
-
 /**
- * App Cobrador — ruta actualmente seleccionada para trabajar.
- * Un cobrador puede tener una o varias rutas autorizadas; esta store guarda
- * cuál está activa. Si solo tiene una, se selecciona esa automáticamente.
+ * App Cobrador — ruta actualmente seleccionada.
+ *
+ * NOTA (modelo de roles y permisos): la ruta activa ahora tiene una FUENTE ÚNICA
+ * de verdad en `useActiveRoute` (persistida por usuario). Este hook se conserva como
+ * alias retrocompatible para no romper las pantallas del cobrador que lo importan.
  */
-interface CollectorRouteState {
-  activeRouteId: string | null
-  setActiveRouteId: (id: string | null) => void
-}
-
-export const useCollectorRoute = create<CollectorRouteState>()(
-  persist(
-    (set) => ({
-      activeRouteId: null,
-      setActiveRouteId: (id) => set({ activeRouteId: id }),
-    }),
-    { name: 'rutacash-collector-route' }
-  )
-)
+export { useActiveRoute as useCollectorRoute } from './useActiveRoute'

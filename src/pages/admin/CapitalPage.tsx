@@ -11,6 +11,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
+import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import type { CapitalMovement, Route, Withdrawal, RouteFinancialSummary } from '@/models/types'
 
 // Paquete 3 — Resumen de capital agrupado por ruta.
@@ -44,15 +45,19 @@ export default function CapitalPage() {
   // Grupo de ruta seleccionado para ver su detalle de movimientos.
   const [detailGroup, setDetailGroup] = useState<CapitalGroup | null>(null)
 
-  useEffect(() => { load() }, [tenantId])
+  useEffect(() => { load() }, [tenantId, user])
 
   async function load() {
     setLoading(true)
-    const [movs, rts, wds] = await Promise.all([
+    const [rawMovs, rawRts, rawWds] = await Promise.all([
       db.capitalMovements.where('tenantId').equals(tenantId).toArray(),
       db.routes.where('tenantId').equals(tenantId).toArray(),
       db.withdrawals.where('tenantId').equals(tenantId).toArray(),
     ])
+    // RESTRICCIÓN POR RUTAS: movimientos, rutas y retiros limitados a los autorizados.
+    const movs = filterByAccessibleRoute(user, rawMovs)
+    const rts = filterAccessibleRoutes(user, rawRts)
+    const wds = filterByAccessibleRoute(user, rawWds)
     setMovements(movs.sort((a, b) => b.fecha.localeCompare(a.fecha)))
     setRoutes(rts)
     setWithdrawals(wds)
@@ -65,6 +70,7 @@ export default function CapitalPage() {
 
   async function handleSave() {
     if (!form.routeId || form.valor <= 0) { toast.error('Selecciona ruta y valor'); return }
+    if (!canAccessRoute(user, form.routeId)) { toast.error('No tienes permiso sobre esa ruta.'); return }
     setSaving(true)
     try {
       const mov: CapitalMovement = {

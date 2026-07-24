@@ -10,6 +10,7 @@ import { LoadingState } from '@/components/ui/EmptyState'
 import { SetupChecklist } from '@/components/ui/SetupChecklist'
 import { db } from '@/lib/db'
 import { getRouteFinancialSummary } from '@/services/cashboxEngine'
+import { getAccessibleRouteIdSet } from '@/lib/scope'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatDate, today, getWeekStart, getWeekEnd } from '@/lib/formatters'
@@ -41,7 +42,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadDashboard()
-  }, [tenantId])
+  }, [tenantId, user])
 
   async function loadDashboard() {
     setLoading(true)
@@ -50,11 +51,14 @@ export default function DashboardPage() {
       const weekStart = getWeekStart()
       const weekEnd = getWeekEnd()
 
-      // Routes (toda la empresa)
-      const routes = await db.routes.where('tenantId').equals(tenantId).toArray()
+      // RESTRICCIÓN POR RUTAS: el alcance limita TODAS las agregaciones ANTES de sumar.
+      const scope = await getAccessibleRouteIdSet(user, tenantId)
 
-      // Sales
-      const allSales = await db.sales.where('tenantId').equals(tenantId).toArray()
+      // Routes (solo rutas autorizadas)
+      const routes = (await db.routes.where('tenantId').equals(tenantId).toArray()).filter(r => scope.has(r.id))
+
+      // Sales (solo de rutas autorizadas)
+      const allSales = (await db.sales.where('tenantId').equals(tenantId).toArray()).filter(s => scope.has(s.routeId))
       const ventasActivas = allSales.filter(s => s.status === 'activa')
 
       // Revisión socio 25-jun — Base actual vs Cartera en calle (consolidado de la empresa).
@@ -68,8 +72,8 @@ export default function DashboardPage() {
       }
       const totalControlado = baseActualTotal + carteraEnCalle
 
-      // Payments
-      const allPayments = await db.payments.where('tenantId').equals(tenantId).toArray()
+      // Payments (solo de rutas autorizadas)
+      const allPayments = (await db.payments.where('tenantId').equals(tenantId).toArray()).filter(p => scope.has(p.routeId))
       const recaudoHoy = allPayments
         .filter(p => p.fecha === todayStr)
         .reduce((s, p) => s + p.valor, 0)
@@ -77,12 +81,12 @@ export default function DashboardPage() {
         .filter(p => p.fecha >= weekStart && p.fecha <= weekEnd)
         .reduce((s, p) => s + p.valor, 0)
 
-      // Clients
-      const allClients = await db.clients.where('tenantId').equals(tenantId).toArray()
+      // Clients (solo de rutas autorizadas)
+      const allClients = (await db.clients.where('tenantId').equals(tenantId).toArray()).filter(c => scope.has(c.routeId))
       const clientesActivos = allClients.filter(c => c.status === 'activo').length
 
-      // Expenses
-      const allExpenses = await db.expenses.where('tenantId').equals(tenantId).toArray()
+      // Expenses (solo de rutas autorizadas)
+      const allExpenses = (await db.expenses.where('tenantId').equals(tenantId).toArray()).filter(e => scope.has(e.routeId))
       const gastosSemana = allExpenses
         .filter(e => e.fecha >= weekStart && e.fecha <= weekEnd)
         .reduce((s, e) => s + e.valor, 0)

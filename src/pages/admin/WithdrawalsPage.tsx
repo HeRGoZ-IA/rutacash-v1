@@ -12,6 +12,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
+import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import type { Withdrawal, Route, User } from '@/models/types'
 
 // Revisión socio 25-jun — Retiros agrupados por ruta (presentación similar a Capital).
@@ -44,7 +45,7 @@ export default function WithdrawalsPage() {
   // Grupo de ruta seleccionado para ver el detalle de sus retiros.
   const [detailGroup, setDetailGroup] = useState<WithdrawalGroup | null>(null)
 
-  useEffect(() => { load() }, [tenantId])
+  useEffect(() => { load() }, [tenantId, user])
 
   async function load() {
     setLoading(true)
@@ -53,17 +54,20 @@ export default function WithdrawalsPage() {
       db.routes.where('tenantId').equals(tenantId).toArray(),
       db.users.where('tenantId').equals(tenantId).toArray(),
     ])
-    setWithdrawals(ws.sort((a, b) => b.fecha.localeCompare(a.fecha)))
-    setRoutes(rts)
+    // RESTRICCIÓN POR RUTAS: retiros y rutas limitados a los autorizados.
+    const scopedRts = filterAccessibleRoutes(user, rts)
+    setWithdrawals(filterByAccessibleRoute(user, ws).sort((a, b) => b.fecha.localeCompare(a.fecha)))
+    setRoutes(scopedRts)
     setUsers(us)
     const base: Record<string, number> = {}
-    for (const r of rts) base[r.id] = await getRouteAvailableCapital(r.id)
+    for (const r of scopedRts) base[r.id] = await getRouteAvailableCapital(r.id)
     setBaseByRoute(base)
     setLoading(false)
   }
 
   async function handleSave() {
     if (!form.routeId || form.valor <= 0) { toast.error('Ruta y valor requeridos'); return }
+    if (!canAccessRoute(user, form.routeId)) { toast.error('No tienes permiso sobre esa ruta.'); return }
     setSaving(true)
     try {
       const w: Withdrawal = {

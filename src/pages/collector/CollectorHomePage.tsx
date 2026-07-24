@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useOpBase } from '@/hooks/useOpBase'
 import {
   MapPin, HandCoins, Users, Wallet, RefreshCw, Wifi, WifiOff,
 } from 'lucide-react'
@@ -20,6 +21,7 @@ export default function CollectorHomePage() {
   const isOnline = useOnlineStatus()
   const { activeRouteId } = useCollectorRoute()
   const navigate = useNavigate()
+  const base = useOpBase()
   const [route, setRoute] = useState<Route | null>(null)
   const [stats, setStats] = useState({ pendientes: 0, cobradoHoy: 0, activos: 0, porDesembolsar: 0, pendientesSync: 0 })
   const [loading, setLoading] = useState(true)
@@ -89,7 +91,7 @@ export default function CollectorHomePage() {
       </div>
 
       {/* BLOQUE 1 — Recaudo (acción principal del día, con más protagonismo) */}
-      <button onClick={() => navigate('/collector/route')} className="block w-full text-left bg-white rounded-2xl shadow-card border border-primary-100 ring-1 ring-primary-100 p-4 active:bg-gray-50 transition-colors">
+      <button onClick={() => navigate(`${base}/route`)} className="block w-full text-left bg-white rounded-2xl shadow-card border border-primary-100 ring-1 ring-primary-100 p-4 active:bg-gray-50 transition-colors">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 bg-emerald-100 rounded-2xl flex items-center justify-center flex-shrink-0">
             <HandCoins className="w-6 h-6 text-emerald-600" />
@@ -101,7 +103,7 @@ export default function CollectorHomePage() {
         </div>
         <div className="flex flex-wrap gap-2 mt-3.5">
           <span className="inline-flex items-center justify-center h-9 px-4 rounded-xl bg-primary-600 text-white text-xs font-semibold">Ir a recaudo</span>
-          <span onClick={e => { e.stopPropagation(); navigate('/collector/payment-history') }}
+          <span onClick={e => { e.stopPropagation(); navigate(`${base}/payment-history`) }}
             className="inline-flex items-center h-9 px-3.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-700 text-xs font-medium border border-gray-200 transition-colors">
             Histórico de abonos
           </span>
@@ -120,9 +122,9 @@ export default function CollectorHomePage() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2 mt-3.5">
-          <Chip label="Nuevo cliente" to="/collector/clients/new" />
-          <Chip label="Nueva venta" to="/collector/new-sale" />
-          <Chip label="Desembolsos" to="/collector/disbursements" badge={stats.porDesembolsar} />
+          <Chip label="Nuevo cliente" to={`${base}/clients/new`} />
+          <Chip label="Nueva venta" to={`${base}/new-sale`} />
+          <Chip label="Desembolsos" to={`${base}/disbursements`} badge={stats.porDesembolsar} />
         </div>
       </div>
 
@@ -138,14 +140,14 @@ export default function CollectorHomePage() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2 mt-3.5">
-          <Chip label="Gastos" to="/collector/expenses" />
-          <Chip label="Informe del día" to="/collector/daily-report" />
-          <Chip label="Cuadre" to="/collector/cashclose" />
+          <Chip label="Gastos" to={`${base}/expenses`} />
+          <Chip label="Informe del día" to={`${base}/daily-report`} />
+          <Chip label="Cuadre" to={`${base}/cashclose`} />
         </div>
       </div>
 
       {/* BLOQUE 4 — Sincronización */}
-      <button onClick={() => navigate('/collector/sync')} className="block w-full text-left bg-white rounded-2xl shadow-card border border-gray-100 p-4 active:bg-gray-50 transition-colors">
+      <button onClick={() => navigate(`${base}/sync`)} className="block w-full text-left bg-white rounded-2xl shadow-card border border-gray-100 p-4 active:bg-gray-50 transition-colors">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center flex-shrink-0">
             <RefreshCw className="w-6 h-6 text-blue-500" />

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Search, CheckCircle, XCircle, Eye } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useOpBase } from '@/hooks/useOpBase'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PaymentDaysBadges } from '@/components/ui/PaymentDaysBadges'
@@ -42,6 +43,7 @@ export default function CollectorRoutePage() {
   const { currency } = useTenant()
   const { activeRouteId } = useCollectorRoute()
   const navigate = useNavigate()
+  const base = useOpBase()
   const [items, setItems] = useState<RouteItem[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -150,9 +152,9 @@ export default function CollectorRoutePage() {
         <div className="px-4 space-y-2.5">
           {filtered.map(item => (
             <ClientCard key={item.sale.id} item={item} currency={currency}
-              onPayment={() => navigate(`/collector/payment/${item.sale.id}`)}
-              onNoPayment={() => navigate(`/collector/no-payment/${item.sale.id}`)}
-              onView={() => navigate(`/collector/client/${item.client.id}?saleId=${item.sale.id}`)} />
+              onPayment={() => navigate(`${base}/payment/${item.sale.id}`)}
+              onNoPayment={() => navigate(`${base}/no-payment/${item.sale.id}`)}
+              onView={() => navigate(`${base}/client/${item.client.id}?saleId=${item.sale.id}`)} />
           ))}
         </div>
       )}

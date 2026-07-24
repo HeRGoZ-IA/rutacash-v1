@@ -4,15 +4,20 @@ import { Eye, EyeOff, Loader2, TrendingUp, Shield, Smartphone } from 'lucide-rea
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 import { IS_DEMO, IS_CLEAN } from '@/lib/appMode'
+import { homePathForRole } from '@/lib/permissions'
+import type { UserRole } from '@/models/types'
 
 const ALL_DEMO_USERS = [
-  { email: 'superadmin@demo.com', password: '123456', label: 'Super Admin', role: 'Platform' },
+  { email: 'superadmin@demo.com', password: '123456', label: 'Super Admin', role: 'Plataforma' },
   { email: 'admin@demo.com', password: '123456', label: 'Administrador', role: 'Empresa' },
-  { email: 'supervisor@demo.com', password: '123456', label: 'Supervisor', role: 'Empresa' },
+  { email: 'socio1@demo.com', password: '123456', label: 'Socio', role: 'Consulta' },
+  { email: 'supervisor@demo.com', password: '123456', label: 'Supervisor', role: 'Rutas' },
   { email: 'cobrador@demo.com', password: '123456', label: 'Cobrador', role: 'Ruta' },
+  { email: 'secretario@demo.com', password: '123456', label: 'Secretario', role: 'Autorizaciones' },
 ]
 
 const CLEAN_USERS = [
+  { email: 'superadmin@demo.com', password: '123456', label: 'Super Admin', role: 'Plataforma' },
   { email: 'admin@demo.com', password: '123456', label: 'Administrador', role: 'Empresa' },
 ]
 
@@ -34,10 +39,8 @@ export default function LoginPage() {
   }, [isAuthenticated, user])
 
   function redirectByRole(rol: string) {
-    if (rol === 'superadmin') return navigate('/platform')
-    if (rol === 'cobrador') return navigate('/collector/home')
-    if (rol === 'supervisor') return navigate('/supervisor/home')
-    return navigate('/admin/dashboard')
+    // Fuente única de redirección post-login (modelo de roles y permisos).
+    navigate(homePathForRole(rol as UserRole))
   }
 
   async function handleSubmit(e: React.FormEvent) {

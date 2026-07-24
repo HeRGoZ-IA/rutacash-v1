@@ -5,12 +5,14 @@
 import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
 import { nowISO } from '@/lib/formatters'
+import { can } from '@/lib/permissions'
+import { assertCan } from '@/services/authz'
 import {
   calculateTotalWithInterest, calculateInstallmentValue,
   estimateFinalDate, generateInstallments,
 } from '@/services/installmentEngine'
 import type {
-  Sale, Installment, SaleRequest, PaymentFrequency, DisbursementStatus,
+  Sale, Installment, SaleRequest, PaymentFrequency, DisbursementStatus, User,
 } from '@/models/types'
 
 export interface SaleInputs {
@@ -62,10 +64,16 @@ export function buildSaleWithInstallments(
 }
 
 /**
- * Venta DIRECTA del cobrador (autorizada y dentro de límite): queda desembolsada
- * y activa para recaudo de inmediato. Crea venta + parcelas en transacción.
+ * Venta DIRECTA (desembolsada y activa de inmediato). VALIDACIÓN EN SERVICIO
+ * (modelo de roles y permisos): quien la ejecuta debe tener la capacidad
+ * `sale.createDirect` sobre la ruta. Hoy solo la poseen Administrador y Super Admin.
+ * Un Cobrador/Supervisor/Secretario será RECHAZADO aquí aunque intente saltarse la UI.
+ * `actor` es opcional únicamente para compatibilidad con seeds/tests internos.
  */
-export async function createDirectSale(input: SaleInputs): Promise<Sale> {
+export async function createDirectSale(input: SaleInputs, actor?: User): Promise<Sale> {
+  if (actor && !can(actor, 'sale.createDirect', { routeId: input.routeId, tenantId: input.tenantId })) {
+    throw new Error('No autorizado: este perfil no puede crear ventas directas. La venta debe enviarse como solicitud.')
+  }
   const { sale, installments } = buildSaleWithInstallments(input, 'desembolsado')
   await db.transaction('rw', [db.sales, db.installments], async () => {
     await db.sales.add(sale)
@@ -84,28 +92,62 @@ export function buildSaleRequest(input: SaleInputs): SaleRequest {
     installmentsCount: input.numeroCuotas, installmentValue: valorCuota,
     frequency: input.frecuenciaPago, startDate: input.fechaInicio, paymentDays: input.paymentDays,
     status: 'pending', requestedAt: nowISO(),
+    // Trazabilidad: condiciones SOLICITADAS congeladas (no se sobrescriben al aprobar).
+    requestedBy: input.createdByUserId,
+    requestedInterestRate: input.tasaInteres,
+    requestedFrequency: input.frecuenciaPago,
+    requestedPaymentDays: input.paymentDays,
   }
 }
 
-/** Crea una Solicitud de venta (estado pending). No crea venta todavía. */
-export async function createSaleRequest(input: SaleInputs): Promise<SaleRequest> {
+/**
+ * Crea una Solicitud de venta (estado pending). VALIDA EN SERVICIO que el actor
+ * tenga `sale.createRequest` sobre la ruta (fail-closed) cuando se pasa `actor`.
+ */
+export async function createSaleRequest(input: SaleInputs, actor?: User): Promise<SaleRequest> {
+  if (actor) assertCan(actor, 'sale.createRequest', { routeId: input.routeId, tenantId: input.tenantId })
   const request = buildSaleRequest(input)
   await db.saleRequests.add(request)
   return request
 }
 
 /**
- * Aprueba una solicitud: crea la venta + parcelas con disbursementStatus 'pendiente'
- * (queda lista pero NO cobrable hasta que el cobrador confirme el desembolso) y
- * marca la solicitud como 'approved' enlazando la venta. Todo en una transacción.
+ * Cambios de condiciones permitidos por el autorizador (Secretario/Admin/Superadmin):
+ * porcentaje (tasa), frecuencia y días de pago, además de confirmación telefónica.
  */
-export async function approveSaleRequest(request: SaleRequest, reviewerId: string, notes?: string): Promise<Sale> {
+export interface ApprovalOverrides {
+  notes?: string
+  interestRate?: number
+  frequency?: PaymentFrequency
+  paymentDays?: number[]
+  phoneConfirmed?: boolean
+  phoneConfirmationNote?: string
+}
+
+/**
+ * Aprueba una solicitud: crea la venta + parcelas con disbursementStatus 'pendiente'
+ * (lista pero NO cobrable hasta confirmar el desembolso) y marca la solicitud como
+ * 'approved'. Registra las condiciones FINALES sin sobrescribir las SOLICITADAS
+ * (evidencia antes/después). El importe NO se modifica en la autorización.
+ */
+export async function approveSaleRequest(request: SaleRequest, actor: User, overrides?: ApprovalOverrides): Promise<Sale> {
+  // Guard de datos: solo quien puede APROBAR autorizaciones en ESA ruta.
+  assertCan(actor, 'authorization.approve', { routeId: request.routeId, tenantId: request.tenantId })
+  if (overrides && (overrides.interestRate !== undefined || overrides.frequency !== undefined || overrides.paymentDays !== undefined)) {
+    assertCan(actor, 'authorization.modifyConditions', { routeId: request.routeId, tenantId: request.tenantId })
+  }
+  const reviewerId = actor.id
   const route = await db.routes.get(request.routeId)
+  // Condiciones finales = override ?? condición solicitada.
+  const finalInterest = overrides?.interestRate ?? request.interestRate
+  const finalFrequency = overrides?.frequency ?? request.frequency
+  const finalPaymentDays = overrides?.paymentDays ?? request.paymentDays ?? []
+
   const input: SaleInputs = {
     tenantId: request.tenantId, officeId: route?.officeId ?? '', routeId: request.routeId,
     clientId: request.clientId, createdByUserId: request.collectorId,
-    valorVenta: request.amount, tasaInteres: request.interestRate, numeroCuotas: request.installmentsCount,
-    frecuenciaPago: request.frequency, fechaInicio: request.startDate, paymentDays: request.paymentDays ?? [],
+    valorVenta: request.amount, tasaInteres: finalInterest, numeroCuotas: request.installmentsCount,
+    frecuenciaPago: finalFrequency, fechaInicio: request.startDate, paymentDays: finalPaymentDays,
   }
   const { sale, installments } = buildSaleWithInstallments(input, 'pendiente', request.id)
   await db.transaction('rw', [db.sales, db.installments, db.saleRequests], async () => {
@@ -113,16 +155,28 @@ export async function approveSaleRequest(request: SaleRequest, reviewerId: strin
     await db.installments.bulkAdd(installments)
     await db.saleRequests.update(request.id, {
       status: 'approved', reviewedAt: nowISO(), reviewedBy: reviewerId,
-      approvalNotes: notes || undefined, saleId: sale.id,
+      approvalNotes: overrides?.notes || undefined, saleId: sale.id,
+      // Congelar solicitadas si no existían (solicitudes antiguas) y registrar finales.
+      requestedInterestRate: request.requestedInterestRate ?? request.interestRate,
+      requestedFrequency: request.requestedFrequency ?? request.frequency,
+      requestedPaymentDays: request.requestedPaymentDays ?? request.paymentDays,
+      approvedInterestRate: finalInterest,
+      approvedFrequency: finalFrequency,
+      approvedPaymentDays: finalPaymentDays,
+      phoneConfirmed: overrides?.phoneConfirmed ?? request.phoneConfirmed,
+      phoneConfirmationNote: overrides?.phoneConfirmationNote ?? request.phoneConfirmationNote,
+      // Reflejar en los campos base las condiciones finales aplicadas.
+      interestRate: finalInterest, frequency: finalFrequency, paymentDays: finalPaymentDays,
     })
   })
   return sale
 }
 
-/** Rechaza una solicitud con motivo. No crea venta. */
-export async function rejectSaleRequest(request: SaleRequest, reviewerId: string, reason: string): Promise<void> {
+/** Rechaza una solicitud con motivo. No crea venta. Valida capacidad en servicio. */
+export async function rejectSaleRequest(request: SaleRequest, actor: User, reason: string): Promise<void> {
+  assertCan(actor, 'authorization.reject', { routeId: request.routeId, tenantId: request.tenantId })
   await db.saleRequests.update(request.id, {
-    status: 'rejected', reviewedAt: nowISO(), reviewedBy: reviewerId, rejectionReason: reason,
+    status: 'rejected', reviewedAt: nowISO(), reviewedBy: actor.id, rejectionReason: reason,
   })
 }
 
@@ -158,9 +212,10 @@ export async function countPendingSaleRequests(tenantId: string): Promise<number
  * Confirma el desembolso de una venta aprobada: la venta queda desembolsada
  * (cobrable) y la solicitud asociada pasa a 'disbursed'.
  */
-export async function confirmDisbursement(saleId: string): Promise<void> {
+export async function confirmDisbursement(saleId: string, actor?: User): Promise<void> {
   const sale = await db.sales.get(saleId)
   if (!sale) throw new Error('Venta no encontrada')
+  if (actor) assertCan(actor, 'sale.confirmDisbursement', { routeId: sale.routeId, tenantId: sale.tenantId })
   await db.transaction('rw', [db.sales, db.saleRequests], async () => {
     await db.sales.update(saleId, { disbursementStatus: 'desembolsado', updatedAt: nowISO() })
     if (sale.saleRequestId) {

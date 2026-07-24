@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useOpBase } from '@/hooks/useOpBase'
 import { CheckCircle, MapPin, MessageSquare } from 'lucide-react'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
@@ -14,6 +15,7 @@ import type { Sale, Client, Installment } from '@/models/types'
 export default function PaymentPage() {
   const { saleId } = useParams<{ saleId: string }>()
   const navigate = useNavigate()
+  const base = useOpBase()
   const { user } = useAuth()
   const { currency } = useTenant()
   const [sale, setSale] = useState<Sale | null>(null)
@@ -128,7 +130,7 @@ export default function PaymentPage() {
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-center space-y-2">
           <p className="text-sm font-semibold text-amber-700">Venta pendiente de desembolso</p>
           <p className="text-xs text-amber-600">No puedes registrar abonos hasta confirmar el desembolso en la sección Desembolsos.</p>
-          <button onClick={() => navigate('/collector/disbursements')} className="text-primary-600 text-sm font-medium">Ir a Desembolsos</button>
+          <button onClick={() => navigate(`${base}/disbursements`)} className="text-primary-600 text-sm font-medium">Ir a Desembolsos</button>
         </div>
       ) : success ? (
         <div className="flex flex-col items-center justify-center py-8 space-y-4">
@@ -145,7 +147,7 @@ export default function PaymentPage() {
           <button onClick={openWhatsApp} className="flex items-center gap-2 bg-green-500 text-white px-4 py-2.5 rounded-xl text-sm font-medium">
             <MessageSquare className="w-4 h-4" /> Enviar recibo por WhatsApp
           </button>
-          <button onClick={() => navigate('/collector/route')} className="text-primary-600 text-sm font-medium">Volver a la ruta</button>
+          <button onClick={() => navigate(`${base}/route`)} className="text-primary-600 text-sm font-medium">Volver a la ruta</button>
         </div>
       ) : (
         <>

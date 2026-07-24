@@ -10,7 +10,8 @@
     "build:demo": "tsc && vite build --mode demo",
     "build:clean": "tsc && vite build --mode clean",
     "preview": "vite preview",
-    "lint": "eslint . --ext ts,tsx"
+    "lint": "eslint . --ext ts,tsx",
+    "test:permissions": "npx --yes esbuild tests/permissions.test.ts --bundle --format=esm --platform=node --outfile=tests/_out.mjs && node tests/_out.mjs"
   },
   "keywords": [],
   "author": "",

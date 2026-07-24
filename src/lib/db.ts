@@ -3,7 +3,7 @@ import type {
   Tenant, Route, User, Client, Sale, Installment, Payment,
   NoPaymentVisit, ExpenseCategory, Expense, CapitalMovement, Transfer,
   Withdrawal, CashboxMovement, WeeklySettlement, AuditLog, SaleRequest,
-  PartnerCashMovement,
+  PartnerCashMovement, PaymentAdjustmentRequest,
 } from '@/models/types'
 
 export class RutaCashDB extends Dexie {
@@ -25,6 +25,7 @@ export class RutaCashDB extends Dexie {
   auditLogs!: Table<AuditLog>
   saleRequests!: Table<SaleRequest>
   partnerCashMovements!: Table<PartnerCashMovement>
+  paymentAdjustmentRequests!: Table<PaymentAdjustmentRequest>
 
   constructor() {
     super('RutaCashDB')
@@ -77,6 +78,74 @@ export class RutaCashDB extends Dexie {
     // índices; se filtran en memoria. No se toca ninguna tabla existente.
     this.version(4).stores({
       partnerCashMovements: 'id, tenantId, partnerId, type, relatedTransferId, fecha',
+    })
+
+    // ============================================================
+    // v5 (MODELO DE ROLES Y PERMISOS): migración ADITIVA y SEGURA.
+    //  - Nueva tabla `paymentAdjustmentRequests` (solicitudes de ajuste de pago).
+    //  - Índice `state` en `payments` para la corrección controlada.
+    //  - Índice `correctionOfPaymentId`/`reversesPaymentId` para trazar enlaces.
+    //  - `.upgrade()` migra datos EXISTENTES sin borrar nada:
+    //      · Cobradores: canCreateDirectSales → false (ya no crean ventas directas).
+    //      · Todos los roles operativos: routeId → authorizedRouteIds (sin duplicar).
+    //      · Liquidaciones existentes: status → 'cerrada'.
+    //    No se eliminan tablas ni registros; los campos nuevos son opcionales y
+    //    conviven con registros anteriores (valores por defecto seguros en runtime).
+    // ============================================================
+    this.version(5).stores({
+      payments: 'id, tenantId, saleId, clientId, routeId, collectorId, syncStatus, state, correctionOfPaymentId, reversesPaymentId, createdAt',
+      paymentAdjustmentRequests: 'id, tenantId, routeId, paymentId, saleId, status, requestedAt',
+    }).upgrade(async (tx) => {
+      // Cobradores: deshabilitar venta directa (toda venta pasa a ser solicitud).
+      await tx.table('users').toCollection().modify((u: User) => {
+        if (u.rol === 'cobrador') {
+          u.canCreateDirectSales = false
+          u.maxDirectSaleAmount = undefined
+        }
+        // routeId legacy → authorizedRouteIds (sin duplicar), para roles con rutas.
+        const roleNeedsRoutes = u.rol === 'admin' || u.rol === 'socio' || u.rol === 'supervisor' || u.rol === 'cobrador' || u.rol === 'secretario'
+        if (roleNeedsRoutes) {
+          const ids = new Set<string>(u.authorizedRouteIds ?? [])
+          if (u.routeId) ids.add(u.routeId)
+          // Solo fijar la lista si hay algo que preservar (no forzar [] a admin legacy).
+          if (ids.size > 0) u.authorizedRouteIds = [...ids]
+        }
+      })
+      // Liquidaciones existentes representan semanas ya cerradas.
+      await tx.table('weeklySettlements').toCollection().modify((w: WeeklySettlement) => {
+        if (!w.status) w.status = 'cerrada'
+      })
+      // Pagos existentes → estado 'active' explícito (compatibilidad; el índice `state`
+      // trata undefined como no indexado, pero fijarlo evita ambigüedad al filtrar).
+      await tx.table('payments').toCollection().modify((p: Payment) => {
+        if (!p.state) p.state = 'active'
+      })
+    })
+
+    // ============================================================
+    // v6 (CIERRE DE BRECHAS — FAIL CLOSED del Administrador): aditiva y segura.
+    // Trata explícitamente a los Administradores EXISTENTES para eliminar la regla
+    // insegura "admin sin rutas = todas". NO otorga acceso global a nadie:
+    //   · Con `authorizedRouteIds`: se conservan, se DEDUPLICAN y se VALIDA que las
+    //     rutas existan y pertenezcan al tenant del usuario.
+    //   · Solo con `routeId` legado: se convierte a `authorizedRouteIds = [routeId]`
+    //     (si la ruta existe en su tenant).
+    //   · Sin ninguna asignación: se deja SIN acceso operativo (no se inventan rutas).
+    //     Los seeds DEMO/CLEAN asignan rutas explícitamente.
+    // No cambia datos financieros ni elimina registros.
+    // ============================================================
+    this.version(6).upgrade(async (tx) => {
+      const routes = await tx.table('routes').toArray() as Route[]
+      const routeById = new Map(routes.map(r => [r.id, r]))
+      const roleNeedsRoutes = (r: string) => r === 'admin' || r === 'socio' || r === 'supervisor' || r === 'cobrador' || r === 'secretario'
+      await tx.table('users').toCollection().modify((u: User) => {
+        if (!roleNeedsRoutes(u.rol)) return
+        const raw = new Set<string>(u.authorizedRouteIds ?? [])
+        if (u.routeId) raw.add(u.routeId) // convertir routeId legado
+        // Validar existencia y pertenencia al tenant (elimina referencias inconsistentes).
+        const valid = [...raw].filter(id => routeById.get(id)?.tenantId === u.tenantId)
+        u.authorizedRouteIds = valid.length > 0 ? valid : undefined
+      })
     })
   }
 }

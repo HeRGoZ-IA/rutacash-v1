@@ -1,23 +1,20 @@
 import type { User } from '@/models/types'
+import { authorizedRouteIdsOf } from '@/lib/permissions'
 
 /**
- * Rutas asignadas de un usuario (concepto unificado).
+ * Rutas asignadas de un usuario (concepto unificado — modelo de roles y permisos).
  *
- * - **Cobrador:** todas sus **rutas asignadas**. Consolida `authorizedRouteIds`
- *   (lista de rutas asignadas) + `routeId` legacy, sin duplicar. Un cobrador puede
- *   tener una o muchas rutas asignadas.
- * - **Supervisor:** sus **rutas autorizadas** (`authorizedRouteIds`), con fallback a
- *   `routeId` legacy si la lista está vacía.
- * - **Otros roles (admin/superadmin):** no aplica → [].
+ * Consolida `authorizedRouteIds` (lista) + `routeId` legacy sin duplicar. Aplica a
+ * admin, socio, supervisor, cobrador y secretario. El SUPERADMIN no se limita por
+ * rutas (devuelve [] aquí; ver `isRouteUnrestricted` en permissions.ts).
+ *
+ * Fuente única: delega en `authorizedRouteIdsOf` (permissions.ts) para que exista
+ * un solo lugar donde se resuelven las rutas de un usuario.
  */
 export function getAssignedRouteIds(user?: User | null): string[] {
   if (!user) return []
-  if (user.rol === 'cobrador' || user.rol === 'supervisor') {
-    const ids = new Set(user.authorizedRouteIds ?? [])
-    if (user.routeId) ids.add(user.routeId)
-    return [...ids]
-  }
-  return []
+  if (user.rol === 'superadmin') return []
+  return authorizedRouteIdsOf(user)
 }
 
 /**

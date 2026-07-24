@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation, Navigate } from 'react-router-dom'
-import { Home, MapPin, DollarSign, Banknote, Calculator, LogOut, WifiOff, Wifi, ShieldAlert, ChevronDown } from 'lucide-react'
+import { Home, MapPin, DollarSign, Banknote, Calculator, LogOut, WifiOff, Wifi, ShieldAlert, ChevronDown, UserCog } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
-import { useCollectorRoute } from '@/hooks/useCollectorRoute'
+import { useActiveRoute } from '@/hooks/useActiveRoute'
+import { useOpBase } from '@/hooks/useOpBase'
 import { getAuthorizedRouteIds } from '@/lib/roles'
 import { countPendingDisbursements } from '@/services/saleRequestService'
 import { db } from '@/lib/db'
@@ -12,14 +13,23 @@ import { AppModeBanner } from '@/components/ui/AppModeBanner'
 import { CountBadge } from '@/components/ui/CountBadge'
 import type { Route } from '@/models/types'
 
+/**
+ * Layout OPERATIVO compartido (App Cobrador y App Supervisor).
+ * La base de rutas (`/collector` o `/supervisor`) se resuelve con `useOpBase` según
+ * la URL, de modo que las mismas pantallas sirvan a ambos roles SIN duplicar lógica.
+ * El rol/auditoría siguen siendo los del usuario real; los servicios validan
+ * capacidad + ruta (p. ej. el Supervisor no puede crear ventas directas).
+ */
 export function CollectorLayout() {
   const { user, logout } = useAuth()
   const isOnline = useOnlineStatus()
   const navigate = useNavigate()
   const location = useLocation()
-  const { activeRouteId, setActiveRouteId } = useCollectorRoute()
+  const base = useOpBase()
+  const { activeRouteId, setActiveRouteId } = useActiveRoute()
   const [routes, setRoutes] = useState<Route[] | null>(null) // null = cargando
   const [pendingDisb, setPendingDisb] = useState(0)
+  const roleTitle = user?.rol === 'supervisor' ? 'Supervisor' : 'Cobrador'
 
   useEffect(() => { loadRoutes() }, [user])
 
@@ -51,16 +61,16 @@ export function CollectorLayout() {
     }
   }, [routes, activeRouteId, setActiveRouteId])
 
-  // Vocabulario cobrador: Recaudo, Desembolsos, Gastos, Cuadre.
+  // Menú operativo (mismo para Cobrador y Supervisor; los servicios diferencian permisos).
   const navItems = [
-    { path: '/collector/home', label: 'Inicio', icon: <Home className="w-5 h-5" />, badge: 0 },
-    { path: '/collector/route', label: 'Recaudo', icon: <MapPin className="w-5 h-5" />, badge: 0 },
-    { path: '/collector/disbursements', label: 'Desembolsos', icon: <Banknote className="w-5 h-5" />, badge: pendingDisb },
-    { path: '/collector/expenses', label: 'Gastos', icon: <DollarSign className="w-5 h-5" />, badge: 0 },
-    { path: '/collector/cashclose', label: 'Cuadre', icon: <Calculator className="w-5 h-5" />, badge: 0 },
+    { path: `${base}/home`, label: 'Inicio', icon: <Home className="w-5 h-5" />, badge: 0 },
+    { path: `${base}/route`, label: 'Recaudo', icon: <MapPin className="w-5 h-5" />, badge: 0 },
+    { path: `${base}/disbursements`, label: 'Desembolsos', icon: <Banknote className="w-5 h-5" />, badge: pendingDisb },
+    { path: `${base}/expenses`, label: 'Gastos', icon: <DollarSign className="w-5 h-5" />, badge: 0 },
+    { path: `${base}/cashclose`, label: 'Cuadre', icon: <Calculator className="w-5 h-5" />, badge: 0 },
   ]
 
-  const onSelectPage = location.pathname === '/collector/select-route'
+  const onSelectPage = location.pathname === `${base}/select-route`
 
   // --- Estados de carga / sin rutas / gating de selección ---
   if (routes === null) {
@@ -84,7 +94,7 @@ export function CollectorLayout() {
 
   // Debe seleccionar ruta primero (varias rutas y ninguna activa válida)
   if (!activeRoute && !onSelectPage) {
-    return <Navigate to="/collector/select-route" replace />
+    return <Navigate to={`${base}/select-route`} replace />
   }
 
   return (
@@ -96,9 +106,9 @@ export function CollectorLayout() {
             <span className="text-white font-bold text-xs">RC</span>
           </div>
           <div className="min-w-0">
-            <p className="font-semibold text-sm leading-tight">RutaCash</p>
+            <p className="font-semibold text-sm leading-tight">RutaCash · {roleTitle}</p>
             {activeRoute && !onSelectPage ? (
-              <button onClick={() => navigate('/collector/select-route')} className="flex items-center gap-1 text-primary-100 text-xs leading-tight hover:text-white transition-colors">
+              <button onClick={() => navigate(`${base}/select-route`)} className="flex items-center gap-1 text-primary-100 text-xs leading-tight hover:text-white transition-colors">
                 <MapPin className="w-3 h-3 flex-shrink-0" />
                 <span className="truncate max-w-[150px]">{activeRoute.nombre}</span>
                 {routes.length > 1 && <ChevronDown className="w-3 h-3 flex-shrink-0" />}
@@ -113,6 +123,9 @@ export function CollectorLayout() {
             {isOnline ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
             {isOnline ? 'Online' : 'Offline'}
           </div>
+          <button onClick={() => navigate(`${base}/account`)} className="p-2 rounded-lg hover:bg-primary-600 transition-colors" aria-label="Mi cuenta">
+            <UserCog className="w-4 h-4" />
+          </button>
           <button onClick={() => { logout(); navigate('/login') }} className="p-2 rounded-lg hover:bg-primary-600 transition-colors" aria-label="Cerrar sesión">
             <LogOut className="w-4 h-4" />
           </button>
