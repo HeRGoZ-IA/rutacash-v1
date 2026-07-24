@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, MapPin, CreditCard, Wallet,
   ArrowLeftRight, TrendingDown, Archive, BarChart3, CalendarRange,
-  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt, ArrowLeft
+  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
@@ -15,6 +15,7 @@ import { countPendingSaleRequests } from '@/services/saleRequestService'
 import { countPendingAdjustmentRequests } from '@/services/paymentCorrectionService'
 import { hasOperationalRoutes, ROLE_LABELS } from '@/lib/permissions'
 import { AdminNoRoutes } from '@/components/layout/AdminNoRoutes'
+import { BackToPlatformButton } from '@/components/layout/BackToPlatformButton'
 
 interface NavItem {
   path: string
@@ -42,16 +43,12 @@ const navItems: NavItem[] = [
 ]
 
 export function AdminLayout() {
-  const { user, tenant, logout, exitTenantContext } = useAuth()
+  const { user, tenant, logout } = useAuth()
   const isOnline = useOnlineStatus()
   const navigate = useNavigate()
   const location = useLocation()
   const isSuperadmin = user?.rol === 'superadmin'
   const roleLabel = user ? ROLE_LABELS[user.rol] : ''
-
-  // Volver a Empresas (solo Super Admin): limpia el tenant y navega a /platform,
-  // conservando la sesión de Super Admin.
-  const backToPlatform = () => { exitTenantContext(); navigate('/platform') }
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [pendingAuth, setPendingAuth] = useState(0)
   const [pendingAdj, setPendingAdj] = useState(0)
@@ -94,17 +91,9 @@ export function AdminLayout() {
         </div>
       </div>
 
-      {/* Volver a Empresas (solo Super Admin operando dentro de una empresa) */}
-      {isSuperadmin && (
-        <button
-          onClick={() => { backToPlatform(); setSidebarOpen(false) }}
-          className="mx-3 mt-3 flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-primary-200 hover:bg-primary-800 hover:text-white transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" /> Volver a Empresas
-        </button>
-      )}
-
-      {/* Empresa activa + rol (encabezado del contexto) */}
+      {/* Empresa activa + rol (encabezado del contexto).
+          "Volver a Empresas" ya no vive en el menú: ahora es un botón flotante
+          (BackToPlatformButton) en el borde derecho, para no ocupar espacio operativo. */}
       {tenant && (
         <div className="mx-3 mt-3 px-3 py-2.5 bg-primary-800/70 rounded-xl">
           <p className="text-white text-xs font-medium truncate">{tenant.nombre}</p>
@@ -159,6 +148,9 @@ export function AdminLayout() {
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
+      {/* Volver a Empresas — botón flotante lateral (solo Super Admin con empresa activa) */}
+      <BackToPlatformButton />
+
       {/* Sidebar Desktop */}
       <aside className="hidden lg:flex flex-col w-56 bg-primary-900 flex-shrink-0">
         <SidebarContent />
@@ -189,12 +181,6 @@ export function AdminLayout() {
           </button>
 
           <div className="flex-1 min-w-0 flex items-center gap-2">
-            {isSuperadmin && (
-              <button onClick={backToPlatform}
-                className="lg:hidden flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700 flex-shrink-0">
-                <ArrowLeft className="w-4 h-4" /> Empresas
-              </button>
-            )}
             {tenant && (
               <span className="text-sm font-medium text-gray-600 truncate">{tenant.nombre}{isSuperadmin ? ' · Super Admin' : ''}</span>
             )}
