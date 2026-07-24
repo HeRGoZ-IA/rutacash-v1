@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Building2, CheckCircle, PauseCircle, LogIn } from 'lucide-react'
+import { Plus, Building2, CheckCircle, PauseCircle, LogIn, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
@@ -7,18 +7,15 @@ import { Input, Select } from '@/components/ui/Input'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
-import { formatDate, nowISO } from '@/lib/formatters'
+import { formatDate, nowISO, today } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import type { Tenant, TenantPlan, TenantStatus } from '@/models/types'
 import { useAuth } from '@/hooks/useAuth'
 import { useNavigate } from 'react-router-dom'
 
-const PLANS: { value: TenantPlan; label: string }[] = [
-  { value: 'basico', label: 'Básico' },
-  { value: 'operativo', label: 'Operativo' },
-  { value: 'profesional', label: 'Profesional' },
-  { value: 'empresarial', label: 'Empresarial' },
-]
+// #7: el plan comercial NO tiene reglas/límites reales implementados; se oculta del
+// formulario y se asigna un plan predeterminado. Pendiente de definición comercial.
+const DEFAULT_PLAN: TenantPlan = 'profesional'
 
 export default function PlatformPage() {
   const { logout, user, selectTenant } = useAuth()
@@ -35,7 +32,8 @@ export default function PlatformPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ nombre: '', email: '', plan: 'profesional' as TenantPlan, pais: 'Colombia', moneda: 'COP', fechaVencimiento: '' })
+  const [editing, setEditing] = useState<Tenant | null>(null)
+  const [form, setForm] = useState({ nombre: '', email: '', pais: 'Colombia', moneda: 'COP', vigencia: 'sin' as 'sin' | 'con', fechaVencimiento: '' })
 
   useEffect(() => { load() }, [])
 
@@ -57,14 +55,50 @@ export default function PlatformPage() {
     setLoading(false)
   }
 
-  async function handleCreate() {
+  function openCreate() {
+    setEditing(null)
+    setForm({ nombre: '', email: '', pais: 'Colombia', moneda: 'COP', vigencia: 'sin', fechaVencimiento: '' })
+    setModalOpen(true)
+  }
+
+  function openEdit(t: Tenant) {
+    setEditing(t)
+    setForm({
+      nombre: t.nombre, email: t.email, pais: t.pais, moneda: t.moneda,
+      vigencia: t.fechaVencimiento ? 'con' : 'sin', fechaVencimiento: t.fechaVencimiento ?? '',
+    })
+    setModalOpen(true)
+  }
+
+  async function handleSave() {
     if (!form.nombre || !form.email) { toast.error('Nombre y email requeridos'); return }
+    // #7 Vigencia: si es "con fecha", es obligatoria y no puede ser anterior a hoy.
+    if (form.vigencia === 'con') {
+      if (!form.fechaVencimiento) { toast.error('Indica la fecha de vencimiento'); return }
+      if (form.fechaVencimiento < today()) { toast.error('La fecha de vencimiento no puede ser anterior a hoy'); return }
+    }
+    const fechaVencimiento = form.vigencia === 'con' ? form.fechaVencimiento : undefined
     setSaving(true)
     try {
-      const t: Tenant = { id: generateId(), ...form, status: 'prueba', createdAt: nowISO(), updatedAt: nowISO() }
-      await db.tenants.add(t)
-      if (user) await logAction({ tenantId: t.id, userId: user.id, userRole: user.rol, action: 'CREATE_TENANT', entityType: 'Tenant', entityId: t.id, descripcion: `Empresa creada: ${t.nombre}` })
-      toast.success('Empresa creada')
+      if (editing) {
+        const before = { nombre: editing.nombre, email: editing.email, pais: editing.pais, fechaVencimiento: editing.fechaVencimiento ?? null }
+        await db.tenants.update(editing.id, { nombre: form.nombre.trim(), email: form.email.trim(), pais: form.pais.trim(), moneda: form.moneda, fechaVencimiento, updatedAt: nowISO() })
+        if (user) await logAction({
+          tenantId: editing.id, userId: user.id, userRole: user.rol,
+          action: 'UPDATE_TENANT', entityType: 'Tenant', entityId: editing.id, descripcion: `Empresa editada: ${form.nombre.trim()}`,
+          before, after: { nombre: form.nombre.trim(), email: form.email.trim(), pais: form.pais.trim(), fechaVencimiento: fechaVencimiento ?? null },
+        })
+        toast.success('Empresa actualizada')
+      } else {
+        const t: Tenant = {
+          id: generateId(), nombre: form.nombre.trim(), email: form.email.trim(), pais: form.pais.trim(),
+          moneda: form.moneda, plan: DEFAULT_PLAN, status: 'prueba', fechaVencimiento,
+          createdAt: nowISO(), updatedAt: nowISO(),
+        }
+        await db.tenants.add(t)
+        if (user) await logAction({ tenantId: t.id, userId: user.id, userRole: user.rol, action: 'CREATE_TENANT', entityType: 'Tenant', entityId: t.id, descripcion: `Empresa creada: ${t.nombre}` })
+        toast.success('Empresa creada')
+      }
       setModalOpen(false)
       await load()
     } catch { toast.error('Error') } finally { setSaving(false) }
@@ -99,7 +133,7 @@ export default function PlatformPage() {
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between">
           <div><h1 className="text-xl font-bold text-gray-900">Empresas / Prestamistas</h1><p className="text-sm text-gray-500 mt-0.5">{tenants.length} empresa(s)</p></div>
-          <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>Nueva empresa</Button>
+          <Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Nueva empresa</Button>
         </div>
 
         {loading ? (
@@ -139,13 +173,17 @@ export default function PlatformPage() {
                     <p className="text-xs text-gray-400">Vence: {formatDate(t.fechaVencimiento)}</p>
                   )}
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <button onClick={() => enterCompany(t)} disabled={t.status === 'suspendida'}
-                      className="flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-medium border text-primary-600 border-primary-100 bg-primary-50 hover:bg-primary-100 disabled:opacity-40 transition-colors">
+                      className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium border text-primary-600 border-primary-100 bg-primary-50 hover:bg-primary-100 disabled:opacity-40 transition-colors">
                       <LogIn className="w-4 h-4" /> Entrar
                     </button>
+                    <button onClick={() => openEdit(t)}
+                      className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium border text-gray-600 border-gray-200 bg-white hover:bg-gray-50 transition-colors">
+                      <Pencil className="w-4 h-4" /> Editar
+                    </button>
                     <button onClick={() => toggleStatus(t)}
-                      className={`flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-medium border transition-colors ${t.status === 'activa' ? 'text-red-600 border-red-100 bg-red-50 hover:bg-red-100' : 'text-emerald-600 border-emerald-100 bg-emerald-50 hover:bg-emerald-100'}`}>
+                      className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium border transition-colors ${t.status === 'activa' ? 'text-red-600 border-red-100 bg-red-50 hover:bg-red-100' : 'text-emerald-600 border-emerald-100 bg-emerald-50 hover:bg-emerald-100'}`}>
                       {t.status === 'activa' ? <><PauseCircle className="w-4 h-4" /> Suspender</> : <><CheckCircle className="w-4 h-4" /> Activar</>}
                     </button>
                   </div>
@@ -156,16 +194,24 @@ export default function PlatformPage() {
         )}
       </div>
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Nueva empresa"
-        footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={handleCreate} loading={saving}>Crear</Button></>}>
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Editar empresa' : 'Nueva empresa'}
+        footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={handleSave} loading={saving}>{editing ? 'Guardar' : 'Crear'}</Button></>}>
         <div className="space-y-4">
           <Input label="Nombre de la empresa" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required />
           <Input label="Email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required />
-          <div className="grid grid-cols-2 gap-3">
-            <Select label="Plan" value={form.plan} onChange={e => setForm(f => ({ ...f, plan: e.target.value as TenantPlan }))} options={PLANS} />
-            <Input label="País" value={form.pais} onChange={e => setForm(f => ({ ...f, pais: e.target.value }))} />
-          </div>
-          <Input label="Fecha de vencimiento" type="date" value={form.fechaVencimiento} onChange={e => setForm(f => ({ ...f, fechaVencimiento: e.target.value }))} />
+          <Input label="País" value={form.pais} onChange={e => setForm(f => ({ ...f, pais: e.target.value }))} />
+          {/* #7 Vigencia explícita: sin vencimiento / con fecha. */}
+          <Select label="Vigencia" value={form.vigencia}
+            onChange={e => setForm(f => ({ ...f, vigencia: e.target.value as 'sin' | 'con' }))}
+            options={[
+              { value: 'sin', label: 'Sin vencimiento' },
+              { value: 'con', label: 'Con fecha de vencimiento' },
+            ]} />
+          {form.vigencia === 'con' && (
+            <Input label="Fecha de vencimiento" type="date" min={today()}
+              value={form.fechaVencimiento} onChange={e => setForm(f => ({ ...f, fechaVencimiento: e.target.value }))} required />
+          )}
+          <p className="text-xs text-gray-400">El plan comercial queda pendiente de definición; se asigna un plan predeterminado.</p>
         </div>
       </Modal>
     </div>

@@ -16,8 +16,9 @@ import { useTenant } from '@/hooks/useTenant'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
-import { assignCobradorToRoute } from '@/services/routeAssignment'
-import { filterAccessibleRoutes, authorizedRouteIdsOf } from '@/lib/permissions'
+import { assignCobradorToRoute, setUserRouteMembership } from '@/services/routeAssignment'
+import { filterAccessibleRoutes, authorizedRouteIdsOf, assignableRoles, canManageUser, ROLE_LABELS } from '@/lib/permissions'
+import { getAssignedRouteIds } from '@/lib/roles'
 import type { Route, User, RouteFinancialSummary } from '@/models/types'
 
 export default function RoutesPage() {
@@ -25,10 +26,14 @@ export default function RoutesPage() {
   const { tenantId, currency } = useTenant()
   const [routes, setRoutes] = useState<Route[]>([])
   const [cobradores, setCobradores] = useState<User[]>([])
+  const [allUsers, setAllUsers] = useState<User[]>([])
   const [summaryByRoute, setSummaryByRoute] = useState<Record<string, RouteFinancialSummary>>({})
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Route | null>(null)
+  // #4 Asignación bidireccional de usuarios a la ruta en edición.
+  const [assignBusy, setAssignBusy] = useState<string | null>(null)
+  const [pendingRemoval, setPendingRemoval] = useState<User | null>(null)
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Route | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -59,8 +64,9 @@ export default function RoutesPage() {
     // RESTRICCIÓN POR RUTAS: el Administrador solo ve sus rutas autorizadas.
     const rts = filterAccessibleRoutes(user, all)
     setRoutes(rts)
-    const cobs = await db.users.where('tenantId').equals(tenantId).and(u => u.rol === 'cobrador').toArray()
-    setCobradores(cobs)
+    const us = await db.users.where('tenantId').equals(tenantId).toArray()
+    setAllUsers(us)
+    setCobradores(us.filter(u => u.rol === 'cobrador'))
     const sum: Record<string, RouteFinancialSummary> = {}
     for (const r of rts) {
       sum[r.id] = await getRouteFinancialSummary(r.id)
@@ -131,6 +137,43 @@ export default function RoutesPage() {
       setModalOpen(false)
       await load()
     } catch { toast.error('Error al guardar') } finally { setSaving(false) }
+  }
+
+  // #4 Usuarios que el actor puede asignar a rutas (jerarquía; nunca superadmin ni,
+  // para un Administrador, otros Administradores).
+  const assignableToRoutes = allUsers.filter(u =>
+    u.rol !== 'superadmin' &&
+    assignableRoles(user).includes(u.rol) &&
+    canManageUser(user, u)
+  )
+
+  async function doToggleUserRoute(u: User, member: boolean) {
+    if (!editing) return
+    setAssignBusy(u.id)
+    try {
+      await setUserRouteMembership(u.id, editing.id, member)
+      if (user) await logAction({
+        tenantId, userId: user.id, userRole: user.rol, routeId: editing.id,
+        action: member ? 'ASSIGN_ROUTE' : 'UNASSIGN_ROUTE', entityType: 'User', entityId: u.id,
+        descripcion: `${member ? 'Asignada' : 'Retirada'} ruta ${editing.nombre} (${ROLE_LABELS[u.rol]} ${u.nombre})`,
+      })
+      if (u.id === user?.id) await refreshUser()
+      toast.success(member ? 'Usuario asignado a la ruta' : 'Usuario retirado de la ruta')
+      await load()
+    } catch { toast.error('Error al actualizar la asignación') }
+    finally { setAssignBusy(null); setPendingRemoval(null) }
+  }
+
+  function toggleUserRoute(u: User, currentlyMember: boolean) {
+    if (!editing) return
+    if (currentlyMember) {
+      // Confirmar antes de retirar la ÚLTIMA ruta operativa de un usuario activo.
+      const remaining = getAssignedRouteIds(u).filter(id => id !== editing.id)
+      if (remaining.length === 0 && u.status === 'activo') { setPendingRemoval(u); return }
+      doToggleUserRoute(u, false)
+    } else {
+      doToggleUserRoute(u, true)
+    }
   }
 
   async function toggleStatus(route: Route) {
@@ -307,6 +350,51 @@ export default function RoutesPage() {
             <input type="checkbox" id="tasaLibre" checked={form.tasaLibre} onChange={e => setForm(f => ({ ...f, tasaLibre: e.target.checked }))} className="w-4 h-4 text-primary-600" />
             <label htmlFor="tasaLibre" className="text-sm text-gray-700">Tasa libre (el cobrador puede variar la tasa)</label>
           </div>
+
+          {/* #4 Usuarios asignados a esta ruta (fuente única: User.authorizedRouteIds).
+              Se guarda de inmediato al alternar; refleja lo mismo que la pantalla de Usuarios. */}
+          {editing && (
+            <div className="pt-3 border-t border-gray-100">
+              <div className="flex items-center gap-2 mb-1">
+                <Users className="w-4 h-4 text-gray-500" />
+                <label className="text-sm font-medium text-gray-700">Usuarios asignados a esta ruta</label>
+              </div>
+              <p className="text-xs text-gray-400 mb-2">Al asignar o retirar se actualiza de inmediato la ruta autorizada del usuario.</p>
+              {assignableToRoutes.length === 0 ? (
+                <p className="text-xs text-gray-400">No hay usuarios que puedas asignar.</p>
+              ) : (
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {assignableToRoutes.map(u => {
+                    const member = getAssignedRouteIds(u).includes(editing.id)
+                    return (
+                      <button key={u.id} type="button" disabled={assignBusy === u.id}
+                        onClick={() => toggleUserRoute(u, member)}
+                        className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-left transition-colors ${member ? 'bg-primary-50 border-primary-200' : 'bg-white border-gray-200 hover:bg-gray-50'} disabled:opacity-50`}>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-800 truncate">{u.nombre}</p>
+                          <p className="text-xs text-gray-400">{ROLE_LABELS[u.rol]}{u.status !== 'activo' ? ' · inactivo' : ''}</p>
+                        </div>
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${member ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                          {member ? 'Asignado' : 'Asignar'}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* #4 Confirmación: retirar la última ruta operativa de un usuario activo */}
+      <Modal open={!!pendingRemoval} onClose={() => setPendingRemoval(null)} title="Retirar última ruta"
+        footer={<><Button variant="secondary" onClick={() => setPendingRemoval(null)}>Cancelar</Button><Button variant="danger" loading={!!assignBusy} onClick={() => pendingRemoval && doToggleUserRoute(pendingRemoval, false)}>Sí, retirar</Button></>}>
+        <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-xl border border-amber-100">
+          <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
+          <p className="text-sm text-amber-700">
+            <span className="font-semibold">{pendingRemoval?.nombre}</span> quedará SIN rutas autorizadas y por tanto sin acceso operativo. ¿Deseas retirarlo de esta ruta de todos modos?
+          </p>
         </div>
       </Modal>
 

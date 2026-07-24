@@ -17,24 +17,11 @@ import { setCobradorRoutes, clearRouteResponsibilities } from '@/services/routeA
 import { resetUserPassword } from '@/services/passwordService'
 import {
   assignableRoles, canManageUser, filterAccessibleRoutes, delegableCapabilitiesFor,
-  sanitizeGrantedCapabilities, authorizedRouteIdsOf, isRouteUnrestricted,
+  sanitizeGrantedCapabilities, authorizedRouteIdsOf, isRouteUnrestricted, capabilitiesForRole,
   ROLE_LABELS, type Capability,
 } from '@/lib/permissions'
+import { CAPABILITY_METADATA, CATEGORY_ORDER, capabilityLabel } from '@/lib/capabilityCatalog'
 import type { User, Route, UserRole } from '@/models/types'
-
-// Etiquetas legibles de capacidades delegables (subset habitual). Las no listadas
-// muestran su clave técnica.
-const CAP_LABELS: Partial<Record<Capability, string>> = {
-  'sale.createDirect': 'Crear ventas directas',
-  'authorization.approve': 'Aprobar autorizaciones',
-  'authorization.modifyConditions': 'Modificar condiciones',
-  'payment.correct': 'Corregir pagos',
-  'payment.reverse': 'Anular pagos (reversión)',
-  'transfer.create': 'Realizar transferencias',
-  'report.export': 'Exportar reportes',
-  'report.viewConsolidated': 'Indicadores consolidados',
-  'expense.correct': 'Corregir gastos',
-}
 
 // Roles que exigen al menos una ruta autorizada para operar.
 const ROLE_REQUIRES_ROUTES: Record<UserRole, boolean> = {
@@ -127,6 +114,11 @@ export default function UsersPage() {
   async function handleSave() {
     if (!currentUser) return
     if (!form.nombre || !form.email) { toast.error('Nombre y email son requeridos'); return }
+    // #5 Guard de datos: no editar usuarios de rango superior aunque se manipule el estado.
+    if (editing && !canManageUser(currentUser, editing)) {
+      toast.error('No tienes permiso para editar este usuario.')
+      return
+    }
     // Jerarquía: el actor solo puede crear/editar roles permitidos.
     if (!assignableRoles(currentUser).includes(form.rol)) {
       toast.error('No puedes asignar ese rol.')
@@ -280,7 +272,10 @@ export default function UsersPage() {
     return targetRoutes.some(r => actorRoutes.has(r))
   }
 
-  const filteredUsers = users.filter(visibleByScope).filter(u => {
+  // #5 VISIBILIDAD JERÁRQUICA: el universo visible (lista, contador, buscador) se
+  // limita a los usuarios que el actor puede ver. No se expone el total del tenant.
+  const scopedUsers = users.filter(visibleByScope)
+  const filteredUsers = scopedUsers.filter(u => {
     const q = search.trim().toLowerCase()
     if (!q) return true
     return u.nombre.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || ROLE_LABELS[u.rol].toLowerCase().includes(q)
@@ -288,11 +283,17 @@ export default function UsersPage() {
 
   const showRoutes = form.rol !== 'superadmin'
   const delegable = delegableCapabilities(form.rol)
+  // #6: capacidades delegables agrupadas por categoría (catálogo humano).
+  const delegableByCategory = CATEGORY_ORDER
+    .map(cat => ({ cat, caps: delegable.filter(c => CAPABILITY_METADATA[c].category === cat) }))
+    .filter(g => g.caps.length > 0)
+  // Permisos incluidos por el rol base (informativo, no editable).
+  const baseCaps = capabilitiesForRole(form.rol).filter(c => c !== 'password.changeOwn')
 
   return (
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-xl font-bold text-gray-900">Usuarios</h1><p className="text-sm text-gray-500 mt-0.5">{filteredUsers.length} de {users.length} usuario(s)</p></div>
+        <div><h1 className="text-xl font-bold text-gray-900">Usuarios</h1><p className="text-sm text-gray-500 mt-0.5">{filteredUsers.length} de {scopedUsers.length} usuario(s)</p></div>
         <Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Nuevo usuario</Button>
       </div>
 
@@ -377,21 +378,56 @@ export default function UsersPage() {
             </div>
           )}
 
-          {delegable.length > 0 && (
+          {/* #6 PERMISOS ADICIONALES — lenguaje humano, agrupado por categoría. */}
+          {form.rol !== 'superadmin' && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Capacidades adicionales (delegación)</label>
-              <p className="text-xs text-gray-400 mb-2">Solo puedes otorgar capacidades que tú posees.</p>
-              <div className="flex flex-wrap gap-2">
-                {delegable.map(cap => {
-                  const active = form.grantedCapabilities.includes(cap)
-                  return (
-                    <button key={cap} type="button" onClick={() => toggleCap(cap)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${active ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
-                      {CAP_LABELS[cap] ?? cap}
-                    </button>
-                  )
-                })}
-              </div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Permisos adicionales</label>
+              <p className="text-xs text-gray-400 mb-2">
+                Permisos especiales que amplían las funciones predeterminadas de este rol.
+                Solo puedes otorgar permisos que tú mismo posees.
+              </p>
+
+              {/* Incluidos por el rol base (informativo, no editable) */}
+              {baseCaps.length > 0 && (
+                <details className="mb-2 rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
+                  <summary className="text-xs font-medium text-gray-500 cursor-pointer select-none">
+                    Ya incluidos por el rol {ROLE_LABELS[form.rol]} ({baseCaps.length})
+                  </summary>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {baseCaps.map(c => (
+                      <span key={c} title={CAPABILITY_METADATA[c].description}
+                        className="px-2 py-0.5 rounded-md text-[11px] bg-white border border-gray-200 text-gray-500">
+                        {capabilityLabel(c)}
+                      </span>
+                    ))}
+                  </div>
+                </details>
+              )}
+
+              {delegableByCategory.length === 0 ? (
+                <p className="text-xs text-gray-400">No hay permisos adicionales que puedas delegar a este rol.</p>
+              ) : (
+                <div className="space-y-3">
+                  {delegableByCategory.map(({ cat, caps }) => (
+                    <div key={cat}>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">{cat}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {caps.map(cap => {
+                          const meta = CAPABILITY_METADATA[cap]
+                          const active = form.grantedCapabilities.includes(cap)
+                          return (
+                            <button key={cap} type="button" onClick={() => toggleCap(cap)} title={meta.description}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${active ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+                              {meta.label}
+                              {meta.risk === 'alto' && <span className={`ml-1 ${active ? 'text-purple-200' : 'text-amber-500'}`}>•</span>}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

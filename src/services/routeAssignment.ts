@@ -74,6 +74,34 @@ export async function assignCobradorToRoute(routeId: string, newCobradorId: stri
 }
 
 /**
+ * ASIGNACIÓN BIDIRECCIONAL (Usuarios ↔ Rutas). Fuente ÚNICA: User.authorizedRouteIds.
+ * Agrega/quita `routeId` de las rutas del usuario `userId`. Se usa desde la pantalla
+ * de RUTAS para asignar/retirar cualquier rol; refleja lo mismo que Usuarios porque
+ * ambos editan la misma fuente. No crea relación paralela en Route.
+ *
+ * Para COBRADORES mantiene coherente route.cobradorId (responsable): al asignar una
+ * ruta sin responsable, lo hace responsable; al retirar, lo libera si lo era.
+ */
+export async function setUserRouteMembership(userId: string, routeId: string, member: boolean): Promise<void> {
+  await db.transaction('rw', db.routes, db.users, async () => {
+    const user = await db.users.get(userId)
+    if (!user) return
+    const set = new Set(getAssignedRouteIds(user))
+    if (member) set.add(routeId); else set.delete(routeId)
+    await writeUserRoutes(userId, [...set])
+
+    if (user.rol === 'cobrador') {
+      const route = await db.routes.get(routeId)
+      if (member && route && !route.cobradorId) {
+        await db.routes.update(routeId, { cobradorId: userId, updatedAt: nowISO() })
+      } else if (!member && route?.cobradorId === userId) {
+        await db.routes.update(routeId, { cobradorId: undefined, updatedAt: nowISO() })
+      }
+    }
+  })
+}
+
+/**
  * Limpia la responsabilidad de rutas de un usuario (al dejar de ser cobrador).
  * Solo toca route.cobradorId; NO modifica los campos del usuario (eso lo decide
  * quien llama, p. ej. para conservar authorizedRouteIds de un supervisor).

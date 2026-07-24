@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, MapPin, CreditCard, Wallet,
   ArrowLeftRight, TrendingDown, Archive, BarChart3, CalendarRange,
-  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt
+  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt, ArrowLeft
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
@@ -13,7 +13,7 @@ import { AppModeBanner } from '@/components/ui/AppModeBanner'
 import { CountBadge } from '@/components/ui/CountBadge'
 import { countPendingSaleRequests } from '@/services/saleRequestService'
 import { countPendingAdjustmentRequests } from '@/services/paymentCorrectionService'
-import { hasOperationalRoutes } from '@/lib/permissions'
+import { hasOperationalRoutes, ROLE_LABELS } from '@/lib/permissions'
 import { AdminNoRoutes } from '@/components/layout/AdminNoRoutes'
 
 interface NavItem {
@@ -42,10 +42,16 @@ const navItems: NavItem[] = [
 ]
 
 export function AdminLayout() {
-  const { user, tenant, logout } = useAuth()
+  const { user, tenant, logout, exitTenantContext } = useAuth()
   const isOnline = useOnlineStatus()
   const navigate = useNavigate()
   const location = useLocation()
+  const isSuperadmin = user?.rol === 'superadmin'
+  const roleLabel = user ? ROLE_LABELS[user.rol] : ''
+
+  // Volver a Empresas (solo Super Admin): limpia el tenant y navega a /platform,
+  // conservando la sesión de Super Admin.
+  const backToPlatform = () => { exitTenantContext(); navigate('/platform') }
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [pendingAuth, setPendingAuth] = useState(0)
   const [pendingAdj, setPendingAdj] = useState(0)
@@ -75,7 +81,7 @@ export function AdminLayout() {
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
-      {/* Logo */}
+      {/* Logo + rol real (nunca "Admin" fijo: refleja ROLE_LABELS del usuario) */}
       <div className="px-5 py-5 border-b border-primary-800/40">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 bg-primary-600 rounded-xl flex items-center justify-center">
@@ -83,15 +89,26 @@ export function AdminLayout() {
           </div>
           <div>
             <p className="text-white font-bold text-sm leading-tight">RutaCash</p>
-            <p className="text-primary-300 text-xs opacity-70">Admin</p>
+            <p className="text-primary-300 text-xs opacity-70">{roleLabel}</p>
           </div>
         </div>
       </div>
 
-      {/* Tenant/Office info */}
+      {/* Volver a Empresas (solo Super Admin operando dentro de una empresa) */}
+      {isSuperadmin && (
+        <button
+          onClick={() => { backToPlatform(); setSidebarOpen(false) }}
+          className="mx-3 mt-3 flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-primary-200 hover:bg-primary-800 hover:text-white transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" /> Volver a Empresas
+        </button>
+      )}
+
+      {/* Empresa activa + rol (encabezado del contexto) */}
       {tenant && (
         <div className="mx-3 mt-3 px-3 py-2.5 bg-primary-800/70 rounded-xl">
           <p className="text-white text-xs font-medium truncate">{tenant.nombre}</p>
+          <p className="text-primary-300 text-[11px] leading-tight">{roleLabel}</p>
         </div>
       )}
 
@@ -126,7 +143,7 @@ export function AdminLayout() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-white text-xs font-medium truncate">{user?.nombre}</p>
-            <p className="text-gray-400 text-xs capitalize">{user?.rol}</p>
+            <p className="text-gray-400 text-xs">{roleLabel}</p>
           </div>
         </div>
         <button
@@ -171,9 +188,15 @@ export function AdminLayout() {
             <Menu className="w-5 h-5" />
           </button>
 
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 flex items-center gap-2">
+            {isSuperadmin && (
+              <button onClick={backToPlatform}
+                className="lg:hidden flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700 flex-shrink-0">
+                <ArrowLeft className="w-4 h-4" /> Empresas
+              </button>
+            )}
             {tenant && (
-              <span className="text-sm font-medium text-gray-600 truncate">{tenant.nombre}</span>
+              <span className="text-sm font-medium text-gray-600 truncate">{tenant.nombre}{isSuperadmin ? ' · Super Admin' : ''}</span>
             )}
           </div>
 

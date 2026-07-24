@@ -16,6 +16,12 @@ interface AuthState {
   logout: () => void
   selectTenant: (tenant: Tenant) => void
   selectRoute: (route: Route) => void
+  /**
+   * Sale del contexto de una empresa (Super Admin): limpia el tenant y la ruta
+   * activa asociada, CONSERVANDO usuario y sesión. La navegación a /platform la
+   * realiza el componente que la invoca.
+   */
+  exitTenantContext: () => void
   /** Revalida la sesión persistida contra la base (usuario/empresa/rol/rutas). */
   revalidateSession: () => Promise<void>
   /** Cambia la contraseña del usuario en sesión. Disponible para TODOS los perfiles. */
@@ -79,6 +85,10 @@ export const useAuth = create<AuthState>()(
 
       selectTenant: (tenant) => set({ tenant }),
       selectRoute: (route) => set({ route }),
+
+      // Volver a Empresas: solo limpia el tenant/ruta seleccionados; mantiene la
+      // sesión de Super Admin intacta (usuario, isAuthenticated).
+      exitTenantContext: () => set({ tenant: null, route: null }),
 
       // ------------------------------------------------------------
       // Revalidación de sesión (SESIONES, BLOQUEOS Y CONTRASEÑAS).

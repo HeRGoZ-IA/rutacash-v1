@@ -7,11 +7,12 @@
 // Valida SOLO la lógica pura de permissions.ts (los tipos se eliminan al compilar).
 // ============================================================
 import {
-  can, canManageRole, canAccessRoute, authorizedRouteIdsOf, homePathForRole, ROLE_LABELS,
+  can, canManageRole, canManageUser, canAccessRoute, authorizedRouteIdsOf, homePathForRole, ROLE_LABELS,
   hasOperationalRoutes, isRouteUnrestricted, filterByAccessibleRoute, filterAccessibleRoutes,
   isCapabilityCompatible, sanitizeGrantedCapabilities, delegableCapabilitiesFor,
   isPartnerInScope, isTransferInScope, type Capability,
 } from '../src/lib/permissions'
+import { CAPABILITY_METADATA, CATEGORY_ORDER } from '../src/lib/capabilityCatalog'
 import type { User, UserRole } from '../src/models/types'
 
 let passed = 0
@@ -196,6 +197,58 @@ check('home secretario', homePathForRole('secretario') === '/secretario')
 
 // --- Etiquetas de los 6 roles ---
 check('existen 6 etiquetas de rol', Object.keys(ROLE_LABELS).length === 6)
+
+// ============================================================
+// CORRECCIÓN DE EXPERIENCIA SUPER ADMIN Y JERARQUÍA — nuevas pruebas
+// ============================================================
+
+// --- #1 Identidad: Super Admin siempre "Super Admin", nunca "Admin" ---
+check('etiqueta superadmin = "Super Admin"', ROLE_LABELS.superadmin === 'Super Admin')
+check('etiqueta admin = "Administrador"', ROLE_LABELS.admin === 'Administrador')
+check('etiqueta superadmin NO es "Admin"', ROLE_LABELS.superadmin !== 'Admin')
+
+// --- #2 Edición de empresa: Super Admin sí; Admin no supera al Super Admin ---
+check('superadmin edita empresa (company.edit)', can(superadmin, 'company.edit'))
+check('admin NO edita empresa (company.edit)', !can(admin, 'company.edit'))
+check('admin NO crea empresas', !can(admin, 'company.create'))
+check('admin NO suspende empresas', !can(admin, 'company.suspend'))
+// Admin no tiene ninguna capacidad corporativa que el Super Admin no tenga.
+const corporate: Capability[] = ['company.create', 'company.edit', 'company.suspend', 'platform.access']
+check('admin ⊆ superadmin en autoridad corporativa', corporate.every(c => !can(admin, c) || can(superadmin, c)))
+
+// --- #5 Visibilidad jerárquica (réplica de la regla de UsersPage) ---
+function visibleTo(actor: User, target: User): boolean {
+  if (isRouteUnrestricted(actor)) return true
+  if (target.id === actor.id) return true
+  if (!canManageUser(actor, target)) return false
+  const actorRoutes = new Set(authorizedRouteIdsOf(actor))
+  const targetRoutes = authorizedRouteIdsOf(target)
+  if (targetRoutes.length === 0) return true
+  return targetRoutes.some(r => actorRoutes.has(r))
+}
+const otherAdmin = mkUser('admin', { authorizedRouteIds: ['r1'] })
+otherAdmin.id = 'u-admin-2'
+const socioR1 = mkUser('socio', { authorizedRouteIds: ['r1'] }); socioR1.id = 'u-socio-r1'
+const socioR9 = mkUser('socio', { authorizedRouteIds: ['r9'] }); socioR9.id = 'u-socio-r9'
+const cobradorPend = mkUser('cobrador'); cobradorPend.id = 'u-cob-pend'
+check('admin NO ve Super Admin', !visibleTo(admin1, superadmin))
+check('admin NO ve otro Administrador', !visibleTo(admin1, otherAdmin))
+check('admin ve subordinado con ruta compartida', visibleTo(admin1, socioR1))
+check('admin NO ve subordinado de ruta ajena', !visibleTo(admin1, socioR9))
+check('admin ve subordinado pendiente (sin rutas)', visibleTo(admin1, cobradorPend))
+check('superadmin ve a todos', visibleTo(superadmin, otherAdmin) && visibleTo(superadmin, socioR9))
+// Servicios siguen bloqueando por jerarquía (edición / reset).
+check('admin NO gestiona superadmin (edición/reset)', !canManageUser(admin1, superadmin))
+check('admin NO gestiona otro admin', !canManageUser(admin1, otherAdmin))
+
+// --- #6 Catálogo de capacidades en lenguaje humano (sin claves técnicas visibles) ---
+const metaKeys = Object.keys(CAPABILITY_METADATA) as Capability[]
+check('toda capacidad tiene metadatos', metaKeys.length >= 40)
+check('ninguna etiqueta está vacía', metaKeys.every(k => CAPABILITY_METADATA[k].label.trim().length > 0))
+check('ninguna etiqueta es la clave técnica', metaKeys.every(k => CAPABILITY_METADATA[k].label !== k))
+check('ninguna etiqueta contiene punto (clave técnica)', metaKeys.every(k => !CAPABILITY_METADATA[k].label.includes('.')))
+check('toda categoría es válida', metaKeys.every(k => CATEGORY_ORDER.includes(CAPABILITY_METADATA[k].category)))
+check('toda descripción existe', metaKeys.every(k => CAPABILITY_METADATA[k].description.trim().length > 0))
 
 console.log(`\nPRUEBA DE PERMISOS: ${passed} OK, ${failed} FALLIDAS`)
 if (failed > 0) process.exit(1)

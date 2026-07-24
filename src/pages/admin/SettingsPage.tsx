@@ -11,9 +11,10 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { resetLocalAppData } from '@/lib/resetApp'
 import { exportJSON } from '@/lib/utils'
-import { nowISO } from '@/lib/formatters'
+import { nowISO, today } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
-import type { Tenant } from '@/models/types'
+import { can } from '@/lib/permissions'
+import type { Tenant, TenantStatus } from '@/models/types'
 
 // Monedas de Suramérica y Centroamérica (Paquete 2.5).
 // La moneda guardada sigue siendo el código ISO (string), 100% compatible
@@ -41,7 +42,7 @@ const MONEDAS = [
 ]
 
 export default function SettingsPage() {
-  const { user, selectTenant } = useAuth()
+  const { user, tenant, selectTenant } = useAuth()
   const { tenantId } = useTenant()
 
   const navigate = useNavigate()
@@ -51,10 +52,17 @@ export default function SettingsPage() {
   const [cleanResetOpen, setCleanResetOpen] = useState(false)
   const [cleanResetting, setCleanResetting] = useState(false)
 
+  // Solo el Super Admin puede editar parámetros CORPORATIVOS (estado, vigencia).
+  const canEditCompany = can(user, 'company.edit', { tenantId })
+
   const [form, setForm] = useState({
     nombre: '', nombreLegal: '', nit: '',
     pais: 'Colombia', ciudad: '', moneda: 'COP',
     telefono: '', email: '', direccion: '', responsable: '',
+    // Campos corporativos (solo Super Admin).
+    status: 'activa' as TenantStatus,
+    vigencia: 'sin' as 'sin' | 'con',
+    fechaVencimiento: '',
   })
 
   useEffect(() => {
@@ -72,6 +80,9 @@ export default function SettingsPage() {
         email: t.email,
         direccion: t.direccion ?? '',
         responsable: t.responsable ?? '',
+        status: t.status,
+        vigencia: t.fechaVencimiento ? 'con' : 'sin',
+        fechaVencimiento: t.fechaVencimiento ?? '',
       })
     })
   }, [tenantId])
@@ -79,8 +90,14 @@ export default function SettingsPage() {
   async function handleSaveTenant() {
     if (!form.nombre.trim()) { toast.error('El nombre de la empresa es obligatorio'); return }
     if (!form.pais.trim() || !form.moneda.trim()) { toast.error('País y moneda son obligatorios'); return }
+    // Vigencia (#7): si es "con fecha", la fecha es obligatoria y no puede ser pasada.
+    if (canEditCompany && form.vigencia === 'con') {
+      if (!form.fechaVencimiento) { toast.error('Indica la fecha de vencimiento'); return }
+      if (form.fechaVencimiento < today()) { toast.error('La fecha de vencimiento no puede ser anterior a hoy'); return }
+    }
     setSavingTenant(true)
     try {
+      const prev = await db.tenants.get(tenantId)
       const updates: Partial<Tenant> = {
         nombre: form.nombre.trim(),
         nombreLegal: form.nombreLegal || undefined,
@@ -94,10 +111,21 @@ export default function SettingsPage() {
         responsable: form.responsable || undefined,
         updatedAt: nowISO(),
       }
+      // Parámetros corporativos: SOLO si el actor tiene company.edit (Super Admin).
+      if (canEditCompany) {
+        updates.status = form.status
+        updates.fechaVencimiento = form.vigencia === 'con' ? form.fechaVencimiento : undefined
+      }
       await db.tenants.update(tenantId, updates)
       const updated = await db.tenants.get(tenantId)
       if (updated) selectTenant(updated)
-      if (user) await logAction({ tenantId, userId: user.id, action: 'UPDATE_TENANT', entityType: 'Tenant', entityId: tenantId, descripcion: `Empresa actualizada: ${form.nombre.trim()}` })
+      if (user) await logAction({
+        tenantId, userId: user.id, userRole: user.rol,
+        action: 'UPDATE_TENANT', entityType: 'Tenant', entityId: tenantId,
+        descripcion: `Empresa actualizada: ${form.nombre.trim()}`,
+        before: prev ? { nombre: prev.nombre, email: prev.email, pais: prev.pais, status: prev.status, fechaVencimiento: prev.fechaVencimiento ?? null } : undefined,
+        after: { nombre: updates.nombre, email: updates.email, pais: updates.pais, status: updates.status ?? prev?.status, fechaVencimiento: (canEditCompany ? (updates.fechaVencimiento ?? null) : (prev?.fechaVencimiento ?? null)) },
+      })
       toast.success('Datos de la empresa guardados')
     } catch { toast.error('Error al guardar') } finally { setSavingTenant(false) }
   }
@@ -143,7 +171,10 @@ export default function SettingsPage() {
     } catch { toast.error('Error al exportar') }
   }
 
-  const showEmpresaForm = !!tenantId && user?.rol !== 'superadmin'
+  // #2: el Super Admin (con empresa seleccionada) TAMBIÉN edita la empresa. Antes
+  // estaba explícitamente excluido. Se muestra a quien tenga acceso a configuración
+  // y haya una empresa real seleccionada (no la "platform").
+  const showEmpresaForm = !!tenant && tenant.id !== 'platform' && can(user, 'settings.access', { tenantId })
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -174,6 +205,35 @@ export default function SettingsPage() {
               <Input label="Email de contacto" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="admin@miempresa.com" />
             </div>
             <Input label="Responsable / Contacto principal" value={form.responsable} onChange={e => setForm(f => ({ ...f, responsable: e.target.value }))} placeholder="Nombre del propietario o encargado" />
+
+            {/* Parámetros corporativos: SOLO Super Admin (company.edit). */}
+            {canEditCompany && (
+              <div className="rounded-xl border border-primary-100 bg-primary-50/40 p-4 space-y-4">
+                <p className="text-xs font-semibold text-primary-700 uppercase tracking-wide">Parámetros corporativos (Super Admin)</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Select label="Estado de la empresa" value={form.status}
+                    onChange={e => setForm(f => ({ ...f, status: e.target.value as TenantStatus }))}
+                    options={[
+                      { value: 'activa', label: 'Activa' },
+                      { value: 'prueba', label: 'En prueba' },
+                      { value: 'suspendida', label: 'Suspendida' },
+                    ]} />
+                  <Select label="Vigencia" value={form.vigencia}
+                    onChange={e => setForm(f => ({ ...f, vigencia: e.target.value as 'sin' | 'con' }))}
+                    options={[
+                      { value: 'sin', label: 'Sin vencimiento' },
+                      { value: 'con', label: 'Con fecha de vencimiento' },
+                    ]} />
+                </div>
+                {form.vigencia === 'con' && (
+                  <Input label="Fecha de vencimiento" type="date" min={today()}
+                    value={form.fechaVencimiento}
+                    onChange={e => setForm(f => ({ ...f, fechaVencimiento: e.target.value }))} required />
+                )}
+                <p className="text-xs text-gray-400">El plan comercial queda pendiente de definición; no se edita aquí.</p>
+              </div>
+            )}
+
             <div className="flex items-center justify-between pt-2 border-t border-gray-100">
               <p className="text-xs text-gray-400">
                 {form.pais && form.ciudad && form.nombre && form.nombre !== 'Mi Empresa'
