@@ -16,7 +16,6 @@ import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatDate, today, getWeekStart, getWeekEnd } from '@/lib/formatters'
 import { format, subDays } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { IS_CLEAN } from '@/lib/appMode'
 
 interface DashboardData {
   baseActualTotal: number
@@ -174,8 +173,9 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Setup checklist (modo limpio) */}
-      {IS_CLEAN && <SetupChecklist />}
+      {/* Onboarding "Primeros pasos": aparece mientras existan pasos esenciales
+          pendientes (empresa nueva); se auto-oculta al completarse. */}
+      <SetupChecklist />
 
       {/* Alerts */}
       {data.alertas.length > 0 && (

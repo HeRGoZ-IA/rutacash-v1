@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { db } from '@/lib/db'
 import { nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
+import { isCompanyBlocked, companyBlockMessage } from '@/lib/company'
 import type { User, Tenant, Route } from '@/models/types'
 
 interface AuthState {
@@ -61,9 +62,10 @@ export const useAuth = create<AuthState>()(
 
           if (user.rol !== 'superadmin') {
             tenant = await db.tenants.get(user.tenantId) ?? null
-            if (tenant?.status === 'suspendida') {
+            // Bloqueo por estado EFECTIVO: suspendida (manual) o vencida (por fecha).
+            if (tenant && isCompanyBlocked(tenant)) {
               set({ isLoading: false })
-              return { success: false, error: 'Tu empresa está suspendida. Contacta al soporte.' }
+              return { success: false, error: companyBlockMessage(tenant) ?? 'Empresa no disponible.' }
             }
           }
 
@@ -108,7 +110,8 @@ export const useAuth = create<AuthState>()(
           let tenant: Tenant | null = null
           if (fresh.rol !== 'superadmin') {
             tenant = await db.tenants.get(fresh.tenantId) ?? null
-            if (!tenant || tenant.status === 'suspendida') {
+            // Revalidación: cierra sesión si la empresa está suspendida o VENCIDA.
+            if (!tenant || isCompanyBlocked(tenant)) {
               set({ user: null, tenant: null, route: null, isAuthenticated: false })
               return
             }

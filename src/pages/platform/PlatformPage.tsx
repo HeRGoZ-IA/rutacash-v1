@@ -9,6 +9,7 @@ import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
 import { formatDate, nowISO, today } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
+import { getEffectiveCompanyStatus, type EffectiveCompanyStatus } from '@/lib/company'
 import type { Tenant, TenantPlan, TenantStatus } from '@/models/types'
 import { useAuth } from '@/hooks/useAuth'
 import { useNavigate } from 'react-router-dom'
@@ -112,7 +113,7 @@ export default function PlatformPage() {
     await load()
   }
 
-  const statusVariant = (s: TenantStatus) => s === 'activa' ? 'success' : s === 'suspendida' ? 'danger' : 'warning'
+  const statusVariant = (s: EffectiveCompanyStatus) => s === 'activa' ? 'success' : (s === 'suspendida' || s === 'vencida') ? 'danger' : 'warning'
   const planVariant = (p: TenantPlan) => p === 'empresarial' ? 'purple' : p === 'profesional' ? 'info' : 'gray'
 
   return (
@@ -142,6 +143,7 @@ export default function PlatformPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {tenants.map(t => {
               const m = metrics[t.id] ?? { routes: 0, users: 0, clients: 0, sales: 0 }
+              const eff = getEffectiveCompanyStatus(t)  // incluye 'vencida' derivado por fecha
               return (
                 <div key={t.id} className="bg-white rounded-2xl shadow-card border border-gray-100 p-5 space-y-4">
                   <div className="flex items-start justify-between">
@@ -155,7 +157,7 @@ export default function PlatformPage() {
                       </div>
                     </div>
                     <div className="flex flex-col gap-1 items-end">
-                      <Badge variant={statusVariant(t.status)}>{t.status}</Badge>
+                      <Badge variant={statusVariant(eff)}>{eff}</Badge>
                       <Badge variant={planVariant(t.plan)} size="sm">{t.plan}</Badge>
                     </div>
                   </div>
@@ -169,9 +171,12 @@ export default function PlatformPage() {
                     ))}
                   </div>
 
-                  {t.fechaVencimiento && (
-                    <p className="text-xs text-gray-400">Vence: {formatDate(t.fechaVencimiento)}</p>
-                  )}
+                  {/* #3 La vigencia SIEMPRE se muestra (nunca línea vacía). */}
+                  <p className={`text-xs ${eff === 'vencida' ? 'text-red-600 font-medium' : 'text-gray-400'}`}>
+                    {t.fechaVencimiento
+                      ? `${eff === 'vencida' ? 'Vencida el' : 'Vence:'} ${formatDate(t.fechaVencimiento)}`
+                      : 'Sin fecha de vencimiento'}
+                  </p>
 
                   <div className="grid grid-cols-3 gap-2">
                     <button onClick={() => enterCompany(t)} disabled={t.status === 'suspendida'}

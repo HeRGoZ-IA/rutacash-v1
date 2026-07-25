@@ -16,11 +16,10 @@ import { getAssignedRouteIds } from '@/lib/roles'
 import { setCobradorRoutes, clearRouteResponsibilities } from '@/services/routeAssignment'
 import { resetUserPassword } from '@/services/passwordService'
 import {
-  assignableRoles, canManageUser, filterAccessibleRoutes, delegableCapabilitiesFor,
-  sanitizeGrantedCapabilities, authorizedRouteIdsOf, isRouteUnrestricted, capabilitiesForRole,
-  ROLE_LABELS, type Capability,
+  assignableRoles, canManageUser, filterAccessibleRoutes,
+  authorizedRouteIdsOf, isRouteUnrestricted,
+  ROLE_LABELS,
 } from '@/lib/permissions'
-import { CAPABILITY_METADATA, CATEGORY_ORDER, capabilityLabel } from '@/lib/capabilityCatalog'
 import type { User, Route, UserRole } from '@/models/types'
 
 // Roles que exigen al menos una ruta autorizada para operar.
@@ -47,19 +46,14 @@ export default function UsersPage() {
   const roleOptions = assignableRoles(currentUser).map(r => ({ value: r, label: ROLE_LABELS[r] }))
   const defaultRole: UserRole = (assignableRoles(currentUser)[0] ?? 'cobrador') as UserRole
 
+  // MODELO PURO (#7): ROL BASE + RUTAS AUTORIZADAS. Sin permisos individuales.
   const [form, setForm] = useState({
     nombre: '', email: '', password: '123456', rol: defaultRole,
-    authorizedRouteIds: [] as string[], grantedCapabilities: [] as Capability[],
+    authorizedRouteIds: [] as string[],
   })
 
   // Rutas que el usuario actual puede asignar (limitado a sus rutas accesibles).
   const assignableRoutes = filterAccessibleRoutes(currentUser, routes)
-
-  // Capacidades DELEGABLES (fuente central): las que el actor posee, no son base del
-  // objetivo y son COMPATIBLES con el rol objetivo (no se ofrece nada prohibido).
-  function delegableCapabilities(targetRole: UserRole): Capability[] {
-    return delegableCapabilitiesFor(currentUser, targetRole)
-  }
 
   function toggleRoute(routeId: string) {
     setForm(f => ({
@@ -67,14 +61,6 @@ export default function UsersPage() {
       authorizedRouteIds: f.authorizedRouteIds.includes(routeId)
         ? f.authorizedRouteIds.filter(id => id !== routeId)
         : [...f.authorizedRouteIds, routeId],
-    }))
-  }
-  function toggleCap(cap: Capability) {
-    setForm(f => ({
-      ...f,
-      grantedCapabilities: f.grantedCapabilities.includes(cap)
-        ? f.grantedCapabilities.filter(c => c !== cap)
-        : [...f.grantedCapabilities, cap],
     }))
   }
 
@@ -93,7 +79,7 @@ export default function UsersPage() {
 
   function openCreate() {
     setEditing(null)
-    setForm({ nombre: '', email: '', password: '123456', rol: defaultRole, authorizedRouteIds: [], grantedCapabilities: [] })
+    setForm({ nombre: '', email: '', password: '123456', rol: defaultRole, authorizedRouteIds: [] })
     setModalOpen(true)
   }
 
@@ -106,7 +92,6 @@ export default function UsersPage() {
     setForm({
       nombre: u.nombre, email: u.email, password: u.password, rol: u.rol,
       authorizedRouteIds: getAssignedRouteIds(u),
-      grantedCapabilities: (u.grantedCapabilities ?? []) as Capability[],
     })
     setModalOpen(true)
   }
@@ -140,25 +125,22 @@ export default function UsersPage() {
     try {
       const userId = editing ? editing.id : generateId()
       const isNew = !editing
-      // Capacidades delegables + depuración central (elimina incompatibles con el rol).
-      const allowedCaps = new Set(delegableCapabilities(form.rol))
-      const grantedCapabilities = sanitizeGrantedCapabilities(form.rol, form.grantedCapabilities.filter(c => allowedCaps.has(c)))
       // Cobrador: modelo NO permite venta directa → flags legacy en false.
+      // #7 Sin permisos individuales: grantedCapabilities/revokedCapabilities siempre vacíos.
       const legacyDirect = { canCreateDirectSales: form.rol === 'cobrador' ? false : undefined, maxDirectSaleAmount: undefined }
+      const noGrants = { grantedCapabilities: undefined, revokedCapabilities: undefined }
 
       if (editing) {
         await db.users.update(editing.id, {
           nombre: form.nombre, email: form.email, password: form.password, rol: form.rol,
-          grantedCapabilities: grantedCapabilities.length ? grantedCapabilities : undefined,
-          ...legacyDirect, updatedAt: nowISO(),
+          ...noGrants, ...legacyDirect, updatedAt: nowISO(),
         })
       } else {
         const existing = await db.users.where('email').equals(form.email).first()
         if (existing) { toast.error('Ya existe un usuario con ese email'); setSaving(false); return }
         const u: User = {
           id: userId, tenantId, nombre: form.nombre, email: form.email, password: form.password, rol: form.rol,
-          grantedCapabilities: grantedCapabilities.length ? grantedCapabilities : undefined,
-          ...legacyDirect, status: 'activo', createdAt: nowISO(), updatedAt: nowISO(),
+          ...noGrants, ...legacyDirect, status: 'activo', createdAt: nowISO(), updatedAt: nowISO(),
         }
         await db.users.add(u)
       }
@@ -181,7 +163,7 @@ export default function UsersPage() {
         tenantId, userId: currentUser.id, userRole: currentUser.rol,
         action: isNew ? 'CREATE_USER' : 'UPDATE_USER', entityType: 'User', entityId: userId,
         descripcion: `${isNew ? 'Usuario creado' : 'Usuario actualizado'}: ${form.nombre} (${ROLE_LABELS[form.rol]})`,
-        after: { rol: form.rol, routes: form.authorizedRouteIds, grantedCapabilities },
+        after: { rol: form.rol, routes: form.authorizedRouteIds },
       })
       toast.success(editing ? 'Usuario actualizado' : 'Usuario creado')
       setModalOpen(false)
@@ -254,7 +236,6 @@ export default function UsersPage() {
       out.push({ label: `${assigned.length} ${assigned.length === 1 ? 'ruta' : 'rutas'}`, variant: 'info' })
       if (assigned.length <= 3) for (const id of assigned) out.push({ label: routeName(id), variant: 'gray' })
     }
-    if ((u.grantedCapabilities?.length ?? 0) > 0) out.push({ label: `+${u.grantedCapabilities!.length} permiso(s)`, variant: 'purple' })
     return out
   }
 
@@ -282,13 +263,6 @@ export default function UsersPage() {
   })
 
   const showRoutes = form.rol !== 'superadmin'
-  const delegable = delegableCapabilities(form.rol)
-  // #6: capacidades delegables agrupadas por categoría (catálogo humano).
-  const delegableByCategory = CATEGORY_ORDER
-    .map(cat => ({ cat, caps: delegable.filter(c => CAPABILITY_METADATA[c].category === cat) }))
-    .filter(g => g.caps.length > 0)
-  // Permisos incluidos por el rol base (informativo, no editable).
-  const baseCaps = capabilitiesForRole(form.rol).filter(c => c !== 'password.changeOwn')
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -378,57 +352,11 @@ export default function UsersPage() {
             </div>
           )}
 
-          {/* #6 PERMISOS ADICIONALES — lenguaje humano, agrupado por categoría. */}
+          {/* #7 Sin "Permisos adicionales": el acceso depende solo de rol + rutas. */}
           {form.rol !== 'superadmin' && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Permisos adicionales</label>
-              <p className="text-xs text-gray-400 mb-2">
-                Permisos especiales que amplían las funciones predeterminadas de este rol.
-                Solo puedes otorgar permisos que tú mismo posees.
-              </p>
-
-              {/* Incluidos por el rol base (informativo, no editable) */}
-              {baseCaps.length > 0 && (
-                <details className="mb-2 rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
-                  <summary className="text-xs font-medium text-gray-500 cursor-pointer select-none">
-                    Ya incluidos por el rol {ROLE_LABELS[form.rol]} ({baseCaps.length})
-                  </summary>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {baseCaps.map(c => (
-                      <span key={c} title={CAPABILITY_METADATA[c].description}
-                        className="px-2 py-0.5 rounded-md text-[11px] bg-white border border-gray-200 text-gray-500">
-                        {capabilityLabel(c)}
-                      </span>
-                    ))}
-                  </div>
-                </details>
-              )}
-
-              {delegableByCategory.length === 0 ? (
-                <p className="text-xs text-gray-400">No hay permisos adicionales que puedas delegar a este rol.</p>
-              ) : (
-                <div className="space-y-3">
-                  {delegableByCategory.map(({ cat, caps }) => (
-                    <div key={cat}>
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">{cat}</p>
-                      <div className="flex flex-wrap gap-2">
-                        {caps.map(cap => {
-                          const meta = CAPABILITY_METADATA[cap]
-                          const active = form.grantedCapabilities.includes(cap)
-                          return (
-                            <button key={cap} type="button" onClick={() => toggleCap(cap)} title={meta.description}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${active ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
-                              {meta.label}
-                              {meta.risk === 'alto' && <span className={`ml-1 ${active ? 'text-purple-200' : 'text-amber-500'}`}>•</span>}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <p className="text-xs text-gray-400">
+              Los permisos de este usuario dependen únicamente de su <span className="font-medium text-gray-500">rol</span> y de sus <span className="font-medium text-gray-500">rutas autorizadas</span>.
+            </p>
           )}
         </div>
       </Modal>

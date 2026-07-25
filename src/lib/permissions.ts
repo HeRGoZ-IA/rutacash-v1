@@ -447,15 +447,14 @@ export function can(user: User | null | undefined, capability: Capability, ctx?:
   if (!user) return false
   if (user.status !== 'activo') return false
 
+  // MODELO PURO: ROL BASE + RUTAS AUTORIZADAS (decisión del usuario). `can()` IGNORA
+  // por completo `grantedCapabilities`/`revokedCapabilities` (permisos individuales):
+  // los permisos dependen solo de rol + contexto + rutas. Los campos pueden seguir en
+  // User por compatibilidad de esquema, pero NO amplían ni reducen el acceso.
   const base = ROLE_CAPABILITIES[user.rol] ?? []
-  const granted = (user.grantedCapabilities ?? []) as Capability[]
-  const revoked = (user.revokedCapabilities ?? []) as Capability[]
-
-  if (revoked.includes(capability)) return false
-  // CAPACIDAD INCOMPATIBLE: aunque figure en `granted` (dato manipulado), se rechaza.
+  // CAPACIDAD INCOMPATIBLE: defensa interna (aunque un dato se manipule, se rechaza).
   if (!isCapabilityCompatible(user.rol, capability)) return false
-  const hasCap = base.includes(capability) || granted.includes(capability)
-  if (!hasCap) return false
+  if (!base.includes(capability)) return false
 
   // Empresa: salvo superadmin, la acción debe ser dentro de su tenant.
   if (ctx?.tenantId && user.rol !== 'superadmin' && user.tenantId !== ctx.tenantId) return false

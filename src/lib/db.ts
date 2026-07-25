@@ -147,6 +147,26 @@ export class RutaCashDB extends Dexie {
         u.authorizedRouteIds = valid.length > 0 ? valid : undefined
       })
     })
+
+    // ============================================================
+    // v7 (MODELO PURO: ROL BASE + RUTAS): aditiva y segura. Se eliminan los permisos
+    // INDIVIDUALES (grantedCapabilities/revokedCapabilities). `can()` ya los ignora;
+    // aquí se LIMPIAN los datos para no dejar arreglos huérfanos. No cambia rol, rutas
+    // ni ningún dato financiero; no elimina usuarios. Reporta cuántos se limpiaron.
+    // ============================================================
+    this.version(7).upgrade(async (tx) => {
+      let cleaned = 0
+      await tx.table('users').toCollection().modify((u: User) => {
+        const had = (u.grantedCapabilities && u.grantedCapabilities.length > 0) ||
+                    (u.revokedCapabilities && u.revokedCapabilities.length > 0)
+        if (had) {
+          u.grantedCapabilities = undefined
+          u.revokedCapabilities = undefined
+          cleaned++
+        }
+      })
+      console.log(`[RutaCash][migración v7] Permisos individuales eliminados de ${cleaned} usuario(s). Modelo: ROL BASE + RUTAS.`)
+    })
   }
 }
 

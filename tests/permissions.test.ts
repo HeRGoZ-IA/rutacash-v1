@@ -13,7 +13,8 @@ import {
   isPartnerInScope, isTransferInScope, type Capability,
 } from '../src/lib/permissions'
 import { CAPABILITY_METADATA, CATEGORY_ORDER } from '../src/lib/capabilityCatalog'
-import type { User, UserRole } from '../src/models/types'
+import { getEffectiveCompanyStatus, isCompanyBlocked } from '../src/lib/company'
+import type { User, UserRole, Tenant } from '../src/models/types'
 
 let passed = 0
 let failed = 0
@@ -249,6 +250,50 @@ check('ninguna etiqueta es la clave técnica', metaKeys.every(k => CAPABILITY_ME
 check('ninguna etiqueta contiene punto (clave técnica)', metaKeys.every(k => !CAPABILITY_METADATA[k].label.includes('.')))
 check('toda categoría es válida', metaKeys.every(k => CATEGORY_ORDER.includes(CAPABILITY_METADATA[k].category)))
 check('toda descripción existe', metaKeys.every(k => CAPABILITY_METADATA[k].description.trim().length > 0))
+
+// ============================================================
+// ONBOARDING, VIGENCIA Y ROLES PUROS — nuevas pruebas
+// ============================================================
+
+// --- #7 MODELO PURO: can() IGNORA grantedCapabilities / revokedCapabilities ---
+const socioConGrant = mkUser('socio', { authorizedRouteIds: ['r1'], grantedCapabilities: ['audit.view', 'client.create'] as Capability[] })
+check('can() ignora granted (audit.view no se habilita en socio)', !can(socioConGrant, 'audit.view'))
+check('can() ignora granted (escritura no se habilita en socio)', !can(socioConGrant, 'client.create', { routeId: 'r1' }))
+const adminConRevoke = mkUser('admin', { authorizedRouteIds: ['r1'], revokedCapabilities: ['report.export', 'client.view'] as Capability[] })
+check('can() ignora revoked (report.export sigue disponible)', can(adminConRevoke, 'report.export'))
+check('can() ignora revoked (client.view sigue disponible)', can(adminConRevoke, 'client.view', { routeId: 'r1' }))
+// Manipulación no rompe: cobrador con sale.createDirect sigue sin venta directa.
+const cobHack = mkUser('cobrador', { authorizedRouteIds: ['r1'], grantedCapabilities: ['sale.createDirect'] as Capability[] })
+check('cobrador manipulado sigue sin venta directa', !can(cobHack, 'sale.createDirect', { routeId: 'r1' }))
+const socioHack = mkUser('socio', { authorizedRouteIds: ['r1'], grantedCapabilities: ['payment.register', 'transfer.create'] as Capability[] })
+check('socio manipulado sigue solo lectura (pagos)', !can(socioHack, 'payment.register', { routeId: 'r1' }))
+check('socio manipulado sigue solo lectura (transferencias)', !can(socioHack, 'transfer.create'))
+// Rol + rutas siguen determinando el acceso.
+check('rol determina acceso: cobrador registra pago en su ruta', can(cobrador, 'payment.register', { routeId: 'r1' }))
+check('rutas determinan acceso: cobrador NO en ruta ajena', !can(cobrador, 'payment.register', { routeId: 'r9' }))
+
+// --- #4 VIGENCIA (estado efectivo por fecha calendario) ---
+function mkTenant(over: Partial<Tenant> = {}): Tenant {
+  return { id: 't1', nombre: 'Emp', email: 'e@e.com', plan: 'profesional', status: 'activa', pais: 'Colombia', moneda: 'COP', createdAt: '', updatedAt: '', ...over }
+}
+const HOY = '2026-07-25'
+const AYER = '2026-07-24'
+const MANANA = '2026-07-26'
+check('sin fecha → activa', getEffectiveCompanyStatus(mkTenant({ fechaVencimiento: undefined }), HOY) === 'activa')
+check('sin fecha (prueba) → prueba', getEffectiveCompanyStatus(mkTenant({ status: 'prueba', fechaVencimiento: undefined }), HOY) === 'prueba')
+check('fecha = hoy → sigue activa (inclusivo)', getEffectiveCompanyStatus(mkTenant({ fechaVencimiento: HOY }), HOY) === 'activa')
+check('fecha = ayer → vencida', getEffectiveCompanyStatus(mkTenant({ fechaVencimiento: AYER }), HOY) === 'vencida')
+check('fecha = mañana → activa', getEffectiveCompanyStatus(mkTenant({ fechaVencimiento: MANANA }), HOY) === 'activa')
+check('vencida bloquea acceso', isCompanyBlocked(mkTenant({ fechaVencimiento: AYER }), HOY))
+check('activa no bloquea', !isCompanyBlocked(mkTenant({ fechaVencimiento: MANANA }), HOY))
+// Suspensión MANUAL manda sobre la fecha; no se reactiva por fecha futura.
+check('suspendida NO se reactiva por fecha futura', getEffectiveCompanyStatus(mkTenant({ status: 'suspendida', fechaVencimiento: MANANA }), HOY) === 'suspendida')
+check('suspendida bloquea', isCompanyBlocked(mkTenant({ status: 'suspendida' }), HOY))
+// Renovación: pasar de vencida a fecha futura o sin fecha → activa.
+check('renovar (fecha futura) → activa', getEffectiveCompanyStatus(mkTenant({ status: 'activa', fechaVencimiento: MANANA }), HOY) === 'activa')
+check('renovar (sin vencimiento) → activa', getEffectiveCompanyStatus(mkTenant({ status: 'activa', fechaVencimiento: undefined }), HOY) === 'activa')
+// suspendida ≠ vencida (estados diferenciados).
+check('suspendida y vencida son estados distintos', getEffectiveCompanyStatus(mkTenant({ status: 'suspendida' }), HOY) !== getEffectiveCompanyStatus(mkTenant({ fechaVencimiento: AYER }), HOY))
 
 console.log(`\nPRUEBA DE PERMISOS: ${passed} OK, ${failed} FALLIDAS`)
 if (failed > 0) process.exit(1)

@@ -17,13 +17,16 @@ import { generateId } from '@/lib/utils'
 import { formatCurrency, nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { assignCobradorToRoute, setUserRouteMembership } from '@/services/routeAssignment'
-import { filterAccessibleRoutes, authorizedRouteIdsOf, assignableRoles, canManageUser, ROLE_LABELS } from '@/lib/permissions'
+import { createRouteWithAdmins } from '@/services/routeService'
+import { filterAccessibleRoutes, assignableRoles, canManageUser, ROLE_LABELS } from '@/lib/permissions'
 import { getAssignedRouteIds } from '@/lib/roles'
+import { useNavigate } from 'react-router-dom'
 import type { Route, User, RouteFinancialSummary } from '@/models/types'
 
 export default function RoutesPage() {
   const { user, refreshUser } = useAuth()
   const { tenantId, currency } = useTenant()
+  const navigate = useNavigate()
   const [routes, setRoutes] = useState<Route[]>([])
   const [cobradores, setCobradores] = useState<User[]>([])
   const [allUsers, setAllUsers] = useState<User[]>([])
@@ -33,7 +36,7 @@ export default function RoutesPage() {
   const [editing, setEditing] = useState<Route | null>(null)
   // #4 Asignación bidireccional de usuarios a la ruta en edición.
   const [assignBusy, setAssignBusy] = useState<string | null>(null)
-  const [pendingRemoval, setPendingRemoval] = useState<User | null>(null)
+  const [pendingRemoval, setPendingRemoval] = useState<{ user: User; reason: 'lastUserRoute' | 'lastRouteAdmin' } | null>(null)
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Route | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -42,9 +45,17 @@ export default function RoutesPage() {
   const [desde, setDesde] = useState('')
   const [hasta, setHasta] = useState('')
   const [form, setForm] = useState({
-    nombre: '', ciudad: '', cobradorId: '',
+    nombre: '', ciudad: '', cobradorId: '', adminIds: [] as string[],
     tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0,
   })
+
+  // #5/#6 Administradores activos del tenant (requisito para crear rutas).
+  const activeAdmins = allUsers.filter(u => u.rol === 'admin' && u.status === 'activo')
+  const hasActiveAdmin = activeAdmins.length > 0
+  // Administradores que el actor puede fijar como responsables al crear:
+  // Super Admin → todos los activos; Administrador → solo él mismo (no gestiona otros admin).
+  const selectableAdmins = user?.rol === 'superadmin' ? activeAdmins : activeAdmins.filter(a => a.id === user?.id)
+  const lockAdminToSelf = user?.rol === 'admin'
 
   // Código interno ordenado y secuencial: RT-001, RT-002, ... (no se pide al usuario).
   function nextRouteCode(existing: Route[]): string {
@@ -77,7 +88,9 @@ export default function RoutesPage() {
 
   function openCreate() {
     setEditing(null)
-    setForm({ nombre: '', ciudad: '', cobradorId: '', tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0 })
+    // El Administrador creador queda preseleccionado (y bloqueado): se autoasigna.
+    const preselect = user?.rol === 'admin' && user?.id ? [user.id] : []
+    setForm({ nombre: '', ciudad: '', cobradorId: '', adminIds: preselect, tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0 })
     setModalOpen(true)
   }
 
@@ -85,18 +98,28 @@ export default function RoutesPage() {
     setEditing(route)
     setForm({
       nombre: route.nombre, ciudad: route.ciudad ?? '',
-      cobradorId: route.cobradorId ?? '', tasaInteres: route.tasaInteres, tasaLibre: route.tasaLibre,
+      cobradorId: route.cobradorId ?? '', adminIds: [], tasaInteres: route.tasaInteres, tasaLibre: route.tasaLibre,
       montoMaximoPrestamo: route.montoMaximoPrestamo, capitalInicial: route.capitalInicial,
     })
     setModalOpen(true)
   }
 
+  function toggleAdmin(id: string) {
+    if (lockAdminToSelf) return // el Administrador solo se asigna a sí mismo
+    setForm(f => ({ ...f, adminIds: f.adminIds.includes(id) ? f.adminIds.filter(x => x !== id) : [...f.adminIds, id] }))
+  }
+
   async function handleSave() {
+    if (!user) return
     if (!form.nombre) { toast.error('El nombre de la ruta es obligatorio'); return }
+    if (!editing) {
+      // #6 Al crear, se exige Administrador responsable (Super Admin debe elegir; el
+      // Administrador queda autoasignado). El servicio revalida ambas condiciones.
+      if (form.adminIds.length === 0) { toast.error('Selecciona al menos un Administrador responsable.'); return }
+    }
     setSaving(true)
     try {
       if (editing) {
-        // No tocamos cobradorId aquí: lo sincroniza assignCobradorToRoute (lee el previo).
         await db.routes.update(editing.id, {
           nombre: form.nombre, ciudad: form.ciudad,
           tasaInteres: form.tasaInteres, tasaLibre: form.tasaLibre,
@@ -105,38 +128,21 @@ export default function RoutesPage() {
         await assignCobradorToRoute(editing.id, form.cobradorId || undefined)
         toast.success('Ruta actualizada')
       } else {
-        const route: Route = {
-          id: generateId(), tenantId, officeId: '',
-          nombre: form.nombre, codigo: nextRouteCode(routes),
-          ciudad: form.ciudad, tasaInteres: form.tasaInteres, tasaLibre: form.tasaLibre,
+        await createRouteWithAdmins({
+          tenantId, nombre: form.nombre, ciudad: form.ciudad,
+          tasaInteres: form.tasaInteres, tasaLibre: form.tasaLibre,
           montoMaximoPrestamo: form.montoMaximoPrestamo, capitalInicial: form.capitalInicial,
-          capitalActual: form.capitalInicial, cobradorId: undefined,
-          status: 'activa', createdAt: nowISO(), updatedAt: nowISO(),
-        }
-        await db.routes.add(route)
-        // Vincula el cobrador (y su ruta principal) de forma consistente.
-        if (form.cobradorId) await assignCobradorToRoute(route.id, form.cobradorId)
-        if (form.capitalInicial > 0) {
-          await db.capitalMovements.add({
-            id: generateId(), tenantId, officeId: '', routeId: route.id,
-            tipo: 'ingresoCapital', valor: form.capitalInicial,
-            descripcion: 'Capital inicial', fecha: new Date().toISOString().slice(0, 10),
-            userId: 'system', createdAt: nowISO(),
-          })
-        }
-        // AUTO-ASIGNACIÓN: si un Administrador limitado por rutas crea una ruta, se
-        // agrega automáticamente a sus rutas autorizadas (sin darle acceso a las demás).
-        if (user && user.rol === 'admin' && authorizedRouteIdsOf(user).length > 0) {
-          const next = [...new Set([...authorizedRouteIdsOf(user), route.id])]
-          await db.users.update(user.id, { authorizedRouteIds: next, updatedAt: nowISO() })
-          await refreshUser()
-        }
-        if (user) await logAction({ tenantId, userId: user.id, userRole: user.rol, routeId: route.id, action: 'CREATE_ROUTE', entityType: 'Route', entityId: route.id, descripcion: `Ruta creada: ${route.nombre}` })
+          codigo: nextRouteCode(routes), adminIds: form.adminIds, cobradorId: form.cobradorId || undefined,
+        }, user)
+        // Si el Administrador creador se autoasignó, refrescar su sesión (rutas).
+        if (form.adminIds.includes(user.id)) await refreshUser()
         toast.success('Ruta creada')
       }
       setModalOpen(false)
       await load()
-    } catch { toast.error('Error al guardar') } finally { setSaving(false) }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al guardar')
+    } finally { setSaving(false) }
   }
 
   // #4 Usuarios que el actor puede asignar a rutas (jerarquía; nunca superadmin ni,
@@ -169,7 +175,12 @@ export default function RoutesPage() {
     if (currentlyMember) {
       // Confirmar antes de retirar la ÚLTIMA ruta operativa de un usuario activo.
       const remaining = getAssignedRouteIds(u).filter(id => id !== editing.id)
-      if (remaining.length === 0 && u.status === 'activo') { setPendingRemoval(u); return }
+      if (remaining.length === 0 && u.status === 'activo') { setPendingRemoval({ user: u, reason: 'lastUserRoute' }); return }
+      // Confirmación REFORZADA: no dejar una ruta ACTIVA sin ningún Administrador.
+      if (u.rol === 'admin' && editing.status === 'activa') {
+        const otherAdmins = allUsers.filter(a => a.rol === 'admin' && a.id !== u.id && getAssignedRouteIds(a).includes(editing.id))
+        if (otherAdmins.length === 0) { setPendingRemoval({ user: u, reason: 'lastRouteAdmin' }); return }
+      }
       doToggleUserRoute(u, false)
     } else {
       doToggleUserRoute(u, true)
@@ -235,8 +246,20 @@ export default function RoutesPage() {
           <h1 className="text-xl font-bold text-gray-900">Rutas</h1>
           <p className="text-sm text-gray-500 mt-0.5">{visibleRoutes.length} de {routes.length} ruta(s)</p>
         </div>
-        <Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Nueva ruta</Button>
+        {/* #5 No se puede crear una ruta sin Administrador activo (botón deshabilitado). */}
+        <Button onClick={openCreate} disabled={!hasActiveAdmin} icon={<Plus className="w-4 h-4" />}>Nueva ruta</Button>
       </div>
+
+      {/* #5 Explicación visible + acción para crear el primer Administrador. */}
+      {!loading && !hasActiveAdmin && (
+        <div className="flex items-start gap-3 p-4 rounded-2xl bg-amber-50 border border-amber-200">
+          <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-amber-800 font-medium">Primero debes crear al menos un Administrador para asignarlo como responsable de la ruta.</p>
+            <Button size="sm" variant="secondary" className="mt-2" onClick={() => navigate('/admin/users')} icon={<Users className="w-3.5 h-3.5" />}>Crear Administrador</Button>
+          </div>
+        </div>
+      )}
 
       {/* Filtro por fecha de creación (compacto) */}
       <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta}
@@ -332,11 +355,37 @@ export default function RoutesPage() {
             <Input label="Ciudad" value={form.ciudad} onChange={e => setForm(f => ({ ...f, ciudad: e.target.value }))} placeholder="Ej: Barranquilla" />
           </div>
           {editing && <p className="text-xs text-gray-400">Código de ruta: <span className="font-medium text-gray-600">{editing.codigo}</span></p>}
-          {!editing && user?.rol === 'admin' && authorizedRouteIdsOf(user).length > 0 && (
-            <div className="text-xs text-primary-700 bg-primary-50 border border-primary-100 rounded-xl px-3 py-2">
-              La nueva ruta será asignada automáticamente a tu usuario.
+
+          {/* #6 Administrador responsable (obligatorio al crear). Super Admin elige uno
+              o varios activos; el Administrador queda autoasignado (bloqueado a sí mismo). */}
+          {!editing && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Administrador responsable <span className="text-red-500">*</span></label>
+              {lockAdminToSelf ? (
+                <div className="flex items-center gap-2 rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-700">
+                  <Users className="w-4 h-4" /> {user?.nombre} <span className="text-xs text-primary-400">(se asigna automáticamente)</span>
+                </div>
+              ) : selectableAdmins.length === 0 ? (
+                <p className="text-xs text-amber-600">No hay Administradores activos disponibles.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {selectableAdmins.map(a => {
+                    const active = form.adminIds.includes(a.id)
+                    return (
+                      <button key={a.id} type="button" onClick={() => toggleAdmin(a.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${active ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+                        {a.nombre}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              {!lockAdminToSelf && form.adminIds.length === 0 && (
+                <p className="mt-1 text-xs text-amber-600">Selecciona al menos un Administrador responsable.</p>
+              )}
             </div>
           )}
+
           <Select label="Cobrador" value={form.cobradorId} onChange={e => setForm(f => ({ ...f, cobradorId: e.target.value }))}
             options={cobradores.map(c => ({ value: c.id, label: c.nombre }))} placeholder="Sin asignar" />
           <div className="grid grid-cols-2 gap-3">
@@ -387,13 +436,18 @@ export default function RoutesPage() {
         </div>
       </Modal>
 
-      {/* #4 Confirmación: retirar la última ruta operativa de un usuario activo */}
-      <Modal open={!!pendingRemoval} onClose={() => setPendingRemoval(null)} title="Retirar última ruta"
-        footer={<><Button variant="secondary" onClick={() => setPendingRemoval(null)}>Cancelar</Button><Button variant="danger" loading={!!assignBusy} onClick={() => pendingRemoval && doToggleUserRoute(pendingRemoval, false)}>Sí, retirar</Button></>}>
+      {/* #4/#6 Confirmación reforzada: última ruta del usuario, o último Administrador de la ruta */}
+      <Modal open={!!pendingRemoval} onClose={() => setPendingRemoval(null)}
+        title={pendingRemoval?.reason === 'lastRouteAdmin' ? 'Ruta sin Administrador' : 'Retirar última ruta'}
+        footer={<><Button variant="secondary" onClick={() => setPendingRemoval(null)}>Cancelar</Button><Button variant="danger" loading={!!assignBusy} onClick={() => pendingRemoval && doToggleUserRoute(pendingRemoval.user, false)}>Sí, retirar de todos modos</Button></>}>
         <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-xl border border-amber-100">
           <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
           <p className="text-sm text-amber-700">
-            <span className="font-semibold">{pendingRemoval?.nombre}</span> quedará SIN rutas autorizadas y por tanto sin acceso operativo. ¿Deseas retirarlo de esta ruta de todos modos?
+            {pendingRemoval?.reason === 'lastRouteAdmin' ? (
+              <>Esta ruta ACTIVA quedará <span className="font-semibold">sin ningún Administrador responsable</span> si retiras a <span className="font-semibold">{pendingRemoval?.user.nombre}</span>. ¿Deseas continuar?</>
+            ) : (
+              <><span className="font-semibold">{pendingRemoval?.user.nombre}</span> quedará SIN rutas autorizadas y por tanto sin acceso operativo. ¿Deseas retirarlo de esta ruta de todos modos?</>
+            )}
           </p>
         </div>
       </Modal>
