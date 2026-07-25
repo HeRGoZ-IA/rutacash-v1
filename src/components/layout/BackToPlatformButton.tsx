@@ -13,6 +13,10 @@ import { useAuth } from '@/hooks/useAuth'
  * Reutiliza `exitTenantContext()` (no duplica lógica): limpia tenant + ruta activa,
  * conserva la sesión y navega a /platform. z-30 → por debajo de modales (z-50),
  * toasts (z-100) y overlay del menú móvil; nunca tapa contenido importante.
+ *
+ * Posición: esquina superior derecha, JUSTO DEBAJO del bloque de estado/usuario
+ * (indicador "En línea" + avatar del header, ~56px, más el banner de modo ~28px en
+ * DEMO). `top-[5.5rem]` (88px) lo deja bajo ese bloque sin invadir los KPIs.
  */
 export function BackToPlatformButton() {
   const { user, tenant, exitTenantContext } = useAuth()
@@ -26,7 +30,7 @@ export function BackToPlatformButton() {
   }
 
   return (
-    <div className="fixed right-0 top-[26%] z-30 print:hidden">
+    <div className="fixed right-0 top-[5.5rem] z-30 print:hidden">
       <button
         onClick={handleBack}
         title="Volver al listado de empresas"
