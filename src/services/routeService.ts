@@ -14,8 +14,8 @@ import { assertCan } from '@/services/authz'
 import { AuthzError } from '@/services/authz'
 import { getAssignedRouteIds } from '@/lib/roles'
 import { canManageUser, authorizedRouteIdsOf } from '@/lib/permissions'
-import { assignCobradorToRoute } from '@/services/routeAssignment'
 import { computeRouteAssignmentDiff } from '@/lib/routeAssignmentDiff'
+import { validateCobradorInvariant } from '@/lib/cobradorRules'
 import type { Route, User } from '@/models/types'
 
 /** ¿Existe al menos un Administrador ACTIVO en el tenant? (requisito para crear rutas). */
@@ -35,6 +35,7 @@ export interface CreateRouteInput {
   codigo: string
   /** Administradores responsables (≥1). Fuente única: se agrega la ruta a su authorizedRouteIds. */
   adminIds: string[]
+  /** Cobrador responsable (OBLIGATORIO): debe ser un cobrador activo del tenant. */
   cobradorId?: string
 }
 
@@ -56,17 +57,25 @@ export async function createRouteWithAdmins(input: CreateRouteInput, actor: User
     if (!a || a.rol !== 'admin' || a.status !== 'activo') throw new AuthzError('Administrador responsable inválido o inactivo.')
     if (a.id !== actor.id && !canManageUser(actor, a)) throw new AuthzError('No puedes asignar a ese Administrador.')
   }
+  // 3.b) COBRADOR RESPONSABLE obligatorio: toda ruta nace con exactamente un cobrador
+  //      responsable, activo y del mismo tenant. El servicio RECHAZA la creación si falta.
+  if (!input.cobradorId) throw new AuthzError('Debes seleccionar un Cobrador responsable para la ruta.')
+  const cobrador = users.find(u => u.id === input.cobradorId)
+  if (!cobrador || cobrador.rol !== 'cobrador' || cobrador.status !== 'activo') {
+    throw new AuthzError('Cobrador responsable inválido o inactivo.')
+  }
 
   const route: Route = {
     id: generateId(), tenantId: input.tenantId, officeId: '',
     nombre: input.nombre, codigo: input.codigo, ciudad: input.ciudad,
     tasaInteres: input.tasaInteres, tasaLibre: input.tasaLibre,
     montoMaximoPrestamo: input.montoMaximoPrestamo, capitalInicial: input.capitalInicial,
-    capitalActual: input.capitalInicial, cobradorId: undefined,
+    capitalActual: input.capitalInicial, cobradorId: input.cobradorId,
     status: 'activa', createdAt: nowISO(), updatedAt: nowISO(),
   }
 
-  // 4) Transaccional: crea la ruta, el capital inicial y asigna la ruta a cada Admin.
+  // 4) Transaccional ÚNICO: crea la ruta, el capital inicial, asigna la ruta a cada Admin
+  //    y al cobrador responsable. Si algo falla, Dexie revierte todo (no queda ruta huérfana).
   await db.transaction('rw', db.routes, db.users, db.capitalMovements, async () => {
     await db.routes.add(route)
     if (input.capitalInicial > 0) {
@@ -82,16 +91,19 @@ export async function createRouteWithAdmins(input: CreateRouteInput, actor: User
       const list = [...ids]
       await db.users.update(id, { authorizedRouteIds: list, routeId: list[0], updatedAt: nowISO() })
     }
+    // Cobrador responsable: queda ASIGNADO (fuente única authorizedRouteIds) y es el
+    // responsable (route.cobradorId ya fijado arriba). Misma transacción → atómico.
+    const cids = new Set(getAssignedRouteIds(cobrador)); cids.add(route.id)
+    const clist = [...cids]
+    await db.users.update(cobrador.id, { authorizedRouteIds: clist, routeId: clist[0], updatedAt: nowISO() })
   })
 
-  // 5) Cobrador responsable opcional (sincroniza route.cobradorId con su propia lógica).
-  if (input.cobradorId) await assignCobradorToRoute(route.id, input.cobradorId)
-
-  // 6) Auditoría de creación y de cada asignación de Administrador.
-  await logAction({ tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: route.id, action: 'CREATE_ROUTE', entityType: 'Route', entityId: route.id, descripcion: `Ruta creada: ${route.nombre}`, after: { adminIds } })
+  // 5) Auditoría de creación, de cada asignación de Administrador y del cobrador responsable.
+  await logAction({ tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: route.id, action: 'CREATE_ROUTE', entityType: 'Route', entityId: route.id, descripcion: `Ruta creada: ${route.nombre}`, after: { adminIds, cobradorId: input.cobradorId } })
   for (const id of adminIds) {
     await logAction({ tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: route.id, action: 'ASSIGN_ROUTE', entityType: 'User', entityId: id, descripcion: `Administrador responsable asignado a ${route.nombre}` })
   }
+  await logAction({ tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: route.id, action: 'ASSIGN_ROUTE', entityType: 'User', entityId: cobrador.id, descripcion: `Cobrador responsable asignado a ${route.nombre}` })
   return route
 }
 
@@ -143,6 +155,17 @@ export async function updateRouteWithAssignments(input: UpdateRouteInput, actor:
     if (input.cobradorId) affectedIds.add(input.cobradorId)
     const users = new Map<string, User>()
     for (const id of affectedIds) { const u = await db.users.get(id); if (u) users.set(id, u) }
+
+    // INVARIANTE DE COBRADORES (defensa en el servicio; la UI ya bloquea estados
+    // inválidos). Se revalida sobre el borrador recibido; si falla, se lanza y Dexie
+    // revierte TODO (no hay persistencia parcial). No se corrige silenciosamente.
+    const inv = validateCobradorInvariant({
+      routeTenantId: input.tenantId,
+      assignedUserIds: input.assignedUserIds,
+      cobradorId: input.cobradorId,
+      userById: (id) => users.get(id),
+    })
+    if (!inv.ok) throw new AuthzError(inv.message)
 
     const diff = computeRouteAssignmentDiff({
       routeId: input.routeId,

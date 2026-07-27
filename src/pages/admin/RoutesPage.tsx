@@ -20,6 +20,8 @@ import { generateId } from '@/lib/utils'
 import { formatCurrency, nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { createRouteWithAdmins, updateRouteWithAssignments } from '@/services/routeService'
+import { cobradorRemovalBlock, validateCobradorInvariant, COBRADOR_REMOVAL_MESSAGE } from '@/lib/cobradorRules'
+import { ASSIGNMENT_ROLE_ORDER } from '@/lib/routeAssignments'
 import { filterAccessibleRoutes, assignableRoles, canManageUser, ROLE_LABELS } from '@/lib/permissions'
 import { getAssignedRouteIds } from '@/lib/roles'
 import { useNavigate } from 'react-router-dom'
@@ -126,8 +128,38 @@ export default function RoutesPage() {
   function tryCloseModal() { if (dirty) setDiscardOpen(true); else closeModal() }
 
   // Alternar asignación de un usuario: SOLO modifica el borrador (no escribe en Dexie).
+  // RETIRO de un cobrador: se valida EN EL INSTANTE del clic. Si es el último cobrador
+  // o el responsable (con otros), NO se modifica el borrador y se avisa con un toast.
   function toggleAssignUser(id: string) {
-    setForm(f => ({ ...f, assignedUserIds: f.assignedUserIds.includes(id) ? f.assignedUserIds.filter(x => x !== id) : [...f.assignedUserIds, id] }))
+    const u = allUsers.find(x => x.id === id)
+    const removing = form.assignedUserIds.includes(id)
+    if (removing && u?.rol === 'cobrador') {
+      const cobradoresAsignados = form.assignedUserIds.filter(x => allUsers.find(y => y.id === x)?.rol === 'cobrador')
+      const block = cobradorRemovalBlock({
+        isCobrador: true,
+        assignedCobradorIds: cobradoresAsignados,
+        responsibleId: form.cobradorId || undefined,
+        userId: id,
+      })
+      if (block) { toast.error(COBRADOR_REMOVAL_MESSAGE[block]); return }  // borrador intacto
+    }
+    setForm(f => {
+      const assigned = removing ? f.assignedUserIds.filter(x => x !== id) : [...f.assignedUserIds, id]
+      // Al AGREGAR un cobrador cuando aún no hay responsable, se vuelve responsable
+      // (un único cobrador asignado es, por definición, el responsable de la ruta).
+      const cobradorId = !removing && u?.rol === 'cobrador' && !f.cobradorId ? id : f.cobradorId
+      return { ...f, assignedUserIds: assigned, cobradorId }
+    })
+  }
+
+  // Cambiar el Cobrador RESPONSABLE (borrador). Si el elegido aún no está asignado, se
+  // agrega automáticamente al conjunto de asignados (el responsable siempre es miembro).
+  function setResponsible(id: string) {
+    setForm(f => ({
+      ...f,
+      cobradorId: id,
+      assignedUserIds: id && !f.assignedUserIds.includes(id) ? [...f.assignedUserIds, id] : f.assignedUserIds,
+    }))
   }
 
   function toggleAdmin(id: string) {
@@ -137,14 +169,33 @@ export default function RoutesPage() {
 
   // Usuarios que el actor puede asignar a la ruta (jerarquía).
   const assignableToRoutes = allUsers.filter(isAssignable)
+  // Cobradores válidos para responsable: activos del tenant (+ el actual si quedó inactivo).
+  const responsibleOptions = cobradores.filter(c => c.status === 'activo' || c.id === form.cobradorId)
+  // Asignables agrupados por rol (orden Administrador→…→Secretario; alfabético dentro de cada rol).
+  const assignableGroups = ASSIGNMENT_ROLE_ORDER
+    .map(g => ({ ...g, list: assignableToRoutes.filter(u => u.rol === g.rol).sort((a, b) => a.nombre.localeCompare(b.nombre)) }))
+    .filter(g => g.list.length > 0)
 
   async function handleSave(force = false) {
     if (!user) return
     if (!form.nombre) { toast.error('El nombre de la ruta es obligatorio'); return }
+    // COBRADOR RESPONSABLE obligatorio (crear y editar): sin él no se guarda. NO se
+    // corrige silenciosamente; se informa el motivo. El servicio revalida (rollback).
+    if (!form.cobradorId) { toast.error('Debes seleccionar un Cobrador responsable para la ruta.'); return }
     if (!editing) {
       // #6 Al crear, se exige Administrador responsable (Super Admin elige; el
       // Administrador queda autoasignado). El servicio revalida ambas condiciones.
       if (form.adminIds.length === 0) { toast.error('Selecciona al menos un Administrador responsable.'); return }
+    } else {
+      // Invariante completo de cobradores sobre el borrador (≥1 cobrador, responsable
+      // válido y asignado). La UI ya lo bloquea; esto evita guardar un estado inválido.
+      const inv = validateCobradorInvariant({
+        routeTenantId: tenantId,
+        assignedUserIds: form.assignedUserIds,
+        cobradorId: form.cobradorId || undefined,
+        userById: (id) => allUsers.find(u => u.id === id),
+      })
+      if (!inv.ok) { toast.error(inv.message); return }
     }
     // Confirmación al Actualizar: no dejar una ruta ACTIVA sin ningún Administrador.
     if (editing && !force && editing.status === 'activa') {
@@ -384,8 +435,11 @@ export default function RoutesPage() {
             </div>
           )}
 
-          <Select label="Cobrador" value={form.cobradorId} onChange={e => setForm(f => ({ ...f, cobradorId: e.target.value }))}
-            options={cobradores.map(c => ({ value: c.id, label: c.nombre }))} placeholder="Sin asignar" />
+          {/* Cobrador RESPONSABLE (obligatorio): al elegir uno no asignado, se agrega
+              automáticamente al borrador de asignados. Solo lista cobradores válidos. */}
+          <Select label="Cobrador responsable" required value={form.cobradorId} onChange={e => setResponsible(e.target.value)}
+            options={responsibleOptions.map(c => ({ value: c.id, label: c.status === 'activo' ? c.nombre : `${c.nombre} (inactivo)` }))}
+            placeholder="Selecciona un cobrador" />
           <div className="grid grid-cols-2 gap-3">
             <Input label="Tasa de interés (%)" type="number" value={form.tasaInteres} onChange={e => setForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} min={0} max={100} />
             <MoneyInput label="Monto máx. préstamo" currency={currency} value={form.montoMaximoPrestamo} onValueChange={v => setForm(f => ({ ...f, montoMaximoPrestamo: v }))} />
@@ -398,33 +452,41 @@ export default function RoutesPage() {
             <label htmlFor="tasaLibre" className="text-sm text-gray-700">Tasa libre (el cobrador puede variar la tasa)</label>
           </div>
 
-          {/* Usuarios asignados a esta ruta — BORRADOR: no persiste hasta "Actualizar". */}
+          {/* Usuarios asignados a esta ruta — BORRADOR: no persiste hasta "Actualizar".
+              Agrupado por rol (Administrador→Socio→Supervisor→Cobrador→Secretario).
+              En Cobradores: el responsable se marca "Responsable"; el resto "Asignado". */}
           {editing && (
             <div className="pt-3 border-t border-gray-100">
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2 mb-2">
                 <Users className="w-4 h-4 text-gray-500" />
                 <label className="text-sm font-medium text-gray-700">Usuarios asignados a esta ruta</label>
               </div>
-              <p className="text-xs text-gray-400 mb-2">Los cambios se guardarán al presionar "Actualizar".</p>
-              {assignableToRoutes.length === 0 ? (
+              {assignableGroups.length === 0 ? (
                 <p className="text-xs text-gray-400">No hay usuarios que puedas asignar.</p>
               ) : (
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                  {assignableToRoutes.map(u => {
-                    const member = form.assignedUserIds.includes(u.id)   // ← lee del BORRADOR
-                    return (
-                      <button key={u.id} type="button" onClick={() => toggleAssignUser(u.id)}
-                        className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-left transition-colors ${member ? 'bg-primary-50 border-primary-200' : 'bg-white border-gray-200 hover:bg-gray-50'}`}>
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-gray-800 truncate">{u.nombre}</p>
-                          <p className="text-xs text-gray-400">{ROLE_LABELS[u.rol]}{u.status !== 'activo' ? ' · inactivo' : ''}</p>
-                        </div>
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${member ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                          {member ? 'Asignado' : 'Asignar'}
-                        </span>
-                      </button>
-                    )
-                  })}
+                <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                  {assignableGroups.map(g => (
+                    <div key={g.key} className="space-y-1.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{g.plural}</p>
+                      {g.list.map(u => {
+                        const member = form.assignedUserIds.includes(u.id)   // ← lee del BORRADOR
+                        const isResp = g.rol === 'cobrador' && member && u.id === form.cobradorId
+                        const tag = !member ? 'Asignar' : isResp ? 'Responsable' : 'Asignado'
+                        return (
+                          <button key={u.id} type="button" onClick={() => toggleAssignUser(u.id)}
+                            className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-left transition-colors ${member ? 'bg-primary-50 border-primary-200' : 'bg-white border-gray-200 hover:bg-gray-50'}`}>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-gray-800 truncate">{u.nombre}</p>
+                              <p className="text-xs text-gray-400">{ROLE_LABELS[u.rol]}{g.rol === 'cobrador' && member ? ` · ${isResp ? 'Responsable' : 'Asignado'}` : ''}{u.status !== 'activo' ? ' · inactivo' : ''}</p>
+                            </div>
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${isResp ? 'bg-amber-500 text-white' : member ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                              {tag}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

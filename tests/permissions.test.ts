@@ -17,6 +17,7 @@ import { getEffectiveCompanyStatus, isCompanyBlocked } from '../src/lib/company'
 import { shallowDirty } from '../src/hooks/useDirtyForm'
 import { computeRouteAssignmentDiff } from '../src/lib/routeAssignmentDiff'
 import { getRouteAssignmentsByRole, getUsersAssignedToRoute, ASSIGNMENT_ROLE_ORDER, hasAnyAssignment } from '../src/lib/routeAssignments'
+import { cobradorRemovalBlock, validateCobradorInvariant } from '../src/lib/cobradorRules'
 import type { User, UserRole, Tenant } from '../src/models/types'
 
 let passed = 0
@@ -394,6 +395,68 @@ check('ruta sin asignados → hasAnyAssignment false', !hasAnyAssignment(getRout
 // La resolución usa authorizedRouteIds, NO route.cobradorId (no hay tal campo en User).
 check('resolución por authorizedRouteIds (routeId legado también cuenta)',
   getUsersAssignedToRoute([{ ...mkAssign('c', 'cobrador', 'Leg', []), routeId: 'rA', authorizedRouteIds: undefined }], 'rA', 't1').length === 1)
+
+// ============================================================
+// INTEGRIDAD DE COBRADORES EN RUTAS (cobradorRules)
+// ============================================================
+const cobA = mkAssign('cobA', 'cobrador', 'Ana Cobradora', ['rA'])
+const cobB = mkAssign('cobB', 'cobrador', 'Juan Cobrador', ['rA'])
+const admB = mkAssign('admB', 'admin', 'Beto Admin', ['rA'])
+const byId = (list: User[]) => (id: string) => list.find(u => u.id === id)
+
+// --- Retiro inmediato (cobradorRemovalBlock) ---
+// CASO 1 — único cobrador asignado: no se puede retirar.
+check('COB CASO 1 — último cobrador bloqueado',
+  cobradorRemovalBlock({ isCobrador: true, assignedCobradorIds: ['cobA'], responsibleId: 'cobA', userId: 'cobA' }) === 'last-cobrador')
+// CASO 2 — cobrador NO responsable con otros: retiro permitido.
+check('COB CASO 2 — cobrador no responsable se puede retirar',
+  cobradorRemovalBlock({ isCobrador: true, assignedCobradorIds: ['cobA', 'cobB'], responsibleId: 'cobA', userId: 'cobB' }) === null)
+// CASO 3 — responsable con otros: requiere elegir otro responsable primero.
+check('COB CASO 3 — responsable con otros requiere reemplazo',
+  cobradorRemovalBlock({ isCobrador: true, assignedCobradorIds: ['cobA', 'cobB'], responsibleId: 'cobA', userId: 'cobA' }) === 'responsible-needs-replacement')
+// CASO 4 — cambiado el responsable a cobB, el anterior (cobA) ya se puede retirar.
+check('COB CASO 4 — tras cambiar responsable, el anterior se puede retirar',
+  cobradorRemovalBlock({ isCobrador: true, assignedCobradorIds: ['cobA', 'cobB'], responsibleId: 'cobB', userId: 'cobA' }) === null)
+// Un usuario que NO es cobrador nunca se bloquea por esta regla (p. ej. Administrador).
+check('COB — retirar un no-cobrador nunca bloquea',
+  cobradorRemovalBlock({ isCobrador: false, assignedCobradorIds: ['cobA'], responsibleId: 'cobA', userId: 'admB' }) === null)
+
+// --- Invariante al guardar (validateCobradorInvariant) ---
+// CASO 5 — estado manipulado con CERO cobradores: rechazado.
+check('COB CASO 5 — cero cobradores rechazado',
+  validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: ['admB'], cobradorId: undefined, userById: byId([admB]) }).ok === false)
+// CASO 6 — responsable FUERA de los asignados: rechazado con código específico.
+const r6 = validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: ['cobA'], cobradorId: 'cobB', userById: byId([cobA, cobB]) })
+check('COB CASO 6 — responsable fuera de asignados rechazado', r6.ok === false && (r6 as { code: string }).code === 'responsible-not-assigned')
+// CASO 7 — crear/guardar sin cobrador: rechazado (mismo invariante que aplica el servicio).
+check('COB CASO 7 — sin cobrador rechazado',
+  validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: [], cobradorId: undefined, userById: byId([]) }).ok === false)
+// Responsable inactivo → inválido.
+const cobInact = mkAssign('cx', 'cobrador', 'Inact', ['rA']); cobInact.status = 'inactivo'
+check('COB — responsable inactivo inválido',
+  validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: ['cx'], cobradorId: 'cx', userById: byId([cobInact]) }).ok === false)
+// Responsable de OTRO tenant → inválido.
+const cobOtro = mkAssign('cy', 'cobrador', 'Otro', ['rA'], 't2')
+check('COB — responsable de otro tenant inválido',
+  validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: ['cy'], cobradorId: 'cy', userById: byId([cobOtro]) }).ok === false)
+// Responsable que no es cobrador (rol admin) → inválido.
+check('COB — responsable con rol no-cobrador inválido',
+  validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: ['admB'], cobradorId: 'admB', userById: byId([admB]) }).ok === false)
+// Caso VÁLIDO: exactamente un cobrador responsable asignado y activo.
+check('COB — invariante válido (1 cobrador responsable)',
+  validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: ['cobA'], cobradorId: 'cobA', userById: byId([cobA]) }).ok === true)
+// CASO 10 — ruta sin Administrador pero CON cobrador: el invariante de cobrador PASA
+// (la regla de Administrador es independiente: permite cero con advertencia).
+check('COB CASO 10 — invariante cobrador OK aunque no haya Administrador',
+  validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: ['cobA'], cobradorId: 'cobA', userById: byId([cobA]) }).ok === true)
+
+// CASO 8 — cambiar responsable marca dirty (Cancelar pediría descartar → restaura original).
+check('COB CASO 8 — cambiar responsable marca dirty',
+  shallowDirty({ cobradorId: 'cobA', assignedUserIds: ['cobA'] }, { cobradorId: 'cobB', assignedUserIds: ['cobA', 'cobB'] }))
+// CASO 9 — al Actualizar, el diff agrega el nuevo cobrador asignado (persistencia real).
+const c9m: Record<string, string[]> = { cobA: ['rA'], cobB: [] }
+const d9 = computeRouteAssignmentDiff({ routeId: 'rA', assignableUserIds: ['cobA', 'cobB'], assignedUserIds: ['cobA', 'cobB'], cobradorId: 'cobB', prevCobradorId: 'cobA', membershipOf: (id) => c9m[id] ?? [] })
+check('COB CASO 9 — actualizar agrega el nuevo cobrador asignado', d9.added.includes('cobB') && d9.removed.length === 0)
 
 console.log(`\nPRUEBA DE PERMISOS: ${passed} OK, ${failed} FALLIDAS`)
 if (failed > 0) process.exit(1)
