@@ -10,10 +10,12 @@ import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
 import { nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
+import { assertCan } from '@/services/authz'
 import { AuthzError } from '@/services/authz'
 import { getAssignedRouteIds } from '@/lib/roles'
-import { canManageUser } from '@/lib/permissions'
+import { canManageUser, authorizedRouteIdsOf } from '@/lib/permissions'
 import { assignCobradorToRoute } from '@/services/routeAssignment'
+import { computeRouteAssignmentDiff } from '@/lib/routeAssignmentDiff'
 import type { Route, User } from '@/models/types'
 
 /** ¿Existe al menos un Administrador ACTIVO en el tenant? (requisito para crear rutas). */
@@ -91,4 +93,93 @@ export async function createRouteWithAdmins(input: CreateRouteInput, actor: User
     await logAction({ tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: route.id, action: 'ASSIGN_ROUTE', entityType: 'User', entityId: id, descripcion: `Administrador responsable asignado a ${route.nombre}` })
   }
   return route
+}
+
+// ============================================================
+// EDICIÓN TRANSACCIONAL DE RUTA (draft → una sola transacción)
+// El editor de Ruta NO persiste nada hasta "Actualizar": todos los cambios (datos
+// generales + cobrador responsable + asignaciones de usuarios) se aplican aquí en una
+// ÚNICA transacción Dexie. Fuente única: User.authorizedRouteIds (+ route.cobradorId
+// legado sincronizado explícitamente). Si algo falla, rollback total (Dexie revierte).
+// ============================================================
+
+export interface UpdateRouteInput {
+  routeId: string
+  tenantId: string
+  nombre: string
+  ciudad?: string
+  tasaInteres: number
+  tasaLibre: boolean
+  montoMaximoPrestamo: number
+  cobradorId?: string
+  /** Membresía DESEADA (draft) entre los usuarios asignables. */
+  assignedUserIds: string[]
+  /** Universo de usuarios que el actor puede togglear (para acotar los retiros). */
+  assignableUserIds: string[]
+}
+
+/** Actualiza la ruta y TODAS sus relaciones en una sola transacción. Audita al final. */
+export async function updateRouteWithAssignments(input: UpdateRouteInput, actor: User): Promise<{ added: string[]; removed: string[] }> {
+  assertCan(actor, 'route.edit', { routeId: input.routeId, tenantId: input.tenantId })
+  const prevRoute = await db.routes.get(input.routeId)
+  if (!prevRoute) throw new AuthzError('Ruta no encontrada')
+
+  const beforeGeneral = {
+    nombre: prevRoute.nombre, ciudad: prevRoute.ciudad ?? '', tasaInteres: prevRoute.tasaInteres,
+    tasaLibre: prevRoute.tasaLibre, montoMaximoPrestamo: prevRoute.montoMaximoPrestamo, cobradorId: prevRoute.cobradorId ?? '',
+  }
+  const afterGeneral = {
+    nombre: input.nombre, ciudad: input.ciudad ?? '', tasaInteres: input.tasaInteres,
+    tasaLibre: input.tasaLibre, montoMaximoPrestamo: input.montoMaximoPrestamo, cobradorId: input.cobradorId ?? '',
+  }
+
+  let added: string[] = []
+  let removed: string[] = []
+
+  await db.transaction('rw', db.routes, db.users, async () => {
+    // Todos los usuarios que podrían cambiar (asignables + cobrador previo/nuevo).
+    const affectedIds = new Set<string>(input.assignableUserIds)
+    if (prevRoute.cobradorId) affectedIds.add(prevRoute.cobradorId)
+    if (input.cobradorId) affectedIds.add(input.cobradorId)
+    const users = new Map<string, User>()
+    for (const id of affectedIds) { const u = await db.users.get(id); if (u) users.set(id, u) }
+
+    const diff = computeRouteAssignmentDiff({
+      routeId: input.routeId,
+      assignableUserIds: input.assignableUserIds,
+      assignedUserIds: input.assignedUserIds,
+      cobradorId: input.cobradorId,
+      prevCobradorId: prevRoute.cobradorId,
+      membershipOf: (id) => authorizedRouteIdsOf(users.get(id)),
+    })
+    added = diff.added; removed = diff.removed
+
+    // Datos generales + cobrador responsable (route.cobradorId).
+    await db.routes.update(input.routeId, {
+      nombre: input.nombre, ciudad: input.ciudad, tasaInteres: input.tasaInteres,
+      tasaLibre: input.tasaLibre, montoMaximoPrestamo: input.montoMaximoPrestamo,
+      cobradorId: input.cobradorId || undefined, updatedAt: nowISO(),
+    })
+
+    // Relaciones User.authorizedRouteIds (agregar/retirar routeId sin duplicados).
+    for (const id of [...added, ...removed]) {
+      const u = users.get(id); if (!u) continue
+      const set = new Set(authorizedRouteIdsOf(u))
+      if (added.includes(id)) set.add(input.routeId); else set.delete(input.routeId)
+      const list = [...set]
+      await db.users.update(id, { authorizedRouteIds: list.length ? list : undefined, routeId: list[0], updatedAt: nowISO() })
+    }
+  })
+
+  // Auditoría (fuera de la transacción de escritura).
+  await logAction({
+    tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: input.routeId,
+    action: 'UPDATE_ROUTE', entityType: 'Route', entityId: input.routeId,
+    descripcion: `Ruta actualizada: ${input.nombre}`, before: beforeGeneral, after: afterGeneral,
+    metadata: { usuariosAgregados: added, usuariosRetirados: removed },
+  })
+  for (const id of added) await logAction({ tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: input.routeId, action: 'ASSIGN_ROUTE', entityType: 'User', entityId: id, descripcion: `Usuario asignado a ${input.nombre}` })
+  for (const id of removed) await logAction({ tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: input.routeId, action: 'UNASSIGN_ROUTE', entityType: 'User', entityId: id, descripcion: `Usuario retirado de ${input.nombre}` })
+
+  return { added, removed }
 }

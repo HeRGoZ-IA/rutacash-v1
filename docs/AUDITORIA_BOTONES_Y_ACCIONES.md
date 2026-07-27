@@ -25,21 +25,40 @@ debía a la confusión con las asignaciones inmediatas (comportamiento híbrido 
   `User.authorizedRouteIds`, igual que en Usuarios) con **aviso explícito** y la confirmación
   de descarte aclara que solo descarta datos generales.
 
-## Modelo de persistencia inmediata (documentado)
+## Corrección posterior (editor de Ruta 100% transaccional)
+
+La primera corrección mantuvo las asignaciones Usuario↔Ruta con **persistencia
+inmediata** y solo agregó un aviso. **Eso fue incorrecto.** Formulación honesta:
+"X y Cancelar no ejecutaban el handler de guardado general, pero el modal ya había
+persistido asignaciones antes de cerrarse" (había escrituras dentro del mismo modal).
+
+Ahora el editor de Ruta es una **única unidad de edición**: mientras el modal está
+abierto **nada** se escribe en Dexie (ni `setUserRouteMembership`, ni `route.cobradorId`,
+ni auditoría). Asignar/Retirar solo modifican `form.assignedUserIds` (borrador). El
+**único** punto de persistencia es "Actualizar", que aplica datos generales + cobrador +
+asignaciones en **una sola transacción** (`updateRouteWithAssignments`); si algo falla,
+Dexie hace rollback total y el modal permanece abierto con el borrador. Se eliminó el
+mensaje amarillo.
+
+## Modelo de persistencia (documentado)
 
 | Acción | Modelo | Motivo |
 |---|---|---|
-| Asignar/Retirar usuario en Editar Ruta | **Inmediato** (guarda al alternar) | Fuente única `authorizedRouteIds`, sincroniza con Usuarios; con aviso y `type="button"`, deshabilitado durante guardado |
+| Asignar/Retirar usuario en Editar Ruta | **Draft** (guarda con Actualizar, transacción única) | Corregido: nada persiste hasta Actualizar |
+| Cobrador responsable en Editar Ruta | **Draft** (guarda con Actualizar) | Parte de la misma transacción |
 | Rutas autorizadas en Editar Usuario | **Draft** (guarda con Actualizar) | Forma parte del formulario del usuario |
 | Datos generales de Ruta/Empresa/Usuario/Cliente | **Draft** (guarda con Actualizar/Crear) | Editor con confirmación de descarte |
+
+Fuente única: `User.authorizedRouteIds` (+ `route.cobradorId` legado sincronizado en la
+misma transacción). Sincronía Usuarios↔Rutas **después** de Actualizar, nunca antes.
 
 ## Matriz de controles
 
 | Módulo | Pantalla | Control | Acción esperada | Handler real | Persistencia | Resultado |
 |---|---|---|---|---|---|---|
 | Rutas | Editar ruta | X / Cancelar | Cerrar (confirmar si sucio) | `tryCloseModal` | No guarda | ✅ corregido |
-| Rutas | Editar ruta | Actualizar | Guardar y cerrar | `handleSave` (await) | `db.routes.update` | ✅ |
-| Rutas | Editar ruta | Asignar/Retirar | Guardar de inmediato | `toggleUserRoute` | `setUserRouteMembership` | ✅ (aviso explícito) |
+| Rutas | Editar ruta | Actualizar | Guardar TODO (transacción) y cerrar | `handleSave`→`updateRouteWithAssignments` | 1 transacción | ✅ |
+| Rutas | Editar ruta | Asignar/Retirar | Solo borrador (no escribe) | `toggleAssignUser` | Ninguna hasta Actualizar | ✅ corregido |
 | Rutas | Lista | Nueva ruta | Abrir modal / bloqueada sin admin | `openCreate` | — | ✅ |
 | Rutas | Lista | Eliminar | Confirmación (solo Super Admin, sin movimientos) | `requestDelete/confirmDelete` | `db.routes.delete` | ✅ |
 | Plataforma | Empresa | Crear/Guardar | Persistir | `handleSave` (await) | `db.tenants` | ✅ |

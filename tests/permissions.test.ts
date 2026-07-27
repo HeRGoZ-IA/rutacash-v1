@@ -15,6 +15,7 @@ import {
 import { CAPABILITY_METADATA, CATEGORY_ORDER } from '../src/lib/capabilityCatalog'
 import { getEffectiveCompanyStatus, isCompanyBlocked } from '../src/lib/company'
 import { shallowDirty } from '../src/hooks/useDirtyForm'
+import { computeRouteAssignmentDiff } from '../src/lib/routeAssignmentDiff'
 import type { User, UserRole, Tenant } from '../src/models/types'
 
 let passed = 0
@@ -310,6 +311,37 @@ check('dirty: cambiar arreglo (adminIds) → dirty', shallowDirty(routeOriginal,
 check('dirty: vaciar un campo → dirty', shallowDirty(routeOriginal, { ...routeOriginal, cobradorId: '' }))
 check('dirty: undefined vs "" en foto se detecta', shallowDirty({ foto: undefined }, { foto: 'data:img' }))
 check('dirty: mismos valores distinto orden de claves → NO dirty', !shallowDirty({ a: 1, b: 2 }, { b: 2, a: 1 }))
+
+// ============================================================
+// EDITOR DE RUTAS TRANSACCIONAL — asignaciones como BORRADOR
+// ============================================================
+
+// --- Dirty state de asignaciones (orden-independiente) ---
+const routeDraft0 = { nombre: 'R', cobradorId: 'c1', assignedUserIds: ['u1', 'u2'] as string[] }
+check('CASO 6a — asignar usuario marca dirty', shallowDirty(routeDraft0, { ...routeDraft0, assignedUserIds: ['u1', 'u2', 'u3'] }))
+check('CASO 6b — asignar y retirar el mismo → NO dirty', !shallowDirty(routeDraft0, { ...routeDraft0, assignedUserIds: ['u2', 'u1'] }))
+check('CASO 6c — orden de asignaciones irrelevante', !shallowDirty({ assignedUserIds: ['a', 'b', 'c'] }, { assignedUserIds: ['c', 'a', 'b'] }))
+check('CASO 6d — retirar usuario marca dirty', shallowDirty(routeDraft0, { ...routeDraft0, assignedUserIds: ['u1'] }))
+check('CASO 6e — cambiar cobrador marca dirty', shallowDirty(routeDraft0, { ...routeDraft0, cobradorId: 'c2' }))
+
+// --- computeRouteAssignmentDiff (lógica de CASO 3 y CASO 4) ---
+const membership: Record<string, string[]> = { u1: ['rA'], u2: [], u3: ['rA', 'rB'], cob: [] }
+const mOf = (id: string) => membership[id] ?? []
+// CASO 3 — asignar u2 (no era miembro): aparece en added; nada en removed.
+const d1 = computeRouteAssignmentDiff({ routeId: 'rA', assignableUserIds: ['u1', 'u2'], assignedUserIds: ['u1', 'u2'], membershipOf: mOf })
+check('CASO 3 — asignar u2 → added', d1.added.includes('u2') && d1.removed.length === 0)
+// CASO 4 — retirar u1 (era miembro): aparece en removed.
+const d2 = computeRouteAssignmentDiff({ routeId: 'rA', assignableUserIds: ['u1', 'u2'], assignedUserIds: ['u2'], membershipOf: mOf })
+check('CASO 4 — retirar u1 → removed', d2.removed.includes('u1') && d2.added.includes('u2'))
+// Sin cambios → diff vacío.
+const d3 = computeRouteAssignmentDiff({ routeId: 'rA', assignableUserIds: ['u1'], assignedUserIds: ['u1'], membershipOf: mOf })
+check('sin cambios → added/removed vacíos', d3.added.length === 0 && d3.removed.length === 0)
+// El cobrador responsable SIEMPRE queda como miembro (auto-add).
+const d4 = computeRouteAssignmentDiff({ routeId: 'rA', assignableUserIds: [], assignedUserIds: [], cobradorId: 'cob', membershipOf: mOf })
+check('cobrador responsable se agrega como miembro', d4.added.includes('cob'))
+// Solo se retiran usuarios dentro del alcance (assignableUserIds); u3 no está en alcance → intacto.
+const d5 = computeRouteAssignmentDiff({ routeId: 'rA', assignableUserIds: ['u1'], assignedUserIds: [], membershipOf: mOf })
+check('no toca usuarios fuera de alcance (u3 intacto)', !d5.removed.includes('u3') && d5.removed.includes('u1'))
 
 console.log(`\nPRUEBA DE PERMISOS: ${passed} OK, ${failed} FALLIDAS`)
 if (failed > 0) process.exit(1)

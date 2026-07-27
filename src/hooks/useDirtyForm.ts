@@ -13,9 +13,12 @@ import { useMemo } from 'react'
  *  - Cancelar/X NUNCA persisten; solo descartan el draft.
  */
 export function shallowDirty(original: Record<string, unknown>, draft: Record<string, unknown>): boolean {
-  // Comparación estable por valor (incluye arrays vía JSON). Suficiente para los
-  // formularios de la app (campos primitivos + arrays de ids).
-  const norm = (v: unknown) => JSON.stringify(v ?? null)
+  // Comparación estable por valor. Los ARREGLOS se comparan SIN importar el orden
+  // (p. ej. asignaciones de usuarios: ['u1','u2'] == ['u2','u1']). Suficiente para los
+  // formularios de la app (campos primitivos + arrays de ids serializables).
+  const norm = (v: unknown) => Array.isArray(v)
+    ? JSON.stringify([...v].map(x => JSON.stringify(x)).sort())
+    : JSON.stringify(v ?? null)
   const keys = new Set([...Object.keys(original), ...Object.keys(draft)])
   for (const k of keys) {
     if (norm(original[k]) !== norm(draft[k])) return true

@@ -18,8 +18,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
-import { assignCobradorToRoute, setUserRouteMembership } from '@/services/routeAssignment'
-import { createRouteWithAdmins } from '@/services/routeService'
+import { createRouteWithAdmins, updateRouteWithAssignments } from '@/services/routeService'
 import { filterAccessibleRoutes, assignableRoles, canManageUser, ROLE_LABELS } from '@/lib/permissions'
 import { getAssignedRouteIds } from '@/lib/roles'
 import { useNavigate } from 'react-router-dom'
@@ -36,9 +35,8 @@ export default function RoutesPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Route | null>(null)
-  // #4 Asignación bidireccional de usuarios a la ruta en edición.
-  const [assignBusy, setAssignBusy] = useState<string | null>(null)
-  const [pendingRemoval, setPendingRemoval] = useState<{ user: User; reason: 'lastUserRoute' | 'lastRouteAdmin' } | null>(null)
+  // Confirmación al Actualizar si la ruta activa quedaría SIN Administrador.
+  const [noAdminConfirm, setNoAdminConfirm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Route | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -48,6 +46,8 @@ export default function RoutesPage() {
   const [hasta, setHasta] = useState('')
   const [form, setForm] = useState({
     nombre: '', ciudad: '', cobradorId: '', adminIds: [] as string[],
+    // BORRADOR de asignaciones de usuarios (edición): NO persiste hasta "Actualizar".
+    assignedUserIds: [] as string[],
     tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0,
   })
   // Dirty-state: snapshot original al abrir vs draft actual (para confirmar descarte).
@@ -96,50 +96,74 @@ export default function RoutesPage() {
     setEditing(null)
     // El Administrador creador queda preseleccionado (y bloqueado): se autoasigna.
     const preselect = user?.rol === 'admin' && user?.id ? [user.id] : []
-    const init = { nombre: '', ciudad: '', cobradorId: '', adminIds: preselect, tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0 }
+    const init = { nombre: '', ciudad: '', cobradorId: '', adminIds: preselect, assignedUserIds: [], tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0 }
     setForm(init)
     setOriginal({ ...init })   // snapshot para dirty-check
     setModalOpen(true)
   }
 
+  // ¿Puede el actor togglear a este usuario? (jerarquía; nunca superadmin ni, para admin, otros admin).
+  const isAssignable = (u: User) => u.rol !== 'superadmin' && assignableRoles(user).includes(u.rol) && canManageUser(user, u)
+
   function openEdit(route: Route) {
     setEditing(route)
+    // Miembros actuales de la ruta (entre los asignables) → snapshot del BORRADOR.
+    const assignedUserIds = allUsers.filter(u => isAssignable(u) && getAssignedRouteIds(u).includes(route.id)).map(u => u.id)
     const init = {
       nombre: route.nombre, ciudad: route.ciudad ?? '',
-      cobradorId: route.cobradorId ?? '', adminIds: [], tasaInteres: route.tasaInteres, tasaLibre: route.tasaLibre,
+      cobradorId: route.cobradorId ?? '', adminIds: [] as string[], assignedUserIds,
+      tasaInteres: route.tasaInteres, tasaLibre: route.tasaLibre,
       montoMaximoPrestamo: route.montoMaximoPrestamo, capitalInicial: route.capitalInicial,
     }
     setForm(init)
-    setOriginal({ ...init })   // snapshot de los datos GENERALES guardados
+    setOriginal({ ...init })   // snapshot de TODO (generales + asignaciones)
     setModalOpen(true)
   }
 
-  // Cierre del editor SIN guardar. Si hay cambios generales sin guardar, confirma.
-  function closeModal() { setModalOpen(false); setDiscardOpen(false); setOriginal(null) }
+  // Cierre del editor SIN guardar (descarta también las asignaciones del borrador).
+  function closeModal() { setModalOpen(false); setDiscardOpen(false); setNoAdminConfirm(false); setOriginal(null) }
   function tryCloseModal() { if (dirty) setDiscardOpen(true); else closeModal() }
+
+  // Alternar asignación de un usuario: SOLO modifica el borrador (no escribe en Dexie).
+  function toggleAssignUser(id: string) {
+    setForm(f => ({ ...f, assignedUserIds: f.assignedUserIds.includes(id) ? f.assignedUserIds.filter(x => x !== id) : [...f.assignedUserIds, id] }))
+  }
 
   function toggleAdmin(id: string) {
     if (lockAdminToSelf) return // el Administrador solo se asigna a sí mismo
     setForm(f => ({ ...f, adminIds: f.adminIds.includes(id) ? f.adminIds.filter(x => x !== id) : [...f.adminIds, id] }))
   }
 
-  async function handleSave() {
+  // Usuarios que el actor puede asignar a la ruta (jerarquía).
+  const assignableToRoutes = allUsers.filter(isAssignable)
+
+  async function handleSave(force = false) {
     if (!user) return
     if (!form.nombre) { toast.error('El nombre de la ruta es obligatorio'); return }
     if (!editing) {
-      // #6 Al crear, se exige Administrador responsable (Super Admin debe elegir; el
+      // #6 Al crear, se exige Administrador responsable (Super Admin elige; el
       // Administrador queda autoasignado). El servicio revalida ambas condiciones.
       if (form.adminIds.length === 0) { toast.error('Selecciona al menos un Administrador responsable.'); return }
+    }
+    // Confirmación al Actualizar: no dejar una ruta ACTIVA sin ningún Administrador.
+    if (editing && !force && editing.status === 'activa') {
+      const draftAdmins = form.assignedUserIds.filter(id => allUsers.find(u => u.id === id)?.rol === 'admin')
+      const prevAdmins = allUsers.filter(a => a.rol === 'admin' && getAssignedRouteIds(a).includes(editing.id))
+      if (draftAdmins.length === 0 && prevAdmins.length > 0) { setNoAdminConfirm(true); return }
     }
     setSaving(true)
     try {
       if (editing) {
-        await db.routes.update(editing.id, {
-          nombre: form.nombre, ciudad: form.ciudad,
-          tasaInteres: form.tasaInteres, tasaLibre: form.tasaLibre,
-          montoMaximoPrestamo: form.montoMaximoPrestamo, updatedAt: nowISO(),
-        })
-        await assignCobradorToRoute(editing.id, form.cobradorId || undefined)
+        // ÚNICO punto de persistencia: todo (generales + cobrador + asignaciones) en una transacción.
+        await updateRouteWithAssignments({
+          routeId: editing.id, tenantId, nombre: form.nombre, ciudad: form.ciudad,
+          tasaInteres: form.tasaInteres, tasaLibre: form.tasaLibre, montoMaximoPrestamo: form.montoMaximoPrestamo,
+          cobradorId: form.cobradorId || undefined,
+          assignedUserIds: form.assignedUserIds,
+          assignableUserIds: assignableToRoutes.map(u => u.id),
+        }, user)
+        // Si el actor se vio afectado (auto-asignación/retiro), refrescar su sesión.
+        if (form.assignedUserIds.includes(user.id) || getAssignedRouteIds(user).includes(editing.id)) await refreshUser()
         toast.success('Ruta actualizada')
       } else {
         await createRouteWithAdmins({
@@ -148,58 +172,15 @@ export default function RoutesPage() {
           montoMaximoPrestamo: form.montoMaximoPrestamo, capitalInicial: form.capitalInicial,
           codigo: nextRouteCode(routes), adminIds: form.adminIds, cobradorId: form.cobradorId || undefined,
         }, user)
-        // Si el Administrador creador se autoasignó, refrescar su sesión (rutas).
         if (form.adminIds.includes(user.id)) await refreshUser()
         toast.success('Ruta creada')
       }
-      // Cerrar SOLO tras confirmarse el guardado (el error mantiene el modal abierto).
+      // Cerrar SOLO tras confirmarse el guardado (el error mantiene el modal abierto y el borrador).
       closeModal()
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Error al guardar')
     } finally { setSaving(false) }
-  }
-
-  // #4 Usuarios que el actor puede asignar a rutas (jerarquía; nunca superadmin ni,
-  // para un Administrador, otros Administradores).
-  const assignableToRoutes = allUsers.filter(u =>
-    u.rol !== 'superadmin' &&
-    assignableRoles(user).includes(u.rol) &&
-    canManageUser(user, u)
-  )
-
-  async function doToggleUserRoute(u: User, member: boolean) {
-    if (!editing) return
-    setAssignBusy(u.id)
-    try {
-      await setUserRouteMembership(u.id, editing.id, member)
-      if (user) await logAction({
-        tenantId, userId: user.id, userRole: user.rol, routeId: editing.id,
-        action: member ? 'ASSIGN_ROUTE' : 'UNASSIGN_ROUTE', entityType: 'User', entityId: u.id,
-        descripcion: `${member ? 'Asignada' : 'Retirada'} ruta ${editing.nombre} (${ROLE_LABELS[u.rol]} ${u.nombre})`,
-      })
-      if (u.id === user?.id) await refreshUser()
-      toast.success(member ? 'Usuario asignado a la ruta' : 'Usuario retirado de la ruta')
-      await load()
-    } catch { toast.error('Error al actualizar la asignación') }
-    finally { setAssignBusy(null); setPendingRemoval(null) }
-  }
-
-  function toggleUserRoute(u: User, currentlyMember: boolean) {
-    if (!editing) return
-    if (currentlyMember) {
-      // Confirmar antes de retirar la ÚLTIMA ruta operativa de un usuario activo.
-      const remaining = getAssignedRouteIds(u).filter(id => id !== editing.id)
-      if (remaining.length === 0 && u.status === 'activo') { setPendingRemoval({ user: u, reason: 'lastUserRoute' }); return }
-      // Confirmación REFORZADA: no dejar una ruta ACTIVA sin ningún Administrador.
-      if (u.rol === 'admin' && editing.status === 'activa') {
-        const otherAdmins = allUsers.filter(a => a.rol === 'admin' && a.id !== u.id && getAssignedRouteIds(a).includes(editing.id))
-        if (otherAdmins.length === 0) { setPendingRemoval({ user: u, reason: 'lastRouteAdmin' }); return }
-      }
-      doToggleUserRoute(u, false)
-    } else {
-      doToggleUserRoute(u, true)
-    }
   }
 
   async function toggleStatus(route: Route) {
@@ -364,7 +345,7 @@ export default function RoutesPage() {
       {/* Create / Edit modal. X y Cancelar NO guardan (confirman descarte si hay
           cambios). Actualizar/Crear persiste y cierra solo tras el éxito. */}
       <Modal open={modalOpen} onClose={tryCloseModal} title={editing ? 'Editar ruta' : 'Nueva ruta'}
-        footer={<><Button variant="secondary" onClick={tryCloseModal} disabled={saving}>Cancelar</Button><Button onClick={handleSave} loading={saving}>{editing ? 'Actualizar' : 'Crear'}</Button></>}>
+        footer={<><Button variant="secondary" onClick={tryCloseModal} disabled={saving}>Cancelar</Button><Button onClick={() => handleSave()} loading={saving}>{editing ? 'Actualizar' : 'Crear'}</Button></>}>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Input label="Nombre de la ruta" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required />
@@ -416,28 +397,23 @@ export default function RoutesPage() {
             <label htmlFor="tasaLibre" className="text-sm text-gray-700">Tasa libre (el cobrador puede variar la tasa)</label>
           </div>
 
-          {/* #4 Usuarios asignados a esta ruta (fuente única: User.authorizedRouteIds).
-              Se guarda de inmediato al alternar; refleja lo mismo que la pantalla de Usuarios. */}
+          {/* Usuarios asignados a esta ruta — BORRADOR: no persiste hasta "Actualizar". */}
           {editing && (
             <div className="pt-3 border-t border-gray-100">
               <div className="flex items-center gap-2 mb-1">
                 <Users className="w-4 h-4 text-gray-500" />
                 <label className="text-sm font-medium text-gray-700">Usuarios asignados a esta ruta</label>
               </div>
-              {/* Aviso EXPLÍCITO de persistencia inmediata (no depende de Actualizar/Cancelar). */}
-              <p className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5 mb-2">
-                Las asignaciones de usuarios se guardan inmediatamente (no dependen de "Actualizar" ni de "Cancelar").
-              </p>
+              <p className="text-xs text-gray-400 mb-2">Los cambios se guardarán al presionar "Actualizar".</p>
               {assignableToRoutes.length === 0 ? (
                 <p className="text-xs text-gray-400">No hay usuarios que puedas asignar.</p>
               ) : (
                 <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                   {assignableToRoutes.map(u => {
-                    const member = getAssignedRouteIds(u).includes(editing.id)
+                    const member = form.assignedUserIds.includes(u.id)   // ← lee del BORRADOR
                     return (
-                      <button key={u.id} type="button" disabled={assignBusy === u.id}
-                        onClick={() => toggleUserRoute(u, member)}
-                        className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-left transition-colors ${member ? 'bg-primary-50 border-primary-200' : 'bg-white border-gray-200 hover:bg-gray-50'} disabled:opacity-50`}>
+                      <button key={u.id} type="button" onClick={() => toggleAssignUser(u.id)}
+                        className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-left transition-colors ${member ? 'bg-primary-50 border-primary-200' : 'bg-white border-gray-200 hover:bg-gray-50'}`}>
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-gray-800 truncate">{u.nombre}</p>
                           <p className="text-xs text-gray-400">{ROLE_LABELS[u.rol]}{u.status !== 'activo' ? ' · inactivo' : ''}</p>
@@ -455,27 +431,19 @@ export default function RoutesPage() {
         </div>
       </Modal>
 
-      {/* Confirmación de descarte de cambios GENERALES sin guardar (X / Cancelar). */}
+      {/* Descarte de TODOS los cambios sin guardar (generales + asignaciones del borrador). */}
       <ConfirmDiscardModal
         open={discardOpen}
         onKeepEditing={() => setDiscardOpen(false)}
         onDiscard={closeModal}
-        note={editing ? 'Las asignaciones de usuarios ya se guardaron; esto solo descarta los datos generales sin guardar.' : undefined}
       />
 
-      {/* #4/#6 Confirmación reforzada: última ruta del usuario, o último Administrador de la ruta */}
-      <Modal open={!!pendingRemoval} onClose={() => setPendingRemoval(null)}
-        title={pendingRemoval?.reason === 'lastRouteAdmin' ? 'Ruta sin Administrador' : 'Retirar última ruta'}
-        footer={<><Button variant="secondary" onClick={() => setPendingRemoval(null)}>Cancelar</Button><Button variant="danger" loading={!!assignBusy} onClick={() => pendingRemoval && doToggleUserRoute(pendingRemoval.user, false)}>Sí, retirar de todos modos</Button></>}>
+      {/* Confirmación al Actualizar: la ruta ACTIVA quedaría sin ningún Administrador. */}
+      <Modal open={noAdminConfirm} onClose={() => setNoAdminConfirm(false)} title="Ruta sin Administrador" size="sm"
+        footer={<><Button variant="secondary" onClick={() => setNoAdminConfirm(false)}>Seguir editando</Button><Button variant="danger" loading={saving} onClick={() => { setNoAdminConfirm(false); handleSave(true) }}>Guardar de todos modos</Button></>}>
         <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-xl border border-amber-100">
           <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
-          <p className="text-sm text-amber-700">
-            {pendingRemoval?.reason === 'lastRouteAdmin' ? (
-              <>Esta ruta ACTIVA quedará <span className="font-semibold">sin ningún Administrador responsable</span> si retiras a <span className="font-semibold">{pendingRemoval?.user.nombre}</span>. ¿Deseas continuar?</>
-            ) : (
-              <><span className="font-semibold">{pendingRemoval?.user.nombre}</span> quedará SIN rutas autorizadas y por tanto sin acceso operativo. ¿Deseas retirarlo de esta ruta de todos modos?</>
-            )}
-          </p>
+          <p className="text-sm text-amber-700">Esta ruta ACTIVA quedará <span className="font-semibold">sin ningún Administrador responsable</span>. ¿Deseas guardar de todos modos?</p>
         </div>
       </Modal>
 

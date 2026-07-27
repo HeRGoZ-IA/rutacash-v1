@@ -70,6 +70,7 @@ export type AuditAction =
   | 'CREATE_TENANT'
   | 'SUSPEND_TENANT'
   | 'CREATE_ROUTE'
+  | 'UPDATE_ROUTE'
   | 'BLOCK_ROUTE'
   | 'ASSIGN_ROUTE'
   | 'UNASSIGN_ROUTE'
