@@ -16,6 +16,7 @@ import { CAPABILITY_METADATA, CATEGORY_ORDER } from '../src/lib/capabilityCatalo
 import { getEffectiveCompanyStatus, isCompanyBlocked } from '../src/lib/company'
 import { shallowDirty } from '../src/hooks/useDirtyForm'
 import { computeRouteAssignmentDiff } from '../src/lib/routeAssignmentDiff'
+import { getRouteAssignmentsByRole, getUsersAssignedToRoute, ASSIGNMENT_ROLE_ORDER, hasAnyAssignment } from '../src/lib/routeAssignments'
 import type { User, UserRole, Tenant } from '../src/models/types'
 
 let passed = 0
@@ -342,6 +343,57 @@ check('cobrador responsable se agrega como miembro', d4.added.includes('cob'))
 // Solo se retiran usuarios dentro del alcance (assignableUserIds); u3 no está en alcance → intacto.
 const d5 = computeRouteAssignmentDiff({ routeId: 'rA', assignableUserIds: ['u1'], assignedUserIds: [], membershipOf: mOf })
 check('no toca usuarios fuera de alcance (u3 intacto)', !d5.removed.includes('u3') && d5.removed.includes('u1'))
+
+// ============================================================
+// CONSISTENCIA VISUAL Usuarios ↔ Rutas (tarjeta = authorizedRouteIds)
+// ============================================================
+function mkAssign(id: string, rol: UserRole, nombre: string, routes: string[], tenantId = 't1'): User {
+  return { id, tenantId, nombre, email: `${id}@t.com`, password: 'x', rol, status: 'activo', authorizedRouteIds: routes, createdAt: '', updatedAt: '' }
+}
+
+// CASO 1 — cobrador con routeId en authorizedRouteIds, route.cobradorId vacío → aparece igual.
+const c1Users = [mkAssign('cob', 'cobrador', '12312', ['rA'])]
+const c1 = getRouteAssignmentsByRole(c1Users, 'rA', 't1')
+check('CASO 1 — cobrador asignado aparece aunque route.cobradorId esté vacío', c1.cobradores.length === 1 && c1.cobradores[0].nombre === '12312')
+check('CASO 1 — hay asignaciones (no "sin usuarios")', hasAnyAssignment(c1))
+
+// CASO 2 — Administrador + Cobrador → ambos roles, orden correcto (admin antes que cobrador).
+const c2Users = [mkAssign('a1', 'admin', 'Jhon', ['rA']), mkAssign('cob', 'cobrador', '12312', ['rA'])]
+const c2 = getRouteAssignmentsByRole(c2Users, 'rA', 't1')
+check('CASO 2 — muestra Administrador y Cobrador', c2.admins.length === 1 && c2.cobradores.length === 1)
+const c2order = ASSIGNMENT_ROLE_ORDER.findIndex(g => g.rol === 'admin') < ASSIGNMENT_ROLE_ORDER.findIndex(g => g.rol === 'cobrador')
+check('CASO 2 — orden de roles Admin antes que Cobrador', c2order)
+
+// CASO 3 — todos los roles: agrupación + orden de roles + orden alfabético dentro del rol.
+const c3Users = [
+  mkAssign('a1', 'admin', 'Jhon', ['rA']),
+  mkAssign('s1', 'socio', 'Marta', ['rA']),
+  mkAssign('sp1', 'supervisor', 'Ana', ['rA']),
+  mkAssign('cob2', 'cobrador', 'Juan Cobrador', ['rA']),
+  mkAssign('cob1', 'cobrador', '12312', ['rA']),
+  mkAssign('sec1', 'secretario', 'Laura', ['rA']),
+]
+const c3 = getRouteAssignmentsByRole(c3Users, 'rA', 't1')
+check('CASO 3 — agrupación completa por rol', c3.admins.length === 1 && c3.socios.length === 1 && c3.supervisores.length === 1 && c3.cobradores.length === 2 && c3.secretarios.length === 1)
+check('CASO 3 — orden alfabético dentro de Cobradores', c3.cobradores[0].nombre === '12312' && c3.cobradores[1].nombre === 'Juan Cobrador')
+const roleKeys = ASSIGNMENT_ROLE_ORDER.map(g => g.rol)
+check('CASO 3 — orden de roles Admin→Socio→Supervisor→Cobrador→Secretario', JSON.stringify(roleKeys) === JSON.stringify(['admin', 'socio', 'supervisor', 'cobrador', 'secretario']))
+
+// Super Admin NO se lista aunque tuviera routeId manipulado.
+const withSuper = [...c1Users, mkAssign('sa', 'superadmin', 'Root', ['rA'])]
+check('Super Admin nunca aparece como asignado', getUsersAssignedToRoute(withSuper, 'rA', 't1').every(u => u.rol !== 'superadmin'))
+
+// CASO 8 — usuarios de OTRO tenant no aparecen.
+const c8Users = [mkAssign('cob', 'cobrador', 'Mismo', ['rA'], 't1'), mkAssign('x', 'cobrador', 'Otro', ['rA'], 't2')]
+const c8 = getUsersAssignedToRoute(c8Users, 'rA', 't1')
+check('CASO 8 — usuarios de otro tenant excluidos', c8.length === 1 && c8[0].nombre === 'Mismo')
+
+// Estado vacío — ruta sin nadie asignado.
+check('ruta sin asignados → hasAnyAssignment false', !hasAnyAssignment(getRouteAssignmentsByRole([], 'rZ', 't1')))
+
+// La resolución usa authorizedRouteIds, NO route.cobradorId (no hay tal campo en User).
+check('resolución por authorizedRouteIds (routeId legado también cuenta)',
+  getUsersAssignedToRoute([{ ...mkAssign('c', 'cobrador', 'Leg', []), routeId: 'rA', authorizedRouteIds: undefined }], 'rA', 't1').length === 1)
 
 console.log(`\nPRUEBA DE PERMISOS: ${passed} OK, ${failed} FALLIDAS`)
 if (failed > 0) process.exit(1)

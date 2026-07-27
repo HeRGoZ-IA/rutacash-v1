@@ -9,6 +9,7 @@ import { MoneyInput } from '@/components/ui/MoneyInput'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { DateRangeFilter } from '@/components/ui/DateRangeFilter'
 import { ConfirmDiscardModal } from '@/components/ui/ConfirmDiscardModal'
+import { RouteAssignedUsers } from '@/components/ui/RouteAssignedUsers'
 import { useDirtyForm } from '@/hooks/useDirtyForm'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
@@ -226,7 +227,6 @@ export default function RoutesPage() {
     } catch { toast.error('Error al eliminar') } finally { setDeleting(false) }
   }
 
-  const getCobradorName = (id?: string) => cobradores.find(c => c.id === id)?.nombre
 
   // Filtro por fecha de creación de la ruta. No afecta los cálculos financieros
   // (Base actual / Cartera Activa son saldos a la fecha), solo qué rutas se listan.
@@ -317,9 +317,10 @@ export default function RoutesPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 text-xs text-gray-600">
-                <Users className="w-3.5 h-3.5 text-gray-400" />
-                {getCobradorName(route.cobradorId) ?? <span className="text-amber-500">Sin cobrador</span>}
+              {/* Usuarios asignados — fuente única authorizedRouteIds (coherente con
+                  el editor y con Usuarios). Ya NO se lee solo route.cobradorId. */}
+              <div className="border-t border-gray-50 pt-2">
+                <RouteAssignedUsers users={allUsers} routeId={route.id} tenantId={tenantId} responsibleCobradorId={route.cobradorId} />
               </div>
 
               <div className="flex gap-2 pt-1">

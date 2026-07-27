@@ -167,6 +167,46 @@ export class RutaCashDB extends Dexie {
       })
       console.log(`[RutaCash][migración v7] Permisos individuales eliminados de ${cleaned} usuario(s). Modelo: ROL BASE + RUTAS.`)
     })
+
+    // ============================================================
+    // v8 (CONSISTENCIA Usuario↔Ruta): aditiva y segura. Reconcilia route.cobradorId
+    // (cobrador RESPONSABLE legado) con la fuente única User.authorizedRouteIds:
+    //   · Si route.cobradorId apunta a un usuario inexistente o de OTRO tenant → se
+    //     limpia (evita datos contradictorios).
+    //   · Si el cobrador responsable NO tiene routeId en authorizedRouteIds → se agrega
+    //     (sincronización inequívoca: el responsable es, por definición, miembro).
+    //   · NO se inventa responsable para rutas con cobradores asignados y cobradorId
+    //     vacío (no se elige arbitrariamente si hay varios). NO se borran asignaciones.
+    // No cambia datos financieros ni elimina usuarios/rutas.
+    // ============================================================
+    this.version(8).upgrade(async (tx) => {
+      const [routes, users] = await Promise.all([
+        tx.table('routes').toArray() as Promise<Route[]>,
+        tx.table('users').toArray() as Promise<User[]>,
+      ])
+      const userById = new Map(users.map(u => [u.id, u]))
+      let cleared = 0
+      let synced = 0
+      for (const r of routes) {
+        if (!r.cobradorId) continue
+        const u = userById.get(r.cobradorId)
+        if (!u || u.tenantId !== r.tenantId) {
+          await tx.table('routes').update(r.id, { cobradorId: undefined })
+          cleared++
+          continue
+        }
+        const ids = new Set<string>(u.authorizedRouteIds ?? [])
+        if (u.routeId) ids.add(u.routeId)
+        if (!ids.has(r.id)) {
+          ids.add(r.id)
+          const list = [...ids]
+          await tx.table('users').update(u.id, { authorizedRouteIds: list })
+          u.authorizedRouteIds = list // por si el mismo cobrador es responsable de varias rutas
+          synced++
+        }
+      }
+      console.log(`[RutaCash][migración v8] cobradorId inválidos limpiados: ${cleared}; membresías de responsable sincronizadas: ${synced}.`)
+    })
   }
 }
 
