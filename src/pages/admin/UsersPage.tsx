@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/Button'
 import { Input, Select } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
+import { ConfirmDiscardModal } from '@/components/ui/ConfirmDiscardModal'
+import { useDirtyForm } from '@/hooks/useDirtyForm'
 import { toast } from '@/components/ui/Toast'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { db } from '@/lib/db'
@@ -51,6 +53,11 @@ export default function UsersPage() {
     nombre: '', email: '', password: '123456', rol: defaultRole,
     authorizedRouteIds: [] as string[],
   })
+  const [original, setOriginal] = useState<Record<string, unknown> | null>(null)
+  const [discardOpen, setDiscardOpen] = useState(false)
+  const dirty = useDirtyForm(original, form)
+  function closeModal() { setModalOpen(false); setDiscardOpen(false); setOriginal(null) }
+  function tryCloseModal() { if (dirty) setDiscardOpen(true); else closeModal() }
 
   // Rutas que el usuario actual puede asignar (limitado a sus rutas accesibles).
   const assignableRoutes = filterAccessibleRoutes(currentUser, routes)
@@ -79,7 +86,8 @@ export default function UsersPage() {
 
   function openCreate() {
     setEditing(null)
-    setForm({ nombre: '', email: '', password: '123456', rol: defaultRole, authorizedRouteIds: [] })
+    const init = { nombre: '', email: '', password: '123456', rol: defaultRole, authorizedRouteIds: [] as string[] }
+    setForm(init); setOriginal({ ...init })
     setModalOpen(true)
   }
 
@@ -89,10 +97,11 @@ export default function UsersPage() {
       return
     }
     setEditing(u)
-    setForm({
+    const init = {
       nombre: u.nombre, email: u.email, password: u.password, rol: u.rol,
       authorizedRouteIds: getAssignedRouteIds(u),
-    })
+    }
+    setForm(init); setOriginal({ ...init })
     setModalOpen(true)
   }
 
@@ -166,7 +175,7 @@ export default function UsersPage() {
         after: { rol: form.rol, routes: form.authorizedRouteIds },
       })
       toast.success(editing ? 'Usuario actualizado' : 'Usuario creado')
-      setModalOpen(false)
+      closeModal()
       await load()
     } catch { toast.error('Error al guardar') } finally { setSaving(false) }
   }
@@ -314,9 +323,9 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* Create/Edit modal */}
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Editar usuario' : 'Nuevo usuario'}
-        footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={handleSave} loading={saving}>{editing ? 'Actualizar' : 'Crear'}</Button></>}>
+      {/* Create/Edit modal. X/Cancelar no guardan (confirman descarte si hay cambios). */}
+      <Modal open={modalOpen} onClose={tryCloseModal} title={editing ? 'Editar usuario' : 'Nuevo usuario'}
+        footer={<><Button variant="secondary" onClick={tryCloseModal} disabled={saving}>Cancelar</Button><Button onClick={handleSave} loading={saving}>{editing ? 'Actualizar' : 'Crear'}</Button></>}>
         <div className="space-y-4">
           <Input label="Nombre completo" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required />
           <Input label="Email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required />
@@ -381,6 +390,8 @@ export default function UsersPage() {
           <p className="text-sm text-gray-600">Usuario: <span className="font-semibold">{deleteTarget?.nombre}</span> ({deleteTarget?.email})</p>
         </div>
       </Modal>
+
+      <ConfirmDiscardModal open={discardOpen} onKeepEditing={() => setDiscardOpen(false)} onDiscard={closeModal} />
     </div>
   )
 }

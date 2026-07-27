@@ -14,6 +14,7 @@ import {
 } from '../src/lib/permissions'
 import { CAPABILITY_METADATA, CATEGORY_ORDER } from '../src/lib/capabilityCatalog'
 import { getEffectiveCompanyStatus, isCompanyBlocked } from '../src/lib/company'
+import { shallowDirty } from '../src/hooks/useDirtyForm'
 import type { User, UserRole, Tenant } from '../src/models/types'
 
 let passed = 0
@@ -294,6 +295,21 @@ check('renovar (fecha futura) → activa', getEffectiveCompanyStatus(mkTenant({ 
 check('renovar (sin vencimiento) → activa', getEffectiveCompanyStatus(mkTenant({ status: 'activa', fechaVencimiento: undefined }), HOY) === 'activa')
 // suspendida ≠ vencida (estados diferenciados).
 check('suspendida y vencida son estados distintos', getEffectiveCompanyStatus(mkTenant({ status: 'suspendida' }), HOY) !== getEffectiveCompanyStatus(mkTenant({ fechaVencimiento: AYER }), HOY))
+
+// ============================================================
+// AUDITORÍA DE BOTONES — lógica de "cambios sin guardar" (dirty state)
+// ============================================================
+// Editar Ruta / Empresa / Usuario / Cliente: abrir y cerrar sin tocar nada NO debe
+// pedir confirmación; cualquier cambio de un campo o de un arreglo SÍ debe marcar dirty.
+const routeOriginal = { nombre: 'Ruta Norte', ciudad: 'BAQ', cobradorId: 'c1', tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, adminIds: [] as string[] }
+check('dirty: abrir y cerrar sin cambios → NO dirty', !shallowDirty(routeOriginal, { ...routeOriginal }))
+check('dirty: cambiar nombre → dirty', shallowDirty(routeOriginal, { ...routeOriginal, nombre: 'Ruta Sur' }))
+check('dirty: cambiar número (tasa) → dirty', shallowDirty(routeOriginal, { ...routeOriginal, tasaInteres: 10 }))
+check('dirty: cambiar booleano (tasaLibre) → dirty', shallowDirty(routeOriginal, { ...routeOriginal, tasaLibre: true }))
+check('dirty: cambiar arreglo (adminIds) → dirty', shallowDirty(routeOriginal, { ...routeOriginal, adminIds: ['a1'] }))
+check('dirty: vaciar un campo → dirty', shallowDirty(routeOriginal, { ...routeOriginal, cobradorId: '' }))
+check('dirty: undefined vs "" en foto se detecta', shallowDirty({ foto: undefined }, { foto: 'data:img' }))
+check('dirty: mismos valores distinto orden de claves → NO dirty', !shallowDirty({ a: 1, b: 2 }, { b: 2, a: 1 }))
 
 console.log(`\nPRUEBA DE PERMISOS: ${passed} OK, ${failed} FALLIDAS`)
 if (failed > 0) process.exit(1)

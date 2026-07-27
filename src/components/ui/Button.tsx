@@ -37,10 +37,15 @@ export function Button({
   children,
   className,
   disabled,
+  // SEGURIDAD (auditoría de botones): por defecto type="button" para que NINGÚN
+  // Button dispare submit accidental dentro de un <form>. Se puede sobrescribir
+  // explícitamente con type="submit" cuando se necesite enviar un formulario.
+  type = 'button',
   ...props
 }: ButtonProps) {
   return (
     <button
+      type={type}
       className={cn(
         'inline-flex items-center justify-center gap-2 font-medium transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed',
         variants[variant],

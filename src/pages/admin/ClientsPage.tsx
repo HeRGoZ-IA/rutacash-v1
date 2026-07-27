@@ -6,6 +6,8 @@ import { MoneyInput } from '@/components/ui/MoneyInput'
 import { PhotoInput } from '@/components/ui/PhotoInput'
 import { ClientStatusBadge, SaleStatusBadge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
+import { ConfirmDiscardModal } from '@/components/ui/ConfirmDiscardModal'
+import { useDirtyForm } from '@/hooks/useDirtyForm'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
@@ -78,6 +80,12 @@ export default function ClientsPage() {
     fotoDocumentoUrl: '' as string | undefined,
     fotoNegocioUrl: '' as string | undefined,
   })
+  // Dirty-state del formulario de cliente (para confirmar descarte en X / Cancelar).
+  const [original, setOriginal] = useState<Record<string, unknown> | null>(null)
+  const [discardOpen, setDiscardOpen] = useState(false)
+  const dirty = useDirtyForm(original, form)
+  function closeModal() { setModalOpen(false); setDiscardOpen(false); setOriginal(null) }
+  function tryCloseModal() { if (dirty) setDiscardOpen(true); else closeModal() }
   // Paquete 2: crear venta/crédito en el mismo flujo de Nuevo Cliente
   const [addSale, setAddSale] = useState(false)
   const [saleForm, setSaleForm] = useState({ ...EMPTY_SALE_FORM })
@@ -134,7 +142,8 @@ export default function ClientsPage() {
   function openCreate() {
     setEditing(null)
     setDupClient(null)
-    setForm({ nombre: '', documento: '', telefonoPrincipal: '', telefonoSecundario: '', direccionPrincipal: '', direccionSecundaria: '', negocio: '', routeId: routes[0]?.id ?? '', officeId: '', notas: '', fotoDocumentoUrl: undefined, fotoNegocioUrl: undefined })
+    const init = { nombre: '', documento: '', telefonoPrincipal: '', telefonoSecundario: '', direccionPrincipal: '', direccionSecundaria: '', negocio: '', routeId: routes[0]?.id ?? '', officeId: '', notas: '', fotoDocumentoUrl: undefined as string | undefined, fotoNegocioUrl: undefined as string | undefined }
+    setForm(init); setOriginal({ ...init })
     setAddSale(false)
     setSaleForm({ ...EMPTY_SALE_FORM, fechaInicio: today() })
     setModalOpen(true)
@@ -144,13 +153,14 @@ export default function ClientsPage() {
     setEditing(client)
     setDupClient(null)
     setAddSale(false)
-    setForm({
+    const init = {
       nombre: client.nombre, documento: client.documento,
       telefonoPrincipal: client.telefonoPrincipal, telefonoSecundario: client.telefonoSecundario ?? '',
       direccionPrincipal: client.direccionPrincipal, direccionSecundaria: client.direccionSecundaria ?? '',
       negocio: client.negocio ?? '', routeId: client.routeId, officeId: client.officeId ?? '', notas: client.notas ?? '',
       fotoDocumentoUrl: client.fotoDocumentoUrl, fotoNegocioUrl: client.fotoNegocioUrl,
-    })
+    }
+    setForm(init); setOriginal({ ...init })
     setModalOpen(true)
   }
 
@@ -243,7 +253,7 @@ export default function ClientsPage() {
         await db.clients.add(client)
         toast.success('Cliente creado')
       }
-      setModalOpen(false)
+      closeModal()
       await load()
     } catch { toast.error('Error al guardar') } finally { setSaving(false) }
   }
@@ -366,8 +376,8 @@ export default function ClientsPage() {
       )}
 
       {/* Create/Edit Modal */}
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Editar cliente' : 'Nuevo cliente'} size="mdPlus"
-        footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={handleSave} loading={saving} disabled={!!dupClient || capExcedido}>{editing ? 'Actualizar' : addSale ? 'Crear cliente y crédito' : 'Crear cliente'}</Button></>}>
+      <Modal open={modalOpen} onClose={tryCloseModal} title={editing ? 'Editar cliente' : 'Nuevo cliente'} size="mdPlus"
+        footer={<><Button variant="secondary" onClick={tryCloseModal} disabled={saving}>Cancelar</Button><Button onClick={handleSave} loading={saving} disabled={!!dupClient || capExcedido}>{editing ? 'Actualizar' : addSale ? 'Crear cliente y crédito' : 'Crear cliente'}</Button></>}>
         <div className="space-y-4">
           {/* Documento primero (Paquete 2.5) con validación de duplicado global */}
           <Input
@@ -612,6 +622,8 @@ export default function ClientsPage() {
           <p className="text-sm text-gray-600">Cliente: <span className="font-semibold">{deleteTarget?.nombre}</span></p>
         </div>
       </Modal>
+
+      <ConfirmDiscardModal open={discardOpen} onKeepEditing={() => setDiscardOpen(false)} onDiscard={closeModal} />
     </div>
   )
 }

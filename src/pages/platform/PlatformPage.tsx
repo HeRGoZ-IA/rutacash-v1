@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { Input, Select } from '@/components/ui/Input'
+import { ConfirmDiscardModal } from '@/components/ui/ConfirmDiscardModal'
+import { useDirtyForm } from '@/hooks/useDirtyForm'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
@@ -35,6 +37,11 @@ export default function PlatformPage() {
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState<Tenant | null>(null)
   const [form, setForm] = useState({ nombre: '', email: '', pais: 'Colombia', moneda: 'COP', vigencia: 'sin' as 'sin' | 'con', fechaVencimiento: '' })
+  const [original, setOriginal] = useState<Record<string, unknown> | null>(null)
+  const [discardOpen, setDiscardOpen] = useState(false)
+  const dirty = useDirtyForm(original, form)
+  function closeModal() { setModalOpen(false); setDiscardOpen(false); setOriginal(null) }
+  function tryCloseModal() { if (dirty) setDiscardOpen(true); else closeModal() }
 
   useEffect(() => { load() }, [])
 
@@ -58,16 +65,18 @@ export default function PlatformPage() {
 
   function openCreate() {
     setEditing(null)
-    setForm({ nombre: '', email: '', pais: 'Colombia', moneda: 'COP', vigencia: 'sin', fechaVencimiento: '' })
+    const init = { nombre: '', email: '', pais: 'Colombia', moneda: 'COP', vigencia: 'sin' as 'sin' | 'con', fechaVencimiento: '' }
+    setForm(init); setOriginal({ ...init })
     setModalOpen(true)
   }
 
   function openEdit(t: Tenant) {
     setEditing(t)
-    setForm({
+    const init = {
       nombre: t.nombre, email: t.email, pais: t.pais, moneda: t.moneda,
-      vigencia: t.fechaVencimiento ? 'con' : 'sin', fechaVencimiento: t.fechaVencimiento ?? '',
-    })
+      vigencia: (t.fechaVencimiento ? 'con' : 'sin') as 'sin' | 'con', fechaVencimiento: t.fechaVencimiento ?? '',
+    }
+    setForm(init); setOriginal({ ...init })
     setModalOpen(true)
   }
 
@@ -100,7 +109,7 @@ export default function PlatformPage() {
         if (user) await logAction({ tenantId: t.id, userId: user.id, userRole: user.rol, action: 'CREATE_TENANT', entityType: 'Tenant', entityId: t.id, descripcion: `Empresa creada: ${t.nombre}` })
         toast.success('Empresa creada')
       }
-      setModalOpen(false)
+      closeModal()
       await load()
     } catch { toast.error('Error') } finally { setSaving(false) }
   }
@@ -199,8 +208,8 @@ export default function PlatformPage() {
         )}
       </div>
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Editar empresa' : 'Nueva empresa'}
-        footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={handleSave} loading={saving}>{editing ? 'Guardar' : 'Crear'}</Button></>}>
+      <Modal open={modalOpen} onClose={tryCloseModal} title={editing ? 'Editar empresa' : 'Nueva empresa'}
+        footer={<><Button variant="secondary" onClick={tryCloseModal} disabled={saving}>Cancelar</Button><Button onClick={handleSave} loading={saving}>{editing ? 'Guardar' : 'Crear'}</Button></>}>
         <div className="space-y-4">
           <Input label="Nombre de la empresa" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required />
           <Input label="Email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required />
@@ -219,6 +228,8 @@ export default function PlatformPage() {
           <p className="text-xs text-gray-400">El plan comercial queda pendiente de definición; se asigna un plan predeterminado.</p>
         </div>
       </Modal>
+
+      <ConfirmDiscardModal open={discardOpen} onKeepEditing={() => setDiscardOpen(false)} onDiscard={closeModal} />
     </div>
   )
 }

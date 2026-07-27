@@ -8,6 +8,8 @@ import { Input, Select } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { DateRangeFilter } from '@/components/ui/DateRangeFilter'
+import { ConfirmDiscardModal } from '@/components/ui/ConfirmDiscardModal'
+import { useDirtyForm } from '@/hooks/useDirtyForm'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { getRouteFinancialSummary } from '@/services/cashboxEngine'
@@ -48,6 +50,10 @@ export default function RoutesPage() {
     nombre: '', ciudad: '', cobradorId: '', adminIds: [] as string[],
     tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0,
   })
+  // Dirty-state: snapshot original al abrir vs draft actual (para confirmar descarte).
+  const [original, setOriginal] = useState<Record<string, unknown> | null>(null)
+  const [discardOpen, setDiscardOpen] = useState(false)
+  const dirty = useDirtyForm(original, form)
 
   // #5/#6 Administradores activos del tenant (requisito para crear rutas).
   const activeAdmins = allUsers.filter(u => u.rol === 'admin' && u.status === 'activo')
@@ -90,19 +96,27 @@ export default function RoutesPage() {
     setEditing(null)
     // El Administrador creador queda preseleccionado (y bloqueado): se autoasigna.
     const preselect = user?.rol === 'admin' && user?.id ? [user.id] : []
-    setForm({ nombre: '', ciudad: '', cobradorId: '', adminIds: preselect, tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0 })
+    const init = { nombre: '', ciudad: '', cobradorId: '', adminIds: preselect, tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0 }
+    setForm(init)
+    setOriginal({ ...init })   // snapshot para dirty-check
     setModalOpen(true)
   }
 
   function openEdit(route: Route) {
     setEditing(route)
-    setForm({
+    const init = {
       nombre: route.nombre, ciudad: route.ciudad ?? '',
       cobradorId: route.cobradorId ?? '', adminIds: [], tasaInteres: route.tasaInteres, tasaLibre: route.tasaLibre,
       montoMaximoPrestamo: route.montoMaximoPrestamo, capitalInicial: route.capitalInicial,
-    })
+    }
+    setForm(init)
+    setOriginal({ ...init })   // snapshot de los datos GENERALES guardados
     setModalOpen(true)
   }
+
+  // Cierre del editor SIN guardar. Si hay cambios generales sin guardar, confirma.
+  function closeModal() { setModalOpen(false); setDiscardOpen(false); setOriginal(null) }
+  function tryCloseModal() { if (dirty) setDiscardOpen(true); else closeModal() }
 
   function toggleAdmin(id: string) {
     if (lockAdminToSelf) return // el Administrador solo se asigna a sí mismo
@@ -138,7 +152,8 @@ export default function RoutesPage() {
         if (form.adminIds.includes(user.id)) await refreshUser()
         toast.success('Ruta creada')
       }
-      setModalOpen(false)
+      // Cerrar SOLO tras confirmarse el guardado (el error mantiene el modal abierto).
+      closeModal()
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Error al guardar')
@@ -346,9 +361,10 @@ export default function RoutesPage() {
         </div>
       )}
 
-      {/* Create / Edit modal */}
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Editar ruta' : 'Nueva ruta'}
-        footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={handleSave} loading={saving}>{editing ? 'Actualizar' : 'Crear'}</Button></>}>
+      {/* Create / Edit modal. X y Cancelar NO guardan (confirman descarte si hay
+          cambios). Actualizar/Crear persiste y cierra solo tras el éxito. */}
+      <Modal open={modalOpen} onClose={tryCloseModal} title={editing ? 'Editar ruta' : 'Nueva ruta'}
+        footer={<><Button variant="secondary" onClick={tryCloseModal} disabled={saving}>Cancelar</Button><Button onClick={handleSave} loading={saving}>{editing ? 'Actualizar' : 'Crear'}</Button></>}>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Input label="Nombre de la ruta" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required />
@@ -408,7 +424,10 @@ export default function RoutesPage() {
                 <Users className="w-4 h-4 text-gray-500" />
                 <label className="text-sm font-medium text-gray-700">Usuarios asignados a esta ruta</label>
               </div>
-              <p className="text-xs text-gray-400 mb-2">Al asignar o retirar se actualiza de inmediato la ruta autorizada del usuario.</p>
+              {/* Aviso EXPLÍCITO de persistencia inmediata (no depende de Actualizar/Cancelar). */}
+              <p className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5 mb-2">
+                Las asignaciones de usuarios se guardan inmediatamente (no dependen de "Actualizar" ni de "Cancelar").
+              </p>
               {assignableToRoutes.length === 0 ? (
                 <p className="text-xs text-gray-400">No hay usuarios que puedas asignar.</p>
               ) : (
@@ -435,6 +454,14 @@ export default function RoutesPage() {
           )}
         </div>
       </Modal>
+
+      {/* Confirmación de descarte de cambios GENERALES sin guardar (X / Cancelar). */}
+      <ConfirmDiscardModal
+        open={discardOpen}
+        onKeepEditing={() => setDiscardOpen(false)}
+        onDiscard={closeModal}
+        note={editing ? 'Las asignaciones de usuarios ya se guardaron; esto solo descarta los datos generales sin guardar.' : undefined}
+      />
 
       {/* #4/#6 Confirmación reforzada: última ruta del usuario, o último Administrador de la ruta */}
       <Modal open={!!pendingRemoval} onClose={() => setPendingRemoval(null)}
