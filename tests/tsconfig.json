@@ -1,0 +1,12 @@
+{
+  "//": "Typecheck SOLO de la carpeta tests/. El tsconfig raíz incluye únicamente src/, así que sin este archivo el código de pruebas no se verifica. No afecta a `npm run build` (que usa el tsconfig raíz). Uso: npx tsc --noEmit -p tests",
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["_out.mjs", "_out.financial.mjs"]
+}

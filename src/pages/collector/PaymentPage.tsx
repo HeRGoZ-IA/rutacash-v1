@@ -6,9 +6,9 @@ import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
-import { generateId } from '@/lib/utils'
-import { formatCurrency, formatCurrencyInput, parseCurrencyInput, getCurrencySymbol, today, nowISO } from '@/lib/formatters'
-import { applyPaymentToInstallments, calculateSaleBalance, calculateCurrentInstallment } from '@/services/installmentEngine'
+import { formatCurrency, formatCurrencyInput, parseCurrencyInput, getCurrencySymbol } from '@/lib/formatters'
+import { calculateCurrentInstallment } from '@/services/installmentEngine'
+import { registerPayment, quickAmounts } from '@/services/paymentService'
 import { buildWhatsAppMessage } from '@/lib/utils'
 import type { Sale, Client, Installment } from '@/models/types'
 
@@ -25,35 +25,39 @@ export default function PaymentPage() {
   const [observacion, setObservacion] = useState('')
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
-  // Número de parcela que se está pagando (capturado al registrar el abono) para
-  // que la pantalla de confirmación muestre la MISMA parcela, no la siguiente.
+  // Número de parcela que se está pagando (lo informa el servicio) para que la
+  // pantalla de confirmación muestre la MISMA parcela, no la siguiente.
   const [paidNumber, setPaidNumber] = useState<number | null>(null)
+  // Importe realmente aplicado (puede ser menor al escrito si se topó al saldo).
+  const [appliedAmount, setAppliedAmount] = useState(0)
 
   useEffect(() => { load() }, [saleId])
 
-  async function load() {
-    if (!saleId) return
+  /** Relee venta y parcelas de Dexie. El estado React es SOLO presentación. */
+  async function refreshFromDb(): Promise<{ sale: Sale; insts: Installment[] } | null> {
+    if (!saleId) return null
     const s = await db.sales.get(saleId)
-    if (!s) return
-    const c = await db.clients.get(s.clientId)
+    if (!s) return null
     const insts = await db.installments.where('saleId').equals(saleId).toArray()
     setSale(s)
-    setClient(c ?? null)
     setInstallments(insts)
-    setValor(s.valorCuota)
+    return { sale: s, insts }
   }
 
-  async function handlePay() {
-    const v = valor
-    if (!v || v <= 0) { toast.error('Ingresa un valor válido'); return }
-    if (!sale || !user) return
-    if (sale.disbursementStatus === 'pendiente') { toast.error('Esta venta aún no está desembolsada'); return }
-    // Parcela que se está pagando AHORA (antes de aplicar el abono): se conserva
-    // para mostrarla igual en la confirmación.
-    const payingNumber = calculateCurrentInstallment(installments)?.numero ?? null
-    setPaidNumber(payingNumber)
-    setSaving(true)
+  async function load() {
+    const fresh = await refreshFromDb()
+    if (!fresh) return
+    const c = await db.clients.get(fresh.sale.clientId)
+    setClient(c ?? null)
+    setValor(quickAmounts(fresh.sale, fresh.insts).parcela)
+  }
 
+  // Registro de abono: TODA la lógica financiera vive en `paymentService`.
+  // El estado React NO se pasa como fuente de verdad: el servicio relee la venta
+  // y las parcelas desde Dexie dentro de su propia transacción.
+  async function handlePay() {
+    if (!sale) return
+    setSaving(true)
     try {
       let lat: number | undefined, lng: number | undefined
       try {
@@ -62,30 +66,26 @@ export default function PaymentPage() {
         lng = pos.coords.longitude
       } catch {}
 
-      const payment = {
-        id: generateId(), tenantId: user.tenantId, saleId: sale.id, clientId: sale.clientId,
-        routeId: sale.routeId, collectorId: user.id, valor: v, fecha: today(),
-        tipo: 'efectivo' as const, observacion, lat, lng,
-        syncStatus: navigator.onLine ? 'synced' as const : 'pending' as const,
-        createdAt: nowISO(),
+      const result = await registerPayment({
+        saleId: sale.id,
+        requestedAmount: valor,
+        actor: user,
+        observacion,
+        lat,
+        lng,
+        syncStatus: navigator.onLine ? 'synced' : 'pending',
+      })
+      if (!result.ok) { toast.error(result.message); return }
+
+      if (result.capped) {
+        toast.warning(`Abono limitado al saldo pendiente: ${formatCurrency(result.appliedAmount, currency)}. La deuda queda en ${formatCurrency(0, currency)}.`)
       }
-      await db.payments.add(payment)
-
-      // Update installments
-      const { updatedInstallments } = applyPaymentToInstallments(installments, v)
-      for (const inst of updatedInstallments) {
-        await db.installments.update(inst.id, { pagado: inst.pagado, saldo: inst.saldo, status: inst.status })
-      }
-
-      // Update sale balance
-      const newSaldo = calculateSaleBalance(updatedInstallments)
-      const newStatus = newSaldo <= 0 ? 'finalizada' : 'activa'
-      await db.sales.update(sale.id, { saldo: newSaldo, status: newStatus, updatedAt: nowISO() })
-
+      setPaidNumber(result.paidInstallmentNumber)
+      setAppliedAmount(result.appliedAmount)
       setSuccess(true)
-      setSale(prev => prev ? { ...prev, saldo: newSaldo, status: newStatus } : null)
-      setInstallments(updatedInstallments)
-    } catch { toast.error('Error al registrar pago') } finally { setSaving(false) }
+      // Refresco desde la base (fuente única), nunca desde un cálculo local.
+      await refreshFromDb()
+    } finally { setSaving(false) }
   }
 
   function openWhatsApp() {
@@ -94,7 +94,7 @@ export default function PaymentPage() {
     const cuotaActual = paidNumber ?? calculateCurrentInstallment(installments)?.numero ?? 0
     const msg = buildWhatsAppMessage({
       clientName: client.nombre,
-      valor,
+      valor: appliedAmount || valor,
       saldo: sale.saldo,
       cuotaActual,
       totalCuotas: sale.numeroCuotas,
@@ -112,6 +112,9 @@ export default function PaymentPage() {
   // En la confirmación se mantiene la parcela recién pagada; antes de guardar se
   // muestra la parcela actual a pagar.
   const parcelaNumero = success ? (paidNumber ?? currentInst?.numero) : currentInst?.numero
+  // Montos rápidos: fuente única `quickAmounts` (saldo REAL de la parcela actual,
+  // no el nominal `valorCuota`). Idéntico criterio que en el panel Admin.
+  const qa = quickAmounts(sale, installments)
 
   return (
     <div className="p-4 space-y-4">
@@ -121,7 +124,7 @@ export default function PaymentPage() {
         <p className="text-sm text-primary-600">{client.negocio}</p>
         <div className="grid grid-cols-3 gap-2 mt-3">
           <div className="text-center"><p className="text-xs text-gray-500">Saldo</p><p className="font-bold text-amber-600">{formatCurrency(sale.saldo, currency)}</p></div>
-          <div className="text-center"><p className="text-xs text-gray-500">Parcela</p><p className="font-bold text-primary-700">{formatCurrency(sale.valorCuota, currency)}</p></div>
+          <div className="text-center"><p className="text-xs text-gray-500">Parcela</p><p className="font-bold text-primary-700">{formatCurrency(qa.parcela, currency)}</p></div>
           <div className="text-center"><p className="text-xs text-gray-500">N° parcela</p><p className="font-bold text-gray-700"><span className="text-primary-700">{parcelaNumero ?? '-'}</span>/{sale.numeroCuotas}</p></div>
         </div>
       </div>
@@ -175,12 +178,15 @@ export default function PaymentPage() {
               />
             </div>
 
-            {/* Quick amounts */}
+            {/* Quick amounts — sobre el saldo REAL de la parcela actual */}
             <div className="grid grid-cols-3 gap-2">
-              <button onClick={() => setValor(sale.valorCuota)} className="py-2 bg-primary-50 text-primary-700 rounded-xl text-xs font-medium">Parcela completa<br />{formatCurrency(sale.valorCuota, currency)}</button>
-              <button onClick={() => setValor(Math.floor(sale.valorCuota / 2))} className="py-2 bg-gray-50 text-gray-600 rounded-xl text-xs font-medium">Mitad<br />{formatCurrency(Math.floor(sale.valorCuota / 2), currency)}</button>
-              <button onClick={() => setValor(sale.saldo)} className="py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-medium">Total<br />{formatCurrency(sale.saldo, currency)}</button>
+              <button type="button" onClick={() => setValor(qa.parcela)} className="py-2 bg-primary-50 text-primary-700 rounded-xl text-xs font-medium">Completar parcela<br />{formatCurrency(qa.parcela, currency)}</button>
+              <button type="button" onClick={() => setValor(qa.mitad)} className="py-2 bg-gray-50 text-gray-600 rounded-xl text-xs font-medium">Mitad<br />{formatCurrency(qa.mitad, currency)}</button>
+              <button type="button" onClick={() => setValor(qa.total)} className="py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-medium">Total<br />{formatCurrency(qa.total, currency)}</button>
             </div>
+            {valor > qa.total && (
+              <p className="text-xs text-amber-600">Supera el saldo: se registrará {formatCurrency(qa.total, currency)} y la deuda quedará en {formatCurrency(0, currency)}.</p>
+            )}
           </div>
 
           {/* Observation */}

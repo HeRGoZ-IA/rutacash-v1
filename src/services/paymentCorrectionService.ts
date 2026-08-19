@@ -28,19 +28,39 @@ export async function isPaymentInClosedPeriod(payment: Payment): Promise<boolean
   )
 }
 
-/** Pagos "efectivos" de una venta: excluye originales revertidos y asientos de reversión. */
-function effectivePayments(payments: Payment[]): Payment[] {
+/**
+ * Pagos "efectivos" de una venta: excluye originales revertidos y asientos de reversión.
+ *
+ * Es la ÚNICA definición de qué pagos cuentan contablemente. Se exporta para que el
+ * diagnóstico de conciliación (`financialReconciliation`) aplique exactamente la misma
+ * semántica y no haga una suma ingenua de todas las filas de `payments`:
+ *   · `state: 'reversed'`  → original anulado por una corrección  → NO cuenta
+ *   · `state: 'reversal'`  → asiento negativo que anula al anterior → NO cuenta
+ *   · `state: 'active' | 'correction' | undefined` (pagos antiguos) → SÍ cuenta
+ * Excluir el par (original + reversión) equivale a netearlos, y evita depender del
+ * signo negativo del asiento.
+ */
+export function effectivePayments(payments: Payment[]): Payment[] {
   return payments.filter(p => p.state !== 'reversed' && p.state !== 'reversal')
 }
 
-/** Recalcula parcelas y saldo/estado de la venta a partir de sus pagos efectivos. */
+/**
+ * Recalcula parcelas y saldo/estado de la venta a partir de sus pagos efectivos.
+ *
+ * ATOMICIDAD: debe invocarse SIEMPRE dentro de la misma transacción que escribe los
+ * pagos (`executeCorrection`). Antes se ejecutaba fuera, de modo que un fallo aquí
+ * dejaba los asientos de reversión/reemplazo guardados con las parcelas y el saldo
+ * antiguos. Las tablas que toca (`sales`, `installments`, `payments`) ya están en el
+ * ámbito de esa transacción, así que no requiere abrir una propia.
+ *
+ * Se conserva intacta la semántica existente: una venta 'perdida' o 'refinanciada'
+ * NUNCA cambia de estado al recomputar.
+ */
 async function recomputeSale(saleId: string): Promise<void> {
   const sale = await db.sales.get(saleId)
   if (!sale) return
-  const [installments, payments] = await Promise.all([
-    db.installments.where('saleId').equals(saleId).toArray(),
-    db.payments.where('saleId').equals(saleId).toArray(),
-  ])
+  const installments = await db.installments.where('saleId').equals(saleId).toArray()
+  const payments = await db.payments.where('saleId').equals(saleId).toArray()
   const recomputed = recalculateSaleFromPayments(installments, effectivePayments(payments))
   for (const inst of recomputed) {
     await db.installments.update(inst.id, { pagado: inst.pagado, saldo: inst.saldo, status: inst.status, diasMora: inst.diasMora })
@@ -93,6 +113,9 @@ async function executeCorrection(original: Payment, actor: User, input: Correcti
     correctionReason: input.reason, correctedBy: actor.id, correctedAt: ts,
   }
 
+  // UNA SOLA TRANSACCIÓN: reversión + pago corregido + recómputo de parcelas y venta.
+  // Si cualquier paso falla, Dexie revierte TODO: nunca quedan pagos corregidos
+  // conviviendo con parcelas y saldo antiguos.
   await db.transaction('rw', [db.payments, db.installments, db.sales], async () => {
     await db.payments.update(original.id, {
       state: 'reversed', correctedByPaymentId: correctedId,
@@ -100,10 +123,11 @@ async function executeCorrection(original: Payment, actor: User, input: Correcti
     })
     await db.payments.add(reversal)
     await db.payments.add(corrected)
+    await recomputeSale(original.saleId)
   })
-  // Fuera de la transacción de escritura de pagos: recomputar la venta.
-  await recomputeSale(original.saleId)
 
+  // La auditoría va FUERA: `auditLogs` no forma parte del ámbito de la transacción
+  // y un fallo al auditar no debe revertir una corrección ya consolidada.
   await logAction({
     tenantId: original.tenantId, userId: actor.id, userRole: actor.rol, routeId: original.routeId,
     action: 'CORRECT_PAYMENT', entityType: 'Payment', entityId: original.id,

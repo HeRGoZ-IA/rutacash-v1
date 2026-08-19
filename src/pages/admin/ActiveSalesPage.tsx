@@ -17,9 +17,9 @@ import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import {
   generateInstallments, calculateTotalWithInterest,
   estimateFinalDate, calculateInstallmentValue,
-  applyPaymentToInstallments, calculateSaleBalance,
   getLastPaidInstallmentNumber,
 } from '@/services/installmentEngine'
+import { registerPayment, quickAmounts } from '@/services/paymentService'
 import { findActiveSaleForClient } from '@/services/saleRequestService'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import type { Sale, Client, Route, Installment } from '@/models/types'
@@ -140,6 +140,11 @@ export default function ActiveSalesPage() {
     })
   }
 
+  // Montos rápidos del modal de pago. Fuente única `quickAmounts`: se calculan
+  // sobre el SALDO REAL de la parcela actual, no sobre el nominal `valorCuota`
+  // (la última parcela absorbe el redondeo y puede valer menos que el nominal).
+  const paymentQuick = paymentSale ? quickAmounts(paymentSale, detailInstallments) : null
+
   const filtered = sales.filter(s => {
     const client = clientMap.get(s.clientId)
     const matchSearch = !search || client?.nombre.toLowerCase().includes(search.toLowerCase()) || client?.documento.includes(search)
@@ -216,34 +221,29 @@ export default function ActiveSalesPage() {
     setDetailInstallments(insts.sort((a, b) => a.numero - b.numero))
   }
 
+  // Registro de pago: TODA la lógica financiera vive en `paymentService`
+  // (lectura fresca, autorización, validaciones, tope al saldo y transacción).
+  // Aquí solo se recoge el importe, se muestra el resultado y se refresca.
   async function handleQuickPayment() {
-    const v = paymentValor
-    if (!v || v <= 0) { toast.error('Ingresa un valor válido'); return }
-    if (!paymentSale || !user) return
+    if (!paymentSale) return
     setPayingQuick(true)
     try {
-      const insts = await db.installments.where('saleId').equals(paymentSale.id).toArray()
-      const payment = {
-        id: generateId(), tenantId, saleId: paymentSale.id,
-        clientId: paymentSale.clientId, routeId: paymentSale.routeId,
-        collectorId: user.id, valor: v, fecha: today(),
-        tipo: 'efectivo' as const, observacion: '',
-        syncStatus: 'synced' as const, createdAt: nowISO(),
+      const result = await registerPayment({
+        saleId: paymentSale.id,
+        requestedAmount: paymentValor,
+        actor: user,
+      })
+      if (!result.ok) { toast.error(result.message); return }
+      if (result.capped) {
+        toast.warning(`El pago se limitó al saldo pendiente: ${formatCurrency(result.appliedAmount, currency)}. La deuda queda en ${formatCurrency(0, currency)}.`)
+      } else {
+        toast.success('Pago registrado correctamente')
       }
-      await db.payments.add(payment)
-      const { updatedInstallments } = applyPaymentToInstallments(insts, v)
-      for (const inst of updatedInstallments) {
-        await db.installments.update(inst.id, { pagado: inst.pagado, saldo: inst.saldo, status: inst.status })
-      }
-      const newSaldo = calculateSaleBalance(updatedInstallments)
-      const newStatus = newSaldo <= 0 ? 'finalizada' : 'activa'
-      await db.sales.update(paymentSale.id, { saldo: newSaldo, status: newStatus, updatedAt: nowISO() })
-      toast.success('Pago registrado correctamente')
       setPaymentSale(null)
       setPaymentValor(0)
       setDetailSale(null)
       await load()
-    } catch { toast.error('Error al registrar pago') } finally { setPayingQuick(false) }
+    } finally { setPayingQuick(false) }
   }
 
   async function markLost() {
@@ -417,7 +417,7 @@ export default function ActiveSalesPage() {
             <>
               <Button variant="secondary" onClick={() => setDetailSale(null)}>Cerrar</Button>
               {detailSale.status === 'activa' && (
-                <Button onClick={() => { setPaymentSale(detailSale); setPaymentValor(detailSale.valorCuota) }} icon={<DollarSign className="w-4 h-4" />}>Registrar pago</Button>
+                <Button onClick={() => { setPaymentSale(detailSale); setPaymentValor(quickAmounts(detailSale, detailInstallments).parcela) }} icon={<DollarSign className="w-4 h-4" />}>Registrar pago</Button>
               )}
               {detailSale.status === 'activa' && (
                 <Button variant="danger" onClick={() => { setLostSale(detailSale); setLostOpen(true) }} icon={<XCircle className="w-4 h-4" />}>Marcar perdida</Button>
@@ -485,18 +485,19 @@ export default function ActiveSalesPage() {
       {/* Quick payment modal */}
       <Modal open={!!paymentSale} onClose={() => setPaymentSale(null)} title="Registrar pago"
         footer={<><Button variant="secondary" onClick={() => setPaymentSale(null)}>Cancelar</Button><Button onClick={handleQuickPayment} loading={payingQuick} icon={<DollarSign className="w-4 h-4" />}>Confirmar pago</Button></>}>
-        {paymentSale && (
+        {paymentSale && paymentQuick && (
           <div className="space-y-4">
             <div className="bg-primary-50 rounded-xl p-4 grid grid-cols-2 gap-3">
-              <div><p className="text-xs text-gray-500">Cuota</p><p className="font-bold text-primary-700">{formatCurrency(paymentSale.valorCuota, currency)}</p></div>
-              <div><p className="text-xs text-gray-500">Saldo pendiente</p><p className="font-bold text-amber-600">{formatCurrency(paymentSale.saldo, currency)}</p></div>
+              <div><p className="text-xs text-gray-500">Parcela pendiente</p><p className="font-bold text-primary-700">{formatCurrency(paymentQuick.parcela, currency)}</p></div>
+              <div><p className="text-xs text-gray-500">Saldo pendiente</p><p className="font-bold text-amber-600">{formatCurrency(paymentQuick.total, currency)}</p></div>
             </div>
             <div className="grid grid-cols-3 gap-2">
-              <button onClick={() => setPaymentValor(paymentSale.valorCuota)} className="py-2 bg-primary-50 text-primary-700 rounded-xl text-xs font-medium hover:bg-primary-100">Cuota completa<br />{formatCurrency(paymentSale.valorCuota, currency)}</button>
-              <button onClick={() => setPaymentValor(Math.floor(paymentSale.valorCuota / 2))} className="py-2 bg-gray-50 text-gray-600 rounded-xl text-xs font-medium hover:bg-gray-100">Mitad<br />{formatCurrency(Math.floor(paymentSale.valorCuota / 2), currency)}</button>
-              <button onClick={() => setPaymentValor(paymentSale.saldo)} className="py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-medium hover:bg-emerald-100">Total saldo<br />{formatCurrency(paymentSale.saldo, currency)}</button>
+              <button type="button" onClick={() => setPaymentValor(paymentQuick.parcela)} className="py-2 bg-primary-50 text-primary-700 rounded-xl text-xs font-medium hover:bg-primary-100">Completar parcela<br />{formatCurrency(paymentQuick.parcela, currency)}</button>
+              <button type="button" onClick={() => setPaymentValor(paymentQuick.mitad)} className="py-2 bg-gray-50 text-gray-600 rounded-xl text-xs font-medium hover:bg-gray-100">Mitad<br />{formatCurrency(paymentQuick.mitad, currency)}</button>
+              <button type="button" onClick={() => setPaymentValor(paymentQuick.total)} className="py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-medium hover:bg-emerald-100">Total saldo<br />{formatCurrency(paymentQuick.total, currency)}</button>
             </div>
-            <MoneyInput label="Valor del pago" currency={currency} value={paymentValor} onValueChange={setPaymentValor} required />
+            <MoneyInput label="Valor del pago" currency={currency} value={paymentValor} onValueChange={setPaymentValor} required
+              hint={paymentValor > paymentQuick.total ? `Supera el saldo: se registrará ${formatCurrency(paymentQuick.total, currency)}` : undefined} />
           </div>
         )}
       </Modal>

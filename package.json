@@ -11,7 +11,9 @@
     "build:clean": "tsc && vite build --mode clean",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx",
-    "test:permissions": "npx --yes esbuild tests/permissions.test.ts --bundle --format=esm --platform=node --outfile=tests/_out.mjs && node tests/_out.mjs"
+    "test:permissions": "npx --yes esbuild tests/permissions.test.ts --bundle --format=esm --platform=node --outfile=tests/_out.mjs && node tests/_out.mjs",
+    "test:financial": "npx --yes esbuild tests/payments.test.ts --bundle --format=esm --platform=node --alias:@=./src --outfile=tests/_out.financial.mjs && node tests/_out.financial.mjs",
+    "test": "npm run test:permissions && npm run test:financial"
   },
   "keywords": [],
   "author": "",
