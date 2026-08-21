@@ -335,7 +335,10 @@ export default function SettingsPage() {
                 <p className="text-xs text-primary-600 mt-1">
                   Esta es tu empresa. Crea los usuarios que necesites: cobradores, supervisores y administradores desde el módulo de Usuarios.
                 </p>
-                <p className="text-xs text-gray-500 mt-1">Usuario inicial: <span className="font-medium">admin@demo.com</span> / 123456</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Cada usuario que crees recibe una contraseña temporal generada al azar y deberá
+                  cambiarla en su primer acceso. RutaCash no crea ninguna cuenta por su cuenta.
+                </p>
                 <button onClick={() => navigate('/admin/users')} className="mt-2 text-xs font-semibold text-primary-600 hover:underline">Ir a Usuarios →</button>
               </div>
             </div>
@@ -405,9 +408,9 @@ export default function SettingsPage() {
             </p>
           </div>
           <p className="text-xs text-gray-500">
-            Solo afecta a este navegador. Quedará el administrador inicial
-            (<span className="font-medium">admin@demo.com / 123456</span>) y las categorías base; la
-            app se recargará en la pantalla de inicio de sesión.
+            Solo afecta a este navegador. La instalación quedará <span className="font-medium">completamente
+            vacía</span>: sin usuarios, sin empresas y sin datos. Al recargar deberás volver a crear
+            el Super Admin desde la pantalla de configuración inicial.
           </p>
         </div>
       </Modal>

@@ -11,6 +11,7 @@ import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
 import { formatDate, nowISO, today } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
+import { buildDefaultExpenseCategories } from '@/data/seed'
 import { getEffectiveCompanyStatus, type EffectiveCompanyStatus } from '@/lib/company'
 import type { Tenant, TenantPlan, TenantStatus } from '@/models/types'
 import { useAuth } from '@/hooks/useAuth'
@@ -105,7 +106,12 @@ export default function PlatformPage() {
           moneda: form.moneda, plan: DEFAULT_PLAN, status: 'prueba', fechaVencimiento,
           createdAt: nowISO(), updatedAt: nowISO(),
         }
-        await db.tenants.add(t)
+        // Las categorías de gasto son DATO DE EMPRESA: nacen con ella, en la misma
+        // transacción. Ya no dependen de ningún seed de arranque.
+        await db.transaction('rw', [db.tenants, db.expenseCategories], async () => {
+          await db.tenants.add(t)
+          await db.expenseCategories.bulkAdd(buildDefaultExpenseCategories(t.id))
+        })
         if (user) await logAction({ tenantId: t.id, userId: user.id, userRole: user.rol, action: 'CREATE_TENANT', entityType: 'Tenant', entityId: t.id, descripcion: `Empresa creada: ${t.nombre}` })
         toast.success('Empresa creada')
       }

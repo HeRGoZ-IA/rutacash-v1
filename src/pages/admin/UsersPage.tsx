@@ -11,7 +11,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
-import { generateId } from '@/lib/utils'
+import { generateId, generateTemporaryPassword } from '@/lib/utils'
 import { nowISO, initials } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { getAssignedRouteIds } from '@/lib/roles'
@@ -43,14 +43,14 @@ export default function UsersPage() {
   const [deleting, setDeleting] = useState(false)
   const [checkingId, setCheckingId] = useState<string | null>(null)
   const [resetTarget, setResetTarget] = useState<User | null>(null)
-  const [resetPass, setResetPass] = useState('123456')
+  const [resetPass, setResetPass] = useState(generateTemporaryPassword)
 
   const roleOptions = assignableRoles(currentUser).map(r => ({ value: r, label: ROLE_LABELS[r] }))
   const defaultRole: UserRole = (assignableRoles(currentUser)[0] ?? 'cobrador') as UserRole
 
   // MODELO PURO (#7): ROL BASE + RUTAS AUTORIZADAS. Sin permisos individuales.
   const [form, setForm] = useState({
-    nombre: '', email: '', password: '123456', rol: defaultRole,
+    nombre: '', email: '', password: generateTemporaryPassword(), rol: defaultRole,
     authorizedRouteIds: [] as string[],
   })
   const [original, setOriginal] = useState<Record<string, unknown> | null>(null)
@@ -86,7 +86,9 @@ export default function UsersPage() {
 
   function openCreate() {
     setEditing(null)
-    const init = { nombre: '', email: '', password: '123456', rol: defaultRole, authorizedRouteIds: [] as string[] }
+    // Cada alta propone una contraseña TEMPORAL distinta y aleatoria: ninguna cuenta
+    // nace con una credencial conocida.
+    const init = { nombre: '', email: '', password: generateTemporaryPassword(), rol: defaultRole, authorizedRouteIds: [] as string[] }
     setForm(init); setOriginal({ ...init })
     setModalOpen(true)
   }
@@ -149,6 +151,9 @@ export default function UsersPage() {
         if (existing) { toast.error('Ya existe un usuario con ese email'); setSaving(false); return }
         const u: User = {
           id: userId, tenantId, nombre: form.nombre, email: form.email, password: form.password, rol: form.rol,
+          // La contraseña la eligió un superior: es TEMPORAL. El usuario debe definir
+          // la suya en su primer acceso (PasswordChangeGate).
+          mustChangePassword: true,
           ...noGrants, ...legacyDirect, status: 'activo', createdAt: nowISO(), updatedAt: nowISO(),
         }
         await db.users.add(u)
@@ -192,7 +197,7 @@ export default function UsersPage() {
   async function handleReset() {
     if (!currentUser || !resetTarget) return
     const res = await resetUserPassword(currentUser, resetTarget.id, resetPass)
-    if (res.success) { toast.success('Contraseña restablecida'); setResetTarget(null); setResetPass('123456') }
+    if (res.success) { toast.success('Contraseña restablecida'); setResetTarget(null); setResetPass(generateTemporaryPassword()) }
     else toast.error(res.error ?? 'No se pudo restablecer')
   }
 
@@ -308,7 +313,7 @@ export default function UsersPage() {
                   <Badge variant={u.status === 'activo' ? 'success' : 'gray'} size="sm">{u.status}</Badge>
                   <div className="flex gap-1 flex-shrink-0">
                     <Button variant="ghost" size="sm" title="Restablecer contraseña" disabled={!manageable}
-                      onClick={(e) => { e.stopPropagation(); setResetTarget(u); setResetPass('123456') }}
+                      onClick={(e) => { e.stopPropagation(); setResetTarget(u); setResetPass(generateTemporaryPassword()) }}
                       icon={<KeyRound className="w-3.5 h-3.5 text-primary-500" />} />
                     <Button variant="ghost" size="sm" disabled={!manageable} onClick={(e) => { e.stopPropagation(); toggleStatus(u) }}
                       icon={u.status === 'activo' ? <ToggleRight className="w-3.5 h-3.5 text-emerald-500" /> : <ToggleLeft className="w-3.5 h-3.5 text-gray-400" />} />
@@ -329,7 +334,8 @@ export default function UsersPage() {
         <div className="space-y-4">
           <Input label="Nombre completo" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required />
           <Input label="Email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required />
-          <Input label="Contraseña inicial" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
+          <Input label="Contraseña temporal" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+            hint="Generada al azar. Compártela con la persona: deberá cambiarla en su primer acceso." />
           <Select label="Rol" value={form.rol} onChange={e => setForm(f => ({ ...f, rol: e.target.value as UserRole, grantedCapabilities: [] }))} options={roleOptions} required />
 
           {showRoutes && (

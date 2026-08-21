@@ -3,7 +3,8 @@ import { persist } from 'zustand/middleware'
 import { db } from '@/lib/db'
 import { nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
-import { isCompanyBlocked, companyBlockMessage } from '@/lib/company'
+import { isCompanyBlocked } from '@/lib/company'
+import { authenticateUser } from '@/services/authService'
 import type { User, Tenant, Route } from '@/models/types'
 
 interface AuthState {
@@ -40,45 +41,23 @@ export const useAuth = create<AuthState>()(
       isAuthenticated: false,
       isLoading: false,
 
+      // La comprobación de credenciales vive en `authService.authenticateUser`
+      // (dominio testeable). Aquí solo se persiste el resultado en el store.
       login: async (email: string, password: string) => {
         set({ isLoading: true })
-        try {
-          const user = await db.users
-            .where('email').equals(email.toLowerCase().trim())
-            .first()
-
-          if (!user || user.password !== password) {
-            set({ isLoading: false })
-            return { success: false, error: 'Credenciales incorrectas' }
-          }
-
-          if (user.status !== 'activo') {
-            set({ isLoading: false })
-            return { success: false, error: 'Usuario inactivo. Contacta al administrador.' }
-          }
-
-          let tenant: Tenant | null = null
-          let route: Route | null = null
-
-          if (user.rol !== 'superadmin') {
-            tenant = await db.tenants.get(user.tenantId) ?? null
-            // Bloqueo por estado EFECTIVO: suspendida (manual) o vencida (por fecha).
-            if (tenant && isCompanyBlocked(tenant)) {
-              set({ isLoading: false })
-              return { success: false, error: companyBlockMessage(tenant) ?? 'Empresa no disponible.' }
-            }
-          }
-
-          if (user.routeId) {
-            route = await db.routes.get(user.routeId) ?? null
-          }
-
-          set({ user, tenant, route, isAuthenticated: true, isLoading: false })
-          return { success: true }
-        } catch (err) {
+        const result = await authenticateUser(email, password)
+        if (!result.ok) {
           set({ isLoading: false })
-          return { success: false, error: 'Error interno. Intenta de nuevo.' }
+          return { success: false, error: result.error }
         }
+        set({
+          user: result.user,
+          tenant: result.tenant,
+          route: result.route,
+          isAuthenticated: true,
+          isLoading: false,
+        })
+        return { success: true }
       },
 
       logout: () => {
@@ -143,13 +122,18 @@ export const useAuth = create<AuthState>()(
         if (user.password !== current) return { success: false, error: 'La contraseña actual no es correcta' }
         if (!next || next.length < 4) return { success: false, error: 'La nueva contraseña debe tener al menos 4 caracteres' }
         try {
-          await db.users.update(user.id, { password: next, updatedAt: nowISO() })
+          // Cambiar la clave APAGA la exigencia de cambio obligatorio: es el único
+          // punto donde `mustChangePassword` pasa a false, y se persiste junto con
+          // la contraseña en la misma escritura.
+          await db.users.update(user.id, { password: next, mustChangePassword: false, updatedAt: nowISO() })
           await logAction({
             tenantId: user.tenantId, userId: user.id, userRole: user.rol,
             action: 'CHANGE_PASSWORD', entityType: 'User', entityId: user.id,
             descripcion: 'El usuario cambió su propia contraseña',
           })
-          set({ user: { ...user, password: next } })
+          // El store se refresca en el acto: la pantalla de bloqueo desaparece sin
+          // recargar, sin cerrar sesión y sin tocar IndexedDB manualmente.
+          set({ user: { ...user, password: next, mustChangePassword: false } })
           return { success: true }
         } catch {
           return { success: false, error: 'Error al actualizar la contraseña' }

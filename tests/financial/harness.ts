@@ -61,16 +61,21 @@ export class FakeTable<T extends Row> {
     return [...this.rows.values()].map(r => structuredClone(r))
   }
 
-  /** Dexie: Table.where(index).equals(value).toArray() */
+  /** Dexie: Table.where(index).equals(value).toArray() / .first() / .count() */
   where(index: string) {
+    const match = (value: unknown) => [...this.rows.values()].filter(r => r[index] === value)
     return {
       equals: (value: unknown) => ({
         toArray: async (): Promise<T[]> => {
           this.db.note(`${this.name}.where(${index}).toArray`)
-          return [...this.rows.values()]
-            .filter(r => r[index] === value)
-            .map(r => structuredClone(r))
+          return match(value).map(r => structuredClone(r))
         },
+        first: async (): Promise<T | undefined> => {
+          this.db.note(`${this.name}.where(${index}).first`)
+          const r = match(value)[0]
+          return r ? structuredClone(r) : undefined
+        },
+        count: async (): Promise<number> => match(value).length,
       }),
     }
   }
@@ -104,6 +109,10 @@ export class MemoryDb {
   // clientes y rutas en el informe.
   clients = new FakeTable<any>(this, 'clients')
   routes = new FakeTable<any>(this, 'routes')
+  // Arranque de instalación limpia y autenticación (tests/bootstrap.test.ts).
+  tenants = new FakeTable<any>(this, 'tenants')
+  users = new FakeTable<any>(this, 'users')
+  expenseCategories = new FakeTable<any>(this, 'expenseCategories')
 
   /** Bitácora ordenada de operaciones — evidencia del orden real de escrituras. */
   log: string[] = []

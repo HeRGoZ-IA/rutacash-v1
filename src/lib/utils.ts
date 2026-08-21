@@ -9,6 +9,23 @@ export function generateId(): string {
   return uuidv4()
 }
 
+/**
+ * Contraseña TEMPORAL para un usuario que crea un superior. Se genera al azar en vez
+ * de usar un valor fijo conocido: ninguna cuenta de RutaCash debe nacer con una
+ * credencial adivinable. Quien la recibe está obligado a cambiarla en su primer
+ * acceso (`User.mustChangePassword`).
+ *
+ * Alfabeto sin caracteres ambiguos (0/O, 1/l/I) porque la clave se dicta o se copia
+ * a mano. Longitud 10 sobre 30 símbolos ≈ 49 bits: sobrado para una clave de un solo
+ * uso y aún legible.
+ */
+export function generateTemporaryPassword(): string {
+  const alfabeto = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
+  const bytes = new Uint8Array(10)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, b => alfabeto[b % alfabeto.length]).join('')
+}
+
 export function downloadCSV(data: Record<string, unknown>[], filename: string) {
   if (!data.length) return
   const headers = Object.keys(data[0])

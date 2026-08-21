@@ -21,7 +21,8 @@ export async function resetUserPassword(actor: User, targetUserId: string, newPa
   if (!canManageUser(actor, target)) return { success: false, error: 'No tienes permiso para restablecer la contraseña de este usuario.' }
   if (!newPassword || newPassword.length < 4) return { success: false, error: 'La contraseña debe tener al menos 4 caracteres.' }
 
-  await db.users.update(targetUserId, { password: newPassword, updatedAt: nowISO() })
+  // La clave la eligió un tercero: el usuario debe definir la suya al entrar.
+  await db.users.update(targetUserId, { password: newPassword, mustChangePassword: true, updatedAt: nowISO() })
   await logAction({
     tenantId: actor.tenantId, userId: actor.id, userRole: actor.rol,
     action: 'RESET_PASSWORD', entityType: 'User', entityId: targetUserId,

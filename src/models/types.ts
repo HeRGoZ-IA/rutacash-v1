@@ -175,6 +175,14 @@ export interface User {
   grantedCapabilities?: string[]
   /** Capacidades RETIRADAS explícitamente (tienen prioridad sobre las del rol/otorgadas). */
   revokedCapabilities?: string[]
+  /**
+   * El usuario debe cambiar su contraseña antes de poder operar. Lo activan los
+   * seeds de arranque (credenciales por defecto conocidas) y el restablecimiento
+   * de contraseña por parte de un superior. Se apaga solo cuando el propio usuario
+   * cambia su clave (`useAuth.changeOwnPassword`).
+   * Ausente/undefined = no se exige cambio (usuarios anteriores a esta regla).
+   */
+  mustChangePassword?: boolean
   status: 'activo' | 'inactivo'
   createdAt: string
   updatedAt: string

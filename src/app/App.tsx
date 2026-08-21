@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from '@/components/ui/Toast'
 import { AdminLayout } from '@/components/layout/AdminLayout'
@@ -8,11 +8,11 @@ import { SocioLayout } from '@/components/layout/SocioLayout'
 import { SecretarioLayout } from '@/components/layout/SecretarioLayout'
 import { RequireAuth } from '@/components/auth/guards'
 import { useAuth } from '@/hooks/useAuth'
-import { seedDatabase, seedCleanDatabase, ensureExpenseCategories } from '@/data/seed'
+import { seedDatabase, ensureExpenseCategories } from '@/data/seed'
 import { IS_CLEAN } from '@/lib/appMode'
 
 // Auth
-import LoginPage from '@/pages/auth/LoginPage'
+import AuthEntry from '@/pages/auth/AuthEntry'
 
 // Platform
 import PlatformPage from '@/pages/platform/PlatformPage'
@@ -97,21 +97,39 @@ function operationalRoutes() {
 
 export default function App() {
   const revalidateSession = useAuth((s) => s.revalidateSession)
+  const [booting, setBooting] = useState(true)
 
   useEffect(() => {
-    const seed = IS_CLEAN ? seedCleanDatabase : seedDatabase
-    // Tras sembrar, garantizar categorías de gasto base y REVALIDAR la sesión
-    // (usuario/empresa/rol/rutas) por si algo cambió mientras no había sesión activa.
-    seed()
-      .then(() => ensureExpenseCategories())
-      .then(() => revalidateSession())
-      .catch(console.error)
+    // ARRANQUE.
+    //  · DEMO  → siembra su conjunto ficticio completo.
+    //  · CLEAN → NO siembra nada: una instalación limpia nace vacía y su primera
+    //            acción es que una persona cree el Super Admin (ver AuthEntry).
+    // Después se garantizan las categorías de gasto de las empresas existentes
+    // (red de seguridad para empresas creadas antes de que fueran dato de empresa)
+    // y se revalida la sesión persistida contra la base.
+    const boot = async () => {
+      if (!IS_CLEAN) await seedDatabase()
+      await ensureExpenseCategories()
+      await revalidateSession()
+    }
+    boot().catch(console.error).finally(() => setBooting(false))
   }, [revalidateSession])
+
+  // Hasta terminar el arranque no se decide qué pantalla mostrar: si se consultara
+  // el estado de la instalación antes de sembrar, DEMO parpadearía en la pantalla
+  // de configuración inicial.
+  if (booting) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-900">
+        <div className="w-8 h-8 border-2 border-primary-300/30 border-t-primary-400 rounded-full animate-spin" />
+      </div>
+    )
+  }
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
+        <Route path="/login" element={<AuthEntry />} />
         <Route path="/" element={<Navigate to="/login" replace />} />
 
         {/* Platform / Super Admin */}

@@ -593,20 +593,21 @@ export async function resetToDemo() {
   location.reload()
 }
 
-// ---- SEED LIMPIO: Super Admin inicial + empresa inicial + primer Administrador ----
-const CLEAN_TENANT_ID = 'tenant-main-001'
-const CLEAN_ADMIN_ID = 'user-admin-main-001'
-const CLEAN_SUPERADMIN_ID = 'user-superadmin-main-001'
+// ---- INSTALACIÓN LIMPIA ----
+// NO hay constantes de credenciales: una instalación CLEAN no precrea ninguna cuenta.
+// El primer Super Admin lo crea una persona desde la pantalla de configuración
+// inicial, eligiendo su propio correo y su propia contraseña
+// (`services/platformBootstrapService.createFirstSuperAdmin`).
 
-// Paquete 3 — Categorías de gasto predeterminadas (genéricas, hasta que el socio
-// envíe el listado final). Se siembran SOLO cuando la base no tiene categorías
-// (modo limpio / reset), sin duplicar; el admin podrá agregar más en el futuro.
+// Categorías de gasto predeterminadas. Son DATO DE EMPRESA (llevan `tenantId`), así
+// que se crean AL CREAR LA EMPRESA. `ensureExpenseCategories()` queda como red de
+// seguridad para empresas creadas antes de esa regla.
 const DEFAULT_EXPENSE_CATEGORY_NAMES = [
   'Transporte', 'Alimentación', 'Papelería', 'Combustible',
   'Comunicación', 'Mantenimiento', 'Otros',
 ]
 
-function buildDefaultExpenseCategories(tenantId: string): ExpenseCategory[] {
+export function buildDefaultExpenseCategories(tenantId: string): ExpenseCategory[] {
   return DEFAULT_EXPENSE_CATEGORY_NAMES.map(nombre => ({
     id: uuidv4(), tenantId, nombre, activa: true,
   }))
@@ -630,65 +631,37 @@ export async function ensureExpenseCategories(): Promise<void> {
   }
 }
 
-export async function seedCleanDatabase() {
-  const existing = await db.users.count()
-  if (existing > 0) return
-
-  const now = new Date()
-
-  const tenant: Tenant = {
-    id: CLEAN_TENANT_ID,
-    nombre: 'Mi Empresa',
-    nombreLegal: '',
-    email: 'admin@demo.com',
-    telefono: '',
-    plan: 'profesional',
-    status: 'activa',
-    fechaVencimiento: d(new Date(now.getFullYear() + 1, 11, 31)),
-    pais: 'Colombia',
-    moneda: 'COP',
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
-  }
-
-  // Super Admin inicial del sistema (plataforma) — capaz de crear empresas y el
-  // primer Administrador. El nuevo modelo exige un Super Admin como acceso raíz.
-  const superadmin: User = {
-    id: CLEAN_SUPERADMIN_ID,
-    tenantId: 'platform',
-    email: 'superadmin@demo.com',
-    password: '123456',
-    nombre: 'Super Admin',
-    rol: 'superadmin',
-    status: 'activo',
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
-  }
-
-  // Administrador inicial de la empresa (para que quede operable de inmediato).
-  const admin: User = {
-    id: CLEAN_ADMIN_ID,
-    tenantId: CLEAN_TENANT_ID,
-    email: 'admin@demo.com',
-    password: '123456',
-    nombre: 'Administrador',
-    rol: 'admin',
-    status: 'activo',
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
-  }
-
-  const expenseCategories = buildDefaultExpenseCategories(CLEAN_TENANT_ID)
-
-  await db.transaction('rw', [db.tenants, db.users, db.expenseCategories], async () => {
-    await db.tenants.add(tenant)
-    await db.users.bulkAdd([superadmin, admin])
-    await db.expenseCategories.bulkAdd(expenseCategories)
-  })
-
-  console.log('[RutaCash] Base de datos limpia inicializada (Super Admin + empresa + Administrador)')
+/**
+ * ARRANQUE DE UNA INSTALACIÓN LIMPIA — NO SIEMBRA NADA.
+ *
+ * DECISIÓN DE PRODUCTO: una instalación CLEAN nace COMPLETAMENTE VACÍA. Cero
+ * usuarios, cero empresas, cero credenciales conocidas. `db.users.count() === 0`
+ * es un estado inicial VÁLIDO y esperado.
+ *
+ * Por eso CLEAN ya no tiene "semilla": no hay ningún dato de sistema que sembrar
+ * antes de que exista un dueño. La primera acción real de la aplicación es que una
+ * persona cree su propio Super Admin desde la pantalla de configuración inicial
+ * (`platformBootstrapService.createFirstSuperAdmin`), eligiendo su propia contraseña.
+ *
+ * Responsabilidades que SÍ quedan, y dónde viven ahora:
+ *   · migraciones de esquema        → `src/lib/db.ts` (versiones Dexie)
+ *   · categorías de gasto por empresa → se crean AL CREAR LA EMPRESA (son dato de
+ *     empresa, llevan `tenantId`), más `ensureExpenseCategories()` como red de
+ *     seguridad para empresas creadas antes de esta regla.
+ *   · usuarios / empresas / rutas    → creación explícita por parte de una persona.
+ *
+ * Se conserva el nombre y la firma para no alterar el punto de arranque de la app.
+ */
+export async function seedCleanDatabase(): Promise<void> {
+  // Intencionadamente vacío. Ver el comentario anterior.
 }
 
+/**
+ * Reset de una empresa concreta (borra sus datos operativos y conserva la empresa).
+ * Sin llamadores actualmente; se conserva por si se expone desde Configuración.
+ * OJO: `installments` no tiene `tenantId`, por eso limpia la tabla completa — es
+ * seguro solo en instalaciones de una sola empresa.
+ */
 export async function resetCleanDatabase(tenantId: string) {
   const now = new Date().toISOString()
 

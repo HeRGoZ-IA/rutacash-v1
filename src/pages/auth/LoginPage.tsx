@@ -16,12 +16,9 @@ const ALL_DEMO_USERS = [
   { email: 'secretario@demo.com', password: '123456', label: 'Secretario', role: 'Autorizaciones' },
 ]
 
-const CLEAN_USERS = [
-  { email: 'superadmin@demo.com', password: '123456', label: 'Super Admin', role: 'Plataforma' },
-  { email: 'admin@demo.com', password: '123456', label: 'Administrador', role: 'Empresa' },
-]
-
-const DEMO_USERS = IS_DEMO ? ALL_DEMO_USERS : CLEAN_USERS
+// En CLEAN no hay NINGUNA cuenta precreada: no existen credenciales que sugerir.
+// Los accesos rápidos son exclusivos de DEMO.
+const DEMO_USERS = IS_DEMO ? ALL_DEMO_USERS : []
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -187,12 +184,13 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Quick login */}
+          {/* Accesos rápidos: SOLO DEMO. En CLEAN no existe ninguna cuenta precreada. */}
+          {DEMO_USERS.length > 0 && (
           <div className="mt-6">
             <p className="text-xs text-gray-400 text-center mb-3">
-              {IS_DEMO ? '— Usuarios demo (clic para llenar) —' : '— Acceso inicial (clic para llenar) —'}
+              — Usuarios demo (clic para llenar) —
             </p>
-            <div className={`grid gap-2 ${IS_DEMO ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            <div className="grid gap-2 grid-cols-2">
               {DEMO_USERS.map((u) => (
                 <button
                   key={u.email}
@@ -206,6 +204,7 @@ export default function LoginPage() {
               ))}
             </div>
           </div>
+          )}
         </div>
       </div>
     </div>
