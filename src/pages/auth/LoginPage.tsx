@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Eye, EyeOff, Loader2, TrendingUp, Shield, Smartphone } from 'lucide-react'
+import { Eye, EyeOff, Loader2, TrendingUp, Shield, Smartphone, Trash2 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 import { IS_DEMO, IS_CLEAN } from '@/lib/appMode'
 import { homePathForRole } from '@/lib/permissions'
 import { getLastLoginEmail } from '@/lib/lastLoginEmail'
+import { FullResetDialog } from '@/components/ui/FullResetDialog'
 import type { UserRole } from '@/models/types'
 
 const ALL_DEMO_USERS = [
@@ -31,6 +32,7 @@ export default function LoginPage() {
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [resetOpen, setResetOpen] = useState(false)
 
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -208,8 +210,34 @@ export default function LoginPage() {
             </div>
           </div>
           )}
+
+          {/* SALIDA DE EMERGENCIA — SOLO CLEAN.
+              Si existe un Super Admin pero nadie recuerda sus credenciales, esta es la
+              única vía para volver a empezar sin recurrir a DevTools: sin sesión no hay
+              acceso a Configuración ni al flujo de recuperación. Acción secundaria, muy
+              separada de «Ingresar», y con la confirmación fuerte que ya vive en
+              FullResetDialog (frase BORRAR TODO incluida). */}
+          {IS_CLEAN && (
+            <div className="mt-8 pt-5 border-t border-gray-100 text-center">
+              <p className="text-xs text-gray-400">¿Quieres empezar nuevamente?</p>
+              <button
+                type="button"
+                onClick={() => setResetOpen(true)}
+                className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-red-600 hover:text-red-700 hover:underline"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Restablecer RutaCash desde cero
+              </button>
+              <p className="text-[11px] text-gray-400 mt-1.5">
+                Elimina todos los datos de RutaCash de este dispositivo.
+              </p>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Mismo diálogo destructivo que Configuración y Recuperar instalación. */}
+      <FullResetDialog open={resetOpen} onClose={() => setResetOpen(false)} />
     </div>
   )
 }

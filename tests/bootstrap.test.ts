@@ -381,6 +381,106 @@ await spec('RESET-CLEAN-007', 'Reset total', 'DEMO conserva su flujo propio y no
   assert(iZona > iCleanBlock, 'la Zona de peligro debe ser exclusiva de CLEAN')
 })
 
+await spec('RESET-LOGIN-001', 'Reset total', 'el login CLEAN ofrece acceso al restablecimiento total', () => {
+  const login = readSource('src/pages/auth/LoginPage.tsx')
+  metric('texto de arranque', '¿Quieres empezar nuevamente?')
+  metric('acción', 'Restablecer RutaCash desde cero')
+  metric('advertencia', 'Elimina todos los datos de RutaCash de este dispositivo.')
+  assert(login.includes('¿Quieres empezar nuevamente?'), 'falta la salida de emergencia en el login')
+  assert(login.includes('Restablecer RutaCash desde cero'), 'falta la acción de restablecimiento en el login')
+  assert(login.includes('Elimina todos los datos de RutaCash de este dispositivo.'), 'falta la advertencia de borrado')
+  // Acción SECUNDARIA: no compite con «Ingresar» (separador, texto pequeño, sin botón primario).
+  const iIngresar = login.indexOf("'Ingresar'")
+  const iReset = login.indexOf('Restablecer RutaCash desde cero')
+  metric('aparece después de «Ingresar»', iReset > iIngresar)
+  metric('separada visualmente', login.includes('border-t border-gray-100'))
+  assert(iReset > iIngresar, 'la acción debe ir después del botón principal')
+  assert(login.includes('border-t border-gray-100'), 'debe estar separada del formulario')
+})
+
+await spec('RESET-LOGIN-002', 'Reset total', 'el login DEMO NO ofrece el restablecimiento total', () => {
+  const login = readSource('src/pages/auth/LoginPage.tsx')
+  // El bloque debe estar condicionado explícitamente a IS_CLEAN.
+  const iCond = login.indexOf('{IS_CLEAN && (')
+  const iReset = login.indexOf('¿Quieres empezar nuevamente?')
+  metric('condicionado a IS_CLEAN', iCond > -1 && iReset > iCond)
+  assert(iCond > -1, 'falta la condición IS_CLEAN')
+  assert(iReset > iCond, 'la acción debe estar dentro del bloque IS_CLEAN')
+  // Y el bloque se cierra antes de que empiece cualquier otra cosa.
+  const cierre = login.indexOf(')}', iReset)
+  metric('bloque CLEAN cerrado', cierre > iReset)
+  assert(cierre > iReset, 'el bloque IS_CLEAN no está bien delimitado')
+  // DEMO conserva su propio flujo intacto.
+  metric('DEMO conserva accesos rápidos', containsLine(login, 'const DEMO_USERS = IS_DEMO ? ALL_DEMO_USERS : []'))
+  assert(containsLine(login, 'const DEMO_USERS = IS_DEMO ? ALL_DEMO_USERS : []'), 'cambió el flujo DEMO del login')
+})
+
+await spec('RESET-LOGIN-003', 'Reset total', 'el login reutiliza FullResetDialog', () => {
+  const login = readSource('src/pages/auth/LoginPage.tsx')
+  metric('monta el diálogo compartido', containsLine(login, '<FullResetDialog open={resetOpen} onClose={() => setResetOpen(false)} />'))
+  metric('importa desde', "@/components/ui/FullResetDialog")
+  assert(containsLine(login, '<FullResetDialog open={resetOpen} onClose={() => setResetOpen(false)} />'), 'el login no usa el diálogo compartido')
+  assert(login.includes("from '@/components/ui/FullResetDialog'"), 'falta el import del diálogo compartido')
+  // Y el diálogo conserva todas sus garantías.
+  const dlg = readSource('src/components/ui/FullResetDialog.tsx')
+  for (const [q, cond] of [
+    ['confirmación escrita BORRAR TODO', dlg.includes("RESET_CONFIRM_PHRASE = 'BORRAR TODO'")],
+    ['botón disabled hasta coincidir', containsLine(dlg, 'disabled={!habilitado}')],
+    ['usa resetLocalAppData', containsLine(dlg, 'await resetLocalAppData()')],
+    ['protección de doble clic', containsLine(dlg, 'setBorrando(true)')],
+    ['estado «Eliminando datos...»', dlg.includes("'Eliminando datos...'")],
+    ['recarga en /login', containsLine(dlg, "location.replace('/login')")],
+  ] as Array<[string, boolean]>) {
+    metric(q, cond)
+    assert(cond, `el diálogo perdió una garantía: ${q}`)
+  }
+})
+
+await spec('RESET-LOGIN-004', 'Reset total', 'el login no implementa un segundo mecanismo de borrado', () => {
+  const login = readSource('src/pages/auth/LoginPage.tsx')
+  for (const prohibido of ['resetLocalAppData', 'db.delete()', 'indexedDB.deleteDatabase', 'localStorage.clear', 'location.replace']) {
+    metric(`borrado propio (${prohibido})`, login.includes(prohibido) ? 'PRESENTE — ERROR' : 'ausente')
+    assert(!login.includes(prohibido), `LoginPage implementa lógica de borrado propia (${prohibido})`)
+  }
+  // Las CUATRO entradas comparten exactamente el mismo componente.
+  const entradas = [
+    'src/pages/auth/LoginPage.tsx',
+    'src/pages/auth/SetupPage.tsx',
+    'src/pages/admin/SettingsPage.tsx',
+    'src/components/ui/AppModeBanner.tsx',
+  ]
+  for (const f of entradas) {
+    const src = readSource(f)
+    metric(f, src.includes('<FullResetDialog') ? 'usa el diálogo compartido' : 'NO lo usa')
+    assert(src.includes('<FullResetDialog'), `${f} no usa el diálogo compartido`)
+  }
+})
+
+await spec('RESET-LOGIN-005', 'Reset total', 'desde estado ready, el reset devuelve la instalación a empty', async () => {
+  // Escenario exacto del hueco: hay Super Admin (ready) pero nadie recuerda la clave.
+  const db = new MemoryDb()
+  await seedCleanDatabase()
+  await createFirstSuperAdmin(OWNER, asPlatformDb(db))
+  await db.tenants.add({ id: 't-1', nombre: 'Caribe', email: 'c@c.com', pais: 'Colombia', moneda: 'COP', plan: 'profesional', status: 'activa', createdAt: '', updatedAt: '' })
+  const antes = await getInstallationState(asPlatformDb(db))
+  metric('estado antes', antes.status)
+  metric('usuarios antes', antes.userCount)
+  metric('empresas antes', antes.companyCount)
+  assert(antes.status === 'ready', 'precondición: instalación con Super Admin')
+
+  // Efecto de resetLocalAppData(): db.delete() + recarga → arranque CLEAN sin siembra.
+  await db.clearAll()
+  await seedCleanDatabase()
+  const despues = await getInstallationState(asPlatformDb(db))
+  const c = await reportarConteos(db, 'tras el reset desde el login')
+  metric('estado después', despues.status)
+  assert(despues.status === 'empty', `estado ${despues.status}: debía volver a 'empty'`)
+  assert(despues.initialized === false, 'AuthEntry debe volver a mostrar «Configurar RutaCash»')
+  for (const [tabla, n] of Object.entries(c)) {
+    assert(n === 0, `${tabla} = ${n}: el reset debe dejarlo todo en 0`)
+  }
+})
+
 // ############################################################
 // GRUPO — INSTALACIÓN VACÍA
 // ############################################################
