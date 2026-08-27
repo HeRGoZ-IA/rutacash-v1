@@ -18,7 +18,7 @@
 import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
 import { nowISO } from '@/lib/formatters'
-import { normalizeEmail } from '@/services/authService'
+import { normalizeEmail, validateEmail } from '@/lib/email'
 import type { Tenant, User } from '@/models/types'
 
 /**
@@ -156,7 +156,6 @@ class BootstrapRejection extends Error {
   constructor(public code: BootstrapRejectionCode) { super(MESSAGES[code]); this.name = 'BootstrapRejection' }
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 /** Longitud mínima de la contraseña que el propio dueño elige. */
 export const MIN_BOOTSTRAP_PASSWORD_LENGTH = 8
 
@@ -179,11 +178,13 @@ export async function createFirstSuperAdmin(
   database: PlatformDatabase = db,
 ): Promise<BootstrapResult> {
   const nombre = input.nombre?.trim() ?? ''
-  const email = normalizeEmail(input.email ?? '')
   const password = input.password ?? ''
 
   if (nombre.length < 2) return fail('INVALID_NAME')
-  if (!EMAIL_RE.test(email)) return fail('INVALID_EMAIL')
+  // Validación SINTÁCTICA centralizada (`lib/email`): misma regla que el resto de la app.
+  const emailCheck = validateEmail(input.email)
+  if (!emailCheck.ok) return { ok: false, code: 'INVALID_EMAIL', message: emailCheck.message }
+  const email = emailCheck.email
   if (password.length < MIN_BOOTSTRAP_PASSWORD_LENGTH) return fail('WEAK_PASSWORD')
   if (password !== input.confirmPassword) return fail('PASSWORD_MISMATCH')
 

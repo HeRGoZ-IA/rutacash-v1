@@ -5,6 +5,7 @@ import { nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { isCompanyBlocked } from '@/lib/company'
 import { authenticateUser } from '@/services/authService'
+import { rememberLoginEmail } from '@/lib/lastLoginEmail'
 import type { User, Tenant, Route } from '@/models/types'
 
 interface AuthState {
@@ -50,6 +51,8 @@ export const useAuth = create<AuthState>()(
           set({ isLoading: false })
           return { success: false, error: result.error }
         }
+        // Solo el correo, y solo tras un acceso correcto. Cerrar sesión no lo borra.
+        rememberLoginEmail(result.user.email)
         set({
           user: result.user,
           tenant: result.tenant,

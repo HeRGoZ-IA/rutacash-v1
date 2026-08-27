@@ -12,6 +12,7 @@ import { generateId } from '@/lib/utils'
 import { formatDate, nowISO, today } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { buildDefaultExpenseCategories } from '@/data/seed'
+import { validateEmail } from '@/lib/email'
 import { getEffectiveCompanyStatus, type EffectiveCompanyStatus } from '@/lib/company'
 import type { Tenant, TenantPlan, TenantStatus } from '@/models/types'
 import { useAuth } from '@/hooks/useAuth'
@@ -83,6 +84,9 @@ export default function PlatformPage() {
 
   async function handleSave() {
     if (!form.nombre || !form.email) { toast.error('Nombre y email requeridos'); return }
+    // Misma regla de correo que en el resto de RutaCash (`lib/email`).
+    const emailEmpresa = validateEmail(form.email)
+    if (!emailEmpresa.ok) { toast.error(emailEmpresa.message); return }
     // #7 Vigencia: si es "con fecha", es obligatoria y no puede ser anterior a hoy.
     if (form.vigencia === 'con') {
       if (!form.fechaVencimiento) { toast.error('Indica la fecha de vencimiento'); return }
@@ -93,16 +97,16 @@ export default function PlatformPage() {
     try {
       if (editing) {
         const before = { nombre: editing.nombre, email: editing.email, pais: editing.pais, fechaVencimiento: editing.fechaVencimiento ?? null }
-        await db.tenants.update(editing.id, { nombre: form.nombre.trim(), email: form.email.trim(), pais: form.pais.trim(), moneda: form.moneda, fechaVencimiento, updatedAt: nowISO() })
+        await db.tenants.update(editing.id, { nombre: form.nombre.trim(), email: emailEmpresa.email, pais: form.pais.trim(), moneda: form.moneda, fechaVencimiento, updatedAt: nowISO() })
         if (user) await logAction({
           tenantId: editing.id, userId: user.id, userRole: user.rol,
           action: 'UPDATE_TENANT', entityType: 'Tenant', entityId: editing.id, descripcion: `Empresa editada: ${form.nombre.trim()}`,
-          before, after: { nombre: form.nombre.trim(), email: form.email.trim(), pais: form.pais.trim(), fechaVencimiento: fechaVencimiento ?? null },
+          before, after: { nombre: form.nombre.trim(), email: emailEmpresa.email, pais: form.pais.trim(), fechaVencimiento: fechaVencimiento ?? null },
         })
         toast.success('Empresa actualizada')
       } else {
         const t: Tenant = {
-          id: generateId(), nombre: form.nombre.trim(), email: form.email.trim(), pais: form.pais.trim(),
+          id: generateId(), nombre: form.nombre.trim(), email: emailEmpresa.email, pais: form.pais.trim(),
           moneda: form.moneda, plan: DEFAULT_PLAN, status: 'prueba', fechaVencimiento,
           createdAt: nowISO(), updatedAt: nowISO(),
         }

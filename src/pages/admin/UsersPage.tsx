@@ -12,6 +12,7 @@ import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { generateId, generateTemporaryPassword } from '@/lib/utils'
+import { validateEmail, sameEmail } from '@/lib/email'
 import { nowISO, initials } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { getAssignedRouteIds } from '@/lib/roles'
@@ -110,6 +111,10 @@ export default function UsersPage() {
   async function handleSave() {
     if (!currentUser) return
     if (!form.nombre || !form.email) { toast.error('Nombre y email son requeridos'); return }
+    // Validación de correo centralizada (`lib/email`): misma regla en toda la app.
+    const emailCheck = validateEmail(form.email)
+    if (!emailCheck.ok) { toast.error(emailCheck.message); return }
+    const email = emailCheck.email   // forma canónica: se guarda y compara siempre así
     // #5 Guard de datos: no editar usuarios de rango superior aunque se manipule el estado.
     if (editing && !canManageUser(currentUser, editing)) {
       toast.error('No tienes permiso para editar este usuario.')
@@ -141,16 +146,21 @@ export default function UsersPage() {
       const legacyDirect = { canCreateDirectSales: form.rol === 'cobrador' ? false : undefined, maxDirectSaleAmount: undefined }
       const noGrants = { grantedCapabilities: undefined, revokedCapabilities: undefined }
 
+      // DUPLICADOS: comparación normalizada, tanto al crear como al editar. Antes se
+      // comparaba la cadena cruda (sensible a mayúsculas) y la edición no comprobaba
+      // nada, de modo que `Admin@Empresa.com` y `admin@empresa.com` convivían.
+      const todos = await db.users.toArray()
+      const duplicado = todos.find(u => u.id !== userId && sameEmail(u.email, email))
+      if (duplicado) { toast.error('Ya existe un usuario con ese correo'); setSaving(false); return }
+
       if (editing) {
         await db.users.update(editing.id, {
-          nombre: form.nombre, email: form.email, password: form.password, rol: form.rol,
+          nombre: form.nombre, email, password: form.password, rol: form.rol,
           ...noGrants, ...legacyDirect, updatedAt: nowISO(),
         })
       } else {
-        const existing = await db.users.where('email').equals(form.email).first()
-        if (existing) { toast.error('Ya existe un usuario con ese email'); setSaving(false); return }
         const u: User = {
-          id: userId, tenantId, nombre: form.nombre, email: form.email, password: form.password, rol: form.rol,
+          id: userId, tenantId, nombre: form.nombre, email, password: form.password, rol: form.rol,
           // La contraseña la eligió un superior: es TEMPORAL. El usuario debe definir
           // la suya en su primer acceso (PasswordChangeGate).
           mustChangePassword: true,

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Settings, RefreshCw, Download, AlertTriangle, Building2, RotateCcw } from 'lucide-react'
+import { Settings, RefreshCw, Download, AlertTriangle, Building2, Trash2 } from 'lucide-react'
 import { IS_CLEAN } from '@/lib/appMode'
 import { Button } from '@/components/ui/Button'
 import { Input, Select } from '@/components/ui/Input'
@@ -10,6 +10,7 @@ import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { resetLocalAppData } from '@/lib/resetApp'
+import { FullResetDialog } from '@/components/ui/FullResetDialog'
 import { exportJSON } from '@/lib/utils'
 import { nowISO, today } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
@@ -50,7 +51,6 @@ export default function SettingsPage() {
   const [resetting, setResetting] = useState(false)
   const [savingTenant, setSavingTenant] = useState(false)
   const [cleanResetOpen, setCleanResetOpen] = useState(false)
-  const [cleanResetting, setCleanResetting] = useState(false)
 
   // Solo el Super Admin puede editar parámetros CORPORATIVOS (estado, vigencia).
   const canEditCompany = can(user, 'company.edit', { tenantId })
@@ -128,21 +128,6 @@ export default function SettingsPage() {
       })
       toast.success('Datos de la empresa guardados')
     } catch { toast.error('Error al guardar') } finally { setSavingTenant(false) }
-  }
-
-  // CLEAN: restablece la app por completo (borra TODOS los datos locales) y
-  // recarga en /login; la semilla limpia se vuelve a inicializar desde cero.
-  async function handleCleanReset() {
-    setCleanResetting(true)
-    try {
-      await resetLocalAppData()
-      toast.success('App restablecida. Iniciando limpia…')
-      // Redirección dura: recarga el documento y reinicializa la semilla CLEAN.
-      setTimeout(() => location.replace('/login'), 800)
-    } catch {
-      toast.error('Error al restablecer la app')
-      setCleanResetting(false)
-    }
   }
 
   // DEMO/CLEAN: borra todos los datos locales y recarga. En DEMO la recarga
@@ -246,33 +231,32 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Restablecer app limpia — solo en modo LIMPIO (zona de control local) */}
+      {/* ZONA DE PELIGRO — solo en modo LIMPIO. Devuelve la instalación a «Usuario 0». */}
       {IS_CLEAN && (
-        <div className="bg-white rounded-2xl shadow-card border border-red-100 p-5">
-          <h2 className="font-semibold text-gray-800 flex items-center gap-2 mb-1">
-            <RotateCcw className="w-4 h-4 text-red-600" />
-            Restablecer app limpia
+        <div className="bg-white rounded-2xl shadow-card border border-red-200 p-5">
+          <h2 className="font-semibold text-red-700 flex items-center gap-2 mb-1">
+            <AlertTriangle className="w-4 h-4 text-red-600" />
+            Zona de peligro
           </h2>
           <p className="text-xs text-gray-500 mb-4">
-            Borra <span className="font-medium">todos los datos locales de RutaCash en este navegador</span>
-            {' '}(rutas, clientes, ventas, abonos, gastos y sesión) y deja la app lista para comenzar
-            desde cero. Solo afecta a este navegador; no toca otros equipos.
+            Acciones irreversibles sobre los datos de este dispositivo.
           </p>
-          <div className="flex items-center justify-between p-3 bg-red-50 rounded-xl border border-red-100">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-red-800">Dejar la app en cero</p>
+          <div className="flex items-center justify-between p-3.5 bg-red-50 rounded-xl border border-red-100">
+            <div className="min-w-0 pr-4">
+              <p className="text-sm font-medium text-red-800">Restablecer RutaCash desde cero</p>
               <p className="text-xs text-red-600 mt-0.5">
-                Tras restablecer, queda solo el administrador inicial y las categorías base.
+                Elimina todos los datos de RutaCash almacenados en este dispositivo y vuelve a la
+                configuración inicial.
               </p>
             </div>
             <Button
               variant="danger"
               size="sm"
               onClick={() => setCleanResetOpen(true)}
-              icon={<RotateCcw className="w-3.5 h-3.5" />}
-              className="ml-4 flex-shrink-0"
+              icon={<Trash2 className="w-3.5 h-3.5" />}
+              className="flex-shrink-0"
             >
-              Restablecer app limpia
+              Restablecer
             </Button>
           </div>
         </div>
@@ -376,44 +360,9 @@ export default function SettingsPage() {
         </div>
       </Modal>
 
-      {/* Modal: Restablecer app limpia */}
-      <Modal
-        open={cleanResetOpen}
-        onClose={() => !cleanResetting && setCleanResetOpen(false)}
-        title="Restablecer app limpia"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setCleanResetOpen(false)} disabled={cleanResetting}>
-              Cancelar
-            </Button>
-            <Button
-              variant="danger"
-              onClick={handleCleanReset}
-              loading={cleanResetting}
-              disabled={cleanResetting}
-              icon={<RotateCcw className="w-4 h-4" />}
-            >
-              Sí, restablecer
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-3">
-          <div className="flex items-start gap-3 p-3 bg-red-50 rounded-xl">
-            <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
-            <p className="text-sm text-red-700">
-              Esto eliminará todos los datos locales de RutaCash en este navegador (rutas, clientes,
-              ventas, parcelas, abonos, gastos y la sesión actual) y dejará la app limpia desde cero.
-              <span className="font-semibold"> Esta acción no se puede deshacer.</span>
-            </p>
-          </div>
-          <p className="text-xs text-gray-500">
-            Solo afecta a este navegador. La instalación quedará <span className="font-medium">completamente
-            vacía</span>: sin usuarios, sin empresas y sin datos. Al recargar deberás volver a crear
-            el Super Admin desde la pantalla de configuración inicial.
-          </p>
-        </div>
-      </Modal>
+      {/* Restablecimiento total: mecanismo ÚNICO compartido con la pantalla de recuperación. */}
+      <FullResetDialog open={cleanResetOpen} onClose={() => setCleanResetOpen(false)} />
+
     </div>
   )
 }

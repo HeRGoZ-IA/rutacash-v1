@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 import { IS_DEMO, IS_CLEAN } from '@/lib/appMode'
 import { homePathForRole } from '@/lib/permissions'
+import { getLastLoginEmail } from '@/lib/lastLoginEmail'
 import type { UserRole } from '@/models/types'
 
 const ALL_DEMO_USERS = [
@@ -23,7 +24,9 @@ const DEMO_USERS = IS_DEMO ? ALL_DEMO_USERS : []
 export default function LoginPage() {
   const navigate = useNavigate()
   const { login, isAuthenticated, user } = useAuth()
-  const [email, setEmail] = useState('')
+  // Se prerrellena con el último correo que entró correctamente en este navegador.
+  // Solo el correo: la contraseña nunca se guarda.
+  const [email, setEmail] = useState(getLastLoginEmail)
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)

@@ -15,6 +15,7 @@
 // ============================================================
 import { db } from '@/lib/db'
 import { isCompanyBlocked, companyBlockMessage } from '@/lib/company'
+import { normalizeEmail } from '@/lib/email'
 import type { Route, Tenant, User } from '@/models/types'
 
 /** Superficie mínima de lectura que necesita la autenticación. */
@@ -49,8 +50,9 @@ export interface AuthFailure {
 
 export type AuthResult = AuthSuccess | AuthFailure
 
-/** Normaliza el email igual que lo hacía `useAuth.login`. */
-export const normalizeEmail = (email: string) => email.toLowerCase().trim()
+// La normalización vive en `lib/email` (fuente única). Se reexporta para no romper
+// a quien ya la importaba desde aquí.
+export { normalizeEmail } from '@/lib/email'
 
 /**
  * Verifica credenciales y devuelve el contexto de sesión. No muta nada.

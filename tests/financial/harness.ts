@@ -113,6 +113,34 @@ export class MemoryDb {
   tenants = new FakeTable<any>(this, 'tenants')
   users = new FakeTable<any>(this, 'users')
   expenseCategories = new FakeTable<any>(this, 'expenseCategories')
+  expenses = new FakeTable<any>(this, 'expenses')
+  noPaymentVisits = new FakeTable<any>(this, 'noPaymentVisits')
+
+  /** Nombres de todas las tablas, para conteos exhaustivos en las pruebas. */
+  static readonly TABLES = [
+    'users', 'tenants', 'routes', 'clients', 'sales', 'installments',
+    'payments', 'expenses', 'expenseCategories', 'noPaymentVisits',
+  ] as const
+
+  /**
+   * Equivalente a `db.delete()` seguido de reabrir la base: deja TODAS las tablas
+   * vacías, como queda IndexedDB tras `resetLocalAppData()` y la recarga.
+   */
+  async clearAll(): Promise<void> {
+    for (const t of MemoryDb.TABLES) {
+      (this as unknown as Record<string, FakeTable<any>>)[t]._restore([])
+    }
+    this.resetLog()
+  }
+
+  /** Conteo de filas por tabla. */
+  async counts(): Promise<Record<string, number>> {
+    const out: Record<string, number> = {}
+    for (const t of MemoryDb.TABLES) {
+      out[t] = (await (this as unknown as Record<string, FakeTable<any>>)[t].toArray()).length
+    }
+    return out
+  }
 
   /** Bitácora ordenada de operaciones — evidencia del orden real de escrituras. */
   log: string[] = []

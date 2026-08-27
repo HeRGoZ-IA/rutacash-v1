@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, ShieldCheck, LifeBuoy, Eye, EyeOff } from 'lucide-react'
+import { Loader2, ShieldCheck, LifeBuoy, Eye, EyeOff, Trash2 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
-import { toast } from '@/components/ui/Toast'
+import { toast, useToastStore } from '@/components/ui/Toast'
+import { rememberLoginEmail } from '@/lib/lastLoginEmail'
 import {
   createFirstSuperAdmin, MIN_BOOTSTRAP_PASSWORD_LENGTH,
   type InstallationState,
 } from '@/services/platformBootstrapService'
 import { homePathForRole } from '@/lib/permissions'
+import { FullResetDialog } from '@/components/ui/FullResetDialog'
 
 /**
  * CONFIGURACIÓN INICIAL DE LA PLATAFORMA.
@@ -29,6 +31,7 @@ export function SetupPage({ state, onDone }: { state: InstallationState; onDone:
   const [showPass, setShowPass] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [resetOpen, setResetOpen] = useState(false)
 
   const esRecuperacion = state.status === 'orphaned'
 
@@ -44,19 +47,31 @@ export function SetupPage({ state, onDone }: { state: InstallationState; onDone:
       return
     }
 
+    // El correo queda recordado aunque el acceso automático fallara: es justo el dato
+    // que la persona necesita si vuelve al login y no lo tiene a mano.
+    const correo = result.user.email
+    rememberLoginEmail(correo)
+
     // Se inicia sesión por la MISMA vía que cualquier otro acceso (`useAuth.login`
     // → `authenticateUser`): no se crea una sesión por un camino paralelo. Y como
     // la contraseña se confirmó en el formulario, no hay riesgo de quedar fuera por
     // una errata.
-    const sesion = await login(form.email, form.password)
+    const sesion = await login(correo, form.password)
     setSaving(false)
     onDone()
 
+    // CONFIRMACIÓN EXPLÍCITA: deja constancia de CUÁL es el correo creado, con una
+    // duración amplia para poder anotarlo. Sin wizard adicional.
+    useToastStore.getState().add({
+      type: 'success',
+      message: `Cuenta principal creada · Super Admin: ${correo}`,
+      duration: 15000,
+    })
+
     if (sesion.success) {
-      toast.success(esRecuperacion ? 'Instalación recuperada' : 'RutaCash configurado')
       navigate(homePathForRole('superadmin'))
     } else {
-      toast.success('Cuenta creada. Inicia sesión para continuar.')
+      toast.info('Inicia sesión con el correo que acabas de crear.')
       navigate('/login')
     }
   }
@@ -153,9 +168,33 @@ export function SetupPage({ state, onDone }: { state: InstallationState; onDone:
           </form>
         </div>
 
+        {/* SEGUNDO CAMINO — solo cuando hay datos heredados. Evita tener que recurrir
+            a DevTools para obtener una instalación realmente virgen. */}
+        {esRecuperacion && (
+          <div className="mt-5 rounded-2xl border border-gray-200 bg-white/95 p-4">
+            <p className="text-sm font-medium text-gray-800">¿Prefieres empezar de cero?</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Elimina todos los datos de RutaCash de este dispositivo y vuelve a la
+              configuración inicial. Los datos existentes se perderán.
+            </p>
+            <button
+              type="button"
+              onClick={() => setResetOpen(true)}
+              disabled={saving}
+              className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-red-600 hover:text-red-700 disabled:opacity-50"
+            >
+              <Trash2 className="w-4 h-4" />
+              Empezar desde cero
+            </button>
+          </div>
+        )}
+
         <p className="text-center text-xs text-gray-400 mt-5">
           RutaCash no crea cuentas automáticamente. Esta es la única forma de generar el acceso principal.
         </p>
+
+        {/* Mismo diálogo destructivo que Configuración: un solo mecanismo de borrado. */}
+        <FullResetDialog open={resetOpen} onClose={() => setResetOpen(false)} />
       </div>
     </div>
   )

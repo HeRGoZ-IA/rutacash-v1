@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { IS_DEMO, IS_CLEAN } from '@/lib/appMode'
 import { resetLocalAppData } from '@/lib/resetApp'
+import { FullResetDialog } from '@/components/ui/FullResetDialog'
 
 async function wipeAndRestart() {
   await resetLocalAppData()
@@ -8,13 +10,12 @@ async function wipeAndRestart() {
 }
 
 export function AppModeBanner() {
+  // CLEAN comparte el diálogo destructivo con Configuración y con la pantalla de
+  // recuperación: un solo mecanismo y una sola confirmación en toda la app.
+  const [resetOpen, setResetOpen] = useState(false)
+
   function handleResetDemo() {
     if (!window.confirm('Esto borrará todos los datos locales y restaurará los datos demo. ¿Continuar?')) return
-    void wipeAndRestart()
-  }
-
-  function handleResetClean() {
-    if (!window.confirm('Esto eliminará todos los datos locales de RutaCash en este navegador y dejará la app limpia desde cero. Esta acción no se puede deshacer. ¿Continuar?')) return
     void wipeAndRestart()
   }
 
@@ -34,15 +35,18 @@ export function AppModeBanner() {
 
   if (IS_CLEAN) {
     return (
-      <div className="bg-primary-900 text-primary-300 text-xs text-center py-1.5 font-medium tracking-wide flex items-center justify-center gap-3">
-        <span>MODO LIMPIO — Datos nuevos</span>
-        <button
-          onClick={handleResetClean}
-          className="underline hover:no-underline opacity-70 hover:opacity-100 transition-opacity"
-        >
-          Restablecer app limpia
-        </button>
-      </div>
+      <>
+        <div className="bg-primary-900 text-primary-300 text-xs text-center py-1.5 font-medium tracking-wide flex items-center justify-center gap-3">
+          <span>MODO LIMPIO — Datos nuevos</span>
+          <button
+            onClick={() => setResetOpen(true)}
+            className="underline hover:no-underline opacity-70 hover:opacity-100 transition-opacity"
+          >
+            Restablecer desde cero
+          </button>
+        </div>
+        <FullResetDialog open={resetOpen} onClose={() => setResetOpen(false)} />
+      </>
     )
   }
 
