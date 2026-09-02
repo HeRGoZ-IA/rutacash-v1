@@ -19,7 +19,10 @@ import { validateEmail, normalizeEmail, sameEmail } from '../src/lib/email'
 import {
   getLastLoginEmail, rememberLoginEmail, forgetLastLoginEmail, LAST_LOGIN_EMAIL_KEY,
 } from '../src/lib/lastLoginEmail'
-import { hasOperationalRoutes, canManageRole } from '../src/lib/permissions'
+import {
+  hasOperationalRoutes, canManageRole, canAccessRoute, can,
+  filterAccessibleRoutes, filterByAccessibleRoute,
+} from '../src/lib/permissions'
 import { validateCobradorInvariant } from '../src/lib/cobradorRules'
 import { MemoryDb } from './financial/harness'
 import type { Tenant, User } from '../src/models/types'
@@ -731,6 +734,218 @@ await spec('CLEAN-ADMIN-005', 'Administrador', 'la primera ruta es creable (inva
   })
   metric('invariante', inv.ok ? 'satisfecho' : inv.message)
   assert(inv.ok, `no se puede crear la primera ruta: ${inv.ok ? '' : inv.message}`)
+})
+
+// ############################################################
+// GRUPO — PRIMERA RUTA / PRIMER COBRADOR (deadlock del onboarding)
+// ############################################################
+/** Empresa recién creada por el Super Admin, con un Admin y SIN ninguna ruta. */
+async function empresaSinRutas() {
+  const db = new MemoryDb()
+  await seedCleanDatabase()
+  const r = await createFirstSuperAdmin(OWNER, asPlatformDb(db))
+  const su = (r as { user: User }).user
+  await db.tenants.add({ id: 't-1', nombre: 'Caribe', email: 'c@c.com', pais: 'Colombia', moneda: 'COP', plan: 'profesional', status: 'activa', createdAt: '', updatedAt: '' })
+  const admin: User = {
+    id: 'u-admin-1', tenantId: 't-1', nombre: 'Ana', email: 'ana@c.com', password: 'tmp',
+    rol: 'admin', status: 'activo', mustChangePassword: true, createdAt: '', updatedAt: '',
+  }
+  await db.users.add(admin)
+  return { db, su, admin }
+}
+
+/** Alta de usuario tal y como la hace UsersPage tras la corrección. */
+const nuevoUsuario = (over: Partial<User>): User => ({
+  id: 'u-x', tenantId: 't-1', nombre: 'X', email: 'x@c.com', password: 'tmp',
+  rol: 'cobrador', status: 'activo', mustChangePassword: true, createdAt: '', updatedAt: '',
+  ...over,
+})
+
+await spec('ONB-ROUTE-001', 'Primera ruta', 'una empresa sin rutas permite crear un Cobrador', async () => {
+  const { db, su } = await empresaSinRutas()
+  metric('rutas en la empresa', (await db.routes.toArray()).length)
+
+  // La regla que bloqueaba vivía en UsersPage: ya no rechaza el alta sin rutas.
+  const users = readSource('src/pages/admin/UsersPage.tsx')
+  metric('bloqueo antiguo presente', users.includes('necesita al menos una ruta autorizada'))
+  assert(!users.includes('necesita al menos una ruta autorizada'), 'el alta sigue exigiendo una ruta')
+  assert(users.includes('Un usuario NO necesita ruta para existir'), 'falta la regla explícita de existencia sin ruta')
+
+  assert(canManageRole(su, 'cobrador'), 'el Super Admin debe poder crear Cobradores')
+  await db.users.add(nuevoUsuario({ id: 'u-cob-1', nombre: 'Luis', email: 'luis@c.com' }))
+  const cob = (await db.users.toArray() as User[]).find(u => u.id === 'u-cob-1')!
+  metric('cobrador creado', `${cob.rol}:${cob.email}`)
+  assert(!!cob && cob.rol === 'cobrador', 'el Cobrador debe poder existir sin rutas')
+})
+
+await spec('ONB-ROUTE-002', 'Primera ruta', 'el Cobrador recién creado queda sin ruta', async () => {
+  const { db } = await empresaSinRutas()
+  await db.users.add(nuevoUsuario({ id: 'u-cob-1', email: 'luis@c.com' }))
+  const cob = (await db.users.toArray() as User[]).find(u => u.id === 'u-cob-1')!
+  metric('routeId', String(cob.routeId))
+  metric('authorizedRouteIds', JSON.stringify(cob.authorizedRouteIds))
+  metric('rutas en la empresa', (await db.routes.toArray()).length)
+  assert(cob.routeId === undefined, 'no debe inventarse un routeId')
+  assert(cob.authorizedRouteIds === undefined || cob.authorizedRouteIds.length === 0, 'no debe inventarse una asignación')
+})
+
+await spec('ONB-ROUTE-003', 'Primera ruta', 'el Cobrador sin ruta NO tiene acceso operativo', async () => {
+  const { db } = await empresaSinRutas()
+  await db.users.add(nuevoUsuario({ id: 'u-cob-1', email: 'luis@c.com' }))
+  const cob = (await db.users.toArray() as User[]).find(u => u.id === 'u-cob-1')!
+
+  // Fail-closed con las funciones REALES de permisos.
+  const rutasVisibles = filterAccessibleRoutes(cob, [{ id: 'r-otra', nombre: 'Ajena' } as never])
+  const ventasVisibles = filterByAccessibleRoute(cob, [{ routeId: 'r-otra' } as never])
+  metric('hasOperationalRoutes', hasOperationalRoutes(cob))
+  metric('rutas visibles', rutasVisibles.length)
+  metric('ventas visibles', ventasVisibles.length)
+  metric('canAccessRoute(r-otra)', canAccessRoute(cob, 'r-otra'))
+  metric('can(payment.register)', can(cob, 'payment.register', { routeId: 'r-otra' }))
+  assert(!hasOperationalRoutes(cob), 'un Cobrador sin ruta NO debe tener acceso operativo')
+  assert(rutasVisibles.length === 0 && ventasVisibles.length === 0, 'no debe ver ninguna ruta ni venta')
+  assert(!canAccessRoute(cob, 'r-otra'), 'no debe acceder a rutas ajenas')
+  assert(!can(cob, 'payment.register', { routeId: 'r-otra' }), 'no debe poder registrar pagos')
+})
+
+await spec('ONB-ROUTE-004', 'Primera ruta', 'la primera Ruta puede seleccionar un Cobrador sin ruta', async () => {
+  const { db, su, admin } = await empresaSinRutas()
+  const cobrador = nuevoUsuario({ id: 'u-cob-1', nombre: 'Luis', email: 'luis@c.com' })
+  await db.users.add(cobrador)
+
+  // RoutesPage lista TODOS los cobradores del tenant, sin filtrar por rutas.
+  const routes = readSource('src/pages/admin/RoutesPage.tsx')
+  metric('selector de cobradores', "us.filter(u => u.rol === 'cobrador')")
+  assert(containsLine(routes, "setCobradores(us.filter(u => u.rol === 'cobrador'))"), 'el selector filtra cobradores por rutas')
+
+  const candidatos = (await db.users.toArray() as User[]).filter(u => u.rol === 'cobrador' && u.status === 'activo')
+  metric('cobradores seleccionables', candidatos.map(c => c.nombre).join(', '))
+  assert(candidatos.length === 1, 'el cobrador sin ruta debe ser seleccionable')
+
+  // Invariante REAL de creación de ruta: se satisface con ese cobrador sin ruta.
+  const inv = validateCobradorInvariant({
+    routeTenantId: 't-1', assignedUserIds: [admin.id, cobrador.id], cobradorId: cobrador.id,
+    userById: (id) => [admin, cobrador, su].find(u => u.id === id),
+  })
+  metric('invariante de cobradores', inv.ok ? 'satisfecho' : inv.message)
+  assert(inv.ok, `la primera ruta no es creable: ${inv.ok ? '' : inv.message}`)
+})
+
+await spec('ONB-ROUTE-005', 'Primera ruta', 'crear la primera Ruta asigna la Ruta al Cobrador', async () => {
+  const { db, admin } = await empresaSinRutas()
+  const cobrador = nuevoUsuario({ id: 'u-cob-1', email: 'luis@c.com' })
+  await db.users.add(cobrador)
+
+  // Efecto de routeService.createRouteWithAdmins (transaccional).
+  await db.transaction('rw', [db.routes, db.users], async () => {
+    await db.routes.add({ id: 'r-1', tenantId: 't-1', nombre: 'Ruta Norte', cobradorId: 'u-cob-1', status: 'activa' })
+    await db.users.update(admin.id, { authorizedRouteIds: ['r-1'], routeId: 'r-1' })
+    await db.users.update('u-cob-1', { authorizedRouteIds: ['r-1'], routeId: 'r-1' })
+  })
+
+  const cob = (await db.users.toArray() as User[]).find(u => u.id === 'u-cob-1')!
+  const ruta = (await db.routes.toArray())[0]
+  metric('authorizedRouteIds del cobrador', JSON.stringify(cob.authorizedRouteIds))
+  metric('cobrador responsable de la ruta', ruta.cobradorId)
+  metric('hasOperationalRoutes tras asignar', hasOperationalRoutes(cob))
+  assert(cob.authorizedRouteIds?.includes('r-1') === true, 'la ruta debe quedar asignada al cobrador')
+  assert(ruta.cobradorId === 'u-cob-1', 'el cobrador debe quedar como responsable')
+  assert(hasOperationalRoutes(cob), 'con ruta asignada el cobrador ya opera')
+})
+
+await spec('ONB-ROUTE-006', 'Primera ruta', 'crear la primera Ruta asigna la Ruta al Admin', async () => {
+  const { db, admin } = await empresaSinRutas()
+  await db.users.add(nuevoUsuario({ id: 'u-cob-1', email: 'luis@c.com' }))
+  assert(!hasOperationalRoutes(admin), 'precondición: el Admin arranca sin rutas')
+
+  await db.transaction('rw', [db.routes, db.users], async () => {
+    await db.routes.add({ id: 'r-1', tenantId: 't-1', nombre: 'Ruta Norte', cobradorId: 'u-cob-1', status: 'activa' })
+    await db.users.update(admin.id, { authorizedRouteIds: ['r-1'], routeId: 'r-1' })
+    await db.users.update('u-cob-1', { authorizedRouteIds: ['r-1'], routeId: 'r-1' })
+  })
+
+  const adm = (await db.users.toArray() as User[]).find(u => u.id === admin.id)!
+  metric('authorizedRouteIds del admin', JSON.stringify(adm.authorizedRouteIds))
+  metric('fail-closed levantado', hasOperationalRoutes(adm))
+  assert(adm.authorizedRouteIds?.includes('r-1') === true, 'la ruta debe quedar asignada al Admin responsable')
+  assert(hasOperationalRoutes(adm), 'el Admin debe quedar operativo tras la asignación')
+})
+
+await spec('ONB-ROUTE-007', 'Primera ruta', 'NO se puede crear una Ruta sin Cobrador', async () => {
+  const { db, su, admin } = await empresaSinRutas()
+  void db
+  // Invariante intacto: sin cobradores asignados, el borrador se rechaza.
+  const sinCobrador = validateCobradorInvariant({
+    routeTenantId: 't-1', assignedUserIds: [admin.id], cobradorId: undefined,
+    userById: (id) => [admin, su].find(u => u.id === id),
+  })
+  metric('sin cobrador asignado', sinCobrador.ok ? 'ACEPTADO — ERROR' : sinCobrador.code)
+  assert(!sinCobrador.ok && sinCobrador.code === 'no-cobrador', 'una ruta sin cobrador debe rechazarse')
+
+  // Y el servicio lo exige explícitamente.
+  const routeService = readSource('src/services/routeService.ts')
+  metric('routeService exige cobrador', routeService.includes('Debes seleccionar un Cobrador responsable para la ruta.'))
+  assert(routeService.includes('Debes seleccionar un Cobrador responsable para la ruta.'), 'el servicio dejó de exigir cobrador')
+  assert(routeService.includes('primero debe existir al menos un Administrador activo'), 'el servicio dejó de exigir Administrador')
+})
+
+await spec('ONB-ROUTE-008', 'Primera ruta', 'no se crea ninguna ruta ficticia automáticamente', async () => {
+  const { db } = await empresaSinRutas()
+  await db.users.add(nuevoUsuario({ id: 'u-cob-1', email: 'luis@c.com' }))
+  metric('rutas tras crear empresa, admin y cobrador', (await db.routes.toArray()).length)
+  assert((await db.routes.toArray()).length === 0, 'no debe aparecer ninguna ruta automática')
+
+  // Ni el alta de usuarios ni el arranque CLEAN crean rutas.
+  for (const f of ['src/pages/admin/UsersPage.tsx', 'src/services/platformBootstrapService.ts', 'src/pages/auth/SetupPage.tsx']) {
+    const src = readSource(f)
+    const crea = /db\.routes\.(add|bulkAdd|put)/.test(src)
+    metric(`${f} crea rutas`, crea)
+    assert(!crea, `${f} crea rutas automáticamente`)
+  }
+  // En `seed.ts` la única siembra de rutas es la de DEMO; el arranque CLEAN no crea ninguna.
+  const seed = readSource('src/data/seed.ts')
+  const bloqueClean = seed.slice(
+    seed.indexOf('export async function seedCleanDatabase'),
+    seed.indexOf('export async function resetCleanDatabase'),
+  )
+  metric('seedDatabase (DEMO) siembra rutas', /db\.routes\.bulkAdd/.test(seed))
+  metric('seedCleanDatabase siembra rutas', /db\.routes\./.test(bloqueClean))
+  assert(!/db\.routes\./.test(bloqueClean), 'el arranque CLEAN siembra rutas')
+})
+
+await spec('ONB-ROUTE-009', 'Primera ruta', 'la asignación de la primera Ruta es transaccional', () => {
+  const routeService = readSource('src/services/routeService.ts')
+  const body = routeService.slice(routeService.indexOf('export async function createRouteWithAdmins'))
+  const iTx = body.indexOf('db.transaction')
+  const iRuta = body.indexOf('db.routes.add', iTx)
+  const iAdmin = body.indexOf('await db.users.update(id,', iTx)
+  const iCob = body.indexOf('await db.users.update(cobrador.id,', iTx)
+  metric('abre transacción', iTx > -1)
+  metric('crea la ruta dentro', iRuta > iTx)
+  metric('asigna al Admin dentro', iAdmin > iTx)
+  metric('asigna al Cobrador dentro', iCob > iTx)
+  metric('mecanismo reutilizado', 'createRouteWithAdmins (no se duplicó lógica de asignación)')
+  assert(iTx > -1, 'la creación de ruta dejó de ser transaccional')
+  assert(iRuta > iTx && iAdmin > iTx && iCob > iTx, 'ruta y asignaciones deben ir en la MISMA transacción')
+  // UsersPage no reimplementa la asignación de la ruta responsable.
+  const users = readSource('src/pages/admin/UsersPage.tsx')
+  metric('UsersPage reutiliza setCobradorRoutes', users.includes('setCobradorRoutes('))
+  assert(users.includes('setCobradorRoutes('), 'UsersPage debe reutilizar el mecanismo de asignación existente')
+})
+
+await spec('ONB-ROUTE-010', 'Primera ruta', 'Secretario, Supervisor y Socio tampoco requieren ruta para existir', () => {
+  const users = readSource('src/pages/admin/UsersPage.tsx')
+  metric('tabla', 'ROLE_NEEDS_ROUTES_TO_OPERATE (solo gobierna avisos de UI)')
+  assert(users.includes('ROLE_NEEDS_ROUTES_TO_OPERATE'), 'falta la tabla renombrada')
+  assert(!users.includes('ROLE_REQUIRES_ROUTES'), 'queda la tabla antigua, que bloqueaba el alta')
+  // Ninguna rama de `handleSave` rechaza por falta de rutas.
+  const save = users.slice(users.indexOf('async function handleSave()'), users.indexOf('async function handleDelete') > -1 ? users.indexOf('async function handleDelete') : undefined)
+  metric('handleSave rechaza por falta de rutas', /authorizedRouteIds\.length === 0[\s\S]{0,120}return/.test(save))
+  assert(!/authorizedRouteIds\.length === 0[\s\S]{0,120}toast\.error/.test(save), 'el alta sigue rechazando por falta de rutas')
+  // Y la operación sigue dependiendo de la asignación.
+  const sinRuta = { id: 'u', tenantId: 't-1', nombre: 'S', email: 's@c.com', password: 'x', rol: 'secretario', status: 'activo', createdAt: '', updatedAt: '' } as User
+  metric('secretario sin ruta opera', hasOperationalRoutes(sinRuta))
+  assert(!hasOperationalRoutes(sinRuta), 'un Secretario sin ruta no debe operar')
 })
 
 // ############################################################

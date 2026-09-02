@@ -25,8 +25,21 @@ import {
 } from '@/lib/permissions'
 import type { User, Route, UserRole } from '@/models/types'
 
-// Roles que exigen al menos una ruta autorizada para operar.
-const ROLE_REQUIRES_ROUTES: Record<UserRole, boolean> = {
+/**
+ * Roles cuya OPERACIÓN depende de tener al menos una ruta asignada.
+ *
+ * OJO — son dos invariantes distintos y no deben confundirse:
+ *   · EXISTENCIA del usuario  → NO requiere ruta. Un Cobrador puede crearse antes de
+ *     que exista ninguna ruta; de lo contrario el onboarding se bloquea (crear ruta
+ *     exige cobrador y crear cobrador exigía ruta).
+ *   · AUTORIZACIÓN operativa  → SÍ depende de la asignación. Sin ruta no ve clientes,
+ *     ventas ni caja: `filterAccessibleRoutes` devuelve [] y el acceso queda cerrado.
+ *
+ * Esta tabla gobierna ÚNICAMENTE los avisos de la interfaz, nunca si el alta se
+ * permite. El invariante «toda ruta nace con ≥1 cobrador» sigue viviendo, intacto,
+ * en `cobradorRules` + `routeService`.
+ */
+const ROLE_NEEDS_ROUTES_TO_OPERATE: Record<UserRole, boolean> = {
   superadmin: false, admin: false, socio: false, supervisor: false, cobrador: true, secretario: true,
 }
 
@@ -125,11 +138,9 @@ export default function UsersPage() {
       toast.error('No puedes asignar ese rol.')
       return
     }
-    // Estados inválidos: rutas obligatorias para cobrador/secretario.
-    if (ROLE_REQUIRES_ROUTES[form.rol] && form.authorizedRouteIds.length === 0) {
-      toast.error(`Un ${ROLE_LABELS[form.rol]} necesita al menos una ruta autorizada.`)
-      return
-    }
+    // Un usuario NO necesita ruta para existir. Crear un Cobrador antes de que exista
+    // la primera ruta es un paso legítimo del onboarding; su acceso operativo seguirá
+    // cerrado hasta que se le asigne una al crear/editar la ruta.
     // Un actor NO Super Admin no puede asignar rutas que él mismo no administra.
     if (!isRouteUnrestricted(currentUser)) {
       const actorAllowed = new Set(authorizedRouteIdsOf(currentUser))
@@ -255,7 +266,7 @@ export default function UsersPage() {
     if (u.rol === 'admin' && getAssignedRouteIds(u).length === 0) { out.push({ label: 'Sin rutas (sin acceso)', variant: 'danger' }); return out }
     const assigned = getAssignedRouteIds(u)
     if (assigned.length === 0) {
-      out.push({ label: ROLE_REQUIRES_ROUTES[u.rol] ? 'Sin rutas (no opera)' : 'Sin rutas', variant: ROLE_REQUIRES_ROUTES[u.rol] ? 'danger' : 'gray' })
+      out.push({ label: ROLE_NEEDS_ROUTES_TO_OPERATE[u.rol] ? 'Sin ruta asignada' : 'Sin rutas', variant: 'warning' })
     } else {
       out.push({ label: `${assigned.length} ${assigned.length === 1 ? 'ruta' : 'rutas'}`, variant: 'info' })
       if (assigned.length <= 3) for (const id of assigned) out.push({ label: routeName(id), variant: 'gray' })
@@ -351,10 +362,13 @@ export default function UsersPage() {
           {showRoutes && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                Rutas autorizadas {ROLE_REQUIRES_ROUTES[form.rol] && <span className="text-red-500">*</span>}
+                Rutas autorizadas
               </label>
               {assignableRoutes.length === 0 ? (
-                <p className="text-xs text-gray-400">No hay rutas disponibles para asignar.</p>
+                <p className="text-xs text-gray-500">
+                  Todavía no hay rutas en la empresa. Puedes crear el usuario igualmente:
+                  <span className="font-medium"> podrás asignarlo al crear o editar una ruta.</span>
+                </p>
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {assignableRoutes.map(r => {
@@ -371,8 +385,11 @@ export default function UsersPage() {
               {form.rol === 'admin' && form.authorizedRouteIds.length === 0 && (
                 <p className="mt-1 text-xs text-gray-400">Sin selección: el administrador verá todas las rutas de la empresa. Selecciona rutas para limitarlo.</p>
               )}
-              {ROLE_REQUIRES_ROUTES[form.rol] && form.authorizedRouteIds.length === 0 && (
-                <p className="mt-1 text-xs text-amber-600">Este rol necesita al menos una ruta para poder operar.</p>
+              {ROLE_NEEDS_ROUTES_TO_OPERATE[form.rol] && form.authorizedRouteIds.length === 0 && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Sin ruta asignada. Podrás asignarlo al crear o editar una ruta; hasta entonces
+                  no tendrá acceso operativo.
+                </p>
               )}
             </div>
           )}
