@@ -115,11 +115,16 @@ export class MemoryDb {
   expenseCategories = new FakeTable<any>(this, 'expenseCategories')
   expenses = new FakeTable<any>(this, 'expenses')
   noPaymentVisits = new FakeTable<any>(this, 'noPaymentVisits')
+  // Motor de caja / liquidación semanal (CashboxDatabase).
+  capitalMovements = new FakeTable<any>(this, 'capitalMovements')
+  transfers = new FakeTable<any>(this, 'transfers')
+  withdrawals = new FakeTable<any>(this, 'withdrawals')
 
   /** Nombres de todas las tablas, para conteos exhaustivos en las pruebas. */
   static readonly TABLES = [
     'users', 'tenants', 'routes', 'clients', 'sales', 'installments',
     'payments', 'expenses', 'expenseCategories', 'noPaymentVisits',
+    'capitalMovements', 'transfers', 'withdrawals',
   ] as const
 
   /**
@@ -343,3 +348,81 @@ export async function computeCobrosComoCaja(db: MemoryDb, routeId = ROUTE_ID): P
 }
 
 export const TEST_IDS = { SALE_ID, TENANT_ID, ROUTE_ID, CLIENT_ID }
+
+// ------------------------------------------------------------
+// Escenario de CAJA / LIQUIDACIÓN (varias rutas en la misma empresa)
+// ------------------------------------------------------------
+/**
+ * Movimientos de una ruta para probar el aislamiento del motor de caja.
+ * Todas las cifras son explícitas: cada prueba declara exactamente lo que siembra.
+ */
+export interface RouteMovements {
+  routeId: string
+  nombre?: string
+  codigo?: string
+  tenantId?: string
+  capital?: Array<{ fecha: string; valor: number }>
+  pagos?: Array<{ fecha: string; valor: number; collectorId?: string; state?: string; clientId?: string; saleId?: string }>
+  ventas?: Array<{ fechaInicio: string; valorVenta: number; createdByUserId?: string; collectorId?: string; disbursementStatus?: Sale['disbursementStatus']; status?: Sale['status'] }>
+  gastos?: Array<{ fecha: string; valor: number; userId?: string; collectorId?: string }>
+  retiros?: Array<{ fecha: string; valor: number }>
+  transferenciasSalida?: Array<{ fecha: string; valor: number; routeDestinoId?: string }>
+  transferenciasEntrada?: Array<{ fecha: string; valor: number; routeOrigenId?: string }>
+}
+
+let _seq = 0
+const nextId = (p: string) => `${p}-${++_seq}`
+
+/**
+ * Base en memoria con varias rutas y sus movimientos. Sirve para verificar que el
+ * cálculo de una ruta NUNCA incorpora movimientos de otra.
+ */
+export function buildCashboxScenario(routes: RouteMovements[], tenantId = TENANT_ID): MemoryDb {
+  const db = new MemoryDb()
+  for (const r of routes) {
+    const tid = r.tenantId ?? tenantId
+    db.routes._seed([{ id: r.routeId, tenantId: tid, nombre: r.nombre ?? r.routeId, codigo: r.codigo ?? r.routeId, status: 'activa' }])
+    db.capitalMovements._seed((r.capital ?? []).map(c => ({
+      id: nextId('cap'), tenantId: tid, routeId: r.routeId, tipo: 'ingresoCapital',
+      valor: c.valor, fecha: c.fecha, userId: 'u-seed', createdAt: c.fecha,
+    })))
+    db.payments._seed((r.pagos ?? []).map(p => ({
+      id: nextId('pay'), tenantId: tid, routeId: r.routeId,
+      saleId: p.saleId ?? nextId('sale'), clientId: p.clientId ?? nextId('cli'),
+      collectorId: p.collectorId ?? 'u-cob-default',
+      valor: p.valor, fecha: p.fecha, tipo: 'efectivo', syncStatus: 'synced',
+      createdAt: `${p.fecha}T10:00:00.000Z`, state: p.state ?? 'active',
+    })))
+    db.sales._seed((r.ventas ?? []).map(v => ({
+      id: nextId('sale'), tenantId: tid, routeId: r.routeId, clientId: nextId('cli'),
+      createdByUserId: v.createdByUserId ?? 'u-seed',
+      collectorId: v.collectorId,
+      valorVenta: v.valorVenta, tasaInteres: 20, valorInteres: 0, valorTotal: v.valorVenta,
+      saldo: v.valorVenta, numeroCuotas: 1, valorCuota: v.valorVenta, frecuenciaPago: 'diaria',
+      fechaInicio: v.fechaInicio, fechaFinalEstimada: v.fechaInicio,
+      status: v.status ?? 'activa', disbursementStatus: v.disbursementStatus,
+      createdAt: `${v.fechaInicio}T09:00:00.000Z`, updatedAt: `${v.fechaInicio}T09:00:00.000Z`,
+    })) as unknown as Sale[])
+    db.expenses._seed((r.gastos ?? []).map(g => ({
+      id: nextId('exp'), tenantId: tid, routeId: r.routeId, categoryId: 'cat-1',
+      valor: g.valor, fecha: g.fecha, userId: g.userId ?? 'u-seed', collectorId: g.collectorId,
+      syncStatus: 'synced', createdAt: `${g.fecha}T11:00:00.000Z`,
+    })))
+    db.withdrawals._seed((r.retiros ?? []).map(w => ({
+      id: nextId('wd'), tenantId: tid, routeId: r.routeId,
+      valor: w.valor, fecha: w.fecha, userId: 'u-seed', createdAt: w.fecha,
+    })))
+    db.transfers._seed([
+      ...(r.transferenciasSalida ?? []).map(t => ({
+        id: nextId('tr'), tenantId: tid, routeOrigenId: r.routeId, routeDestinoId: t.routeDestinoId ?? '',
+        origenType: 'route', destinoType: 'route', valor: t.valor, fecha: t.fecha, userId: 'u-seed', createdAt: t.fecha,
+      })),
+      ...(r.transferenciasEntrada ?? []).map(t => ({
+        id: nextId('tr'), tenantId: tid, routeOrigenId: t.routeOrigenId ?? '', routeDestinoId: r.routeId,
+        origenType: 'route', destinoType: 'route', valor: t.valor, fecha: t.fecha, userId: 'u-seed', createdAt: t.fecha,
+      })),
+    ])
+  }
+  db.resetLog()
+  return db
+}

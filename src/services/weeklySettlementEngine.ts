@@ -1,27 +1,46 @@
 // ============================================================
-// Motor de liquidación semanal
+// Motor de liquidación semanal — SIEMPRE POR RUTA
+// ------------------------------------------------------------
+// La liquidación se calcula para UNA ruta concreta: no existe modo consolidado.
+// Todo el cálculo se delega en `getCashboxSummary(routeId, ...)`, que ya aísla los
+// ocho componentes por ruta (capital, cobros, préstamos, gastos, transferencias
+// de entrada y salida, retiros y saldo anterior). Aquí no se recalcula nada.
+//
+// SCOPING (fail-closed): `generateWeeklySettlementForUser` valida la ruta contra
+// las rutas autorizadas del usuario ANTES de leer un solo movimiento. Una ruta
+// fuera del alcance devuelve `null`, nunca cifras. La comprobación vive en el
+// servicio —no solo en la pantalla— para que un routeId manipulado no llegue al
+// motor financiero.
 // ============================================================
+import { getCashboxSummary, type CashboxDatabase } from './cashboxEngine'
 import { db } from '@/lib/db'
-import { getCashboxSummary } from './cashboxEngine'
+import { canAccessRoute } from '@/lib/permissions'
 import { generateId } from '@/lib/utils'
 import { nowISO } from '@/lib/formatters'
-import type { WeeklySettlement } from '@/models/types'
+import type { User, WeeklySettlement } from '@/models/types'
 
-export async function generateWeeklySettlement(params: {
+export interface WeeklySettlementParams {
   tenantId: string
-  officeId: string
   routeId: string
   semanaInicio: string
   semanaFin: string
-}): Promise<WeeklySettlement> {
-  const { tenantId, officeId, routeId, semanaInicio, semanaFin } = params
+}
 
-  const summary = await getCashboxSummary(routeId, semanaInicio, semanaFin)
+/**
+ * Liquidación de UNA ruta en un rango semanal. No aplica permisos: es el cálculo
+ * puro. Las pantallas deben usar `generateWeeklySettlementForUser`.
+ */
+export async function generateWeeklySettlement(
+  params: WeeklySettlementParams,
+  database: CashboxDatabase = db,
+): Promise<WeeklySettlement> {
+  const { tenantId, routeId, semanaInicio, semanaFin } = params
 
-  const settlement: WeeklySettlement = {
+  const summary = await getCashboxSummary(routeId, semanaInicio, semanaFin, database)
+
+  return {
     id: generateId(),
     tenantId,
-    officeId,
     routeId,
     semanaInicio,
     semanaFin,
@@ -36,30 +55,20 @@ export async function generateWeeklySettlement(params: {
     saldoFinal: summary.saldoActual,
     createdAt: nowISO(),
   }
-
-  return settlement
 }
 
-export async function getAllRoutesWeeklySettlement(params: {
-  tenantId: string
-  semanaInicio: string
-  semanaFin: string
-}): Promise<WeeklySettlement[]> {
-  const { tenantId, semanaInicio, semanaFin } = params
-
-  // Liquidación por empresa: todas las rutas del tenant (ya no por oficina).
-  const routes = await db.routes.where('tenantId').equals(tenantId).toArray()
-
-  const settlements: WeeklySettlement[] = []
-  for (const route of routes) {
-    const s = await generateWeeklySettlement({
-      tenantId,
-      officeId: route.officeId ?? '',
-      routeId: route.id,
-      semanaInicio,
-      semanaFin,
-    })
-    settlements.push(s)
-  }
-  return settlements
+/**
+ * Liquidación de una ruta CON GUARDA DE ALCANCE (punto de entrada de la UI).
+ * Devuelve `null` si el usuario no puede acceder a esa ruta: cero datos, sin
+ * excepción que revele si la ruta existe.
+ */
+export async function generateWeeklySettlementForUser(
+  params: WeeklySettlementParams & { user: User | null | undefined },
+  database: CashboxDatabase = db,
+): Promise<WeeklySettlement | null> {
+  const { user, ...rest } = params
+  if (!rest.routeId) return null
+  // FAIL-CLOSED: la ruta debe estar entre las autorizadas (Super Admin: todas).
+  if (!canAccessRoute(user, rest.routeId)) return null
+  return generateWeeklySettlement(rest, database)
 }

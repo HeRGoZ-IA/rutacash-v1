@@ -6,6 +6,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { formatCurrency, today } from '@/lib/formatters'
+import { effectivePayments } from '@/lib/paymentState'
 import type { Client } from '@/models/types'
 
 interface Movement {
@@ -48,19 +49,27 @@ export default function CollectorDailyReportPage() {
     const clientMap = new Map<string, Client>(clientsArr.map(c => [c.id, c]))
     const catName = (id: string) => categories.find(c => c.id === id)?.nombre ?? 'Gasto'
 
-    // Ventas creadas hoy (incluye directas y aprobadas creadas hoy)
-    const salesToday = sales.filter(s => s.createdAt.slice(0, 10) === todayStr)
+    // INFORME PERSONAL: solo los movimientos ATRIBUIBLES a quien está en sesión.
+    // Con varios cobradores en la misma ruta, cada uno revisa lo suyo; el
+    // consolidado de la ruta es información administrativa, no operativa.
+    const misAbonos = effectivePayments(payments).filter(p => p.collectorId === user.id)
+    const misDesembolsos = sales.filter(s =>
+      s.disbursementStatus !== 'pendiente'
+      && s.disbursedByCollectorId === user.id
+      && s.fechaDesembolso === todayStr
+    )
+    const misGastos = expenses.filter(e => (e.collectorId ?? e.userId) === user.id)
 
     const movs: Movement[] = []
-    for (const p of payments) movs.push({ hora: hora(p.createdAt), cliente: clientMap.get(p.clientId)?.nombre ?? 'Cliente', concepto: 'Abono', valor: p.valor, tipo: 'abono' })
-    for (const s of salesToday) movs.push({ hora: hora(s.createdAt), cliente: clientMap.get(s.clientId)?.nombre ?? 'Cliente', concepto: 'Venta', valor: s.valorVenta, tipo: 'venta' })
-    for (const e of expenses) movs.push({ hora: hora(e.createdAt), cliente: catName(e.categoryId), concepto: 'Gasto', valor: e.valor, tipo: 'gasto' })
+    for (const p of misAbonos) movs.push({ hora: hora(p.createdAt), cliente: clientMap.get(p.clientId)?.nombre ?? 'Cliente', concepto: 'Abono', valor: p.valor, tipo: 'abono' })
+    for (const s of misDesembolsos) movs.push({ hora: hora(s.createdAt), cliente: clientMap.get(s.clientId)?.nombre ?? 'Cliente', concepto: 'Desembolso', valor: s.valorVenta, tipo: 'venta' })
+    for (const e of misGastos) movs.push({ hora: hora(e.createdAt), cliente: catName(e.categoryId), concepto: 'Gasto', valor: e.valor, tipo: 'gasto' })
     movs.sort((a, b) => a.hora.localeCompare(b.hora))
 
     setTotals({
-      abonos: payments.reduce((s, p) => s + p.valor, 0),
-      ventas: salesToday.reduce((s, x) => s + x.valorVenta, 0),
-      gastos: expenses.reduce((s, e) => s + e.valor, 0),
+      abonos: misAbonos.reduce((s, p) => s + p.valor, 0),
+      ventas: misDesembolsos.reduce((s, x) => s + x.valorVenta, 0),
+      gastos: misGastos.reduce((s, e) => s + e.valor, 0),
     })
     setMovements(movs)
     setLoading(false)
@@ -74,7 +83,7 @@ export default function CollectorDailyReportPage() {
     <div className="p-4 space-y-4">
       <div>
         <h1 className="font-bold text-gray-900">Informe del día</h1>
-        <p className="text-xs text-gray-500">Movimientos de hoy en tu ruta</p>
+        <p className="text-xs text-gray-500">Tus movimientos de hoy</p>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
@@ -84,7 +93,7 @@ export default function CollectorDailyReportPage() {
         </div>
         <div className="bg-white rounded-2xl p-3 shadow-card border border-gray-100 text-center">
           <p className="text-sm font-bold text-primary-600 leading-tight">{formatCurrency(totals.ventas, currency)}</p>
-          <p className="text-xs text-gray-500 mt-0.5">Ventas</p>
+          <p className="text-xs text-gray-500 mt-0.5">Desembolsos</p>
         </div>
         <div className="bg-white rounded-2xl p-3 shadow-card border border-gray-100 text-center">
           <p className="text-sm font-bold text-red-500 leading-tight">{formatCurrency(totals.gastos, currency)}</p>

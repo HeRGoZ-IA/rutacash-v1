@@ -45,7 +45,13 @@ export default function CollectorExpensesPage() {
         id: generateId(), tenantId: user.tenantId, officeId: route?.officeId ?? '',
         routeId, categoryId: form.categoryId, valor: form.valor,
         descripcion: form.descripcion || undefined, receiptPhotoDataUrl: form.receiptPhotoDataUrl,
-        fecha: today(), userId: user.id,
+        fecha: today(),
+        // `userId` = quién REGISTRÓ el gasto. `collectorId` = a qué caja personal se
+        // carga. En la app operativa el cobrador pone el dinero de su propio bolsillo,
+        // así que ambos coinciden; un gasto registrado por otro rol no se carga a
+        // ninguna caja personal (queda como gasto de la ruta).
+        userId: user.id,
+        collectorId: user.rol === 'cobrador' ? user.id : undefined,
         syncStatus: navigator.onLine ? 'synced' : 'pending', createdAt: nowISO(),
       }
       await db.expenses.add(expense)

@@ -13,7 +13,7 @@ import { getAuthorizedRouteIds } from '@/lib/roles'
 import { can } from '@/lib/permissions'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import { computeSaleFinancials, createDirectSale, createSaleRequest, findActiveSaleForClient, type SaleInputs } from '@/services/saleRequestService'
-import { useRouteCapital } from '@/hooks/useRouteCapital'
+import { useCapitalGuard } from '@/hooks/useCapitalGuard'
 import type { Client, Sale, Route } from '@/models/types'
 
 const TASA_OPTIONS = [{ value: '10', label: '10%' }, { value: '20', label: '20%' }]
@@ -95,8 +95,10 @@ export default function CollectorNewSalePage() {
   const withinLimit = !hasEffectiveLimit || form.valorVenta <= effectiveLimit
   const allowDirect = canDirect && withinLimit
 
-  const { available: capDisponible } = useRouteCapital(selectedClient?.routeId)
-  const capExcedido = capDisponible != null && form.valorVenta > capDisponible
+  // La validación de capital se mantiene para todos los roles; el MONTO solo se
+  // revela a quien puede ver la caja de la ruta (el Cobrador no lo necesita).
+  const { exceeded: capExcedido, available: capDisponible, canSeeAmount: verCapital } =
+    useCapitalGuard(selectedClient?.routeId, form.valorVenta)
 
   const calc = form.valorVenta > 0 && form.numeroCuotas > 0
     ? computeSaleFinancials({ valorVenta: form.valorVenta, tasaInteres: form.tasaInteres, numeroCuotas: form.numeroCuotas, frecuenciaPago: form.frecuenciaPago, fechaInicio: form.fechaInicio, paymentDays: form.paymentDays })
@@ -125,7 +127,12 @@ export default function CollectorNewSalePage() {
 
   async function handleDirectSale() {
     if (!validate()) return
-    if (capDisponible != null && form.valorVenta > capDisponible) { toast.error(`La venta supera el capital disponible de la ruta (${formatCurrency(capDisponible, currency)})`); return }
+    if (capExcedido) {
+      toast.error(verCapital
+        ? `La venta supera el capital disponible de la ruta (${formatCurrency(capDisponible ?? 0, currency)})`
+        : 'La venta supera el capital disponible actualmente. Reduce el monto o solicita una inyección de capital.')
+      return
+    }
     // Si el cliente ya tiene venta activa, pedir confirmación antes de crear otra.
     if (activeSale && confirmKind !== 'direct') { setConfirmKind('direct'); return }
     const inputs = buildInputs(); if (!inputs) return
@@ -220,11 +227,18 @@ export default function CollectorNewSalePage() {
           </div>
         )}
 
-        {/* Capital disponible de la ruta */}
-        {selectedClient && capDisponible != null && (
+        {/* CAPITAL DE LA RUTA: la cifra solo se muestra a quien puede verla
+            (`cashbox.viewRoute`). Al Cobrador se le informa el LÍMITE sin revelar el
+            capital financiero, y solo cuando lo supera: la regla sigue vigente. */}
+        {selectedClient && verCapital && capDisponible != null && (
           <div className={`rounded-xl p-3 text-sm border ${capExcedido ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>
             Capital disponible de la ruta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
             {capExcedido && <p className="text-xs mt-1 font-medium">El valor supera el capital disponible. Reduce el monto o inyecta capital a la ruta.</p>}
+          </div>
+        )}
+        {selectedClient && !verCapital && capExcedido && (
+          <div className="rounded-xl p-3 text-sm border bg-red-50 border-red-200 text-red-700">
+            La venta supera el capital disponible actualmente. Reduce el monto o solicita una inyección de capital al administrador.
           </div>
         )}
 

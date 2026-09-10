@@ -1,10 +1,21 @@
 // ============================================================
-// Creación de rutas con ADMINISTRADOR responsable (fuente única: authorizedRouteIds)
+// Creación de rutas (fuente única de asignaciones: User.authorizedRouteIds)
 // ------------------------------------------------------------
-// Regla funcional: no se crea una ruta sin al menos un Administrador ACTIVO del
-// tenant, y la ruta debe quedar asignada a uno o varios Administradores responsables.
-// La validación se aplica también aquí (no solo en la UI): el servicio RECHAZA la
-// creación si no hay Administrador activo o si no se selecciona ninguno.
+// REGLA FUNCIONAL VIGENTE (revisión del socio):
+//   · El ADMINISTRADOR responsable es OPCIONAL. Una ruta puede nacer sin ningún
+//     Administrador y asignársele uno más adelante desde el editor de ruta o desde
+//     Gestión de usuarios (misma fuente única: `authorizedRouteIds`).
+//   · El COBRADOR responsable sigue siendo OBLIGATORIO: sin cobrador no hay ruta.
+//   · Si quien crea la ruta es un ADMINISTRADOR, queda SIEMPRE autoasignado. No es
+//     una comodidad: el acceso del Administrador es fail-closed por rutas, así que
+//     crear una ruta sin quedar dentro lo dejaría sin acceso operativo a la ruta
+//     que acaba de crear (auto-bloqueo). El servicio lo garantiza aunque la UI
+//     enviara otra cosa.
+//   · Si SÍ se seleccionan Administradores, cada uno debe ser un admin ACTIVO del
+//     mismo tenant y gestionable por el actor.
+//
+// No hay migración de `Route`: el modelo nunca tuvo campo de Administrador; la
+// relación Admin↔Ruta vive exclusivamente en `User.authorizedRouteIds`.
 // ============================================================
 import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
@@ -18,12 +29,6 @@ import { computeRouteAssignmentDiff } from '@/lib/routeAssignmentDiff'
 import { validateCobradorInvariant } from '@/lib/cobradorRules'
 import type { Route, User } from '@/models/types'
 
-/** ¿Existe al menos un Administrador ACTIVO en el tenant? (requisito para crear rutas). */
-export async function hasActiveAdmin(tenantId: string): Promise<boolean> {
-  const n = await db.users.where('tenantId').equals(tenantId).and(u => u.rol === 'admin' && u.status === 'activo').count()
-  return n > 0
-}
-
 export interface CreateRouteInput {
   tenantId: string
   nombre: string
@@ -33,32 +38,46 @@ export interface CreateRouteInput {
   montoMaximoPrestamo: number
   capitalInicial: number
   codigo: string
-  /** Administradores responsables (≥1). Fuente única: se agrega la ruta a su authorizedRouteIds. */
+  /**
+   * Administradores responsables. OPCIONAL: puede ir vacío y la ruta se crea igual.
+   * Fuente única: se agrega la ruta a su `authorizedRouteIds`.
+   */
   adminIds: string[]
   /** Cobrador responsable (OBLIGATORIO): debe ser un cobrador activo del tenant. */
   cobradorId?: string
 }
 
+/**
+ * Administradores responsables EFECTIVOS de una ruta nueva (regla pura y testeable).
+ *
+ *  · La lista puede quedar VACÍA: el Administrador es opcional.
+ *  · Si el actor es ADMINISTRADOR, se autoincluye siempre. Su acceso es fail-closed
+ *    por rutas: crear una ruta sin quedar dentro lo dejaría sin acceso a su propia
+ *    ruta (auto-bloqueo del que solo podría rescatarlo un Super Admin).
+ *  · El Super Admin NO se autoasigna: no se limita por rutas.
+ */
+export function resolveRouteAdminIds(adminIds: string[], actor: Pick<User, 'id' | 'rol'>): string[] {
+  const ids = [...new Set(adminIds)].filter(Boolean)
+  if (actor.rol === 'admin' && !ids.includes(actor.id)) ids.push(actor.id)
+  return ids
+}
+
 export async function createRouteWithAdmins(input: CreateRouteInput, actor: User): Promise<Route> {
-  // 1) Debe existir al menos un Administrador activo en la empresa.
-  if (!(await hasActiveAdmin(input.tenantId))) {
-    throw new AuthzError('No se puede crear la ruta: primero debe existir al menos un Administrador activo.')
-  }
-  // 2) Debe seleccionarse al menos un Administrador responsable.
-  const adminIds = [...new Set(input.adminIds)].filter(Boolean)
-  if (adminIds.length === 0) {
-    throw new AuthzError('Debes seleccionar al menos un Administrador responsable de la ruta.')
-  }
-  // 3) Cada responsable debe ser Administrador activo del tenant y asignable por el actor
-  //    (o el propio actor, para el caso del Administrador creador que se autoasigna).
+  // 1) Administradores responsables: OPCIONALES. Si el actor es Administrador,
+  //    queda autoasignado SIEMPRE (evita que se auto-bloquee por el fail-closed).
+  const adminIds = resolveRouteAdminIds(input.adminIds, actor)
+
+  // 2) Cada responsable indicado debe ser Administrador activo del tenant y asignable
+  //    por el actor (o el propio actor, para el Administrador creador que se autoasigna).
   const users = await db.users.where('tenantId').equals(input.tenantId).toArray()
   for (const id of adminIds) {
     const a = users.find(u => u.id === id)
     if (!a || a.rol !== 'admin' || a.status !== 'activo') throw new AuthzError('Administrador responsable inválido o inactivo.')
     if (a.id !== actor.id && !canManageUser(actor, a)) throw new AuthzError('No puedes asignar a ese Administrador.')
   }
-  // 3.b) COBRADOR RESPONSABLE obligatorio: toda ruta nace con exactamente un cobrador
-  //      responsable, activo y del mismo tenant. El servicio RECHAZA la creación si falta.
+  // 3) COBRADOR RESPONSABLE obligatorio: toda ruta nace con exactamente un cobrador
+  //    responsable, activo y del mismo tenant. El servicio RECHAZA la creación si falta.
+  //    Esta regla NO cambió: el Administrador se volvió opcional, el Cobrador no.
   if (!input.cobradorId) throw new AuthzError('Debes seleccionar un Cobrador responsable para la ruta.')
   const cobrador = users.find(u => u.id === input.cobradorId)
   if (!cobrador || cobrador.rol !== 'cobrador' || cobrador.status !== 'activo') {
@@ -99,7 +118,17 @@ export async function createRouteWithAdmins(input: CreateRouteInput, actor: User
   })
 
   // 5) Auditoría de creación, de cada asignación de Administrador y del cobrador responsable.
-  await logAction({ tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: route.id, action: 'CREATE_ROUTE', entityType: 'Route', entityId: route.id, descripcion: `Ruta creada: ${route.nombre}`, after: { adminIds, cobradorId: input.cobradorId } })
+  // Se deja constancia explícita de una ruta creada SIN Administrador: es un estado
+  // válido, pero conviene poder rastrearlo (nadie podrá aprobar solicitudes de esa
+  // ruta hasta que se le asigne un Administrador).
+  await logAction({
+    tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: route.id,
+    action: 'CREATE_ROUTE', entityType: 'Route', entityId: route.id,
+    descripcion: adminIds.length === 0
+      ? `Ruta creada SIN Administrador responsable: ${route.nombre}`
+      : `Ruta creada: ${route.nombre}`,
+    after: { adminIds, cobradorId: input.cobradorId, sinAdministrador: adminIds.length === 0 },
+  })
   for (const id of adminIds) {
     await logAction({ tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: route.id, action: 'ASSIGN_ROUTE', entityType: 'User', entityId: id, descripcion: `Administrador responsable asignado a ${route.nombre}` })
   }

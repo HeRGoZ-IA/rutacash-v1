@@ -2,25 +2,53 @@
 // Motor de caja - calcula saldos desde movimientos
 // ============================================================
 import { db } from '@/lib/db'
-import type { CashboxSummary, RouteFinancialSummary } from '@/models/types'
+import { effectivePayments } from '@/lib/paymentState'
+import type {
+  CashboxSummary, RouteFinancialSummary, CollectorCashSummary,
+  CapitalMovement, Expense, Payment, Sale, Transfer, Withdrawal,
+} from '@/models/types'
+
+// ------------------------------------------------------------
+// Contrato de base de datos
+// ------------------------------------------------------------
+/**
+ * Superficie mínima de Dexie que necesita el motor de caja. Se declara de forma
+ * estructural (mismo criterio que `PaymentDatabase` en paymentService y
+ * `ReconciliationDatabase` en financialReconciliation) para poder inyectar una
+ * base en memoria desde las pruebas sin arrastrar IndexedDB a Node.
+ * En producción SIEMPRE se usa el `db` real.
+ */
+export interface CashboxReadTable<T> {
+  where(index: string): { equals(key: string): { toArray(): Promise<T[]> } }
+}
+
+export interface CashboxDatabase {
+  capitalMovements: CashboxReadTable<CapitalMovement>
+  payments: CashboxReadTable<Payment>
+  sales: CashboxReadTable<Sale>
+  expenses: CashboxReadTable<Expense>
+  transfers: CashboxReadTable<Transfer>
+  withdrawals: CashboxReadTable<Withdrawal>
+}
 
 export async function getCashboxSummary(
   routeId: string,
   fechaDesde?: string,
-  fechaHasta?: string
+  fechaHasta?: string,
+  database: CashboxDatabase = db,
 ): Promise<CashboxSummary> {
   const today = new Date().toISOString().slice(0, 10)
   const desde = fechaDesde ?? '2000-01-01'
   const hasta = fechaHasta ?? today
 
   // Capital
-  const capitalMovs = await db.capitalMovements
+  const capitalMovs = await database.capitalMovements
     .where('routeId').equals(routeId).toArray()
   const capitalFiltrado = capitalMovs.filter(m => m.fecha >= desde && m.fecha <= hasta)
   const ingresoCapital = capitalFiltrado.reduce((sum, m) => sum + m.valor, 0)
 
   // Cobros (pagos recibidos)
-  const payments = await db.payments
+  const payments = await database.payments
     .where('routeId').equals(routeId).toArray()
   const cobros = payments
     .filter(p => p.fecha >= desde && p.fecha <= hasta)
@@ -28,7 +56,7 @@ export async function getCashboxSummary(
 
   // Préstamos entregados (ventas creadas). Las ventas aprobadas pero aún NO
   // desembolsadas no representan dinero entregado todavía → se excluyen.
-  const allSales = await db.sales
+  const allSales = await database.sales
     .where('routeId').equals(routeId).toArray()
   const sales = allSales.filter(s => s.disbursementStatus !== 'pendiente')
   const prestamosEntregados = sales
@@ -36,27 +64,27 @@ export async function getCashboxSummary(
     .reduce((sum, s) => sum + s.valorVenta, 0)
 
   // Gastos
-  const expenses = await db.expenses
+  const expenses = await database.expenses
     .where('routeId').equals(routeId).toArray()
   const gastos = expenses
     .filter(e => e.fecha >= desde && e.fecha <= hasta)
     .reduce((sum, e) => sum + e.valor, 0)
 
   // Transferencias
-  const transfersOut = await db.transfers
+  const transfersOut = await database.transfers
     .where('routeOrigenId').equals(routeId).toArray()
   const transferenciasSalidas = transfersOut
     .filter(t => t.fecha >= desde && t.fecha <= hasta)
     .reduce((sum, t) => sum + t.valor, 0)
 
-  const transfersIn = await db.transfers
+  const transfersIn = await database.transfers
     .where('routeDestinoId').equals(routeId).toArray()
   const transferenciasEntradas = transfersIn
     .filter(t => t.fecha >= desde && t.fecha <= hasta)
     .reduce((sum, t) => sum + t.valor, 0)
 
   // Retiros
-  const withdrawals = await db.withdrawals
+  const withdrawals = await database.withdrawals
     .where('routeId').equals(routeId).toArray()
   const retiros = withdrawals
     .filter(w => w.fecha >= desde && w.fecha <= hasta)
@@ -174,4 +202,90 @@ export async function getRoutesFinancialSummary(routeIds: string[]): Promise<Rec
     result[routeId] = await getRouteFinancialSummary(routeId)
   }
   return result
+}
+
+// ============================================================
+// CAJA PERSONAL DEL COBRADOR (revisión del socio — RQ-05)
+// ------------------------------------------------------------
+// La caja del Cobrador NO es la caja financiera de la ruta. Representa el
+// EFECTIVO OPERATIVO bajo su responsabilidad:
+//
+//     recaudado − desembolsado − gastos = efectivo a entregar
+//
+// Esta función lee EXCLUSIVAMENTE lo atribuible a ese cobrador y NO toca
+// `capitalMovements`, `transfers` ni `withdrawals`: el capital inicial y el
+// consolidado de la ruta no se calculan aquí, así que no pueden filtrarse a la
+// pantalla del cobrador ni siquiera por accidente. Ocultar una tarjeta no habría
+// bastado: el dato no se obtiene.
+// ============================================================
+
+/** Superficie de datos de la caja personal: SOLO pagos, ventas y gastos. */
+export interface CollectorCashDatabase {
+  payments: CashboxReadTable<Payment>
+  sales: CashboxReadTable<Sale>
+  expenses: CashboxReadTable<Expense>
+}
+
+/**
+ * Caja personal de un cobrador en una fecha.
+ *
+ *  · recaudado    Σ abonos VIGENTES con `collectorId` = él (excluye reversiones,
+ *                 misma semántica canónica que la corrección controlada).
+ *  · desembolsado Σ ventas que ÉL desembolsó ese día (`disbursedByCollectorId`),
+ *                 por FECHA DE DESEMBOLSO, no por fecha de creación de la venta.
+ *  · gastos       Σ gastos cargados a SU caja (`collectorId`), con compatibilidad
+ *                 hacia atrás: los gastos anteriores a la separación solo llevan
+ *                 `userId`, y se aceptan cuando ese usuario es él mismo.
+ */
+export async function getCollectorDailyCashSummary(
+  params: { routeId: string; collectorId: string; fecha: string },
+  database: CollectorCashDatabase = db,
+): Promise<CollectorCashSummary> {
+  const { routeId, collectorId, fecha } = params
+  const vacio: CollectorCashSummary = {
+    collectorId, routeId, fecha, recaudado: 0, desembolsado: 0, gastos: 0, efectivoAEntregar: 0,
+  }
+  // Fail-closed: sin cobrador o sin ruta no se calcula nada.
+  if (!routeId || !collectorId) return vacio
+
+  const [payments, sales, expenses] = await Promise.all([
+    database.payments.where('routeId').equals(routeId).toArray(),
+    database.sales.where('routeId').equals(routeId).toArray(),
+    database.expenses.where('routeId').equals(routeId).toArray(),
+  ])
+
+  const recaudado = effectivePayments(payments)
+    .filter(p => p.collectorId === collectorId && p.fecha === fecha)
+    .reduce((sum, p) => sum + p.valor, 0)
+
+  const desembolsado = sales
+    .filter(s => s.disbursementStatus !== 'pendiente'
+      && s.disbursedByCollectorId === collectorId
+      && s.fechaDesembolso === fecha)
+    .reduce((sum, s) => sum + s.valorVenta, 0)
+
+  const gastos = expenses
+    .filter(e => e.fecha === fecha && (e.collectorId ?? e.userId) === collectorId)
+    .reduce((sum, e) => sum + e.valor, 0)
+
+  return {
+    collectorId, routeId, fecha,
+    recaudado, desembolsado, gastos,
+    efectivoAEntregar: recaudado - desembolsado - gastos,
+  }
+}
+
+/**
+ * ¿La ruta tiene capital suficiente para una venta de `valorVenta`?
+ *
+ * Devuelve SOLO el veredicto, nunca el monto. Permite conservar intacta la regla de
+ * negocio "no vender por encima del capital disponible" en pantallas donde el
+ * usuario no debe conocer la cifra financiera de la ruta (App Cobrador), sin
+ * eliminar la validación ni dejar un error inexplicable.
+ */
+export async function hasCapitalForSale(routeId: string, valorVenta: number): Promise<boolean> {
+  if (!routeId) return false
+  if (!Number.isFinite(valorVenta) || valorVenta <= 0) return true
+  const { saldoActual } = await getCashboxSummary(routeId)
+  return valorVenta <= saldoActual
 }

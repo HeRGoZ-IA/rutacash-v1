@@ -24,6 +24,7 @@ import {
   filterAccessibleRoutes, filterByAccessibleRoute,
 } from '../src/lib/permissions'
 import { validateCobradorInvariant } from '../src/lib/cobradorRules'
+import { resolveRouteAdminIds } from '../src/services/routeService'
 import { MemoryDb } from './financial/harness'
 import type { Tenant, User } from '../src/models/types'
 import { readSource, containsLine, SRC } from './financial/sourceContract'
@@ -886,7 +887,12 @@ await spec('ONB-ROUTE-007', 'Primera ruta', 'NO se puede crear una Ruta sin Cobr
   const routeService = readSource('src/services/routeService.ts')
   metric('routeService exige cobrador', routeService.includes('Debes seleccionar un Cobrador responsable para la ruta.'))
   assert(routeService.includes('Debes seleccionar un Cobrador responsable para la ruta.'), 'el servicio dejó de exigir cobrador')
-  assert(routeService.includes('primero debe existir al menos un Administrador activo'), 'el servicio dejó de exigir Administrador')
+  // REGLA REVISADA (revisión del socio): el Administrador ya NO es obligatorio.
+  // Solo el Cobrador lo es. Las dos guardas antiguas deben haber desaparecido.
+  metric('exige Administrador activo en la empresa', routeService.includes('primero debe existir al menos un Administrador activo'))
+  metric('exige seleccionar Administrador responsable', routeService.includes('Debes seleccionar al menos un Administrador responsable'))
+  assert(!routeService.includes('primero debe existir al menos un Administrador activo'), 'el servicio sigue exigiendo que exista un Administrador activo')
+  assert(!routeService.includes('Debes seleccionar al menos un Administrador responsable'), 'el servicio sigue exigiendo seleccionar Administrador')
 })
 
 await spec('ONB-ROUTE-008', 'Primera ruta', 'no se crea ninguna ruta ficticia automáticamente', async () => {
@@ -946,6 +952,153 @@ await spec('ONB-ROUTE-010', 'Primera ruta', 'Secretario, Supervisor y Socio tamp
   const sinRuta = { id: 'u', tenantId: 't-1', nombre: 'S', email: 's@c.com', password: 'x', rol: 'secretario', status: 'activo', createdAt: '', updatedAt: '' } as User
   metric('secretario sin ruta opera', hasOperationalRoutes(sinRuta))
   assert(!hasOperationalRoutes(sinRuta), 'un Secretario sin ruta no debe operar')
+})
+
+// ############################################################
+// GRUPO — RQ-01: ADMINISTRADOR OPCIONAL AL CREAR RUTA
+// ------------------------------------------------------------
+// Regla nueva: una ruta puede nacer SIN Administrador. Sigue exigiéndose Cobrador.
+// El Administrador que crea la ruta queda SIEMPRE dentro (evita auto-bloqueo).
+// ############################################################
+
+await spec('ONB-ROUTE-011', 'Primera ruta', 'una ruta con Cobrador y SIN Administrador es válida', async () => {
+  const { db, su, admin } = await empresaSinRutas()
+  void db; void admin
+  const cobrador = nuevoUsuario({ id: 'u-cob-1', nombre: 'Luis', email: 'luis@c.com' })
+
+  // El invariante de la ruta se satisface solo con el Cobrador: el Administrador
+  // no participa en él.
+  const inv = validateCobradorInvariant({
+    routeTenantId: 't-1', assignedUserIds: [cobrador.id], cobradorId: cobrador.id,
+    userById: (id) => [cobrador, su].find(u => u.id === id),
+  })
+  metric('invariante sin Administrador', inv.ok ? 'satisfecho' : inv.message)
+  assert(inv.ok, `una ruta con cobrador y sin admin debe ser válida: ${inv.ok ? '' : inv.message}`)
+
+  // El Super Admin no se autoasigna y la lista de administradores queda vacía.
+  const efectivos = resolveRouteAdminIds([], su)
+  metric('administradores responsables resultantes', efectivos.length === 0 ? '(ninguno)' : efectivos.join(', '))
+  assert(efectivos.length === 0, 'el Super Admin no debe forzar ningún Administrador responsable')
+
+  // Y la UI ya no bloquea la creación por falta de Administradores.
+  const routes = readSource('src/pages/admin/RoutesPage.tsx')
+  metric('botón Nueva ruta deshabilitado por falta de admin', routes.includes('disabled={!hasActiveAdmin}'))
+  metric('rechazo por falta de Administrador en handleSave', routes.includes('Selecciona al menos un Administrador responsable.'))
+  assert(!routes.includes('disabled={!hasActiveAdmin}'), 'el botón Nueva ruta sigue deshabilitado sin Administrador')
+  assert(!routes.includes('Selecciona al menos un Administrador responsable.'), 'la pantalla sigue rechazando la creación sin Administrador')
+})
+
+await spec('ONB-ROUTE-012', 'Primera ruta', 'el Super Admin crea una ruta sin Administrador y el Cobrador queda operativo', async () => {
+  const { db } = await empresaSinRutas()
+  const cobrador = nuevoUsuario({ id: 'u-cob-1', email: 'luis@c.com' })
+  await db.users.add(cobrador)
+
+  // Efecto de createRouteWithAdmins cuando adminIds queda vacío: solo se asigna
+  // el cobrador responsable; ningún Administrador entra en la ruta.
+  await db.transaction('rw', [db.routes, db.users], async () => {
+    await db.routes.add({ id: 'r-1', tenantId: 't-1', nombre: 'Ruta Norte', cobradorId: 'u-cob-1', status: 'activa' })
+    await db.users.update('u-cob-1', { authorizedRouteIds: ['r-1'], routeId: 'r-1' })
+  })
+
+  const users = await db.users.toArray() as User[]
+  const cob = users.find(u => u.id === 'u-cob-1')!
+  const adminsEnRuta = users.filter(u => u.rol === 'admin' && (u.authorizedRouteIds ?? []).includes('r-1'))
+  const ruta = (await db.routes.toArray())[0]
+  metric('rutas creadas', (await db.routes.toArray()).length)
+  metric('administradores en la ruta', adminsEnRuta.length)
+  metric('cobrador responsable', ruta.cobradorId)
+  metric('cobrador operativo', hasOperationalRoutes(cob))
+  assert(!!ruta, 'la ruta no se creó')
+  assert(adminsEnRuta.length === 0, 'se asignó un Administrador que nadie pidió')
+  assert(ruta.cobradorId === 'u-cob-1', 'la ruta quedó sin cobrador responsable')
+  assert(hasOperationalRoutes(cob), 'el cobrador debe quedar operativo aunque la ruta no tenga Administrador')
+})
+
+await spec('ONB-ROUTE-013', 'Primera ruta', 'el Administrador que crea una ruta queda SIEMPRE autoasignado', async () => {
+  const { db, su, admin } = await empresaSinRutas()
+  void db
+  // Aunque la pantalla enviara una lista vacía, el servicio autoincluye al actor.
+  const efectivos = resolveRouteAdminIds([], admin)
+  metric('adminIds enviados', '(vacío)')
+  metric('adminIds efectivos', efectivos.join(', '))
+  assert(efectivos.includes(admin.id), 'el Administrador creador NO quedó asignado: se auto-bloquearía')
+
+  // No duplica si ya venía incluido.
+  const yaIncluido = resolveRouteAdminIds([admin.id], admin)
+  metric('sin duplicados', yaIncluido.length)
+  assert(yaIncluido.length === 1 && yaIncluido[0] === admin.id, 'la autoasignación duplicó al Administrador')
+
+  // Y tras crear la ruta, el fail-closed queda levantado para él.
+  await db.transaction('rw', [db.routes, db.users], async () => {
+    await db.routes.add({ id: 'r-1', tenantId: 't-1', nombre: 'Ruta Norte', cobradorId: 'u-cob-1', status: 'activa' })
+    await db.users.update(admin.id, { authorizedRouteIds: ['r-1'], routeId: 'r-1' })
+  })
+  const adm = (await db.users.toArray() as User[]).find(u => u.id === admin.id)!
+  metric('fail-closed levantado tras crear', hasOperationalRoutes(adm))
+  assert(hasOperationalRoutes(adm), 'el Administrador creador quedó sin acceso a su propia ruta')
+
+  // El Super Admin no se autoasigna (no se limita por rutas).
+  metric('Super Admin autoasignado', resolveRouteAdminIds([], su).length > 0)
+  assert(resolveRouteAdminIds([], su).length === 0, 'el Super Admin no debe autoasignarse')
+
+  // El servicio deja constancia auditable de la autoasignación.
+  const routeService = readSource('src/services/routeService.ts')
+  assert(routeService.includes('resolveRouteAdminIds(input.adminIds, actor)'), 'createRouteWithAdmins dejó de aplicar la regla de autoasignación')
+})
+
+await spec('ONB-ROUTE-014', 'Primera ruta', 'un Administrador puede asignarse a una ruta creada sin Administrador', async () => {
+  const { db, admin } = await empresaSinRutas()
+  await db.users.add(nuevoUsuario({ id: 'u-cob-1', email: 'luis@c.com' }))
+  // Ruta creada por el Super Admin SIN Administrador.
+  await db.routes.add({ id: 'r-1', tenantId: 't-1', nombre: 'Ruta Norte', cobradorId: 'u-cob-1', status: 'activa' })
+  await db.users.update('u-cob-1', { authorizedRouteIds: ['r-1'], routeId: 'r-1' })
+
+  const antes = (await db.users.toArray() as User[]).find(u => u.id === admin.id)!
+  metric('admin operativo antes de asignarle la ruta', hasOperationalRoutes(antes))
+  assert(!hasOperationalRoutes(antes), 'precondición: el Admin aún no debe tener acceso')
+
+  // ASIGNACIÓN POSTERIOR (editor de ruta / Gestión de usuarios): misma fuente única.
+  await db.users.update(admin.id, { authorizedRouteIds: ['r-1'], routeId: 'r-1' })
+
+  const despues = (await db.users.toArray() as User[]).find(u => u.id === admin.id)!
+  metric('authorizedRouteIds tras la asignación', JSON.stringify(despues.authorizedRouteIds))
+  metric('admin operativo después', hasOperationalRoutes(despues))
+  metric('accede a la ruta', canAccessRoute(despues, 'r-1'))
+  assert(hasOperationalRoutes(despues), 'la asignación posterior de Administrador debe habilitar su operación')
+  assert(canAccessRoute(despues, 'r-1'), 'el Administrador asignado debe acceder a la ruta')
+})
+
+await spec('ONB-ROUTE-015', 'Primera ruta', 'un Administrador sin rutas sigue fail-closed tras la nueva regla', async () => {
+  const { db, admin } = await empresaSinRutas()
+  await db.users.add(nuevoUsuario({ id: 'u-cob-1', email: 'luis@c.com' }))
+  // Ruta creada SIN Administrador: no debe conceder acceso a ningún Admin.
+  await db.routes.add({ id: 'r-1', tenantId: 't-1', nombre: 'Ruta Norte', cobradorId: 'u-cob-1', status: 'activa' })
+
+  const adm = (await db.users.toArray() as User[]).find(u => u.id === admin.id)!
+  metric('hasOperationalRoutes', hasOperationalRoutes(adm))
+  metric('canAccessRoute(r-1)', canAccessRoute(adm, 'r-1'))
+  metric('rutas visibles', filterAccessibleRoutes(adm, [{ id: 'r-1' } as never]).length)
+  metric('ventas visibles', filterByAccessibleRoute(adm, [{ routeId: 'r-1' } as never]).length)
+  metric('can(client.view)', can(adm, 'client.view', { routeId: 'r-1' }))
+  assert(!hasOperationalRoutes(adm), 'una ruta sin Administrador NO puede conceder acceso implícito')
+  assert(!canAccessRoute(adm, 'r-1'), 'el fail-closed se rompió')
+  assert(filterAccessibleRoutes(adm, [{ id: 'r-1' } as never]).length === 0, 'el Admin ve una ruta que no tiene asignada')
+  assert(filterByAccessibleRoute(adm, [{ routeId: 'r-1' } as never]).length === 0, 'el Admin ve datos de una ruta ajena')
+  assert(!can(adm, 'client.view', { routeId: 'r-1' }), 'el Admin sin rutas consulta clientes')
+
+  // La pantalla informativa sigue montándose para el Admin sin rutas.
+  const layout = readSource('src/components/layout/AdminLayout.tsx')
+  metric('AdminNoRoutes sigue montado', layout.includes("user?.rol === 'admin' && !hasOperationalRoutes(user) ? <AdminNoRoutes />"))
+  assert(layout.includes("user?.rol === 'admin' && !hasOperationalRoutes(user) ? <AdminNoRoutes />"), 'se perdió la pantalla de fail-closed del Administrador')
+})
+
+await spec('ONB-ROUTE-016', 'Primera ruta', 'el checklist de arranque no exige Administrador para dar la ruta por hecha', () => {
+  const checklist = readSource('src/components/ui/SetupChecklist.tsx')
+  metric('condición antigua (routeHasAdmin)', checklist.includes('routeHasAdmin'))
+  metric('condición nueva (ruta con cobrador)', checklist.includes('hasOperationalRoute'))
+  assert(!checklist.includes('routeHasAdmin'), 'el checklist sigue exigiendo Administrador en la ruta')
+  assert(checklist.includes('hasOperationalRoute'), 'falta la condición basada en la ruta con Cobrador')
+  assert(!checklist.includes('Crea una ruta y asígnale un Administrador'), 'el texto sigue exigiendo Administrador')
 })
 
 // ############################################################

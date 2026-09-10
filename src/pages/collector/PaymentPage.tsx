@@ -9,6 +9,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatCurrencyInput, parseCurrencyInput, getCurrencySymbol } from '@/lib/formatters'
 import { calculateCurrentInstallment } from '@/services/installmentEngine'
 import { registerPayment, quickAmounts } from '@/services/paymentService'
+import { CollectorPicker } from '@/components/ui/CollectorPicker'
 import { buildWhatsAppMessage } from '@/lib/utils'
 import type { Sale, Client, Installment } from '@/models/types'
 
@@ -23,6 +24,8 @@ export default function PaymentPage() {
   const [installments, setInstallments] = useState<Installment[]>([])
   const [valor, setValor] = useState(0)
   const [observacion, setObservacion] = useState('')
+  /** Cobrador RESPONSABLE del recaudo. El propio cobrador no lo elige: es él. */
+  const [collectorId, setCollectorId] = useState('')
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
   // Número de parcela que se está pagando (lo informa el servicio) para que la
@@ -70,6 +73,9 @@ export default function PaymentPage() {
         saleId: sale.id,
         requestedAmount: valor,
         actor: user,
+        // Solo aplica cuando quien registra NO es el cobrador (p. ej. un Supervisor
+        // que digita un cobro hecho por otra persona).
+        collectorId: collectorId || undefined,
         observacion,
         lat,
         lng,
@@ -188,6 +194,11 @@ export default function PaymentPage() {
               <p className="text-xs text-amber-600">Supera el saldo: se registrará {formatCurrency(qa.total, currency)} y la deuda quedará en {formatCurrency(0, currency)}.</p>
             )}
           </div>
+
+          {/* ¿Quién recibió el dinero? Solo aparece cuando quien registra NO es el
+              cobrador (Supervisor). Para el Cobrador el componente no renderiza nada:
+              responde él, así que no hay nada que preguntar. */}
+          {sale && <CollectorPicker routeId={sale.routeId} value={collectorId} onChange={setCollectorId} />}
 
           {/* Observation */}
           <div className="bg-white rounded-2xl border border-gray-200 p-4">

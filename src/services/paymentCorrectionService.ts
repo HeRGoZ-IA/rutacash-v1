@@ -18,6 +18,8 @@ import { nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { can } from '@/lib/permissions'
 import { recalculateSaleFromPayments, calculateSaleBalance } from '@/services/installmentEngine'
+import { effectivePayments as onlyEffective, lastEffectivePaymentDate } from '@/lib/paymentState'
+import { resolveSealedCompletionDate } from '@/lib/creditHistory'
 import type { Payment, PaymentAdjustmentRequest, Sale, User } from '@/models/types'
 
 /** ¿El pago cae dentro de una liquidación/periodo CERRADO de su ruta? */
@@ -31,18 +33,12 @@ export async function isPaymentInClosedPeriod(payment: Payment): Promise<boolean
 /**
  * Pagos "efectivos" de una venta: excluye originales revertidos y asientos de reversión.
  *
- * Es la ÚNICA definición de qué pagos cuentan contablemente. Se exporta para que el
- * diagnóstico de conciliación (`financialReconciliation`) aplique exactamente la misma
- * semántica y no haga una suma ingenua de todas las filas de `payments`:
- *   · `state: 'reversed'`  → original anulado por una corrección  → NO cuenta
- *   · `state: 'reversal'`  → asiento negativo que anula al anterior → NO cuenta
- *   · `state: 'active' | 'correction' | undefined` (pagos antiguos) → SÍ cuenta
- * Excluir el par (original + reversión) equivale a netearlos, y evita depender del
- * signo negativo del asiento.
+ * La definición vive ahora en `@/lib/paymentState` (pura, sin Dexie) para que también
+ * puedan aplicarla las migraciones del esquema y los reportes sin dependencia circular.
+ * Se REEXPORTA aquí para no romper a quien ya la importaba desde este servicio: sigue
+ * habiendo una sola definición de qué cuenta contablemente.
  */
-export function effectivePayments(payments: Payment[]): Payment[] {
-  return payments.filter(p => p.state !== 'reversed' && p.state !== 'reversal')
-}
+export { effectivePayments, isEffectivePayment, lastEffectivePaymentDate } from '@/lib/paymentState'
 
 /**
  * Recalcula parcelas y saldo/estado de la venta a partir de sus pagos efectivos.
@@ -61,7 +57,8 @@ async function recomputeSale(saleId: string): Promise<void> {
   if (!sale) return
   const installments = await db.installments.where('saleId').equals(saleId).toArray()
   const payments = await db.payments.where('saleId').equals(saleId).toArray()
-  const recomputed = recalculateSaleFromPayments(installments, effectivePayments(payments))
+  const vigentes = onlyEffective(payments)
+  const recomputed = recalculateSaleFromPayments(installments, vigentes)
   for (const inst of recomputed) {
     await db.installments.update(inst.id, { pagado: inst.pagado, saldo: inst.saldo, status: inst.status, diasMora: inst.diasMora })
   }
@@ -70,7 +67,20 @@ async function recomputeSale(saleId: string): Promise<void> {
   if (sale.status === 'activa' || sale.status === 'finalizada') {
     status = newSaldo <= 0 ? 'finalizada' : 'activa'
   }
-  await db.sales.update(saleId, { saldo: Math.max(0, newSaldo), status, updatedAt: nowISO() })
+
+  // FECHA REAL DE FINALIZACIÓN: se conserva si ya estaba sellada; solo se limpia
+  // cuando la corrección REABRE la venta (deja de estar finalizada), y se sella de
+  // nuevo si vuelve a saldarse. Nunca se reescribe una fecha ya sellada mientras la
+  // venta siga cerrada. Ver `resolveSealedCompletionDate`.
+  const fechaFinalizacion = resolveSealedCompletionDate({
+    status,
+    sealed: sale.fechaFinalizacion,
+    lastEffectivePaymentDate: lastEffectivePaymentDate(vigentes),
+  })
+
+  await db.sales.update(saleId, {
+    saldo: Math.max(0, newSaldo), status, fechaFinalizacion, updatedAt: nowISO(),
+  })
 }
 
 export interface CorrectionInput {

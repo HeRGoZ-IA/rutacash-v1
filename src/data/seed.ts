@@ -370,6 +370,11 @@ export async function seedDatabase() {
       fechaInicio,
       fechaFinalEstimada,
       status: 'activa',
+      // ATRIBUCIÓN DEL EFECTIVO (revisión del socio): el desembolso sale de la caja
+      // personal del cobrador que entregó el dinero, en la fecha en que lo entregó.
+      disbursedByCollectorId: sd.cobradorId,
+      disbursedByUserId: sd.cobradorId,
+      fechaDesembolso: fechaInicio,
       createdAt: subDays(now, sd.daysAgo).toISOString(),
       updatedAt: now.toISOString(),
     }
@@ -389,12 +394,12 @@ export async function seedDatabase() {
 
   // ---- EXPENSES ----
   const expenses: Expense[] = [
-    { id: uuidv4(), tenantId: TENANT_ID, officeId: OFFICE1_ID, routeId: ROUTE1_ID, categoryId: expenseCategories[0].id, valor: 20000, descripcion: 'Gasolina ruta mañana', fecha: d(subDays(now, 1)), userId: USER_COB1_ID, syncStatus: 'synced', createdAt: subDays(now, 1).toISOString() },
-    { id: uuidv4(), tenantId: TENANT_ID, officeId: OFFICE1_ID, routeId: ROUTE1_ID, categoryId: expenseCategories[0].id, valor: 25000, descripcion: 'Gasolina ruta tarde', fecha: d(subDays(now, 3)), userId: USER_COB1_ID, syncStatus: 'synced', createdAt: subDays(now, 3).toISOString() },
-    { id: uuidv4(), tenantId: TENANT_ID, officeId: OFFICE1_ID, routeId: ROUTE2_ID, categoryId: expenseCategories[0].id, valor: 30000, descripcion: 'Gasolina', fecha: d(subDays(now, 2)), userId: USER_COB2_ID, syncStatus: 'synced', createdAt: subDays(now, 2).toISOString() },
-    { id: uuidv4(), tenantId: TENANT_ID, officeId: OFFICE1_ID, routeId: ROUTE1_ID, categoryId: expenseCategories[2].id, valor: 15000, descripcion: 'Despinchada av principal', fecha: d(subDays(now, 4)), userId: USER_COB1_ID, syncStatus: 'synced', createdAt: subDays(now, 4).toISOString() },
-    { id: uuidv4(), tenantId: TENANT_ID, officeId: OFFICE2_ID, routeId: ROUTE3_ID, categoryId: expenseCategories[0].id, valor: 22000, descripcion: 'Gasolina semana', fecha: d(subDays(now, 1)), userId: USER_COB3_ID, syncStatus: 'synced', createdAt: subDays(now, 1).toISOString() },
-    { id: uuidv4(), tenantId: TENANT_ID, officeId: OFFICE2_ID, routeId: ROUTE4_ID, categoryId: expenseCategories[5].id, valor: 10000, descripcion: 'Bus para segunda vuelta', fecha: d(now), userId: USER_COB4_ID, syncStatus: 'pending', createdAt: now.toISOString() },
+    { id: uuidv4(), tenantId: TENANT_ID, officeId: OFFICE1_ID, routeId: ROUTE1_ID, categoryId: expenseCategories[0].id, valor: 20000, descripcion: 'Gasolina ruta mañana', fecha: d(subDays(now, 1)), userId: USER_COB1_ID, collectorId: USER_COB1_ID, syncStatus: 'synced', createdAt: subDays(now, 1).toISOString() },
+    { id: uuidv4(), tenantId: TENANT_ID, officeId: OFFICE1_ID, routeId: ROUTE1_ID, categoryId: expenseCategories[0].id, valor: 25000, descripcion: 'Gasolina ruta tarde', fecha: d(subDays(now, 3)), userId: USER_COB1_ID, collectorId: USER_COB1_ID, syncStatus: 'synced', createdAt: subDays(now, 3).toISOString() },
+    { id: uuidv4(), tenantId: TENANT_ID, officeId: OFFICE1_ID, routeId: ROUTE2_ID, categoryId: expenseCategories[0].id, valor: 30000, descripcion: 'Gasolina', fecha: d(subDays(now, 2)), userId: USER_COB2_ID, collectorId: USER_COB2_ID, syncStatus: 'synced', createdAt: subDays(now, 2).toISOString() },
+    { id: uuidv4(), tenantId: TENANT_ID, officeId: OFFICE1_ID, routeId: ROUTE1_ID, categoryId: expenseCategories[2].id, valor: 15000, descripcion: 'Despinchada av principal', fecha: d(subDays(now, 4)), userId: USER_COB1_ID, collectorId: USER_COB1_ID, syncStatus: 'synced', createdAt: subDays(now, 4).toISOString() },
+    { id: uuidv4(), tenantId: TENANT_ID, officeId: OFFICE2_ID, routeId: ROUTE3_ID, categoryId: expenseCategories[0].id, valor: 22000, descripcion: 'Gasolina semana', fecha: d(subDays(now, 1)), userId: USER_COB3_ID, collectorId: USER_COB3_ID, syncStatus: 'synced', createdAt: subDays(now, 1).toISOString() },
+    { id: uuidv4(), tenantId: TENANT_ID, officeId: OFFICE2_ID, routeId: ROUTE4_ID, categoryId: expenseCategories[5].id, valor: 10000, descripcion: 'Bus para segunda vuelta', fecha: d(now), userId: USER_COB4_ID, collectorId: USER_COB4_ID, syncStatus: 'pending', createdAt: now.toISOString() },
   ]
 
   // ---- CAPITAL MOVEMENTS ----
@@ -417,7 +422,9 @@ export async function seedDatabase() {
           saleId: sale.id,
           clientId: sale.clientId,
           routeId: sale.routeId,
+          // El cobrador recibió el dinero Y lo registró (caso normal en la calle).
           collectorId: sale.createdByUserId,
+          createdByUserId: sale.createdByUserId,
           valor: inst.valor,
           fecha: inst.fechaVencimiento,
           tipo: 'efectivo',
@@ -436,6 +443,7 @@ export async function seedDatabase() {
     clientId: clientIds[0],
     routeId: ROUTE1_ID,
     collectorId: USER_COB1_ID,
+    createdByUserId: USER_COB1_ID,
     valor: salesWithInstallments[0].sale.valorCuota,
     fecha: d(now),
     tipo: 'efectivo',

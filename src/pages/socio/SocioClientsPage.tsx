@@ -1,6 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Search, Users, Lock } from 'lucide-react'
+import { Search, Users, Lock, History } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
+import { ClientCreditHistory } from '@/components/ui/ClientCreditHistory'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { db } from '@/lib/db'
@@ -23,6 +26,8 @@ export default function SocioClientsPage() {
   const [sales, setSales] = useState<Sale[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  /** Cliente cuyo historial de créditos se está consultando. */
+  const [historyClient, setHistoryClient] = useState<Client | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -74,7 +79,7 @@ export default function SocioClientsPage() {
           {filtered.map(c => {
             const saldo = activeSaldo(c.id)
             return (
-              <div key={c.id} className="flex items-center gap-3 px-4 py-3">
+              <div key={c.id} className="flex items-center gap-2 px-4 py-3">
                 <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center text-primary-700 font-bold text-sm flex-shrink-0">
                   {c.nombre.charAt(0)}
                 </div>
@@ -87,11 +92,32 @@ export default function SocioClientsPage() {
                     ? <p className="text-sm font-semibold text-amber-600">{formatCurrency(saldo, currency)}</p>
                     : <Badge variant="gray" size="sm">Sin saldo</Badge>}
                 </div>
+                {/* Consulta del historial de créditos (misma vista que Admin y Secretario). */}
+                <button
+                  onClick={() => setHistoryClient(c)}
+                  title="Ver historial de créditos"
+                  aria-label={`Ver historial de créditos de ${c.nombre}`}
+                  className="flex-shrink-0 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                >
+                  <History className="w-3.5 h-3.5" /> Historial
+                </button>
               </div>
             )
           })}
         </div>
       )}
+
+      {/* Historial de créditos (solo consulta) */}
+      <Modal open={!!historyClient} onClose={() => setHistoryClient(null)} size="lg"
+        title={historyClient ? `Historial de créditos · ${historyClient.nombre}` : 'Historial de créditos'}
+        footer={<Button variant="secondary" onClick={() => setHistoryClient(null)}>Cerrar</Button>}>
+        {historyClient && (
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500">Documento: <span className="font-medium text-gray-700">{historyClient.documento}</span> · Ruta: {routeName(historyClient.routeId)}</p>
+            <ClientCreditHistory client={historyClient} />
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

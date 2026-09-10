@@ -27,6 +27,11 @@ import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
 import { nowISO, today } from '@/lib/formatters'
 import { can } from '@/lib/permissions'
+import { getAssignedRouteIds } from '@/lib/roles'
+import {
+  resolveResponsibleCollector, COLLECTOR_ATTRIBUTION_MESSAGE,
+  type CollectorAttributionSource,
+} from '@/lib/collectorAttribution'
 import { logAction } from '@/services/auditService'
 import {
   applyPaymentToInstallments, calculateSaleBalance,
@@ -54,6 +59,10 @@ export interface PaymentDatabase {
     get(key: string): Promise<Sale | undefined>
     update(key: string, changes: Partial<Sale>): Promise<number>
   }
+  /** Solo lectura: necesaria para resolver el COBRADOR RESPONSABLE del recaudo. */
+  users: {
+    where(index: string): { equals(key: string): { toArray(): Promise<User[]> } }
+  }
   transaction<U>(mode: 'rw', tables: any, scope: () => PromiseLike<U>): Promise<U>
 }
 
@@ -68,6 +77,8 @@ export type PaymentRejectionCode =
   | 'SALE_NOT_DISBURSED'  // venta aprobada pero aún no desembolsada
   | 'NO_INSTALLMENTS'     // venta sin parcelas: dato inconsistente, nunca se cobra
   | 'NO_BALANCE'          // la venta ya no tiene saldo pendiente
+  | 'COLLECTOR_REQUIRED'  // varios cobradores en la ruta: hay que indicar quién cobró
+  | 'COLLECTOR_INVALID'   // el cobrador indicado no es cobrador activo de esa ruta
   | 'WRITE_FAILED'        // fallo de persistencia: se revirtió todo
 
 export interface RegisterPaymentInput {
@@ -77,6 +88,12 @@ export interface RegisterPaymentInput {
   requestedAmount: number
   /** Usuario en sesión. Se valida su capacidad contra la ruta real de la venta. */
   actor: User | null | undefined
+  /**
+   * COBRADOR RESPONSABLE del recaudo (quien recibió el dinero), cuando NO coincide
+   * con el actor. Lo envían las interfaces administrativas al registrar un cobro
+   * hecho por un cobrador. Si se omite, lo resuelve `resolveResponsibleCollector`.
+   */
+  collectorId?: string
   tipo?: PaymentType
   observacion?: string
   /** Fecha contable del pago (yyyy-MM-dd). Por defecto, hoy. */
@@ -90,6 +107,10 @@ export interface RegisterPaymentInput {
 export interface RegisterPaymentSuccess {
   ok: true
   paymentId: string
+  /** Cobrador al que quedó atribuido el dinero (puede no ser el actor). */
+  collectorId: string
+  /** Cómo se determinó ese cobrador (ver `CollectorAttributionSource`). */
+  collectorSource: CollectorAttributionSource
   /** Lo que pidió el usuario. */
   requestedAmount: number
   /** Lo que realmente se registró y aplicó (= requestedAmount si no hubo tope). */
@@ -153,6 +174,8 @@ const REJECTION_MESSAGES: Record<PaymentRejectionCode, string> = {
   SALE_NOT_DISBURSED: 'Esta venta aún no está desembolsada.',
   NO_INSTALLMENTS: 'La venta no tiene parcelas generadas. Revísala antes de cobrar.',
   NO_BALANCE: 'Esta venta ya no tiene saldo pendiente.',
+  COLLECTOR_REQUIRED: COLLECTOR_ATTRIBUTION_MESSAGE.ambiguous,
+  COLLECTOR_INVALID: COLLECTOR_ATTRIBUTION_MESSAGE.invalid,
   WRITE_FAILED: 'Error al registrar el pago. No se guardó ningún cambio.',
 }
 
@@ -223,6 +246,25 @@ export async function registerPayment(
         throw new PaymentRejection('NO_BALANCE', REJECTION_MESSAGES.NO_BALANCE)
       }
 
+      // ---- 4.b COBRADOR RESPONSABLE DEL RECAUDO ------------------------------
+      // Quien REGISTRA no es necesariamente quien recibió el dinero. Se resuelve
+      // contra los cobradores REALES de la ruta de la venta (releídos de la base,
+      // no enviados por la pantalla). Con varios cobradores no se adivina: se exige
+      // indicar quién cobró, para que el efectivo no se cargue a la caja equivocada.
+      const routeCollectors = (await database.users.where('tenantId').equals(sale.tenantId).toArray())
+        .filter(u => u.rol === 'cobrador' && getAssignedRouteIds(u).includes(sale.routeId))
+      const atribucion = resolveResponsibleCollector({
+        actor: input.actor!,
+        requested: input.collectorId,
+        routeCollectors,
+      })
+      if (!atribucion.ok) {
+        throw new PaymentRejection(
+          atribucion.code === 'ambiguous' ? 'COLLECTOR_REQUIRED' : 'COLLECTOR_INVALID',
+          atribucion.message,
+        )
+      }
+
       // ---- 5. TOPE AL SALDO --------------------------------------------------
       const appliedAmount = Math.min(requestedAmount, previousBalance)
       const capped = appliedAmount < requestedAmount
@@ -245,7 +287,10 @@ export async function registerPayment(
         saleId: sale.id,
         clientId: sale.clientId,
         routeId: sale.routeId,
-        collectorId: input.actor!.id,
+        // RESPONSABILIDAD ≠ REGISTRO: el dinero se atribuye a quien lo recibió;
+        // quién lo digitó queda por separado para trazabilidad.
+        collectorId: atribucion.collectorId,
+        createdByUserId: input.actor!.id,
         // INVARIANTE: se guarda el valor EFECTIVO, jamás el solicitado.
         valor: appliedAmount,
         fecha: input.fecha ?? today(),
@@ -263,15 +308,24 @@ export async function registerPayment(
           pagado: inst.pagado, saldo: inst.saldo, status: inst.status, diasMora: inst.diasMora,
         })
       }
-      await database.sales.update(sale.id, {
-        saldo: newBalance, status: saleStatus, updatedAt: nowISO(),
-      })
+
+      // FECHA REAL DE FINALIZACIÓN: cuando este abono salda la venta, se SELLA con la
+      // fecha CONTABLE del propio pago (no `updatedAt`, que cambia con cualquier
+      // actualización posterior y no serviría como dato histórico). Si la venta ya
+      // traía una fecha sellada, se respeta.
+      const saleChanges: Partial<Sale> = { saldo: newBalance, status: saleStatus, updatedAt: nowISO() }
+      if (saleStatus === 'finalizada' && !sale.fechaFinalizacion) {
+        saleChanges.fechaFinalizacion = payment.fecha
+      }
+      await database.sales.update(sale.id, saleChanges)
 
       auditCtx = { tenantId: sale.tenantId, routeId: sale.routeId, saleId: sale.id }
 
       const result: RegisterPaymentSuccess = {
         ok: true,
         paymentId: payment.id,
+        collectorId: atribucion.collectorId,
+        collectorSource: atribucion.source,
         requestedAmount,
         appliedAmount,
         capped,
@@ -322,6 +376,10 @@ export async function registerPayment(
           routeId: ctx.routeId,
           tenantId: ctx.tenantId,
           actorId: input.actor.id,
+          // Trazabilidad de la atribución: quién responde por el dinero y quién lo digitó.
+          collectorId: consolidated.collectorId,
+          createdByUserId: input.actor.id,
+          collectorSource: consolidated.collectorSource,
           requestedAmount: consolidated.requestedAmount,
           appliedAmount: consolidated.appliedAmount,
           capped: consolidated.capped,

@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie'
+import { lastEffectivePaymentDate } from '@/lib/paymentState'
 import type {
   Tenant, Route, User, Client, Sale, Installment, Payment,
   NoPaymentVisit, ExpenseCategory, Expense, CapitalMovement, Transfer,
@@ -206,6 +207,97 @@ export class RutaCashDB extends Dexie {
         }
       }
       console.log(`[RutaCash][migración v8] cobradorId inválidos limpiados: ${cleared}; membresías de responsable sincronizadas: ${synced}.`)
+    })
+
+    // ============================================================
+    // v9 (FECHA REAL DE FINALIZACIÓN DEL CRÉDITO): aditiva y segura.
+    // `Sale.fechaFinalizacion` es un campo NUEVO y OPCIONAL: no cambia índices, no
+    // borra nada y no toca importes. Esta migración solo rellena el dato histórico
+    // de las ventas que YA estaban finalizadas:
+    //   · Se toma la fecha CONTABLE del ÚLTIMO PAGO VIGENTE de la venta
+    //     (`lastEffectivePaymentDate`: excluye originales revertidos y asientos de
+    //     reversión, misma semántica que la corrección controlada).
+    //   · Si la venta no tiene ningún pago vigente, se DEJA VACÍA. No se inventa una
+    //     fecha, y NUNCA se usa `updatedAt` (cambia con cualquier actualización
+    //     posterior y no representa el cierre).
+    //   · Ventas activas, perdidas o refinanciadas no reciben fecha: no han
+    //     terminado de pagarse.
+    // Se ejecuta UNA sola vez; a partir de aquí la fecha la sellan `paymentService`
+    // (al saldar) y `paymentCorrectionService` (al recomputar).
+    // ============================================================
+    this.version(9).upgrade(async (tx) => {
+      const sales = await tx.table('sales').toArray() as Sale[]
+      const pendientes = sales.filter(s => s.status === 'finalizada' && !s.fechaFinalizacion)
+      if (pendientes.length === 0) {
+        console.log('[RutaCash][migración v9] No hay ventas finalizadas sin fecha real de finalización.')
+        return
+      }
+      const payments = await tx.table('payments').toArray() as Payment[]
+      const porVenta = new Map<string, Payment[]>()
+      for (const p of payments) {
+        const arr = porVenta.get(p.saleId) ?? []
+        arr.push(p)
+        porVenta.set(p.saleId, arr)
+      }
+      let selladas = 0
+      let sinFuente = 0
+      for (const s of pendientes) {
+        const fecha = lastEffectivePaymentDate(porVenta.get(s.id) ?? [])
+        if (!fecha) { sinFuente++; continue }   // sin fuente fiable → se deja vacía
+        await tx.table('sales').update(s.id, { fechaFinalizacion: fecha })
+        selladas++
+      }
+      console.log(`[RutaCash][migración v9] Fecha real de finalización inferida en ${selladas} venta(s); ${sinFuente} sin pago vigente del que inferirla (quedan vacías).`)
+    })
+
+    // ============================================================
+    // v10 (ATRIBUCIÓN DEL EFECTIVO: REGISTRAR ≠ RESPONDER): aditiva y segura.
+    // Se separan dos conceptos que antes compartían un solo campo. NO se reinterpreta
+    // ningún dato histórico ni se mueve dinero de una caja a otra:
+    //
+    //   · payments.createdByUserId ← collectorId
+    //     EQUIVALENCIA LEGACY EXPLÍCITA: antes de esta versión `collectorId` guardaba
+    //     el id de quien DIGITABA el abono, que en la práctica era casi siempre el
+    //     propio cobrador. Se conserva `collectorId` intacto (sigue siendo el
+    //     responsable del dinero) y se copia en `createdByUserId` porque es la única
+    //     fuente histórica de quién registró. A partir de aquí ambos se escriben por
+    //     separado y pueden diferir.
+    //
+    //   · expenses.collectorId ← userId, SOLO si ese usuario es cobrador.
+    //     Un gasto registrado por un Admin no se carga a la caja personal de nadie.
+    //
+    //   · sales.disbursedByCollectorId / fechaDesembolso para ventas ya desembolsadas.
+    //     El responsable se infiere de `createdByUserId` cuando es cobrador; la fecha,
+    //     de `fechaInicio` (fecha contable de arranque del crédito). Es la mejor
+    //     aproximación disponible y queda documentada como comportamiento legacy.
+    //
+    // No se borra nada, no se cambian importes y ninguna venta cambia de estado.
+    // ============================================================
+    this.version(10).upgrade(async (tx) => {
+      const users = await tx.table('users').toArray() as User[]
+      const esCobrador = new Set(users.filter(u => u.rol === 'cobrador').map(u => u.id))
+
+      let pagos = 0
+      await tx.table('payments').toCollection().modify((p: Payment) => {
+        if (!p.createdByUserId) { p.createdByUserId = p.collectorId; pagos++ }
+      })
+
+      let gastos = 0
+      await tx.table('expenses').toCollection().modify((e: Expense) => {
+        if (e.collectorId === undefined && esCobrador.has(e.userId)) { e.collectorId = e.userId; gastos++ }
+      })
+
+      let ventas = 0
+      await tx.table('sales').toCollection().modify((s: Sale) => {
+        if (s.disbursementStatus === 'pendiente') return
+        if (s.disbursedByCollectorId !== undefined || s.fechaDesembolso !== undefined) return
+        if (esCobrador.has(s.createdByUserId)) s.disbursedByCollectorId = s.createdByUserId
+        s.disbursedByUserId = s.createdByUserId
+        s.fechaDesembolso = s.fechaInicio
+        ventas++
+      })
+
+      console.log(`[RutaCash][migración v10] Atribución separada: ${pagos} pago(s), ${gastos} gasto(s) y ${ventas} venta(s) desembolsada(s). Los valores históricos conservan la equivalencia legacy (registrador = responsable).`)
     })
   }
 }

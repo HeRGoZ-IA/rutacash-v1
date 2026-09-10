@@ -75,7 +75,8 @@ export type Capability =
   | 'expense.register'
   | 'expense.correct'
   // Caja
-  | 'cashbox.viewRoute'
+  | 'cashbox.viewRoute'          // caja FINANCIERA de la ruta (capital incluido)
+  | 'cashbox.viewOwnCollection'  // caja PERSONAL: solo el recaudo propio
   | 'cashbox.viewConsolidated'
   | 'cashbox.dailyClose'
   | 'partnerCash.viewOwn'
@@ -107,7 +108,7 @@ const SUPERADMIN_CAPS: Capability[] = [
   'authorization.modifyConditions', 'authorization.phoneConfirm',
   'payment.register', 'payment.correct', 'payment.reverse', 'payment.viewHistory', 'payment.approveAdjustment',
   'expense.register', 'expense.correct',
-  'cashbox.viewRoute', 'cashbox.viewConsolidated', 'cashbox.dailyClose',
+  'cashbox.viewRoute', 'cashbox.viewOwnCollection', 'cashbox.viewConsolidated', 'cashbox.dailyClose',
   'partnerCash.viewOwn', 'partnerCash.viewAll', 'partnerCash.registerMovement', 'transfer.create',
   'report.view', 'report.export', 'report.viewPortfolio', 'report.viewConsolidated',
   'audit.view',
@@ -127,7 +128,7 @@ const ADMIN_CAPS: Capability[] = [
   'authorization.access', 'authorization.approve', 'authorization.reject', 'authorization.modifyConditions',
   'payment.register', 'payment.correct', 'payment.reverse', 'payment.viewHistory', 'payment.approveAdjustment',
   'expense.register', 'expense.correct',
-  'cashbox.viewRoute', 'cashbox.viewConsolidated', 'cashbox.dailyClose',
+  'cashbox.viewRoute', 'cashbox.viewOwnCollection', 'cashbox.viewConsolidated', 'cashbox.dailyClose',
   'partnerCash.viewAll', 'partnerCash.registerMovement', 'transfer.create',
   'report.view', 'report.export', 'report.viewPortfolio', 'report.viewConsolidated',
   'audit.view',
@@ -153,7 +154,7 @@ const SUPERVISOR_CAPS: Capability[] = [
   'sale.viewActive', 'sale.viewHistory', 'sale.createRequest', 'sale.confirmDisbursement',
   'payment.register', 'payment.viewHistory',
   'expense.register',
-  'cashbox.viewRoute', 'cashbox.dailyClose',
+  'cashbox.viewRoute', 'cashbox.viewOwnCollection', 'cashbox.dailyClose',
   'report.view', 'report.export', 'report.viewPortfolio',
   'password.changeOwn',
 ]
@@ -166,7 +167,9 @@ const COBRADOR_CAPS: Capability[] = [
   'sale.viewActive', 'sale.viewHistory', 'sale.createRequest', 'sale.confirmDisbursement',
   'payment.register', 'payment.viewHistory',
   'expense.register',
-  'cashbox.viewRoute', 'cashbox.dailyClose',
+  // CAJA: el Cobrador ve SU recaudo, no la caja financiera de la ruta (ver
+  // `cashbox.viewRoute` en INCOMPATIBLE_BY_ROLE).
+  'cashbox.viewOwnCollection', 'cashbox.dailyClose',
   'report.view', 'report.viewPortfolio',
   'password.changeOwn',
 ]
@@ -216,6 +219,7 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     'sale.adjustAfterDisbursement', 'sale.cancel', 'sale.confirmDisbursement',
     'payment.register', 'payment.correct', 'payment.reverse', 'payment.approveAdjustment',
     'expense.register', 'expense.correct',
+    'cashbox.viewOwnCollection', 'cashbox.dailyClose',
     'authorization.approve', 'authorization.reject', 'authorization.modifyConditions', 'authorization.phoneConfirm',
     'transfer.create', 'partnerCash.registerMovement', 'partnerCash.viewAll',
     'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
@@ -239,7 +243,9 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     'payment.correct', 'payment.reverse', 'payment.approveAdjustment',
     'expense.correct',
     'transfer.create', 'partnerCash.viewAll', 'partnerCash.registerMovement',
-    'cashbox.viewConsolidated', 'report.viewConsolidated', 'report.export',
+    // El Cobrador NO accede a información financiera de la ruta ni de la empresa:
+    // su caja es el efectivo que él ha recaudado, sin capital inicial ni consolidados.
+    'cashbox.viewRoute', 'cashbox.viewConsolidated', 'report.viewConsolidated', 'report.export',
     'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
     'user.create', 'user.edit', 'user.block', 'user.setRole', 'user.grantCapabilities', 'user.resetPassword',
     'platform.access', 'company.create', 'company.edit', 'company.suspend', 'settings.access', 'capital.manage',
@@ -248,7 +254,7 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     'sale.createDirect', 'sale.createRequest',
     'payment.register',
     'expense.register', 'expense.correct',
-    'cashbox.viewRoute', 'cashbox.viewConsolidated', 'cashbox.dailyClose',
+    'cashbox.viewRoute', 'cashbox.viewOwnCollection', 'cashbox.viewConsolidated', 'cashbox.dailyClose',
     'transfer.create', 'partnerCash.viewOwn', 'partnerCash.viewAll', 'partnerCash.registerMovement',
     'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
     'user.create', 'user.edit', 'user.block', 'user.setRole', 'user.grantCapabilities', 'user.resetPassword',
@@ -435,7 +441,7 @@ const ROUTE_SCOPED: ReadonlySet<Capability> = new Set<Capability>([
   'authorization.modifyConditions', 'authorization.phoneConfirm',
   'payment.register', 'payment.correct', 'payment.reverse', 'payment.viewHistory', 'payment.approveAdjustment',
   'expense.register', 'expense.correct',
-  'cashbox.viewRoute', 'cashbox.dailyClose',
+  'cashbox.viewRoute', 'cashbox.viewOwnCollection', 'cashbox.dailyClose',
 ])
 
 /**

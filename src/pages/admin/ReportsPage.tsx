@@ -3,136 +3,86 @@ import { BarChart3, Download, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Input'
 import { LoadingState } from '@/components/ui/EmptyState'
+import { RouteSelector, ALL_ROUTES, routeFileTag } from '@/components/ui/RouteSelector'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
+import { useAccessibleRoutes } from '@/hooks/useAccessibleRoutes'
 import { getAccessibleRouteIdSet } from '@/lib/scope'
-import { filterAccessibleRoutes, filterByAccessibleRoute } from '@/lib/permissions'
-import { formatCurrency, formatDate, today, getWeekStart, getWeekEnd } from '@/lib/formatters'
+import {
+  buildReport, resolveReportRouteIds, REPORT_OPTIONS,
+  type ReportType, type ReportRow,
+} from '@/services/reportService'
+import { formatCurrency, today, getWeekStart } from '@/lib/formatters'
 import { downloadCSV } from '@/lib/utils'
-
-type ReportType = 'pagos' | 'ventas' | 'gastos' | 'caja_diaria'
 
 export default function ReportsPage() {
   const { tenantId } = useTenant()
   const { user } = useAuth()
+  // Rutas ACCESIBLES por el usuario (scoping central). El Administrador solo ve
+  // sus rutas autorizadas; el Super Admin, todas las de la empresa seleccionada.
+  const { routes } = useAccessibleRoutes()
   const [reportType, setReportType] = useState<ReportType>('pagos')
+  // '' = "Todas las rutas" → significa TODAS LAS PERMITIDAS, nunca todas las del sistema.
+  const [routeId, setRouteId] = useState<string>(ALL_ROUTES)
   const [fechaDesde, setFechaDesde] = useState(getWeekStart())
   const [fechaHasta, setFechaHasta] = useState(today())
   const [loading, setLoading] = useState(false)
-  const [rows, setRows] = useState<Record<string, unknown>[]>([])
+  const [rows, setRows] = useState<ReportRow[]>([])
+  /** Ruta con la que se generó el listado actual (para el CSV y el encabezado). */
+  const [generatedRouteId, setGeneratedRouteId] = useState<string>(ALL_ROUTES)
 
   async function generateReport() {
     setLoading(true)
     try {
-      let data: Record<string, unknown>[] = []
-      // RESTRICCIÓN POR RUTAS: todo reporte/exportación se recorta ANTES de agregar.
+      // 1) RESTRICCIÓN POR RUTAS (fail-closed): alcance real del usuario.
       const scope = await getAccessibleRouteIdSet(user, tenantId)
+      // 2) RUTA SELECCIONADA: se INTERSECTA con el alcance. Una ruta fuera del
+      //    alcance produce un conjunto vacío, nunca un acceso.
+      const routeIds = resolveReportRouteIds(scope, routeId)
 
-      if (reportType === 'pagos') {
-        const payments = (await db.payments.where('tenantId').equals(tenantId).toArray()).filter(p => scope.has(p.routeId))
-        const filtered = payments.filter(p => p.fecha >= fechaDesde && p.fecha <= fechaHasta)
-        const clients = await db.clients.where('tenantId').equals(tenantId).toArray()
-        const routes = filterAccessibleRoutes(user, await db.routes.where('tenantId').equals(tenantId).toArray())
-        const clientMap = new Map(clients.map(c => [c.id, c]))
-        const routeMap = new Map(routes.map(r => [r.id, r]))
-        data = filtered.map(p => ({
-          Fecha: formatDate(p.fecha),
-          Cliente: clientMap.get(p.clientId)?.nombre ?? p.clientId,
-          Ruta: routeMap.get(p.routeId)?.nombre ?? p.routeId,
-          Valor: p.valor,
-          Tipo: p.tipo,
-          Observación: p.observacion ?? '',
-          Sync: p.syncStatus,
-        }))
+      if (routeId && routeIds.size === 0) {
+        toast.error('No tienes acceso a la ruta seleccionada.')
+        setRows([])
+        return
       }
 
-      if (reportType === 'ventas') {
-        const sales = (await db.sales.where('tenantId').equals(tenantId).toArray()).filter(s => scope.has(s.routeId))
-        const filtered = sales.filter(s => s.createdAt.slice(0, 10) >= fechaDesde && s.createdAt.slice(0, 10) <= fechaHasta)
-        const clients = await db.clients.where('tenantId').equals(tenantId).toArray()
-        const routes = filterAccessibleRoutes(user, await db.routes.where('tenantId').equals(tenantId).toArray())
-        const clientMap = new Map(clients.map(c => [c.id, c]))
-        const routeMap = new Map(routes.map(r => [r.id, r]))
-        data = filtered.map(s => ({
-          Fecha: formatDate(s.createdAt),
-          Cliente: clientMap.get(s.clientId)?.nombre ?? s.clientId,
-          Ruta: routeMap.get(s.routeId)?.nombre ?? s.routeId,
-          'Valor venta': s.valorVenta,
-          'Total+interés': s.valorTotal,
-          Saldo: s.saldo,
-          Estado: s.status,
-          Cuotas: s.numeroCuotas,
-          Frecuencia: s.frecuenciaPago,
-          'Fecha inicio': formatDate(s.fechaInicio),
-          'Fecha fin estimada': formatDate(s.fechaFinalEstimada),
-        }))
-      }
+      // 3) Datos de la empresa; el servicio aplica rutas efectivas y rango de fechas.
+      const [payments, sales, expenses, clients, allRoutes, categories] = await Promise.all([
+        db.payments.where('tenantId').equals(tenantId).toArray(),
+        db.sales.where('tenantId').equals(tenantId).toArray(),
+        db.expenses.where('tenantId').equals(tenantId).toArray(),
+        db.clients.where('tenantId').equals(tenantId).toArray(),
+        db.routes.where('tenantId').equals(tenantId).toArray(),
+        db.expenseCategories.where('tenantId').equals(tenantId).toArray(),
+      ])
 
-      if (reportType === 'gastos') {
-        const expenses = (await db.expenses.where('tenantId').equals(tenantId).toArray()).filter(e => scope.has(e.routeId))
-        const filtered = expenses.filter(e => e.fecha >= fechaDesde && e.fecha <= fechaHasta)
-        const cats = await db.expenseCategories.where('tenantId').equals(tenantId).toArray()
-        const routes = filterAccessibleRoutes(user, await db.routes.where('tenantId').equals(tenantId).toArray())
-        const catMap = new Map(cats.map(c => [c.id, c]))
-        const routeMap = new Map(routes.map(r => [r.id, r]))
-        data = filtered.map(e => ({
-          Fecha: formatDate(e.fecha),
-          Ruta: routeMap.get(e.routeId)?.nombre ?? e.routeId,
-          Categoría: catMap.get(e.categoryId)?.nombre ?? e.categoryId,
-          Valor: e.valor,
-          Descripción: e.descripcion ?? '',
-        }))
-      }
-
-      if (reportType === 'caja_diaria') {
-        const payments = (await db.payments.where('tenantId').equals(tenantId).toArray()).filter(p => scope.has(p.routeId))
-        const expenses = (await db.expenses.where('tenantId').equals(tenantId).toArray()).filter(e => scope.has(e.routeId))
-        const routes = filterAccessibleRoutes(user, await db.routes.where('tenantId').equals(tenantId).toArray())
-        const routeMap = new Map(routes.map(r => [r.id, r]))
-
-        const byDate: Record<string, Record<string, number>> = {}
-        for (const p of payments.filter(p => p.fecha >= fechaDesde && p.fecha <= fechaHasta)) {
-          const key = `${p.fecha}|${p.routeId}`
-          if (!byDate[key]) byDate[key] = { cobros: 0, gastos: 0 }
-          byDate[key].cobros += p.valor
-        }
-        for (const e of expenses.filter(e => e.fecha >= fechaDesde && e.fecha <= fechaHasta)) {
-          const key = `${e.fecha}|${e.routeId}`
-          if (!byDate[key]) byDate[key] = { cobros: 0, gastos: 0 }
-          byDate[key].gastos += e.valor
-        }
-        data = Object.entries(byDate).map(([key, v]) => {
-          const [fecha, routeId] = key.split('|')
-          return {
-            Fecha: formatDate(fecha),
-            Ruta: routeMap.get(routeId)?.nombre ?? routeId,
-            Cobros: v.cobros,
-            Gastos: v.gastos,
-            Neto: v.cobros - v.gastos,
-          }
-        }).sort((a, b) => String(a.Fecha).localeCompare(String(b.Fecha)))
-      }
+      const data = buildReport(
+        reportType,
+        { payments, sales, expenses, clients, routes: allRoutes, categories },
+        { routeIds, fechaDesde, fechaHasta },
+      )
 
       setRows(data)
-      if (data.length === 0) toast.info('No hay datos para el período seleccionado')
+      setGeneratedRouteId(routeId)
+      if (data.length === 0) toast.info('No hay datos para el período y la ruta seleccionados')
       else toast.success(`${data.length} registro(s) generados`)
     } catch { toast.error('Error al generar reporte') } finally { setLoading(false) }
   }
 
   function exportCSV() {
     if (!rows.length) { toast.warning('Genera el reporte primero'); return }
-    downloadCSV(rows, `reporte_${reportType}_${fechaDesde}_${fechaHasta}.csv`)
+    // El CSV se construye desde `rows`, que YA está filtrado por ruta y fechas:
+    // no puede contener registros de una ruta distinta a la generada.
+    const tag = routeFileTag(routes, generatedRouteId)
+    downloadCSV(rows, `reporte_${reportType}_${tag}_${fechaDesde}_${fechaHasta}.csv`)
     toast.success('CSV descargado')
   }
 
-  const reportOptions = [
-    { value: 'pagos', label: 'Pagos recibidos' },
-    { value: 'ventas', label: 'Ventas / Créditos' },
-    { value: 'gastos', label: 'Gastos' },
-    { value: 'caja_diaria', label: 'Caja diaria por ruta' },
-  ]
+  const alcance = generatedRouteId
+    ? routes.find(r => r.id === generatedRouteId)?.nombre ?? generatedRouteId
+    : 'Todas tus rutas'
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -143,7 +93,9 @@ export default function ReportsPage() {
       <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-5 space-y-4">
         <div className="flex flex-wrap gap-3 items-end">
           <Select label="Tipo de reporte" value={reportType} onChange={e => setReportType(e.target.value as ReportType)}
-            options={reportOptions} className="w-56" />
+            options={REPORT_OPTIONS} className="w-56" />
+          {/* "Todas las rutas" = todas las AUTORIZADAS al usuario (nunca más). */}
+          <RouteSelector routes={routes} value={routeId} onChange={setRouteId} allowAll className="w-56" />
           <div>
             <label className="block text-xs text-gray-500 mb-1.5">Desde</label>
             <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)}
@@ -160,11 +112,15 @@ export default function ReportsPage() {
           )}
         </div>
 
+        {routes.length === 0 && (
+          <p className="text-xs text-amber-600">No tienes rutas autorizadas: no hay datos que reportar.</p>
+        )}
+
         {loading ? (
           <LoadingState message="Generando reporte..." />
         ) : rows.length > 0 ? (
           <div className="overflow-x-auto">
-            <p className="text-xs text-gray-500 mb-2">{rows.length} registro(s) encontrado(s)</p>
+            <p className="text-xs text-gray-500 mb-2">{rows.length} registro(s) · Ruta: <span className="font-medium text-gray-700">{alcance}</span></p>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
@@ -192,7 +148,7 @@ export default function ReportsPage() {
         ) : (
           <div className="flex flex-col items-center justify-center py-12 text-gray-400">
             <FileText className="w-10 h-10 mb-3" />
-            <p className="text-sm">Configura el reporte y haz clic en Generar</p>
+            <p className="text-sm">Elige el tipo de reporte, la ruta y el rango de fechas, luego haz clic en Generar</p>
           </div>
         )}
       </div>

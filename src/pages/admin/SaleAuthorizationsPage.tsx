@@ -367,7 +367,14 @@ export default function SaleAuthorizationsPage() {
                       <div key={s.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 border border-gray-100 text-xs">
                         <div>
                           <p className="font-medium text-gray-800">{formatCurrency(s.valorVenta, currency)} · {SALE_STATUS_LABEL[s.status] ?? s.status}</p>
-                          <p className="text-gray-400">Inicio {formatDate(s.fechaInicio)}{s.status !== 'activa' ? ` · Fin ${formatDate(s.fechaFinalEstimada)}` : ''}</p>
+                          {/* "Fin estimado" es `fechaFinalEstimada` (cuándo DEBERÍA
+                              terminar). La fecha REAL de finalización solo existe
+                              cuando el crédito se saldó: `fechaFinalizacion`. */}
+                          <p className="text-gray-400">
+                            Inicio {formatDate(s.fechaInicio)}
+                            {s.status !== 'activa' ? ` · Fin estimado ${formatDate(s.fechaFinalEstimada)}` : ''}
+                            {s.fechaFinalizacion ? ` · Finalizó ${formatDate(s.fechaFinalizacion)}` : ''}
+                          </p>
                         </div>
                         <div className="text-right">
                           <p className="text-emerald-600 font-medium">Pagado {formatCurrency(pagado, currency)}</p>

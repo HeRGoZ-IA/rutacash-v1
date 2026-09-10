@@ -58,12 +58,17 @@ export default function RoutesPage() {
   const [discardOpen, setDiscardOpen] = useState(false)
   const dirty = useDirtyForm(original, form)
 
-  // #5/#6 Administradores activos del tenant (requisito para crear rutas).
+  // Administradores activos del tenant. El Administrador responsable es OPCIONAL al
+  // crear la ruta: su ausencia ya NO bloquea nada, solo se avisa (se puede asignar
+  // después desde el editor de ruta o desde Gestión de usuarios).
   const activeAdmins = allUsers.filter(u => u.rol === 'admin' && u.status === 'activo')
   const hasActiveAdmin = activeAdmins.length > 0
   // Administradores que el actor puede fijar como responsables al crear:
   // Super Admin → todos los activos; Administrador → solo él mismo (no gestiona otros admin).
   const selectableAdmins = user?.rol === 'superadmin' ? activeAdmins : activeAdmins.filter(a => a.id === user?.id)
+  // El Administrador creador SIEMPRE queda dentro de la ruta que crea: su acceso es
+  // fail-closed por rutas, así que quedarse fuera sería auto-bloquearse. El servicio
+  // revalida esta autoasignación (no depende de la pantalla).
   const lockAdminToSelf = user?.rol === 'admin'
 
   // Código interno ordenado y secuencial: RT-001, RT-002, ... (no se pide al usuario).
@@ -183,9 +188,8 @@ export default function RoutesPage() {
     // corrige silenciosamente; se informa el motivo. El servicio revalida (rollback).
     if (!form.cobradorId) { toast.error('Debes seleccionar un Cobrador responsable para la ruta.'); return }
     if (!editing) {
-      // #6 Al crear, se exige Administrador responsable (Super Admin elige; el
-      // Administrador queda autoasignado). El servicio revalida ambas condiciones.
-      if (form.adminIds.length === 0) { toast.error('Selecciona al menos un Administrador responsable.'); return }
+      // Administrador responsable OPCIONAL: crear sin Administrador es válido y no
+      // se bloquea. Solo el Cobrador responsable (validado arriba) es obligatorio.
     } else {
       // Invariante completo de cobradores sobre el borrador (≥1 cobrador, responsable
       // válido y asignado). La UI ya lo bloquea; esto evita guardar un estado inválido.
@@ -293,16 +297,18 @@ export default function RoutesPage() {
           <h1 className="text-xl font-bold text-gray-900">Rutas</h1>
           <p className="text-sm text-gray-500 mt-0.5">{visibleRoutes.length} de {routes.length} ruta(s)</p>
         </div>
-        {/* #5 No se puede crear una ruta sin Administrador activo (botón deshabilitado). */}
-        <Button onClick={openCreate} disabled={!hasActiveAdmin} icon={<Plus className="w-4 h-4" />}>Nueva ruta</Button>
+        {/* Crear ruta NO depende de que exista un Administrador (solo del Cobrador). */}
+        <Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Nueva ruta</Button>
       </div>
 
-      {/* #5 Explicación visible + acción para crear el primer Administrador. */}
+      {/* Aviso INFORMATIVO (no bloquea): sin Administradores la ruta se crea igual,
+          pero conviene asignar uno para que alguien pueda aprobar solicitudes. */}
       {!loading && !hasActiveAdmin && (
         <div className="flex items-start gap-3 p-4 rounded-2xl bg-amber-50 border border-amber-200">
           <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm text-amber-800 font-medium">Primero debes crear al menos un Administrador para asignarlo como responsable de la ruta.</p>
+            <p className="text-sm text-amber-800 font-medium">Aún no hay Administradores en la empresa.</p>
+            <p className="text-xs text-amber-700 mt-0.5">Puedes crear la ruta igualmente (solo se exige un Cobrador) y asignarle un Administrador más adelante.</p>
             <Button size="sm" variant="secondary" className="mt-2" onClick={() => navigate('/admin/users')} icon={<Users className="w-3.5 h-3.5" />}>Crear Administrador</Button>
           </div>
         </div>
@@ -405,17 +411,20 @@ export default function RoutesPage() {
           </div>
           {editing && <p className="text-xs text-gray-400">Código de ruta: <span className="font-medium text-gray-600">{editing.codigo}</span></p>}
 
-          {/* #6 Administrador responsable (obligatorio al crear). Super Admin elige uno
-              o varios activos; el Administrador queda autoasignado (bloqueado a sí mismo). */}
+          {/* Administrador responsable: OPCIONAL al crear. El Super Admin puede elegir
+              uno, varios o ninguno; el Administrador queda SIEMPRE autoasignado (si no,
+              se auto-bloquearía por el fail-closed de rutas). */}
           {!editing && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Administrador responsable <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Administrador responsable <span className="text-xs font-normal text-gray-400">(opcional)</span>
+              </label>
               {lockAdminToSelf ? (
                 <div className="flex items-center gap-2 rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-700">
                   <Users className="w-4 h-4" /> {user?.nombre} <span className="text-xs text-primary-400">(se asigna automáticamente)</span>
                 </div>
               ) : selectableAdmins.length === 0 ? (
-                <p className="text-xs text-amber-600">No hay Administradores activos disponibles.</p>
+                <p className="text-xs text-gray-500">No hay Administradores activos. La ruta se creará sin Administrador; podrás asignarle uno más adelante.</p>
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {selectableAdmins.map(a => {
@@ -429,8 +438,8 @@ export default function RoutesPage() {
                   })}
                 </div>
               )}
-              {!lockAdminToSelf && form.adminIds.length === 0 && (
-                <p className="mt-1 text-xs text-amber-600">Selecciona al menos un Administrador responsable.</p>
+              {!lockAdminToSelf && selectableAdmins.length > 0 && form.adminIds.length === 0 && (
+                <p className="mt-1 text-xs text-gray-500">Sin Administrador asignado. La ruta se creará igualmente; recuerda que nadie podrá aprobar solicitudes de esta ruta hasta que le asignes uno.</p>
               )}
             </div>
           )}

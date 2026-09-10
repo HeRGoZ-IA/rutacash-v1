@@ -234,10 +234,45 @@ export interface Sale {
    */
   paymentDays?: number[]
   fechaInicio: string
+  /**
+   * Fecha en la que el crédito DEBERÍA terminar, calculada al crearlo desde
+   * `fechaInicio + numeroCuotas + frecuencia + paymentDays`. Es un compromiso, no
+   * un hecho: NO representa cuándo terminó de pagarse realmente.
+   */
   fechaFinalEstimada: string
+  /**
+   * Fecha REAL en la que el crédito terminó de pagarse (yyyy-MM-dd).
+   *
+   *  · Se SELLA cuando el saldo llega a 0 y la venta pasa a 'finalizada'. El valor
+   *    es la fecha CONTABLE del abono que la cerró (`payment.fecha`), no la hora
+   *    del sistema ni `updatedAt`.
+   *  · Una vez sellada NO se reescribe: una corrección posterior que mantenga la
+   *    venta finalizada conserva la fecha original.
+   *  · ÚNICA excepción: si una corrección REABRE la venta (vuelve a 'activa' con
+   *    saldo pendiente), el cierre deja de existir y la fecha se limpia; si más
+   *    tarde vuelve a saldarse, se sella la nueva fecha real.
+   *  · `undefined` significa "no determinable": ventas activas, perdidas o
+   *    refinanciadas, y créditos históricos sin un pago efectivo del que inferirla.
+   *    NUNCA se inventa una fecha.
+   */
+  fechaFinalizacion?: string
   status: SaleStatus
   /** App Cobrador: estado de desembolso. undefined = desembolsada (ventas antiguas). */
   disbursementStatus?: DisbursementStatus
+  /**
+   * COBRADOR que ENTREGÓ físicamente el dinero al desembolsar. Es lo que descuenta
+   * de SU caja personal. `undefined` = desembolso no atribuido a ningún cobrador
+   * (ventas antiguas o entregadas desde la administración).
+   */
+  disbursedByCollectorId?: string
+  /** Usuario que registró la confirmación del desembolso (trazabilidad). */
+  disbursedByUserId?: string
+  /**
+   * Fecha CONTABLE del desembolso (yyyy-MM-dd). Una venta aprobada un día puede
+   * desembolsarse otro; la caja del cobrador debe descontarla el día en que
+   * realmente entregó el dinero, no el día en que se creó el registro.
+   */
+  fechaDesembolso?: string
   /** Solicitud de venta de origen, si la venta nació de una autorización. */
   saleRequestId?: string
   motivoPerdida?: string
@@ -320,7 +355,20 @@ export interface Payment {
   saleId: string
   clientId: string
   routeId: string
+  /**
+   * COBRADOR RESPONSABLE del recaudo: quien recibió FÍSICAMENTE el dinero y debe
+   * responder por él en su caja. NO es necesariamente quien digitó la operación.
+   *
+   * Si un Supervisor registra un abono que cobró Fabio, `collectorId` es Fabio y
+   * `createdByUserId` es el Supervisor: el dinero se atribuye a quien lo tiene.
+   */
   collectorId: string
+  /**
+   * Usuario que REGISTRÓ la operación en el sistema (trazabilidad de quién digitó).
+   * `undefined` en pagos anteriores a esta separación: en ellos ambos conceptos eran
+   * el mismo campo, así que el comportamiento LEGACY equivale a `collectorId`.
+   */
+  createdByUserId?: string
   valor: number
   fecha: string
   tipo: PaymentType
@@ -418,7 +466,15 @@ export interface Expense {
   /** App Cobrador: foto opcional de factura/soporte (Data URL local). */
   receiptPhotoDataUrl?: string
   fecha: string
+  /** Usuario que REGISTRÓ el gasto. */
   userId: string
+  /**
+   * COBRADOR a cuya caja personal se carga el gasto (quien puso el dinero).
+   * `undefined` = gasto de la RUTA, no atribuible a la caja de ningún cobrador
+   * (p. ej. un gasto administrativo). En gastos anteriores a esta separación se
+   * infiere del `userId` cuando ese usuario es cobrador (comportamiento legacy).
+   */
+  collectorId?: string
   syncStatus: SyncStatus
   createdAt: string
 }
@@ -616,6 +672,31 @@ export interface CashboxSummary {
  *  - carteraEnCalle: lo prestado en la calle pendiente por cobrar (capital + interés)
  *    en ventas activas YA desembolsadas.
  */
+/**
+ * CAJA PERSONAL DEL COBRADOR (revisión del socio).
+ *
+ * NO es la caja financiera de la ruta: es el EFECTIVO OPERATIVO bajo la
+ * responsabilidad de un cobrador en una fecha concreta. Deliberadamente NO
+ * contiene capital inicial, movimientos de capital, transferencias, retiros ni
+ * ningún consolidado de la empresa: el cobrador responde por el dinero que pasó
+ * por sus manos, no por el capital de la ruta.
+ *
+ *   recaudado − desembolsado − gastos = efectivoAEntregar
+ */
+export interface CollectorCashSummary {
+  collectorId: string
+  routeId: string
+  fecha: string
+  /** Abonos VIGENTES recibidos por este cobrador ese día. */
+  recaudado: number
+  /** Ventas que ESTE cobrador desembolsó ese día (dinero que entregó). */
+  desembolsado: number
+  /** Gastos cargados a la caja de este cobrador ese día. */
+  gastos: number
+  /** Efectivo que debe entregar: recaudado − desembolsado − gastos. */
+  efectivoAEntregar: number
+}
+
 export interface RouteFinancialSummary {
   routeId: string
   /** Saldo de caja disponible (getRouteAvailableCapital). */

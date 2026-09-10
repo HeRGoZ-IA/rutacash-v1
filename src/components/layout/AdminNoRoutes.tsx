@@ -29,7 +29,8 @@ export function AdminNoRoutes() {
         <ol className="space-y-2.5 text-sm text-gray-600 list-decimal list-inside">
           <li>El <span className="font-medium text-gray-800">Super Admin</span> inicia sesión y entra a la empresa.</li>
           <li>Crea al menos un <span className="font-medium text-gray-800">Cobrador</span> en Gestión de usuarios.</li>
-          <li>Crea la primera <span className="font-medium text-gray-800">Ruta</span>, indicándote a ti como Administrador responsable y al Cobrador como responsable de cobro.</li>
+          <li>Crea una <span className="font-medium text-gray-800">Ruta</span> con ese Cobrador como responsable de cobro (el Administrador responsable es opcional al crearla).</li>
+          <li>Te <span className="font-medium text-gray-800">asigna a esa Ruta</span>, desde el editor de la ruta o desde Gestión de usuarios.</li>
           <li>Al guardar, esta pantalla desaparece y tu operación queda habilitada.</li>
         </ol>
         <p className="text-xs text-gray-400 mt-3">

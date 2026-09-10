@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Search, Users, Lock } from 'lucide-react'
+import { Search, Users, Lock, History } from 'lucide-react'
 import { Input, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { ClientCreditHistory } from '@/components/ui/ClientCreditHistory'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
@@ -29,6 +30,8 @@ export default function SecretarioClientsPage() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Client | null>(null)
+  /** Cliente cuyo historial de créditos se está consultando (lupa del listado). */
+  const [historyClient, setHistoryClient] = useState<Client | null>(null)
   const [hasMovements, setHasMovements] = useState(false)
   const [form, setForm] = useState<Record<EditableField, string>>({ nombre: '', telefonoPrincipal: '', telefonoSecundario: '', direccionPrincipal: '', direccionSecundaria: '', negocio: '', notas: '' })
   const [saving, setSaving] = useState(false)
@@ -117,16 +120,40 @@ export default function SecretarioClientsPage() {
       ) : (
         <div className="bg-white rounded-2xl shadow-card border border-gray-100 divide-y divide-gray-50">
           {filtered.map(c => (
-            <button key={c.id} onClick={() => openEdit(c)} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-primary-50/40 transition-colors">
-              <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center text-primary-700 font-bold text-sm flex-shrink-0">{c.nombre.charAt(0)}</div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-gray-900 truncate">{c.nombre}</p>
-                <p className="text-xs text-gray-400 truncate">{c.documento} · {c.telefonoPrincipal} · {routeName(c.routeId)}</p>
-              </div>
-            </button>
+            <div key={c.id} className="flex items-center gap-2 px-4 py-3 hover:bg-primary-50/40 transition-colors">
+              <button onClick={() => openEdit(c)} className="flex items-center gap-3 text-left min-w-0 flex-1">
+                <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center text-primary-700 font-bold text-sm flex-shrink-0">{c.nombre.charAt(0)}</div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-gray-900 truncate">{c.nombre}</p>
+                  <p className="text-xs text-gray-400 truncate">{c.documento} · {c.telefonoPrincipal} · {routeName(c.routeId)}</p>
+                </div>
+              </button>
+              {/* CONSULTA DE HISTORIAL: créditos que ha tenido el cliente, con valor,
+                  fecha de creación y fecha real de finalización. Solo consulta. */}
+              <button
+                onClick={() => setHistoryClient(c)}
+                title="Ver historial de créditos"
+                aria-label={`Ver historial de créditos de ${c.nombre}`}
+                className="flex-shrink-0 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                <History className="w-3.5 h-3.5" /> Historial
+              </button>
+            </div>
           ))}
         </div>
       )}
+
+      {/* Historial de créditos (solo consulta) */}
+      <Modal open={!!historyClient} onClose={() => setHistoryClient(null)} size="lg"
+        title={historyClient ? `Historial de créditos · ${historyClient.nombre}` : 'Historial de créditos'}
+        footer={<Button variant="secondary" onClick={() => setHistoryClient(null)}>Cerrar</Button>}>
+        {historyClient && (
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500">Documento: <span className="font-medium text-gray-700">{historyClient.documento}</span> · Ruta: {routeName(historyClient.routeId)}</p>
+            <ClientCreditHistory client={historyClient} />
+          </div>
+        )}
+      </Modal>
 
       <Modal open={!!editing} onClose={() => setEditing(null)} title="Editar cliente"
         footer={<><Button variant="secondary" onClick={() => setEditing(null)}>Cancelar</Button><Button onClick={handleSave} loading={saving}>Guardar</Button></>}>

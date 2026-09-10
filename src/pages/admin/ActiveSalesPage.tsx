@@ -20,6 +20,7 @@ import {
   getLastPaidInstallmentNumber,
 } from '@/services/installmentEngine'
 import { registerPayment, quickAmounts } from '@/services/paymentService'
+import { CollectorPicker } from '@/components/ui/CollectorPicker'
 import { findActiveSaleForClient } from '@/services/saleRequestService'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import type { Sale, Client, Route, Installment } from '@/models/types'
@@ -57,6 +58,8 @@ export default function ActiveSalesPage() {
   const [saving, setSaving] = useState(false)
   const [paymentSale, setPaymentSale] = useState<Sale | null>(null)
   const [paymentValor, setPaymentValor] = useState(0)
+  /** Cobrador RESPONSABLE del recaudo (quien recibió el dinero), no quien lo digita. */
+  const [paymentCollectorId, setPaymentCollectorId] = useState('')
   const [payingQuick, setPayingQuick] = useState(false)
   // Revisión socio 25-jun — alerta de segunda venta activa del mismo cliente.
   const [activeSale, setActiveSale] = useState<Sale | null>(null)
@@ -232,6 +235,9 @@ export default function ActiveSalesPage() {
         saleId: paymentSale.id,
         requestedAmount: paymentValor,
         actor: user,
+        // Quien recibió el dinero. Si va vacío, el servicio lo resuelve (y rechaza
+        // si la ruta tiene varios cobradores y no se indicó cuál).
+        collectorId: paymentCollectorId || undefined,
       })
       if (!result.ok) { toast.error(result.message); return }
       if (result.capped) {
@@ -241,6 +247,7 @@ export default function ActiveSalesPage() {
       }
       setPaymentSale(null)
       setPaymentValor(0)
+      setPaymentCollectorId('')
       setDetailSale(null)
       await load()
     } finally { setPayingQuick(false) }
@@ -483,8 +490,8 @@ export default function ActiveSalesPage() {
       </Modal>
 
       {/* Quick payment modal */}
-      <Modal open={!!paymentSale} onClose={() => setPaymentSale(null)} title="Registrar pago"
-        footer={<><Button variant="secondary" onClick={() => setPaymentSale(null)}>Cancelar</Button><Button onClick={handleQuickPayment} loading={payingQuick} icon={<DollarSign className="w-4 h-4" />}>Confirmar pago</Button></>}>
+      <Modal open={!!paymentSale} onClose={() => { setPaymentSale(null); setPaymentCollectorId('') }} title="Registrar pago"
+        footer={<><Button variant="secondary" onClick={() => { setPaymentSale(null); setPaymentCollectorId('') }}>Cancelar</Button><Button onClick={handleQuickPayment} loading={payingQuick} icon={<DollarSign className="w-4 h-4" />}>Confirmar pago</Button></>}>
         {paymentSale && paymentQuick && (
           <div className="space-y-4">
             <div className="bg-primary-50 rounded-xl p-4 grid grid-cols-2 gap-3">
@@ -498,6 +505,9 @@ export default function ActiveSalesPage() {
             </div>
             <MoneyInput label="Valor del pago" currency={currency} value={paymentValor} onValueChange={setPaymentValor} required
               hint={paymentValor > paymentQuick.total ? `Supera el saldo: se registrará ${formatCurrency(paymentQuick.total, currency)}` : undefined} />
+            {/* El efectivo se carga a la caja del cobrador que lo recibió, no del
+                usuario que registra la operación. */}
+            <CollectorPicker routeId={paymentSale.routeId} value={paymentCollectorId} onChange={setPaymentCollectorId} />
           </div>
         )}
       </Modal>

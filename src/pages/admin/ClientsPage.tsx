@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { Input, Select } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { PhotoInput } from '@/components/ui/PhotoInput'
-import { ClientStatusBadge, SaleStatusBadge } from '@/components/ui/Badge'
+import { ClientStatusBadge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDiscardModal } from '@/components/ui/ConfirmDiscardModal'
 import { useDirtyForm } from '@/hooks/useDirtyForm'
@@ -14,6 +14,7 @@ import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useRouteCapital } from '@/hooks/useRouteCapital'
+import { ClientCreditHistory } from '@/components/ui/ClientCreditHistory'
 import { generateId } from '@/lib/utils'
 import { nowISO, formatDate, today, formatCurrency, normalizeDoc } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
@@ -561,28 +562,10 @@ export default function ClientsPage() {
                 )}
               </div>
 
-              {/* E. Historial de ventas */}
-              <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Historial de ventas</p>
-                {detailSales.length === 0 ? (
-                  <p className="text-xs text-gray-400">Este cliente no tiene ventas.</p>
-                ) : (
-                  <div className="space-y-1.5 max-h-52 overflow-y-auto">
-                    {detailSales.map(s => (
-                      <div key={s.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-gray-800">{formatCurrency(s.valorVenta, currency)} <span className="text-xs text-gray-400">· total {formatCurrency(s.valorTotal, currency)}</span></p>
-                          <p className="text-xs text-gray-400">Inicio {formatDate(s.fechaInicio)}{s.status !== 'activa' ? ` · Cierre ${formatDate(s.updatedAt)}` : ''}</p>
-                        </div>
-                        <div className="text-right flex-shrink-0 ml-2">
-                          <SaleStatusBadge status={s.status} />
-                          <p className="text-xs text-amber-600 mt-0.5">Saldo {formatCurrency(s.saldo, currency)}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {/* E. Historial de créditos — componente compartido (misma vista que
+                  Secretario y Socio). Antes se mostraba `updatedAt` como "Cierre",
+                  que NO es la fecha real de finalización; ahora se usa el dato sellado. */}
+              <ClientCreditHistory client={selected} />
 
               {/* F. Abonos recientes */}
               <div>

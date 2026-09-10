@@ -26,9 +26,22 @@ import {
 } from '../src/services/financialReconciliation'
 import type { Sale, User, Payment, AuditLog } from '../src/models/types'
 import {
-  buildScenario, readFinancialState, computeCobrosComoCaja, TEST_IDS,
+  buildScenario, buildCashboxScenario, readFinancialState, computeCobrosComoCaja, TEST_IDS,
   type FinancialState, type MemoryDb,
 } from './financial/harness'
+import { getCashboxSummary, type CashboxDatabase } from '../src/services/cashboxEngine'
+import {
+  buildReport, resolveReportRouteIds, REPORT_OPTIONS,
+  type ReportSources,
+} from '../src/services/reportService'
+import {
+  generateWeeklySettlement, generateWeeklySettlementForUser,
+} from '../src/services/weeklySettlementEngine'
+import {
+  buildClientCreditHistory, resolveSealedCompletionDate, CREDIT_STATUS_LABEL,
+} from '../src/lib/creditHistory'
+import { effectivePayments, lastEffectivePaymentDate } from '../src/lib/paymentState'
+import { getCollectorDailyCashSummary, hasCapitalForSale, type CollectorCashDatabase } from '../src/services/cashboxEngine'
 import { adminQuickPaymentFlow, operationalPaymentFlow } from './financial/flows'
 import {
   adminHandlerBody, operationalHandlerBody, paymentServiceBody, opensDexieTransaction,
@@ -1182,6 +1195,1077 @@ await spec('FIN-INV-005', 'Invariantes', 'toda venta finalizada tiene saldo 0', 
     if (r.state.saleStatus === 'finalizada') {
       assert(r.state.saleSaldo === 0, `[${nombre}] venta finalizada con saldo ${r.state.saleSaldo}`)
     }
+  }
+})
+
+
+// ############################################################
+// CAJA POR RUTA — AISLAMIENTO DEL MOTOR (red de seguridad RQ-02/RQ-03)
+// ------------------------------------------------------------
+// `getCashboxSummary` es la base de la Liquidación semanal, de la Caja y del
+// capital disponible. Antes de que la Liquidación permita elegir ruta hay que
+// demostrar que el motor YA aísla por ruta: si esto se rompiera, el selector
+// mostraría cifras contaminadas sin que nada avisara.
+// ############################################################
+const asCashboxDb = (db: MemoryDb) => db as unknown as CashboxDatabase
+
+/** Semana de referencia de los casos de caja. */
+const SEM_INI = '2026-08-17'
+const SEM_FIN = '2026-08-22'
+
+/** Dos rutas de la misma empresa con movimientos DISTINTOS en los 8 componentes. */
+function dosRutas() {
+  return buildCashboxScenario([
+    {
+      routeId: 'r-A', nombre: 'Ruta A', codigo: 'RT-001',
+      capital: [{ fecha: '2026-08-18', valor: 1_000_000 }],
+      pagos: [{ fecha: '2026-08-19', valor: 300_000 }, { fecha: '2026-08-20', valor: 200_000 }],
+      ventas: [{ fechaInicio: '2026-08-19', valorVenta: 400_000 }],
+      gastos: [{ fecha: '2026-08-20', valor: 50_000 }],
+      retiros: [{ fecha: '2026-08-21', valor: 100_000 }],
+      transferenciasSalida: [{ fecha: '2026-08-21', valor: 70_000, routeDestinoId: 'r-B' }],
+      transferenciasEntrada: [{ fecha: '2026-08-18', valor: 30_000, routeOrigenId: 'r-B' }],
+    },
+    {
+      routeId: 'r-B', nombre: 'Ruta B', codigo: 'RT-002',
+      capital: [{ fecha: '2026-08-18', valor: 9_000_000 }],
+      pagos: [{ fecha: '2026-08-19', valor: 7_000_000 }],
+      ventas: [{ fechaInicio: '2026-08-19', valorVenta: 5_000_000 }],
+      gastos: [{ fecha: '2026-08-20', valor: 800_000 }],
+      retiros: [{ fecha: '2026-08-21', valor: 600_000 }],
+    },
+  ])
+}
+
+await spec('CASH-ROUTE-001', 'Caja por ruta', 'la caja de la Ruta A no incorpora ningún movimiento de la Ruta B', async () => {
+  const db = dosRutas()
+  const a = await getCashboxSummary('r-A', SEM_INI, SEM_FIN, asCashboxDb(db))
+  metric('capital A', a.ingresoCapital)
+  metric('cobros A', a.cobros)
+  metric('prestamos A', a.prestamosEntregados)
+  metric('gastos A', a.gastos)
+  metric('transf. entradas A', a.transferenciasEntradas)
+  metric('transf. salidas A', a.transferenciasSalidas)
+  metric('retiros A', a.retiros)
+  metric('saldo final A', a.saldoActual)
+  // Cada componente corresponde EXCLUSIVAMENTE a lo sembrado en A.
+  assert(a.ingresoCapital === 1_000_000, `capital contaminado: ${a.ingresoCapital}`)
+  assert(a.cobros === 500_000, `cobros contaminados: ${a.cobros}`)
+  assert(a.prestamosEntregados === 400_000, `préstamos contaminados: ${a.prestamosEntregados}`)
+  assert(a.gastos === 50_000, `gastos contaminados: ${a.gastos}`)
+  assert(a.transferenciasEntradas === 30_000, `transferencias de entrada contaminadas: ${a.transferenciasEntradas}`)
+  assert(a.transferenciasSalidas === 70_000, `transferencias de salida contaminadas: ${a.transferenciasSalidas}`)
+  assert(a.retiros === 100_000, `retiros contaminados: ${a.retiros}`)
+  // saldoActual = 0 (sin historial previo) + 1.000.000 + 500.000 + 30.000 - 400.000 - 50.000 - 70.000 - 100.000
+  assert(a.saldoActual === 910_000, `saldo final contaminado: ${a.saldoActual}`)
+  assert(a.routeId === 'r-A', 'el resumen no identifica su propia ruta')
+})
+
+await spec('CASH-ROUTE-002', 'Caja por ruta', 'el saldo anterior de A se calcula solo con historial de A', async () => {
+  const db = buildCashboxScenario([
+    {
+      routeId: 'r-A',
+      // Historial ANTERIOR al rango.
+      capital: [{ fecha: '2026-08-01', valor: 500_000 }],
+      pagos: [{ fecha: '2026-08-02', valor: 100_000 }],
+      gastos: [{ fecha: '2026-08-03', valor: 40_000 }],
+      ventas: [{ fechaInicio: '2026-08-02', valorVenta: 200_000 }],
+    },
+    {
+      routeId: 'r-B',
+      // Historial MUCHO mayor, también anterior al rango: no debe filtrarse.
+      capital: [{ fecha: '2026-08-01', valor: 8_000_000 }],
+      pagos: [{ fecha: '2026-08-02', valor: 3_000_000 }],
+    },
+  ])
+  const a = await getCashboxSummary('r-A', SEM_INI, SEM_FIN, asCashboxDb(db))
+  metric('saldo anterior A', a.saldoAnterior)
+  metric('movimientos dentro del rango', `${a.ingresoCapital}/${a.cobros}/${a.gastos}`)
+  // 500.000 + 100.000 - 200.000 - 40.000 = 360.000
+  assert(a.saldoAnterior === 360_000, `saldo anterior contaminado: ${a.saldoAnterior}`)
+  assert(a.ingresoCapital === 0 && a.cobros === 0 && a.gastos === 0, 'movimientos previos contados dentro del rango')
+  assert(a.saldoActual === 360_000, `saldo final incorrecto: ${a.saldoActual}`)
+})
+
+await spec('CASH-ROUTE-003', 'Caja por ruta', 'una venta pendiente de desembolso no descuenta caja', async () => {
+  const db = buildCashboxScenario([{
+    routeId: 'r-A',
+    capital: [{ fecha: '2026-08-18', valor: 1_000_000 }],
+    ventas: [
+      { fechaInicio: '2026-08-19', valorVenta: 300_000 },
+      { fechaInicio: '2026-08-19', valorVenta: 900_000, disbursementStatus: 'pendiente' },
+    ],
+  }])
+  const a = await getCashboxSummary('r-A', SEM_INI, SEM_FIN, asCashboxDb(db))
+  metric('préstamos entregados', a.prestamosEntregados)
+  metric('saldo final', a.saldoActual)
+  assert(a.prestamosEntregados === 300_000, 'la venta pendiente de desembolso descontó caja')
+  assert(a.saldoActual === 700_000, `saldo final incorrecto: ${a.saldoActual}`)
+})
+
+await spec('CASH-ROUTE-004', 'Caja por ruta', 'un pago corregido no infla la caja (reversión + reemplazo)', async () => {
+  // Original 300.000 revertido y reemplazado por 250.000: la caja debe ver 250.000.
+  const db = buildCashboxScenario([{
+    routeId: 'r-A',
+    pagos: [
+      { fecha: '2026-08-19', valor: 300_000, state: 'reversed' },
+      { fecha: '2026-08-19', valor: -300_000, state: 'reversal' },
+      { fecha: '2026-08-19', valor: 250_000, state: 'active' },
+    ],
+  }])
+  const a = await getCashboxSummary('r-A', SEM_INI, SEM_FIN, asCashboxDb(db))
+  metric('cobros netos', a.cobros)
+  metric('regla', 'el asiento de reversión es negativo: se netea sin filtrar por state')
+  assert(a.cobros === 250_000, `cobros tras corrección: ${a.cobros}`)
+})
+
+
+// ############################################################
+// RQ-03 — REPORTES POR RUTA
+// ------------------------------------------------------------
+// El scoping es de DOS pasos y en ese orden: (1) rutas permitidas al usuario,
+// (2) ruta elegida. La interseccion hace que una ruta fuera del alcance produzca
+// CERO filas en vez de un acceso.
+// ############################################################
+
+/** Empresa con dos rutas y datos claramente distinguibles en cada una. */
+function fuentesDosRutas(): ReportSources {
+  const mkPay = (id: string, routeId: string, valor: number, fecha: string) => ({
+    id, tenantId: 't-1', saleId: `s-${id}`, clientId: routeId === 'r-A' ? 'c-A' : 'c-B',
+    routeId, collectorId: 'u-cob', valor, fecha, tipo: 'efectivo' as const,
+    syncStatus: 'synced' as const, createdAt: `${fecha}T10:00:00.000Z`, state: 'active' as const,
+  })
+  const mkSale = (id: string, routeId: string, valorVenta: number, createdAt: string) => ({
+    id, tenantId: 't-1', routeId, clientId: routeId === 'r-A' ? 'c-A' : 'c-B',
+    createdByUserId: 'u-cob', valorVenta, tasaInteres: 20, valorInteres: 0, valorTotal: valorVenta,
+    saldo: valorVenta, numeroCuotas: 1, valorCuota: valorVenta, frecuenciaPago: 'diaria' as const,
+    fechaInicio: createdAt.slice(0, 10), fechaFinalEstimada: createdAt.slice(0, 10),
+    status: 'activa' as const, createdAt, updatedAt: createdAt,
+  })
+  const mkExp = (id: string, routeId: string, valor: number, fecha: string) => ({
+    id, tenantId: 't-1', routeId, categoryId: 'cat-1', valor, fecha,
+    userId: 'u-cob', syncStatus: 'synced' as const, createdAt: `${fecha}T11:00:00.000Z`,
+  })
+  return {
+    payments: [
+      mkPay('p-A1', 'r-A', 100_000, '2026-08-19'),
+      mkPay('p-A2', 'r-A', 50_000, '2026-08-20'),
+      mkPay('p-B1', 'r-B', 900_000, '2026-08-19'),
+      mkPay('p-A3', 'r-A', 777_000, '2026-07-01'),
+    ] as never,
+    sales: [
+      mkSale('s-A1', 'r-A', 300_000, '2026-08-19T09:00:00.000Z'),
+      mkSale('s-B1', 'r-B', 800_000, '2026-08-19T09:00:00.000Z'),
+    ] as never,
+    expenses: [
+      mkExp('e-A1', 'r-A', 20_000, '2026-08-20'),
+      mkExp('e-B1', 'r-B', 60_000, '2026-08-20'),
+    ] as never,
+    clients: [
+      { id: 'c-A', tenantId: 't-1', routeId: 'r-A', nombre: 'Cliente A', documento: '1' },
+      { id: 'c-B', tenantId: 't-1', routeId: 'r-B', nombre: 'Cliente B', documento: '2' },
+    ] as never,
+    routes: [
+      { id: 'r-A', tenantId: 't-1', nombre: 'Ruta A', codigo: 'RT-001' },
+      { id: 'r-B', tenantId: 't-1', nombre: 'Ruta B', codigo: 'RT-002' },
+    ] as never,
+    categories: [{ id: 'cat-1', tenantId: 't-1', nombre: 'Transporte', activa: true }] as never,
+  }
+}
+
+const RANGO = { fechaDesde: '2026-08-17', fechaHasta: '2026-08-22' }
+const soloA = { routeIds: new Set(['r-A']), ...RANGO }
+
+await spec('REP-ROUTE-001', 'Reportes', 'los 4 reportes filtrados a la Ruta A no traen registros de la Ruta B', () => {
+  const src = fuentesDosRutas()
+  for (const tipo of REPORT_OPTIONS.map(o => o.value)) {
+    const rows = buildReport(tipo, src, soloA)
+    const rutas = [...new Set(rows.map(r => String(r.Ruta)))]
+    metric(`${tipo} -> filas`, `${rows.length} (rutas: ${rutas.join(', ') || '-'})`)
+    assert(rows.length > 0, `${tipo}: el reporte de la Ruta A quedo vacio`)
+    assert(rutas.every(n => n === 'Ruta A'), `${tipo}: se colo otra ruta -> ${rutas.join(', ')}`)
+  }
+})
+
+await spec('REP-ROUTE-002', 'Reportes', 'los importes del reporte de A son exactamente los de A', () => {
+  const src = fuentesDosRutas()
+  const pagos = buildReport('pagos', src, soloA)
+  const total = pagos.reduce((s, r) => s + Number(r.Valor), 0)
+  metric('pagos de A dentro del rango', total)
+  assert(total === 150_000, `total contaminado o fuera de rango: ${total}`)
+
+  const caja = buildReport('caja_diaria', src, soloA)
+  const cobros = caja.reduce((s, r) => s + Number(r.Cobros), 0)
+  const gastos = caja.reduce((s, r) => s + Number(r.Gastos), 0)
+  metric('caja diaria A', `cobros=${cobros} gastos=${gastos}`)
+  assert(cobros === 150_000 && gastos === 20_000, `caja diaria contaminada: ${cobros}/${gastos}`)
+})
+
+await spec('REP-SCOPE-001', 'Reportes', 'Todas las rutas consolida UNICAMENTE las rutas permitidas', () => {
+  const src = fuentesDosRutas()
+  const efectivas = resolveReportRouteIds(new Set(['r-A']), '')
+  metric('rutas efectivas con seleccion Todas', [...efectivas].join(', '))
+  const rows = buildReport('pagos', src, { routeIds: efectivas, ...RANGO })
+  const rutas = [...new Set(rows.map(r => String(r.Ruta)))]
+  metric('rutas presentes', rutas.join(', '))
+  assert(efectivas.size === 1 && efectivas.has('r-A'), 'Todas amplio el alcance del usuario')
+  assert(rutas.every(n => n === 'Ruta A'), 'se consolidaron rutas no autorizadas')
+})
+
+await spec('REP-SCOPE-002', 'Reportes', 'el Super Admin ve todas las rutas de la empresa actual', () => {
+  const src = fuentesDosRutas()
+  const efectivas = resolveReportRouteIds(new Set(['r-A', 'r-B']), '')
+  const rows = buildReport('pagos', src, { routeIds: efectivas, ...RANGO })
+  const rutas = [...new Set(rows.map(r => String(r.Ruta)))].sort()
+  metric('rutas consolidadas', rutas.join(', '))
+  assert(rutas.length === 2, `el Super Admin no consolido ambas rutas: ${rutas.join(', ')}`)
+})
+
+await spec('REP-SCOPE-003', 'Reportes', 'elegir una ruta FUERA del alcance devuelve cero filas (fail-closed)', () => {
+  const src = fuentesDosRutas()
+  const efectivas = resolveReportRouteIds(new Set(['r-A']), 'r-B')
+  metric('rutas efectivas', efectivas.size === 0 ? '(vacio)' : [...efectivas].join(', '))
+  assert(efectivas.size === 0, 'una ruta fuera del alcance NO debe resolverse')
+  for (const tipo of REPORT_OPTIONS.map(o => o.value)) {
+    const rows = buildReport(tipo, src, { routeIds: efectivas, ...RANGO })
+    metric(`${tipo} -> filas`, rows.length)
+    assert(rows.length === 0, `${tipo}: se filtraron datos de una ruta no autorizada`)
+  }
+})
+
+await spec('REP-CSV-001', 'Reportes', 'lo que se exporta a CSV es exactamente lo generado para esa ruta', () => {
+  const src = fuentesDosRutas()
+  const rows = buildReport('pagos', src, soloA)
+  const ajenas = rows.filter(r => String(r.Ruta) !== 'Ruta A')
+  metric('filas exportables', rows.length)
+  metric('filas de otra ruta', ajenas.length)
+  assert(ajenas.length === 0, 'el CSV contendria registros de otra ruta')
+  assert(rows.every(r => 'Ruta' in r), 'el CSV perdio la columna Ruta')
+})
+
+await spec('REP-SEM-001', 'Reportes', 'un pago corregido aparece una sola vez, no como tres movimientos', () => {
+  const src = fuentesDosRutas()
+  const base = {
+    tenantId: 't-1', saleId: 's-A1', clientId: 'c-A', routeId: 'r-A', collectorId: 'u-cob',
+    fecha: '2026-08-21', tipo: 'efectivo' as const, syncStatus: 'synced' as const,
+    createdAt: '2026-08-21T10:00:00.000Z',
+  }
+  src.payments = [
+    ...src.payments,
+    { ...base, id: 'p-orig', valor: 100_000, state: 'reversed', correctedByPaymentId: 'p-corr' },
+    { ...base, id: 'p-rev', valor: -100_000, state: 'reversal', reversesPaymentId: 'p-orig' },
+    { ...base, id: 'p-corr', valor: 80_000, state: 'active', correctionOfPaymentId: 'p-orig' },
+  ] as never
+
+  const rows = buildReport('pagos', src, soloA)
+  const del21 = rows.filter(r => String(r.Fecha).includes('21'))
+  const total = rows.reduce((s, r) => s + Number(r.Valor), 0)
+  metric('movimientos listados del dia corregido', del21.length)
+  metric('valores del dia corregido', del21.map(r => r.Valor).join(', '))
+  metric('total del reporte', total)
+  assert(del21.length === 1, `el pago corregido se lista ${del21.length} veces (debe ser 1)`)
+  assert(Number(del21[0].Valor) === 80_000, `se listo el importe equivocado: ${del21[0].Valor}`)
+  assert(!rows.some(r => Number(r.Valor) < 0), 'el reporte muestra asientos de reversion negativos')
+  assert(total === 230_000, `total incorrecto tras la correccion: ${total}`)
+
+  const caja = buildReport('caja_diaria', src, soloA)
+  const cobros = caja.reduce((s, r) => s + Number(r.Cobros), 0)
+  metric('cobros de caja diaria', cobros)
+  assert(cobros === 230_000, `caja diaria incoherente con el reporte de pagos: ${cobros}`)
+})
+
+await spec('REP-DATE-001', 'Reportes', 'el rango de fechas se respeta dentro de la ruta elegida', () => {
+  const src = fuentesDosRutas()
+  const rows = buildReport('pagos', src, { routeIds: new Set(['r-A']), fechaDesde: '2026-07-01', fechaHasta: '2026-07-31' })
+  const total = rows.reduce((s, r) => s + Number(r.Valor), 0)
+  metric('filas en julio', rows.length)
+  metric('total julio', total)
+  assert(rows.length === 1 && total === 777_000, `el rango de fechas no se aplico: ${rows.length} filas / ${total}`)
+})
+
+
+// ############################################################
+// RQ-02 — LIQUIDACION SEMANAL POR RUTA
+// ------------------------------------------------------------
+// La liquidacion es SIEMPRE de una ruta. Se apoya integramente en
+// getCashboxSummary, asi que estos casos comprueban dos cosas distintas:
+//   1. que la liquidacion refleje exactamente la caja de ESA ruta;
+//   2. que el alcance del usuario se valide en el SERVICIO, no solo en la UI.
+// ############################################################
+
+/** Misma empresa, dos rutas con movimientos deliberadamente distintos. */
+function rutasParaLiquidar() {
+  return buildCashboxScenario([
+    {
+      routeId: 'r-A', nombre: 'Ruta A', codigo: 'RT-001',
+      capital: [{ fecha: '2026-08-10', valor: 2_000_000 }],
+      pagos: [{ fecha: '2026-08-19', valor: 400_000 }, { fecha: '2026-08-20', valor: 100_000 }],
+      ventas: [{ fechaInicio: '2026-08-19', valorVenta: 300_000 }],
+      gastos: [{ fecha: '2026-08-20', valor: 25_000 }],
+      retiros: [{ fecha: '2026-08-21', valor: 75_000 }],
+    },
+    {
+      routeId: 'r-B', nombre: 'Ruta B', codigo: 'RT-002',
+      capital: [{ fecha: '2026-08-10', valor: 50_000_000 }],
+      pagos: [{ fecha: '2026-08-19', valor: 9_000_000 }],
+      ventas: [{ fechaInicio: '2026-08-20', valorVenta: 6_000_000 }],
+      gastos: [{ fecha: '2026-08-20', valor: 400_000 }],
+      retiros: [{ fecha: '2026-08-21', valor: 300_000 }],
+    },
+  ])
+}
+
+const mkUserRutas = (rol: User['rol'], routeIds: string[]): User => ({
+  id: `u-${rol}`, tenantId: TEST_IDS.TENANT_ID, nombre: rol, email: `${rol}@t.com`, password: 'x',
+  rol, status: 'activo', authorizedRouteIds: routeIds, createdAt: '', updatedAt: '',
+})
+
+await spec('SETTLE-ROUTE-001', 'Liquidacion', 'la liquidacion de la Ruta A no incluye ningun movimiento de la Ruta B', async () => {
+  const db = rutasParaLiquidar()
+  const a = await generateWeeklySettlement(
+    { tenantId: TEST_IDS.TENANT_ID, routeId: 'r-A', semanaInicio: SEM_INI, semanaFin: SEM_FIN },
+    asCashboxDb(db),
+  )
+  metric('ruta liquidada', a.routeId)
+  metric('cobros', a.cobros)
+  metric('prestamos', a.prestamosEntregados)
+  metric('gastos', a.gastos)
+  metric('retiros', a.retiros)
+  metric('saldo anterior', a.saldoAnterior)
+  metric('saldo final', a.saldoFinal)
+  assert(a.routeId === 'r-A', 'la liquidacion no identifica su ruta')
+  assert(a.cobros === 500_000, `cobros contaminados: ${a.cobros}`)
+  assert(a.prestamosEntregados === 300_000, `prestamos contaminados: ${a.prestamosEntregados}`)
+  assert(a.gastos === 25_000, `gastos contaminados: ${a.gastos}`)
+  assert(a.retiros === 75_000, `retiros contaminados: ${a.retiros}`)
+  assert(a.ingresoCapital === 0, 'el capital previo se conto dentro de la semana')
+  // Saldo anterior: solo el capital de A del 10-ago.
+  assert(a.saldoAnterior === 2_000_000, `saldo anterior contaminado: ${a.saldoAnterior}`)
+  // 2.000.000 + 500.000 - 300.000 - 25.000 - 75.000
+  assert(a.saldoFinal === 2_100_000, `saldo final contaminado: ${a.saldoFinal}`)
+})
+
+await spec('SETTLE-ROUTE-002', 'Liquidacion', 'liquidar A y liquidar B dan resultados independientes', async () => {
+  const db = rutasParaLiquidar()
+  const params = { tenantId: TEST_IDS.TENANT_ID, semanaInicio: SEM_INI, semanaFin: SEM_FIN }
+  const a = await generateWeeklySettlement({ ...params, routeId: 'r-A' }, asCashboxDb(db))
+  const b = await generateWeeklySettlement({ ...params, routeId: 'r-B' }, asCashboxDb(db))
+  metric('saldo final A', a.saldoFinal)
+  metric('saldo final B', b.saldoFinal)
+  assert(a.cobros === 500_000 && b.cobros === 9_000_000, 'los cobros se mezclaron entre rutas')
+  assert(a.saldoFinal !== b.saldoFinal, 'ambas rutas devolvieron el mismo saldo: hay consolidacion')
+  // B: 50.000.000 + 9.000.000 - 6.000.000 - 400.000 - 300.000
+  assert(b.saldoFinal === 52_300_000, `saldo final de B incorrecto: ${b.saldoFinal}`)
+})
+
+await spec('SETTLE-SCOPE-001', 'Liquidacion', 'un Administrador NO puede liquidar una ruta fuera de su alcance', async () => {
+  const db = rutasParaLiquidar()
+  const adminSoloA = mkUserRutas('admin', ['r-A'])
+  const params = { tenantId: TEST_IDS.TENANT_ID, semanaInicio: SEM_INI, semanaFin: SEM_FIN }
+
+  const propia = await generateWeeklySettlementForUser({ ...params, routeId: 'r-A', user: adminSoloA }, asCashboxDb(db))
+  const ajena = await generateWeeklySettlementForUser({ ...params, routeId: 'r-B', user: adminSoloA }, asCashboxDb(db))
+  metric('ruta propia (r-A)', propia ? `saldo ${propia.saldoFinal}` : 'null')
+  metric('ruta ajena (r-B)', ajena === null ? 'null (fail-closed)' : 'DEVOLVIO DATOS')
+  assert(propia !== null, 'el Administrador no pudo liquidar su propia ruta')
+  assert(ajena === null, 'se liquido una ruta fuera del alcance del usuario')
+})
+
+await spec('SETTLE-SCOPE-002', 'Liquidacion', 'un Administrador SIN rutas no puede liquidar nada (fail-closed)', async () => {
+  const db = rutasParaLiquidar()
+  const sinRutas = mkUserRutas('admin', [])
+  const params = { tenantId: TEST_IDS.TENANT_ID, semanaInicio: SEM_INI, semanaFin: SEM_FIN }
+  for (const routeId of ['r-A', 'r-B']) {
+    const r = await generateWeeklySettlementForUser({ ...params, routeId, user: sinRutas }, asCashboxDb(db))
+    metric(`liquidacion de ${routeId}`, r === null ? 'null (fail-closed)' : 'DEVOLVIO DATOS')
+    assert(r === null, `un Admin sin rutas liquido ${routeId}`)
+  }
+  const anonimo = await generateWeeklySettlementForUser({ ...params, routeId: 'r-A', user: null }, asCashboxDb(db))
+  metric('sin sesion', anonimo === null ? 'null' : 'DEVOLVIO DATOS')
+  assert(anonimo === null, 'sin sesion se genero una liquidacion')
+})
+
+await spec('SETTLE-SCOPE-003', 'Liquidacion', 'el Super Admin puede liquidar cualquier ruta de la empresa', async () => {
+  const db = rutasParaLiquidar()
+  const su = mkUserRutas('superadmin', [])
+  const params = { tenantId: TEST_IDS.TENANT_ID, semanaInicio: SEM_INI, semanaFin: SEM_FIN }
+  const a = await generateWeeklySettlementForUser({ ...params, routeId: 'r-A', user: su }, asCashboxDb(db))
+  const b = await generateWeeklySettlementForUser({ ...params, routeId: 'r-B', user: su }, asCashboxDb(db))
+  metric('r-A', a ? a.saldoFinal : 'null')
+  metric('r-B', b ? b.saldoFinal : 'null')
+  assert(a !== null && b !== null, 'el Super Admin no pudo liquidar alguna ruta')
+  assert(a!.cobros === 500_000 && b!.cobros === 9_000_000, 'las cifras se mezclaron para el Super Admin')
+})
+
+await spec('SETTLE-CSV-001', 'Liquidacion', 'el CSV de la Ruta A contiene solo la Ruta A', async () => {
+  const db = rutasParaLiquidar()
+  const a = await generateWeeklySettlement(
+    { tenantId: TEST_IDS.TENANT_ID, routeId: 'r-A', semanaInicio: SEM_INI, semanaFin: SEM_FIN },
+    asCashboxDb(db),
+  )
+  // Replica de exportCSV(): una unica fila, la de la ruta liquidada.
+  const rows = [{
+    Ruta: 'Ruta A',
+    Cobros: a.cobros, Gastos: a.gastos, Retiros: a.retiros,
+    'Saldo anterior': a.saldoAnterior, 'Saldo final': a.saldoFinal,
+  }]
+  metric('filas exportadas', rows.length)
+  metric('rutas presentes', [...new Set(rows.map(r => r.Ruta))].join(', '))
+  assert(rows.length === 1, 'el CSV de una liquidacion debe tener una sola fila de ruta')
+  assert(rows.every(r => r.Ruta === 'Ruta A'), 'el CSV incluye otra ruta')
+  assert(rows[0].Cobros === 500_000, `el CSV exporta cobros contaminados: ${rows[0].Cobros}`)
+})
+
+await spec('SETTLE-SRC-001', 'Liquidacion', 'ya no existe el modo consolidado "todas las rutas"', () => {
+  const engine = readSource('src/services/weeklySettlementEngine.ts')
+  const page = readSource('src/pages/admin/WeeklySettlementPage.tsx')
+  metric('getAllRoutesWeeklySettlement en el motor', /getAllRoutesWeeklySettlement/.test(engine))
+  metric('la pantalla exige ruta', page.includes('Selecciona la ruta que deseas liquidar.'))
+  metric('la pantalla valida el alcance', page.includes('canAccessRoute(user, routeId)'))
+  metric('el servicio valida el alcance', engine.includes('canAccessRoute(user, rest.routeId)'))
+  assert(!/getAllRoutesWeeklySettlement/.test(engine), 'sigue existiendo el orquestador consolidado')
+  assert(!/getAllRoutesWeeklySettlement/.test(page), 'la pantalla sigue llamando al modo consolidado')
+  assert(page.includes('Selecciona la ruta que deseas liquidar.'), 'la ruta dejo de ser obligatoria en la pantalla')
+  assert(engine.includes('canAccessRoute(user, rest.routeId)'), 'el servicio dejo de aplicar fail-closed')
+  // El motor no reimplementa el calculo: lo delega en getCashboxSummary.
+  assert(engine.includes('getCashboxSummary('), 'la liquidacion dejo de reutilizar el motor de caja')
+})
+
+
+// ############################################################
+// RQ-04 — HISTORIAL DE CREDITOS DEL CLIENTE
+// ------------------------------------------------------------
+// Dos reglas que estos casos protegen:
+//   1. el historial se cruza por clientId, JAMAS por nombre;
+//   2. fechaFinalEstimada (cuando deberia terminar) y fechaFinalizacion (cuando
+//      termino de verdad) son datos distintos y no se sustituyen entre si.
+// ############################################################
+
+/** Venta de prueba con los campos que consume el historial. */
+function venta(over: Partial<Sale> & { id: string; clientId: string }): Sale {
+  return {
+    tenantId: 't-1', routeId: 'r-A', createdByUserId: 'u-cob',
+    valorVenta: 100_000, tasaInteres: 20, valorInteres: 20_000, valorTotal: 120_000,
+    saldo: 0, numeroCuotas: 30, valorCuota: 4_000, frecuenciaPago: 'diaria',
+    fechaInicio: '2026-01-01', fechaFinalEstimada: '2026-01-31',
+    status: 'finalizada', createdAt: '2026-01-01T09:00:00.000Z', updatedAt: '2026-06-01T09:00:00.000Z',
+    ...over,
+  } as Sale
+}
+
+/** Pago de prueba. */
+function pago(over: Partial<Payment> & { id: string; saleId: string; clientId: string }): Payment {
+  return {
+    tenantId: 't-1', routeId: 'r-A', collectorId: 'u-cob',
+    valor: 10_000, fecha: '2026-01-10', tipo: 'efectivo', syncStatus: 'synced',
+    createdAt: '2026-01-10T10:00:00.000Z', state: 'active',
+    ...over,
+  } as Payment
+}
+
+await spec('HIST-001', 'Historial', 'un cliente con varios creditos los muestra todos', () => {
+  const sales = [
+    venta({ id: 's-1', clientId: 'c-1', valorVenta: 300_000, fechaInicio: '2026-01-01', fechaFinalizacion: '2026-02-10' }),
+    venta({ id: 's-2', clientId: 'c-1', valorVenta: 500_000, fechaInicio: '2026-03-01', fechaFinalizacion: '2026-04-15' }),
+    venta({ id: 's-3', clientId: 'c-1', valorVenta: 700_000, fechaInicio: '2026-06-01', status: 'activa', saldo: 400_000, fechaFinalizacion: undefined }),
+    // Credito de OTRO cliente: no debe aparecer.
+    venta({ id: 's-x', clientId: 'c-2', valorVenta: 999_000 }),
+  ]
+  const payments = [
+    pago({ id: 'p-1', saleId: 's-1', clientId: 'c-1', valor: 360_000 }),
+    pago({ id: 'p-2', saleId: 's-2', clientId: 'c-1', valor: 600_000 }),
+    pago({ id: 'p-3', saleId: 's-3', clientId: 'c-1', valor: 440_000 }),
+    pago({ id: 'p-x', saleId: 's-x', clientId: 'c-2', valor: 999_000 }),
+  ]
+  const h = buildClientCreditHistory('c-1', sales, payments)
+  metric('cantidad de creditos', h.total)
+  metric('activos / finalizados', `${h.activos} / ${h.finalizados}`)
+  metric('valores', h.entries.map(e => e.valorVenta).join(', '))
+  metric('total prestado', h.totalPrestado)
+  metric('total abonado', h.totalAbonado)
+  metric('saldo pendiente', h.saldoPendiente)
+  assert(h.total === 3, `debe mostrar 3 creditos, mostro ${h.total}`)
+  assert(h.activos === 1 && h.finalizados === 2, `conteo por estado incorrecto: ${h.activos}/${h.finalizados}`)
+  assert(h.entries.every(e => e.saleId !== 's-x'), 'se colo el credito de otro cliente')
+  assert(h.totalPrestado === 1_500_000, `total prestado incorrecto: ${h.totalPrestado}`)
+  assert(h.totalAbonado === 1_400_000, `total abonado incorrecto: ${h.totalAbonado}`)
+  assert(h.saldoPendiente === 400_000, `saldo pendiente incorrecto: ${h.saldoPendiente}`)
+  // Del mas reciente al mas antiguo.
+  assert(h.entries[0].saleId === 's-3', 'el historial no esta ordenado del mas reciente al mas antiguo')
+})
+
+await spec('HIST-002', 'Historial', 'un credito ACTIVO nunca aparece como finalizado', () => {
+  const sales = [
+    venta({ id: 's-act', clientId: 'c-1', status: 'activa', saldo: 50_000, fechaFinalizacion: undefined }),
+    // Dato inconsistente heredado: activa PERO con fecha de finalizacion guardada.
+    venta({ id: 's-raro', clientId: 'c-1', status: 'activa', saldo: 10_000, fechaFinalizacion: '2026-05-05' }),
+  ]
+  const h = buildClientCreditHistory('c-1', sales, [])
+  const act = h.entries.find(e => e.saleId === 's-act')!
+  const raro = h.entries.find(e => e.saleId === 's-raro')!
+  metric('estado del credito activo', act.estado)
+  metric('fecha de finalizacion del activo', String(act.fechaFinalizacion))
+  metric('activo con fecha heredada -> se ignora', String(raro.fechaFinalizacion))
+  assert(act.estado === 'Activo', `el credito activo se etiqueto como ${act.estado}`)
+  assert(act.fechaFinalizacion === undefined, 'un credito activo no puede tener fecha real de finalizacion')
+  assert(raro.fechaFinalizacion === undefined, 'una venta activa con fecha heredada la sigue mostrando')
+  assert(h.finalizados === 0, 'se conto como finalizado un credito activo')
+})
+
+await spec('HIST-003', 'Historial', 'un credito PERDIDO no inventa fecha de finalizacion', () => {
+  const sales = [
+    venta({ id: 's-perd', clientId: 'c-1', status: 'perdida', saldo: 80_000, motivoPerdida: 'ilocalizable', updatedAt: '2026-09-09T00:00:00.000Z', fechaFinalizacion: undefined }),
+    venta({ id: 's-ref', clientId: 'c-1', status: 'refinanciada', saldo: 0, fechaFinalizacion: undefined }),
+  ]
+  const h = buildClientCreditHistory('c-1', sales, [pago({ id: 'p-1', saleId: 's-perd', clientId: 'c-1', valor: 20_000 })])
+  const perd = h.entries.find(e => e.saleId === 's-perd')!
+  const ref = h.entries.find(e => e.saleId === 's-ref')!
+  metric('estado', perd.estado)
+  metric('fecha de finalizacion del perdido', String(perd.fechaFinalizacion))
+  metric('estado del refinanciado', ref.estado)
+  assert(perd.estado === 'Perdido' && ref.estado === 'Refinanciado', 'etiquetas de estado incorrectas')
+  assert(perd.fechaFinalizacion === undefined, 'un credito perdido no debe tener fecha real de finalizacion')
+  assert(ref.fechaFinalizacion === undefined, 'un credito refinanciado no debe tener fecha real de finalizacion')
+  assert(h.perdidos === 1 && h.refinanciados === 1, 'conteo por estado incorrecto')
+  // Y su etiqueta esta en el catalogo oficial de estados.
+  assert(CREDIT_STATUS_LABEL.perdida === 'Perdido', 'cambio la etiqueta oficial del estado perdido')
+})
+
+await spec('HIST-004', 'Historial', 'un credito FINALIZADO expone su fecha real, distinta de la estimada', () => {
+  const sales = [venta({
+    id: 's-fin', clientId: 'c-1', status: 'finalizada',
+    fechaInicio: '2026-01-01', fechaFinalEstimada: '2026-01-31', fechaFinalizacion: '2026-02-18',
+  })]
+  const h = buildClientCreditHistory('c-1', sales, [])
+  const e = h.entries[0]
+  metric('fecha de creacion (comercial)', e.fechaInicio)
+  metric('fin estimado', e.fechaFinEstimada)
+  metric('finalizacion real', String(e.fechaFinalizacion))
+  assert(e.fechaFinalizacion === '2026-02-18', `fecha real incorrecta: ${e.fechaFinalizacion}`)
+  assert(e.fechaFinEstimada === '2026-01-31', 'se perdio la fecha estimada')
+  assert(e.fechaFinalizacion !== e.fechaFinEstimada, 'la fecha real quedo igualada a la estimada')
+  // La fecha de creacion del credito es la COMERCIAL (fechaInicio), no createdAt.
+  assert(e.fechaInicio === '2026-01-01', 'la fecha de creacion no es la fecha comercial del credito')
+})
+
+await spec('HIST-005', 'Historial', 'dos clientes con el MISMO nombre no mezclan historiales', () => {
+  // Mismo nombre y hasta el mismo documento: solo el id los distingue.
+  const sales = [
+    venta({ id: 's-a1', clientId: 'c-ana-1', valorVenta: 100_000 }),
+    venta({ id: 's-a2', clientId: 'c-ana-1', valorVenta: 200_000 }),
+    venta({ id: 's-b1', clientId: 'c-ana-2', valorVenta: 900_000 }),
+  ]
+  const payments = [
+    pago({ id: 'p-a1', saleId: 's-a1', clientId: 'c-ana-1', valor: 120_000 }),
+    pago({ id: 'p-b1', saleId: 's-b1', clientId: 'c-ana-2', valor: 999_000 }),
+  ]
+  const a = buildClientCreditHistory('c-ana-1', sales, payments)
+  const b = buildClientCreditHistory('c-ana-2', sales, payments)
+  metric('Ana (id c-ana-1)', `${a.total} creditos / prestado ${a.totalPrestado} / abonado ${a.totalAbonado}`)
+  metric('Ana (id c-ana-2)', `${b.total} creditos / prestado ${b.totalPrestado} / abonado ${b.totalAbonado}`)
+  assert(a.total === 2 && b.total === 1, `historiales mezclados: ${a.total} / ${b.total}`)
+  assert(a.totalPrestado === 300_000 && b.totalPrestado === 900_000, 'importes mezclados entre homonimos')
+  assert(a.totalAbonado === 120_000 && b.totalAbonado === 999_000, 'abonos mezclados entre homonimos')
+  assert(a.entries.every(e => e.saleId !== 's-b1'), 'un credito del homonimo aparece en el historial equivocado')
+})
+
+await spec('HIST-006', 'Historial', 'los abonos revertidos no cuentan en el historial', () => {
+  const sales = [venta({ id: 's-1', clientId: 'c-1', status: 'activa', saldo: 40_000 })]
+  const payments = [
+    pago({ id: 'p-orig', saleId: 's-1', clientId: 'c-1', valor: 100_000, state: 'reversed' }),
+    pago({ id: 'p-rev', saleId: 's-1', clientId: 'c-1', valor: -100_000, state: 'reversal' }),
+    pago({ id: 'p-corr', saleId: 's-1', clientId: 'c-1', valor: 80_000, state: 'active' }),
+    // Pago heredado sin `state`: cuenta (compatibilidad).
+    pago({ id: 'p-legacy', saleId: 's-1', clientId: 'c-1', valor: 5_000, state: undefined }),
+  ]
+  const h = buildClientCreditHistory('c-1', sales, payments)
+  metric('abonado segun el historial', h.totalAbonado)
+  metric('pagos vigentes', effectivePayments(payments).length)
+  assert(h.totalAbonado === 85_000, `el historial no aplico la semantica de correccion: ${h.totalAbonado}`)
+  assert(effectivePayments(payments).length === 2, 'la definicion de pago vigente cambio')
+})
+
+await spec('HIST-007', 'Historial', 'un cliente sin creditos devuelve un historial vacio, no un error', () => {
+  const h = buildClientCreditHistory('c-sin-nada', [venta({ id: 's-1', clientId: 'c-otro' })], [])
+  metric('creditos', h.total)
+  metric('entradas', h.entries.length)
+  assert(h.total === 0 && h.entries.length === 0, 'un cliente sin creditos no devolvio historial vacio')
+  assert(h.totalPrestado === 0 && h.saldoPendiente === 0, 'totales no nulos en un historial vacio')
+  // Sin clientId no se devuelve nada (fail-closed).
+  assert(buildClientCreditHistory('', [venta({ id: 's-1', clientId: 'c-otro' })], []).total === 0, 'sin clientId se devolvieron creditos')
+})
+
+// ------------------------------------------------------------
+// SELLADO DE LA FECHA REAL DE FINALIZACION
+// ------------------------------------------------------------
+await spec('HIST-SEAL-001', 'Historial', 'al saldar la venta se sella la fecha CONTABLE del abono que la cerro', async () => {
+  // Venta de 2 parcelas: el segundo abono la cierra, con fecha contable propia.
+  const sc = buildScenario({ valorVenta: 100_000, numeroCuotas: 2, parcelasPagadas: 1 })
+  const saldo = (await sc.db.sales.get(TEST_IDS.SALE_ID))!.saldo
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: saldo, actor: USER_ADMIN, fecha: '2026-09-07' },
+    asDb(sc.db),
+  )
+  const sale = (await sc.db.sales.get(TEST_IDS.SALE_ID))!
+  metric('resultado', res.ok ? `saldo ${res.newBalance} estado ${res.saleStatus}` : res.code)
+  metric('fechaFinalizacion sellada', String(sale.fechaFinalizacion))
+  metric('updatedAt (NO se usa como cierre)', sale.updatedAt.slice(0, 10))
+  assert(res.ok && res.saleStatus === 'finalizada', 'la venta no quedo finalizada')
+  assert(sale.fechaFinalizacion === '2026-09-07', `no se sello la fecha contable del abono: ${sale.fechaFinalizacion}`)
+  assert(sale.fechaFinalizacion !== sale.updatedAt, 'se uso updatedAt como fecha de finalizacion')
+  assert(sale.fechaFinalizacion !== sale.fechaFinalEstimada, 'se uso la fecha estimada como fecha real')
+})
+
+await spec('HIST-SEAL-002', 'Historial', 'un abono que NO cierra la venta no sella ninguna fecha', async () => {
+  const sc = buildScenario({ valorVenta: 100_000, numeroCuotas: 10 })
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 5_000, actor: USER_ADMIN, fecha: '2026-09-07' },
+    asDb(sc.db),
+  )
+  const sale = (await sc.db.sales.get(TEST_IDS.SALE_ID))!
+  metric('estado', res.ok ? res.saleStatus : 'rechazado')
+  metric('fechaFinalizacion', String(sale.fechaFinalizacion))
+  assert(res.ok && res.saleStatus === 'activa', 'la venta no siguio activa')
+  assert(sale.fechaFinalizacion === undefined, 'se sello una fecha de finalizacion en una venta activa')
+})
+
+await spec('HIST-SEAL-003', 'Historial', 'una fecha ya sellada no se reescribe mientras la venta siga cerrada', () => {
+  // Regla pura aplicada por paymentCorrectionService al recomputar.
+  const conservada = resolveSealedCompletionDate({
+    status: 'finalizada', sealed: '2026-02-18', lastEffectivePaymentDate: '2026-03-30',
+  })
+  metric('fecha sellada previa', '2026-02-18')
+  metric('ultimo pago vigente tras la correccion', '2026-03-30')
+  metric('resultado', String(conservada))
+  assert(conservada === '2026-02-18', `la correccion reescribio una fecha ya sellada: ${conservada}`)
+
+  // Si nunca se sello (dato heredado), se infiere del ultimo pago vigente.
+  const inferida = resolveSealedCompletionDate({
+    status: 'finalizada', sealed: undefined, lastEffectivePaymentDate: '2026-03-30',
+  })
+  metric('sin sellar -> se infiere', String(inferida))
+  assert(inferida === '2026-03-30', 'no se infirio la fecha del ultimo pago vigente')
+
+  // Sin ninguna fuente fiable NO se inventa nada.
+  const sinFuente = resolveSealedCompletionDate({ status: 'finalizada', sealed: undefined, lastEffectivePaymentDate: undefined })
+  metric('sin fuente fiable', String(sinFuente))
+  assert(sinFuente === undefined, 'se invento una fecha de finalizacion sin fuente')
+})
+
+await spec('HIST-SEAL-004', 'Historial', 'si una correccion REABRE la venta, la fecha de cierre se limpia', () => {
+  // Unica excepcion admitida: la venta vuelve a tener saldo -> el cierre ya no existe.
+  const reabierta = resolveSealedCompletionDate({
+    status: 'activa', sealed: '2026-02-18', lastEffectivePaymentDate: '2026-02-18',
+  })
+  metric('estado tras la correccion', 'activa')
+  metric('fecha de cierre resultante', String(reabierta))
+  assert(reabierta === undefined, 'una venta reabierta conservo su fecha de finalizacion (dato falso)')
+
+  // Perdida o refinanciada tampoco conservan fecha real de finalizacion.
+  assert(resolveSealedCompletionDate({ status: 'perdida', sealed: '2026-02-18' }) === undefined, 'una venta perdida conservo fecha de cierre')
+  assert(resolveSealedCompletionDate({ status: 'refinanciada', sealed: '2026-02-18' }) === undefined, 'una venta refinanciada conservo fecha de cierre')
+
+  // Y al volver a saldarse se sella la NUEVA fecha real.
+  const recerrada = resolveSealedCompletionDate({ status: 'finalizada', sealed: undefined, lastEffectivePaymentDate: '2026-05-02' })
+  metric('vuelve a saldarse', String(recerrada))
+  assert(recerrada === '2026-05-02', 'no se sello la nueva fecha real tras volver a cerrarse')
+})
+
+await spec('HIST-MIG-001', 'Historial', 'la migracion historica infiere la fecha del ultimo pago vigente, o la deja vacia', () => {
+  // Replica exacta de la migracion v9 de db.ts sobre datos heredados.
+  const salesHeredadas: Sale[] = [
+    venta({ id: 's-con-pagos', clientId: 'c-1', status: 'finalizada', fechaFinalizacion: undefined }),
+    venta({ id: 's-sin-pagos', clientId: 'c-1', status: 'finalizada', fechaFinalizacion: undefined }),
+    venta({ id: 's-ya-sellada', clientId: 'c-1', status: 'finalizada', fechaFinalizacion: '2025-12-01' }),
+    venta({ id: 's-activa', clientId: 'c-1', status: 'activa', saldo: 10_000, fechaFinalizacion: undefined }),
+    venta({ id: 's-perdida', clientId: 'c-1', status: 'perdida', saldo: 10_000, fechaFinalizacion: undefined }),
+  ]
+  const pagosHeredados: Payment[] = [
+    pago({ id: 'p-1', saleId: 's-con-pagos', clientId: 'c-1', fecha: '2026-03-01' }),
+    pago({ id: 'p-2', saleId: 's-con-pagos', clientId: 'c-1', fecha: '2026-04-20' }),
+    // Ultimo pago del historial, pero REVERTIDO: no puede ser la fecha de cierre.
+    pago({ id: 'p-3', saleId: 's-con-pagos', clientId: 'c-1', fecha: '2026-05-30', state: 'reversed' }),
+    pago({ id: 'p-4', saleId: 's-con-pagos', clientId: 'c-1', fecha: '2026-05-30', valor: -10_000, state: 'reversal' }),
+    // La venta perdida SI tiene pagos, pero no se le sella fecha.
+    pago({ id: 'p-5', saleId: 's-perdida', clientId: 'c-1', fecha: '2026-06-06' }),
+  ]
+
+  const porVenta = new Map<string, Payment[]>()
+  for (const pmt of pagosHeredados) {
+    const arr = porVenta.get(pmt.saleId) ?? []
+    arr.push(pmt); porVenta.set(pmt.saleId, arr)
+  }
+  const resultado = new Map<string, string | undefined>()
+  for (const v of salesHeredadas.filter(x => x.status === 'finalizada' && !x.fechaFinalizacion)) {
+    resultado.set(v.id, lastEffectivePaymentDate(porVenta.get(v.id) ?? []))
+  }
+
+  metric('s-con-pagos', String(resultado.get('s-con-pagos')))
+  metric('s-sin-pagos', String(resultado.get('s-sin-pagos')))
+  metric('s-ya-sellada (no se toca)', 'no entra en la migracion')
+  metric('s-activa / s-perdida', 'no entran en la migracion')
+  assert(resultado.get('s-con-pagos') === '2026-04-20', `se inferio la fecha equivocada: ${resultado.get('s-con-pagos')}`)
+  assert(resultado.get('s-sin-pagos') === undefined, 'se invento una fecha sin pagos que la respalden')
+  assert(!resultado.has('s-ya-sellada'), 'la migracion reescribio una fecha ya sellada')
+  assert(!resultado.has('s-activa') && !resultado.has('s-perdida'), 'la migracion sello fechas en ventas no finalizadas')
+
+  // Y la migracion real de db.ts aplica exactamente esta regla.
+  const dbSrc = readSource('src/lib/db.ts')
+  metric('db.ts usa lastEffectivePaymentDate', dbSrc.includes('lastEffectivePaymentDate('))
+  metric('db.ts usa updatedAt como cierre', /fechaFinalizacion:\s*s\.updatedAt/.test(dbSrc))
+  assert(dbSrc.includes('this.version(9)'), 'falta la migracion v9')
+  assert(dbSrc.includes('lastEffectivePaymentDate('), 'la migracion no usa la fuente canonica')
+  assert(!/fechaFinalizacion:\s*\w*\.?updatedAt/.test(dbSrc), 'la migracion usa updatedAt como fecha de cierre')
+})
+
+await spec('HIST-SRC-001', 'Historial', 'el historial se monta en las areas administrativas y consulta por clientId', () => {
+  const comp = readSource('src/components/ui/ClientCreditHistory.tsx')
+  metric('consulta por clientId', comp.includes("db.sales.where('clientId').equals(client.id)"))
+  metric('aplica scoping por rutas', comp.includes('filterByAccessibleRoute(user'))
+  metric('exige sale.viewHistory', comp.includes("can(user, 'sale.viewHistory'"))
+  assert(comp.includes("db.sales.where('clientId').equals(client.id)"), 'el historial no consulta por clientId')
+  assert(!/where\('nombre'\)|c\.nombre ===/.test(comp), 'el historial cruza por nombre')
+  assert(comp.includes('filterByAccessibleRoute(user'), 'el historial no aplica el scoping por rutas')
+  assert(comp.includes("can(user, 'sale.viewHistory'"), 'el historial no valida la capacidad')
+
+  // Montado en Secretario, Admin y Socio; NO en la app del Cobrador.
+  for (const f of [
+    'src/pages/secretario/SecretarioClientsPage.tsx',
+    'src/pages/admin/ClientsPage.tsx',
+    'src/pages/socio/SocioClientsPage.tsx',
+  ]) {
+    const src = readSource(f)
+    metric(`montado en ${f.split('/').pop()}`, src.includes('<ClientCreditHistory'))
+    assert(src.includes('<ClientCreditHistory'), `falta el historial en ${f}`)
+  }
+  for (const f of ['src/pages/collector/ClientDetailPage.tsx', 'src/pages/collector/CollectorRoutePage.tsx']) {
+    const src = readSource(f)
+    metric(`ausente en ${f.split('/').pop()}`, !src.includes('ClientCreditHistory'))
+    assert(!src.includes('ClientCreditHistory'), `el historial se agrego a la app del Cobrador (${f})`)
+  }
+})
+
+await spec('HIST-SRC-002', 'Historial', 'ninguna pantalla rotula la fecha estimada como fecha de fin real', () => {
+  const auth = readSource('src/pages/admin/SaleAuthorizationsPage.tsx')
+  metric('rotulo antiguo "Fin {estimada}"', /` · Fin \$\{formatDate\(s\.fechaFinalEstimada\)\}`/.test(auth))
+  metric('rotulo nuevo', auth.includes('Fin estimado'))
+  assert(!/` · Fin \$\{formatDate\(s\.fechaFinalEstimada\)\}`/.test(auth), 'la fecha estimada se sigue rotulando como "Fin"')
+  assert(auth.includes('Fin estimado'), 'falta el rotulo inequivoco de la fecha estimada')
+
+  // La ficha del cliente ya no usa updatedAt como fecha de cierre.
+  const clientes = readSource('src/pages/admin/ClientsPage.tsx')
+  metric('ClientsPage usa updatedAt como Cierre', /Cierre \$\{formatDate\(s\.updatedAt\)\}/.test(clientes))
+  assert(!/Cierre \$\{formatDate\(s\.updatedAt\)\}/.test(clientes), 'la ficha del cliente sigue mostrando updatedAt como cierre')
+})
+
+
+// ############################################################
+// RQ-05 — CAJA PERSONAL DEL COBRADOR
+// ------------------------------------------------------------
+// La caja del Cobrador es el EFECTIVO que el maneja, no la caja financiera de la
+// ruta. Estos casos protegen tres cosas:
+//   1. el capital inicial NO llega a la capa de calculo del cobrador;
+//   2. dos cobradores de la misma ruta ven cifras distintas;
+//   3. quien DIGITA un abono no se queda con el dinero de quien lo COBRO.
+// ############################################################
+const asCollectorDb = (db: MemoryDb) => db as unknown as CollectorCashDatabase
+const DIA = '2026-08-19'
+
+/** Ruta con capital inicial y movimientos de DOS cobradores el mismo dia. */
+function rutaConDosCobradores() {
+  return buildCashboxScenario([{
+    routeId: 'r-A', nombre: 'Ruta A',
+    // Capital inicial MUY alto: si se filtrara a la caja del cobrador, saltaria.
+    capital: [{ fecha: '2026-08-01', valor: 50_000_000 }],
+    pagos: [
+      { fecha: DIA, valor: 60_000, collectorId: 'u-cobA' },
+      { fecha: DIA, valor: 40_000, collectorId: 'u-cobA' },
+      { fecha: DIA, valor: 200_000, collectorId: 'u-cobB' },
+      // Otro dia: no entra en el cuadre de hoy.
+      { fecha: '2026-08-18', valor: 900_000, collectorId: 'u-cobA' },
+    ],
+    ventas: [
+      { fechaInicio: DIA, valorVenta: 30_000, collectorId: 'u-cobA' },
+      { fechaInicio: DIA, valorVenta: 500_000, collectorId: 'u-cobB' },
+    ],
+    gastos: [
+      { fecha: DIA, valor: 5_000, collectorId: 'u-cobA' },
+      { fecha: DIA, valor: 90_000, collectorId: 'u-cobB' },
+    ],
+    retiros: [{ fecha: DIA, valor: 1_000_000 }],
+    transferenciasEntrada: [{ fecha: DIA, valor: 2_000_000 }],
+  }])
+}
+
+/** Marca las ventas del escenario con su desembolso (cobrador + fecha). */
+async function marcarDesembolsos(db: MemoryDb) {
+  for (const v of await db.sales.toArray() as Array<Sale & { collectorId?: string }>) {
+    if (!v.collectorId) continue
+    await db.sales.update(v.id, {
+      disbursedByCollectorId: v.collectorId,
+      fechaDesembolso: v.fechaInicio,
+    } as Partial<Sale>)
+  }
+}
+
+await spec('COLL-CASH-001', 'Caja cobrador', 'A y B recaudan en la misma ruta y cada uno ve SOLO lo suyo', async () => {
+  const db = rutaConDosCobradores()
+  await marcarDesembolsos(db)
+  const a = await getCollectorDailyCashSummary({ routeId: 'r-A', collectorId: 'u-cobA', fecha: DIA }, asCollectorDb(db))
+  const b = await getCollectorDailyCashSummary({ routeId: 'r-A', collectorId: 'u-cobB', fecha: DIA }, asCollectorDb(db))
+  metric('A recaudado', a.recaudado)
+  metric('B recaudado', b.recaudado)
+  metric('A a entregar', a.efectivoAEntregar)
+  metric('B a entregar', b.efectivoAEntregar)
+  assert(a.recaudado === 100_000, `A ve un recaudo contaminado: ${a.recaudado}`)
+  assert(b.recaudado === 200_000, `B ve un recaudo contaminado: ${b.recaudado}`)
+  assert(a.recaudado !== b.recaudado, 'ambos cobradores ven la misma cifra: sigue habiendo consolidado')
+  // A: 100.000 - 30.000 (desembolso) - 5.000 (gasto) = 65.000
+  assert(a.efectivoAEntregar === 65_000, `efectivo de A incorrecto: ${a.efectivoAEntregar}`)
+  // B: 200.000 - 500.000 - 90.000 = -390.000 (entrego mas de lo que recaudo)
+  assert(b.efectivoAEntregar === -390_000, `efectivo de B incorrecto: ${b.efectivoAEntregar}`)
+})
+
+await spec('COLL-CASH-002', 'Caja cobrador', 'el capital inicial NO llega a la capa de calculo del cobrador', async () => {
+  const db = rutaConDosCobradores()
+  await marcarDesembolsos(db)
+  const a = await getCollectorDailyCashSummary({ routeId: 'r-A', collectorId: 'u-cobA', fecha: DIA }, asCollectorDb(db))
+  const campos = Object.keys(a).join(', ')
+  metric('campos devueltos', campos)
+  metric('capital sembrado en la ruta', 50_000_000)
+  metric('mayor cifra devuelta al cobrador', Math.max(a.recaudado, a.desembolsado, a.gastos, Math.abs(a.efectivoAEntregar)))
+  // Ningun campo del resumen puede acercarse al capital, a los retiros ni a las transferencias.
+  const valores = [a.recaudado, a.desembolsado, a.gastos, a.efectivoAEntregar]
+  assert(!valores.includes(50_000_000), 'el capital inicial se filtro a la caja del cobrador')
+  assert(!valores.includes(1_000_000), 'los retiros de la ruta se filtraron a la caja del cobrador')
+  assert(!valores.includes(2_000_000), 'las transferencias de la ruta se filtraron a la caja del cobrador')
+  assert(!/capital|saldoAnterior|saldoActual|transferencias|retiros|baseActual/i.test(campos),
+    `el resumen del cobrador expone datos financieros de la ruta: ${campos}`)
+
+  // Y NO es solo que la UI lo oculte: la funcion ni siquiera declara esas tablas.
+  const src = readSource('src/services/cashboxEngine.ts')
+  const body = src.slice(src.indexOf('export async function getCollectorDailyCashSummary'))
+  const cuerpo = body.slice(0, body.indexOf('export async function hasCapitalForSale'))
+  metric('lee capitalMovements', /capitalMovements/.test(cuerpo))
+  metric('lee transfers', /transfers/.test(cuerpo))
+  metric('lee withdrawals', /withdrawals/.test(cuerpo))
+  assert(!/capitalMovements|transfers|withdrawals/.test(cuerpo),
+    'la caja personal consulta tablas financieras de la ruta')
+})
+
+await spec('COLL-CASH-003', 'Caja cobrador', 'los desembolsos y gastos se restan al cobrador que los hizo', async () => {
+  const db = rutaConDosCobradores()
+  await marcarDesembolsos(db)
+  const a = await getCollectorDailyCashSummary({ routeId: 'r-A', collectorId: 'u-cobA', fecha: DIA }, asCollectorDb(db))
+  const b = await getCollectorDailyCashSummary({ routeId: 'r-A', collectorId: 'u-cobB', fecha: DIA }, asCollectorDb(db))
+  metric('A desembolso / gastos', `${a.desembolsado} / ${a.gastos}`)
+  metric('B desembolso / gastos', `${b.desembolsado} / ${b.gastos}`)
+  assert(a.desembolsado === 30_000, `el desembolso de B se cargo a A: ${a.desembolsado}`)
+  assert(b.desembolsado === 500_000, `el desembolso de A se cargo a B: ${b.desembolsado}`)
+  assert(a.gastos === 5_000, `el gasto de B se cargo a A: ${a.gastos}`)
+  assert(b.gastos === 90_000, `el gasto de A se cargo a B: ${b.gastos}`)
+})
+
+await spec('COLL-CASH-004', 'Caja cobrador', 'solo cuentan los movimientos del DIA consultado', async () => {
+  const db = rutaConDosCobradores()
+  await marcarDesembolsos(db)
+  const hoy = await getCollectorDailyCashSummary({ routeId: 'r-A', collectorId: 'u-cobA', fecha: DIA }, asCollectorDb(db))
+  const ayer = await getCollectorDailyCashSummary({ routeId: 'r-A', collectorId: 'u-cobA', fecha: '2026-08-18' }, asCollectorDb(db))
+  metric('recaudo de hoy', hoy.recaudado)
+  metric('recaudo de ayer', ayer.recaudado)
+  assert(hoy.recaudado === 100_000, 'el recaudo de otro dia entro en el cuadre de hoy')
+  assert(ayer.recaudado === 900_000, `el recaudo de ayer es incorrecto: ${ayer.recaudado}`)
+  assert(ayer.desembolsado === 0 && ayer.gastos === 0, 'movimientos de hoy contados en el cuadre de ayer')
+})
+
+await spec('COLL-CASH-005', 'Caja cobrador', 'los abonos parciales se suman y los revertidos no cuentan', async () => {
+  const db = buildCashboxScenario([{
+    routeId: 'r-A',
+    pagos: [
+      { fecha: DIA, valor: 10_000, collectorId: 'u-cobA' },
+      { fecha: DIA, valor: 15_000, collectorId: 'u-cobA' },
+      { fecha: DIA, valor: 25_000, collectorId: 'u-cobA' },
+      // Corregido: original revertido + asiento negativo + reemplazo vigente.
+      { fecha: DIA, valor: 100_000, collectorId: 'u-cobA', state: 'reversed' },
+      { fecha: DIA, valor: -100_000, collectorId: 'u-cobA', state: 'reversal' },
+      { fecha: DIA, valor: 70_000, collectorId: 'u-cobA', state: 'active' },
+    ],
+  }])
+  const a = await getCollectorDailyCashSummary({ routeId: 'r-A', collectorId: 'u-cobA', fecha: DIA }, asCollectorDb(db))
+  metric('recaudo con parciales y una correccion', a.recaudado)
+  // 10.000 + 15.000 + 25.000 + 70.000 (el par revertido no cuenta)
+  assert(a.recaudado === 120_000, `los parciales o la correccion se contaron mal: ${a.recaudado}`)
+})
+
+await spec('COLL-CASH-006', 'Caja cobrador', 'sin cobrador o sin ruta no se calcula nada (fail-closed)', async () => {
+  const db = rutaConDosCobradores()
+  const sinCobrador = await getCollectorDailyCashSummary({ routeId: 'r-A', collectorId: '', fecha: DIA }, asCollectorDb(db))
+  const sinRuta = await getCollectorDailyCashSummary({ routeId: '', collectorId: 'u-cobA', fecha: DIA }, asCollectorDb(db))
+  const ajeno = await getCollectorDailyCashSummary({ routeId: 'r-A', collectorId: 'u-desconocido', fecha: DIA }, asCollectorDb(db))
+  metric('sin cobrador', sinCobrador.efectivoAEntregar)
+  metric('sin ruta', sinRuta.efectivoAEntregar)
+  metric('cobrador ajeno a la ruta', ajeno.efectivoAEntregar)
+  assert(sinCobrador.recaudado === 0 && sinRuta.recaudado === 0, 'se calculo caja sin cobrador o sin ruta')
+  assert(ajeno.recaudado === 0 && ajeno.efectivoAEntregar === 0, 'un cobrador ajeno obtuvo cifras de la ruta')
+})
+
+// ------------------------------------------------------------
+// ATRIBUCION DEL RECAUDO EN EL SERVICIO REAL
+// ------------------------------------------------------------
+/** Escenario con los cobradores indicados asignados a la ruta de la venta. */
+function escenarioConCobradores(ids: string[], opts: Parameters<typeof buildScenario>[0] = { valorVenta: 100_000, numeroCuotas: 10 }) {
+  const sc = buildScenario(opts)
+  sc.db.users._seed(ids.map(id => ({
+    id, tenantId: TEST_IDS.TENANT_ID, nombre: id, email: `${id}@t.com`, password: 'x',
+    rol: 'cobrador', status: 'activo', authorizedRouteIds: [TEST_IDS.ROUTE_ID],
+    createdAt: '', updatedAt: '',
+  })))
+  return sc
+}
+
+await spec('COLL-ATTR-001', 'Caja cobrador', 'el Supervisor registra el cobro de A y el dinero queda a nombre de A', async () => {
+  const sc = escenarioConCobradores(['u-cobA', 'u-cobB'])
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 100_000, actor: USER_SUPERVISOR, collectorId: 'u-cobA', fecha: DIA },
+    asDb(sc.db),
+  )
+  const pago = (await sc.db.payments.toArray())[0]
+  metric('resultado', res.ok ? `${res.appliedAmount} atribuido a ${res.collectorId} (${res.collectorSource})` : res.code)
+  metric('collectorId guardado', pago?.collectorId)
+  metric('createdByUserId guardado', pago?.createdByUserId)
+  assert(res.ok, `el pago fue rechazado: ${res.ok ? '' : res.code}`)
+  assert(pago.collectorId === 'u-cobA', `el dinero se atribuyo a ${pago.collectorId} en lugar de al cobrador`)
+  assert(pago.createdByUserId === USER_SUPERVISOR.id, `no se registro quien digito: ${pago.createdByUserId}`)
+  assert(pago.collectorId !== pago.createdByUserId, 'registrar y responder siguen siendo el mismo campo')
+
+  // Y la caja de A refleja ese dinero; la del Supervisor, no.
+  const cajaA = await getCollectorDailyCashSummary({ routeId: TEST_IDS.ROUTE_ID, collectorId: 'u-cobA', fecha: DIA }, asCollectorDb(sc.db))
+  const cajaSup = await getCollectorDailyCashSummary({ routeId: TEST_IDS.ROUTE_ID, collectorId: USER_SUPERVISOR.id, fecha: DIA }, asCollectorDb(sc.db))
+  metric('caja de A', cajaA.recaudado)
+  metric('caja del Supervisor', cajaSup.recaudado)
+  assert(cajaA.recaudado === 100_000, `la caja de A no recibio el dinero: ${cajaA.recaudado}`)
+  assert(cajaSup.recaudado === 0, 'el Supervisor se quedo con dinero que no cobro')
+})
+
+await spec('COLL-ATTR-002', 'Caja cobrador', 'un Admin NO puede atribuir el dinero solo por digitarlo si hay varios cobradores', async () => {
+  const sc = escenarioConCobradores(['u-cobA', 'u-cobB'])
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 50_000, actor: USER_ADMIN, fecha: DIA },
+    asDb(sc.db),
+  )
+  const pagos = await sc.db.payments.toArray()
+  metric('resultado', res.ok ? 'ACEPTADO — ERROR' : res.code)
+  metric('pagos escritos', pagos.length)
+  assert(!res.ok && res.code === 'COLLECTOR_REQUIRED', `se atribuyo el dinero sin elegir cobrador: ${res.ok ? 'aceptado' : res.code}`)
+  assert(pagos.length === 0, 'se escribio un pago pese al rechazo')
+
+  // Indicando el cobrador, el mismo pago se acepta.
+  const ok = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 50_000, actor: USER_ADMIN, collectorId: 'u-cobB', fecha: DIA },
+    asDb(sc.db),
+  )
+  metric('tras indicar el cobrador', ok.ok ? `atribuido a ${ok.collectorId}` : ok.code)
+  assert(ok.ok && ok.collectorId === 'u-cobB', 'no se acepto el pago con cobrador indicado')
+})
+
+await spec('COLL-ATTR-003', 'Caja cobrador', 'con un unico cobrador en la ruta se preselecciona sin preguntar', async () => {
+  const sc = escenarioConCobradores(['u-cobA'])
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 40_000, actor: USER_ADMIN, fecha: DIA },
+    asDb(sc.db),
+  )
+  metric('resultado', res.ok ? `${res.collectorId} (${res.collectorSource})` : res.code)
+  assert(res.ok && res.collectorId === 'u-cobA' && res.collectorSource === 'single-route-collector',
+    'no se preselecciono el unico cobrador de la ruta')
+})
+
+await spec('COLL-ATTR-004', 'Caja cobrador', 'el cobrador que registra su cobro responde por el', async () => {
+  const sc = escenarioConCobradores(['u-cob', 'u-cobB'])
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 30_000, actor: USER_COBRADOR, fecha: DIA },
+    asDb(sc.db),
+  )
+  const pago = (await sc.db.payments.toArray())[0]
+  metric('atribuido a', res.ok ? res.collectorId : res.code)
+  metric('origen', res.ok ? res.collectorSource : '—')
+  assert(res.ok && res.collectorId === USER_COBRADOR.id && res.collectorSource === 'actor',
+    'el cobrador no quedo como responsable de su propio cobro')
+  assert(pago.createdByUserId === USER_COBRADOR.id, 'no se registro el usuario que digito')
+})
+
+await spec('COLL-ATTR-005', 'Caja cobrador', 'un cobrador ajeno a la ruta se rechaza', async () => {
+  const sc = escenarioConCobradores(['u-cobA'])
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 20_000, actor: USER_ADMIN, collectorId: 'u-de-otra-ruta', fecha: DIA },
+    asDb(sc.db),
+  )
+  metric('resultado', res.ok ? 'ACEPTADO — ERROR' : res.code)
+  metric('pagos escritos', (await sc.db.payments.toArray()).length)
+  assert(!res.ok && res.code === 'COLLECTOR_INVALID', 'se acepto un cobrador ajeno a la ruta')
+  assert((await sc.db.payments.toArray()).length === 0, 'se escribio un pago pese al rechazo')
+})
+
+await spec('COLL-ATTR-006', 'Caja cobrador', 'una correccion conserva el cobrador responsable original', () => {
+  // `executeCorrection` copia `original.collectorId` tanto en la reversion como en
+  // el pago corregido: corregir un abono NO cambia de quien es el dinero.
+  const src = readSource('src/services/paymentCorrectionService.ts')
+  const bloque = src.slice(src.indexOf('const reversal: Payment'), src.indexOf('// UNA SOLA TRANSACCIÓN'))
+  const ocurrencias = (bloque.match(/collectorId: original\.collectorId/g) ?? []).length
+  metric('asientos que conservan el cobrador original', ocurrencias)
+  metric('quien ejecuta la correccion queda en correctedBy', /correctedBy: actor\.id/.test(bloque))
+  assert(ocurrencias === 2, `la correccion no conserva el cobrador en ambos asientos (${ocurrencias})`)
+  assert(/correctedBy: actor\.id/.test(bloque), 'la correccion no registra quien la ejecuto')
+})
+
+await spec('COLL-CAP-001', 'Caja cobrador', 'la validacion de capital sigue vigente sin exponer el monto', async () => {
+  // Ruta con 500.000 de capital y 100.000 ya prestados: quedan 400.000.
+  const db = buildCashboxScenario([{
+    routeId: 'r-A',
+    capital: [{ fecha: '2026-08-01', valor: 500_000 }],
+    ventas: [{ fechaInicio: '2026-08-02', valorVenta: 100_000 }],
+  }])
+  const disponible = (await getCashboxSummary('r-A', undefined, '2026-12-31', asCashboxDb(db))).saldoActual
+  metric('capital disponible real', disponible)
+  assert(disponible === 400_000, `capital de partida incorrecto: ${disponible}`)
+
+  // `hasCapitalForSale` devuelve SOLO el veredicto, nunca la cifra.
+  const src = readSource('src/services/cashboxEngine.ts')
+  const cuerpo = src.slice(src.indexOf('export async function hasCapitalForSale'))
+  metric('tipo de retorno', /Promise<boolean>/.test(cuerpo) ? 'boolean' : 'OTRO')
+  assert(/Promise<boolean>/.test(cuerpo), 'la guarda de capital devuelve algo distinto de un veredicto')
+
+  // Y el hook solo revela el monto a quien puede ver la caja de la ruta.
+  const hook = readSource('src/hooks/useCapitalGuard.ts')
+  metric('el hook condiciona el monto a cashbox.viewRoute', hook.includes("can(user, 'cashbox.viewRoute'"))
+  metric('devuelve el veredicto siempre', hook.includes('exceeded'))
+  assert(hook.includes("can(user, 'cashbox.viewRoute'"), 'el hook no condiciona el monto a la capacidad')
+  assert(hook.includes('available: puedeVerMonto ? capital : null'), 'el hook expone el capital a quien no debe verlo')
+})
+
+await spec('COLL-SRC-001', 'Caja cobrador', 'ninguna pantalla del Cobrador pide la caja financiera de la ruta sin permiso', () => {
+  // El cuadre solo calcula la caja de ruta si el usuario tiene `cashbox.viewRoute`.
+  const cuadre = readSource('src/pages/collector/CollectorCashClosePage.tsx')
+  metric('usa la caja personal', cuadre.includes('getCollectorDailyCashSummary('))
+  metric('condiciona la caja de ruta', cuadre.includes("can(user, 'cashbox.viewRoute'"))
+  metric('no la pide sin permiso', cuadre.includes('verCajaRuta ? await getRouteFinancialSummary(routeId) : null'))
+  assert(cuadre.includes('getCollectorDailyCashSummary('), 'el cuadre dejo de usar la caja personal')
+  assert(cuadre.includes('verCajaRuta ? await getRouteFinancialSummary(routeId) : null'),
+    'el cuadre calcula la caja financiera de la ruta sin comprobar el permiso')
+
+  // El inicio y el informe del dia muestran lo del usuario en sesion.
+  const home = readSource('src/pages/collector/CollectorHomePage.tsx')
+  metric('inicio filtra por cobrador', home.includes('p.collectorId === user?.id'))
+  assert(home.includes('p.collectorId === user?.id'), 'el inicio sigue mostrando el recaudo de toda la ruta')
+  const informe = readSource('src/pages/collector/CollectorDailyReportPage.tsx')
+  metric('informe filtra por cobrador', informe.includes('p.collectorId === user.id'))
+  assert(informe.includes('p.collectorId === user.id'), 'el informe del dia sigue mostrando toda la ruta')
+
+  // Las pantallas de venta ya no usan el hook que expone el capital sin filtro.
+  for (const f of ['src/pages/collector/CollectorNewSalePage.tsx', 'src/pages/collector/CollectorNewClientPage.tsx']) {
+    const src = readSource(f)
+    metric(`${f.split('/').pop()} usa la guarda acotada`, src.includes('useCapitalGuard('))
+    assert(src.includes('useCapitalGuard('), `${f} no usa la guarda acotada de capital`)
+    assert(!src.includes('useRouteCapital('), `${f} sigue pidiendo el capital completo de la ruta`)
   }
 })
 

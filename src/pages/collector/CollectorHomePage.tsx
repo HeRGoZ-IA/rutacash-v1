@@ -13,6 +13,7 @@ import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import { isSaleDueToday, isSaleDisbursed } from '@/services/installmentEngine'
+import { effectivePayments } from '@/lib/paymentState'
 import type { Route } from '@/models/types'
 
 export default function CollectorHomePage() {
@@ -26,7 +27,7 @@ export default function CollectorHomePage() {
   const [stats, setStats] = useState({ pendientes: 0, cobradoHoy: 0, activos: 0, porDesembolsar: 0, pendientesSync: 0 })
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => { if (activeRouteId) load(activeRouteId) }, [activeRouteId])
+  useEffect(() => { if (activeRouteId) load(activeRouteId) }, [activeRouteId, user?.id])
 
   async function load(routeId: string) {
     setLoading(true)
@@ -38,9 +39,17 @@ export default function CollectorHomePage() {
     const porDesembolsar = allSales.filter(s => s.disbursementStatus === 'pendiente').length
     const todayStr = today()
     const payments = await db.payments.where('routeId').equals(routeId).toArray()
-    const cobradoHoy = payments.filter(p => p.fecha === todayStr).reduce((s, p) => s + p.valor, 0)
+    // ABONADO HOY = lo recaudado por QUIEN ESTÁ EN SESIÓN, no por toda la ruta. Con
+    // varios cobradores en la misma ruta, cada uno debe ver su propio recaudo (lo que
+    // tiene en el bolsillo), no el consolidado. Se aplica la semántica de pagos
+    // vigentes para que un abono corregido no se cuente dos veces.
+    const misPagosHoy = effectivePayments(payments)
+      .filter(p => p.fecha === todayStr && p.collectorId === user?.id)
+    const cobradoHoy = misPagosHoy.reduce((s, p) => s + p.valor, 0)
     const pendientesSync = payments.filter(p => p.syncStatus === 'pending').length
-    const salePaidToday = new Set(payments.filter(p => p.fecha === todayStr).map(p => p.saleId))
+    // Las parcelas ya cobradas HOY salen de la lista pendiente aunque las haya
+    // cobrado otro compañero de la misma ruta: el cliente ya pagó.
+    const salePaidToday = new Set(effectivePayments(payments).filter(p => p.fecha === todayStr).map(p => p.saleId))
     const allInst = await db.installments.toArray()
     const instBySale = new Map<string, typeof allInst>()
     for (const inst of allInst) {
@@ -86,7 +95,7 @@ export default function CollectorHomePage() {
       {/* KPIs uniformes */}
       <div className="grid grid-cols-3 gap-3">
         <KpiCard color="amber" value={loading ? '—' : stats.pendientes} label="Pendientes" />
-        <KpiCard color="emerald" value={loading ? '—' : formatCurrency(stats.cobradoHoy, currency)} label="Abonado hoy" />
+        <KpiCard color="emerald" value={loading ? '—' : formatCurrency(stats.cobradoHoy, currency)} label="Mi recaudo hoy" />
         <KpiCard color="primary" value={loading ? '—' : stats.activos} label="Ventas activas" />
       </div>
 
@@ -136,13 +145,13 @@ export default function CollectorHomePage() {
           </div>
           <div className="min-w-0 flex-1">
             <p className="font-bold text-gray-900 text-[15px]">Gastos y cuadre</p>
-            <p className="text-xs text-gray-500 mt-0.5">Registrar gastos y revisar caja esperada</p>
+            <p className="text-xs text-gray-500 mt-0.5">Registrar gastos y revisar tu efectivo del día</p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2 mt-3.5">
           <Chip label="Gastos" to={`${base}/expenses`} />
           <Chip label="Informe del día" to={`${base}/daily-report`} />
-          <Chip label="Cuadre" to={`${base}/cashclose`} />
+          <Chip label="Mi caja" to={`${base}/cashclose`} />
         </div>
       </div>
 

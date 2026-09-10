@@ -18,6 +18,7 @@ import { shallowDirty } from '../src/hooks/useDirtyForm'
 import { computeRouteAssignmentDiff } from '../src/lib/routeAssignmentDiff'
 import { getRouteAssignmentsByRole, getUsersAssignedToRoute, ASSIGNMENT_ROLE_ORDER, hasAnyAssignment } from '../src/lib/routeAssignments'
 import { cobradorRemovalBlock, validateCobradorInvariant } from '../src/lib/cobradorRules'
+import { resolveResponsibleCollector, hasPersonalCashbox } from '../src/lib/collectorAttribution'
 import type { User, UserRole, Tenant } from '../src/models/types'
 
 let passed = 0
@@ -457,6 +458,92 @@ check('COB CASO 8 — cambiar responsable marca dirty',
 const c9m: Record<string, string[]> = { cobA: ['rA'], cobB: [] }
 const d9 = computeRouteAssignmentDiff({ routeId: 'rA', assignableUserIds: ['cobA', 'cobB'], assignedUserIds: ['cobA', 'cobB'], cobradorId: 'cobB', prevCobradorId: 'cobA', membershipOf: (id) => c9m[id] ?? [] })
 check('COB CASO 9 — actualizar agrega el nuevo cobrador asignado', d9.added.includes('cobB') && d9.removed.length === 0)
+
+// ============================================================
+// RQ-05 — CAJA DEL COBRADOR: SU RECAUDO, NO LA CAJA DE LA RUTA
+// ------------------------------------------------------------
+// El Cobrador pierde `cashbox.viewRoute` (caja FINANCIERA de la ruta, capital
+// incluido) y gana `cashbox.viewOwnCollection` (su efectivo del dia). Los roles
+// administrativos conservan intactas sus capacidades financieras.
+// ============================================================
+
+// --- COBRADOR: sin caja financiera de ruta ---
+check('cobrador NO ve la caja financiera de la ruta', !can(cobrador, 'cashbox.viewRoute', { routeId: 'r1' }))
+check('cobrador NO ve caja consolidada', !can(cobrador, 'cashbox.viewConsolidated'))
+check('cashbox.viewRoute es INCOMPATIBLE con cobrador', !isCapabilityCompatible('cobrador', 'cashbox.viewRoute'))
+const cobCajaHack = mkUser('cobrador', { authorizedRouteIds: ['r1'], grantedCapabilities: ['cashbox.viewRoute', 'cashbox.viewConsolidated'] as Capability[] })
+check('grant NO habilita caja de ruta en Cobrador', !can(cobCajaHack, 'cashbox.viewRoute', { routeId: 'r1' }))
+check('sanitize elimina cashbox.viewRoute del Cobrador', sanitizeGrantedCapabilities('cobrador', ['cashbox.viewRoute'] as Capability[]).length === 0)
+
+// --- COBRADOR: SI tiene su caja personal ---
+check('cobrador ve su propia caja de recaudo', can(cobrador, 'cashbox.viewOwnCollection', { routeId: 'r1' }))
+check('cobrador conserva el cuadre diario', can(cobrador, 'cashbox.dailyClose', { routeId: 'r1' }))
+check('la caja personal esta limitada por ruta', !can(cobrador, 'cashbox.viewOwnCollection', { routeId: 'r9' }))
+const cobSinRutas = mkUser('cobrador', { authorizedRouteIds: [] })
+check('cobrador sin rutas NO ve ni su caja personal', !can(cobSinRutas, 'cashbox.viewOwnCollection', { routeId: 'r1' }))
+
+// --- ROLES ADMINISTRATIVOS: conservan lo suyo ---
+check('admin conserva la caja de ruta', can(admin, 'cashbox.viewRoute', { routeId: 'r1' }))
+check('admin conserva la caja consolidada', can(admin, 'cashbox.viewConsolidated'))
+check('supervisor conserva la caja de ruta', can(supervisor, 'cashbox.viewRoute', { routeId: 'r1' }))
+check('superadmin conserva la caja de ruta', can(superadmin, 'cashbox.viewRoute', { routeId: 'r1' }))
+check('superadmin conserva la caja consolidada', can(superadmin, 'cashbox.viewConsolidated'))
+check('admin sin rutas sigue sin ver caja de ruta', !can(adminNoRoutes, 'cashbox.viewRoute', { routeId: 'r1' }))
+// El Supervisor tambien recauda en la calle: tiene caja personal.
+check('supervisor tiene caja personal de recaudo', can(supervisor, 'cashbox.viewOwnCollection', { routeId: 'r1' }))
+
+// --- ROLES SIN CAJA: siguen sin ella ---
+check('secretario NO tiene caja personal', !can(secretario, 'cashbox.viewOwnCollection', { routeId: 'r1' }))
+check('socio NO tiene caja personal', !can(socio, 'cashbox.viewOwnCollection', { routeId: 'r1' }))
+check('caja personal INCOMPATIBLE con secretario', !isCapabilityCompatible('secretario', 'cashbox.viewOwnCollection'))
+check('caja personal INCOMPATIBLE con socio', !isCapabilityCompatible('socio', 'cashbox.viewOwnCollection'))
+check('socio conserva su consulta de caja de ruta', can(socio, 'cashbox.viewRoute', { routeId: 'r1' }))
+
+// --- Catalogo humano ---
+check('la nueva capacidad tiene etiqueta humana', !!CAPABILITY_METADATA['cashbox.viewOwnCollection'] && !CAPABILITY_METADATA['cashbox.viewOwnCollection'].label.includes('.'))
+
+// ============================================================
+// RQ-05 — ATRIBUCION DEL RECAUDO: REGISTRAR != RESPONDER POR EL DINERO
+// ============================================================
+const atrCobA = { id: 'u-atrCobA', rol: 'cobrador' as UserRole, status: 'activo' as const }
+const atrCobB = { id: 'u-atrCobB', rol: 'cobrador' as UserRole, status: 'activo' as const }
+const atrCobInactivo = { id: 'u-cobC', rol: 'cobrador' as UserRole, status: 'inactivo' as const }
+const actorCob = { id: 'u-atrCobA', rol: 'cobrador' as UserRole }
+const actorSup = { id: 'u-sup', rol: 'supervisor' as UserRole }
+const actorAdmin = { id: 'u-adm', rol: 'admin' as UserRole }
+
+// El cobrador responde por lo que el mismo registra.
+const rCob = resolveResponsibleCollector({ actor: actorCob, routeCollectors: [atrCobA, atrCobB] })
+check('ATRIB — el cobrador responde por su propio recaudo', rCob.ok && rCob.collectorId === 'u-atrCobA' && rCob.source === 'actor')
+
+// Supervisor registra un cobro hecho por A: el dinero es de A, no del Supervisor.
+const rExp = resolveResponsibleCollector({ actor: actorSup, requested: 'u-atrCobA', routeCollectors: [atrCobA, atrCobB] })
+check('ATRIB — el dinero se atribuye al cobrador indicado, no a quien digita', rExp.ok && rExp.collectorId === 'u-atrCobA' && rExp.source === 'explicit')
+
+// Ruta con UN solo cobrador: se preselecciona sin ambiguedad.
+const rUno = resolveResponsibleCollector({ actor: actorAdmin, routeCollectors: [atrCobA] })
+check('ATRIB — con un unico cobrador se preselecciona', rUno.ok && rUno.collectorId === 'u-atrCobA' && rUno.source === 'single-route-collector')
+
+// Ruta con VARIOS: no se adivina, se exige elegir.
+const rVarios = resolveResponsibleCollector({ actor: actorAdmin, routeCollectors: [atrCobA, atrCobB] })
+check('ATRIB — con varios cobradores se EXIGE elegir', !rVarios.ok && rVarios.code === 'ambiguous')
+check('ATRIB — nunca se atribuye al Admin por ser quien digita', !(rVarios.ok && (rVarios as { collectorId: string }).collectorId === 'u-adm'))
+
+// Un cobrador que no pertenece a la ruta (o inactivo) se rechaza.
+const rAjeno = resolveResponsibleCollector({ actor: actorAdmin, requested: 'u-otro', routeCollectors: [atrCobA, atrCobB] })
+check('ATRIB — cobrador ajeno a la ruta rechazado', !rAjeno.ok && rAjeno.code === 'invalid')
+const rInactivo = resolveResponsibleCollector({ actor: actorAdmin, requested: 'u-cobC', routeCollectors: [atrCobA, atrCobInactivo] })
+check('ATRIB — cobrador inactivo rechazado', !rInactivo.ok && rInactivo.code === 'invalid')
+
+// Ruta sin cobradores: se conserva el comportamiento anterior, marcado como legacy.
+const rSin = resolveResponsibleCollector({ actor: actorAdmin, routeCollectors: [] })
+check('ATRIB — ruta sin cobradores conserva el comportamiento legacy', rSin.ok && rSin.collectorId === 'u-adm' && rSin.source === 'legacy-actor')
+
+// Solo los perfiles de calle tienen caja personal.
+check('ATRIB — el cobrador tiene caja personal', hasPersonalCashbox('cobrador'))
+check('ATRIB — el supervisor tiene caja personal', hasPersonalCashbox('supervisor'))
+check('ATRIB — el admin NO tiene caja personal', !hasPersonalCashbox('admin'))
+check('ATRIB — el secretario NO tiene caja personal', !hasPersonalCashbox('secretario'))
 
 console.log(`\nPRUEBA DE PERMISOS: ${passed} OK, ${failed} FALLIDAS`)
 if (failed > 0) process.exit(1)

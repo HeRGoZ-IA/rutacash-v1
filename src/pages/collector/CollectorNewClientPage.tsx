@@ -15,7 +15,7 @@ import { can } from '@/lib/permissions'
 import { generateId } from '@/lib/utils'
 import { nowISO, normalizeDoc, formatCurrency, formatDate, today } from '@/lib/formatters'
 import { computeSaleFinancials, buildSaleWithInstallments, buildSaleRequest, type SaleInputs } from '@/services/saleRequestService'
-import { useRouteCapital } from '@/hooks/useRouteCapital'
+import { useCapitalGuard } from '@/hooks/useCapitalGuard'
 import type { Client, Route, Sale } from '@/models/types'
 
 const TASA_OPTIONS = [{ value: '10', label: '10%' }, { value: '20', label: '20%' }]
@@ -79,8 +79,11 @@ export default function CollectorNewClientPage() {
   const allowDirect = canDirect && withinLimit
 
   // Capital disponible de la ruta seleccionada (bloquea venta directa si se supera).
-  const { available: capDisponible } = useRouteCapital(addSale ? form.routeId : null)
-  const capExcedido = addSale && capDisponible != null && saleForm.valorVenta > capDisponible
+  // Igual que en Nueva venta: la regla de capital se conserva; el monto solo se
+  // revela a quien puede ver la caja de la ruta.
+  const { exceeded, available: capDisponible, canSeeAmount: verCapital } =
+    useCapitalGuard(addSale ? form.routeId : null, saleForm.valorVenta)
+  const capExcedido = addSale && exceeded
 
   const saleCalc = addSale && saleForm.valorVenta > 0 && saleForm.numeroCuotas > 0
     ? computeSaleFinancials({ valorVenta: saleForm.valorVenta, tasaInteres: saleForm.tasaInteres, numeroCuotas: saleForm.numeroCuotas, frecuenciaPago: saleForm.frecuenciaPago, fechaInicio: saleForm.fechaInicio, paymentDays: saleForm.paymentDays })
@@ -110,8 +113,11 @@ export default function CollectorNewClientPage() {
       if (saleForm.fechaInicio < today()) { toast.error('La fecha de inicio no puede ser anterior a hoy'); return }
       if (saleForm.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
       // Venta directa no puede superar el capital disponible (la solicitud sí puede enviarse).
-      if (allowDirect && capDisponible != null && saleForm.valorVenta > capDisponible) {
-        toast.error(`La venta supera el capital disponible de la ruta (${formatCurrency(capDisponible, currency)})`); return
+      if (allowDirect && capExcedido) {
+        toast.error(verCapital
+          ? `La venta supera el capital disponible de la ruta (${formatCurrency(capDisponible ?? 0, currency)})`
+          : 'La venta supera el capital disponible actualmente. Reduce el monto o solicita una inyección de capital.')
+        return
       }
     }
 
@@ -260,10 +266,15 @@ export default function CollectorNewClientPage() {
                   })}
                 </div>
               </div>
-              {capDisponible != null && (
+              {verCapital && capDisponible != null && (
                 <div className={`rounded-xl p-3 text-sm border ${capExcedido ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>
                   Capital disponible de la ruta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
                   {capExcedido && <p className="text-xs mt-1 font-medium">Supera el capital disponible. {allowDirect ? 'Reduce el monto o inyecta capital.' : 'Se enviará como solicitud al administrador.'}</p>}
+                </div>
+              )}
+              {!verCapital && capExcedido && (
+                <div className="rounded-xl p-3 text-sm border bg-red-50 border-red-200 text-red-700">
+                  La venta supera el capital disponible actualmente. {allowDirect ? 'Reduce el monto o solicita una inyección de capital.' : 'Se enviará como solicitud al administrador.'}
                 </div>
               )}
               {saleCalc && (

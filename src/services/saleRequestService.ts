@@ -4,7 +4,7 @@
 // ============================================================
 import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
-import { nowISO } from '@/lib/formatters'
+import { nowISO, today } from '@/lib/formatters'
 import { can } from '@/lib/permissions'
 import { assertCan } from '@/services/authz'
 import {
@@ -211,13 +211,28 @@ export async function countPendingSaleRequests(tenantId: string): Promise<number
 /**
  * Confirma el desembolso de una venta aprobada: la venta queda desembolsada
  * (cobrable) y la solicitud asociada pasa a 'disbursed'.
+ *
+ * ATRIBUCIÓN DEL EFECTIVO (revisión del socio): se registra QUIÉN entregó el dinero
+ * y CUÁNDO. El desembolso sale de la caja personal del cobrador que lo entrega, así
+ * que sin estos datos su cuadre no cierra. Se distingue igual que en los pagos:
+ *   · `disbursedByCollectorId` → cobrador que entregó físicamente el dinero.
+ *   · `disbursedByUserId`      → usuario que registró la confirmación.
+ * Si quien confirma no es cobrador, el desembolso NO se atribuye a la caja personal
+ * de nadie (queda como entrega administrativa de la ruta).
  */
 export async function confirmDisbursement(saleId: string, actor?: User): Promise<void> {
   const sale = await db.sales.get(saleId)
   if (!sale) throw new Error('Venta no encontrada')
   if (actor) assertCan(actor, 'sale.confirmDisbursement', { routeId: sale.routeId, tenantId: sale.tenantId })
+  const fechaDesembolso = today()
   await db.transaction('rw', [db.sales, db.saleRequests], async () => {
-    await db.sales.update(saleId, { disbursementStatus: 'desembolsado', updatedAt: nowISO() })
+    await db.sales.update(saleId, {
+      disbursementStatus: 'desembolsado',
+      disbursedByCollectorId: actor?.rol === 'cobrador' ? actor.id : undefined,
+      disbursedByUserId: actor?.id,
+      fechaDesembolso,
+      updatedAt: nowISO(),
+    })
     if (sale.saleRequestId) {
       await db.saleRequests.update(sale.saleRequestId, { status: 'disbursed' })
     }
