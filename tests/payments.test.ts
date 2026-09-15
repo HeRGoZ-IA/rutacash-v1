@@ -27,8 +27,11 @@ import {
 import type { Sale, User, Payment, AuditLog } from '../src/models/types'
 import {
   buildScenario, buildCashboxScenario, readFinancialState, computeCobrosComoCaja, TEST_IDS,
-  type FinancialState, type MemoryDb,
+  MemoryDb, type FinancialState,
 } from './financial/harness'
+import {
+  createRouteWithAdmins, updateRouteWithAssignments, type RouteDatabase,
+} from '../src/services/routeService'
 import { getCashboxSummary, type CashboxDatabase } from '../src/services/cashboxEngine'
 import {
   buildReport, resolveReportRouteIds, REPORT_OPTIONS,
@@ -49,6 +52,7 @@ import {
   checksPaymentCapability, refetchesInstallments, supervisorSharesPaymentComponent,
   cashboxSumsRawPaymentValor, delegatesToPaymentService, correctionRecomputesInsideTransaction,
   containsLine, dexieWriteOperations, auditsOutsideTransaction, readSource, SRC,
+  extractTransactionScope,
 } from './financial/sourceContract'
 
 // ============================================================
@@ -2267,6 +2271,326 @@ await spec('COLL-SRC-001', 'Caja cobrador', 'ninguna pantalla del Cobrador pide 
     assert(src.includes('useCapitalGuard('), `${f} no usa la guarda acotada de capital`)
     assert(!src.includes('useRouteCapital('), `${f} sigue pidiendo el capital completo de la ruta`)
   }
+})
+
+// ############################################################
+// GRUPO — REGRESIÓN: LA APP COBRADOR REGISTRA ABONOS
+// ------------------------------------------------------------
+// INCIDENTE 15/09/2026 (producción CLEAN): "Registrar abono" devolvía siempre
+// «Error al registrar el pago. No se guardó ningún cambio.» (WRITE_FAILED).
+//
+// CAUSA RAÍZ: `registerPayment` abría la transacción con el alcance
+// ['payments','installments','sales'] y DENTRO leía `database.users` para
+// resolver el cobrador responsable (paso 4.b, introducido con RQ-05). Dexie solo
+// permite usar las tablas DECLARADAS y lanza
+// `NotFoundError: Table users not part of transaction`
+// (dexie/dist/dexie.js → Table.prototype._trans / Transaction.prototype.table).
+// Ese error NO es un rechazo de negocio: caía en el catch genérico y abortaba el
+// pago entero, con rollback completo. Afectaba a TODOS los roles y a DEMO y CLEAN.
+//
+// Por qué no lo vio la suite: el harness replicaba Dexie salvo esta regla —
+// ignoraba el alcance declarado. Ya lo replica (`assertTableInTransaction`), así
+// que este grupo protege la corrección de verdad.
+// ############################################################
+const DIA_REG = '2026-09-15'
+
+/** Escenario de la App Cobrador: el propio Cobrador asignado a la ruta de la venta. */
+function escenarioAppCobrador(opts: Parameters<typeof buildScenario>[0] = { valorVenta: 100_000, numeroCuotas: 10 }) {
+  const sc = buildScenario(opts)
+  sc.db.users._seed([{
+    id: USER_COBRADOR.id, tenantId: TEST_IDS.TENANT_ID, nombre: 'Cobrador', email: 'cob@t.com',
+    password: 'x', rol: 'cobrador', status: 'activo', authorizedRouteIds: [TEST_IDS.ROUTE_ID],
+    createdAt: '', updatedAt: '',
+  }])
+  return sc
+}
+
+await spec('PAY-COLL-REG-001', 'App Cobrador', 'el Cobrador registra su propio abono en su ruta', async () => {
+  const sc = escenarioAppCobrador()
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 400, actor: USER_COBRADOR, fecha: DIA_REG },
+    asDb(sc.db),
+  )
+  const pago = (await sc.db.payments.toArray())[0] as Payment | undefined
+  metric('resultado', res.ok ? `ACEPTADO ${res.appliedAmount}` : `RECHAZADO(${res.code}) — ${res.message}`)
+  metric('collectorId', pago?.collectorId)
+  metric('createdByUserId', pago?.createdByUserId)
+  metric('atribución', res.ok ? res.collectorSource : '—')
+  assert(res.ok, `el abono del propio Cobrador debe registrarse: ${res.ok ? '' : res.message}`)
+  assert(!!pago, 'no se persistió el pago')
+  assert(pago!.collectorId === USER_COBRADOR.id, 'el dinero debe atribuirse al Cobrador que lo recibió')
+  assert(pago!.createdByUserId === USER_COBRADOR.id, 'debe registrarse quién digitó la operación')
+  assert(res.ok && res.collectorSource === 'actor', 'el Cobrador responde por su propio recaudo, sin pedir selección')
+})
+
+await spec('PAY-COLL-REG-002', 'App Cobrador', 'abono parcial: se registra y el saldo baja exactamente', async () => {
+  const sc = escenarioAppCobrador()
+  const antes = await readFinancialState(sc.db)
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 5_000, actor: USER_COBRADOR, fecha: DIA_REG },
+    asDb(sc.db),
+  )
+  const st = await readFinancialState(sc.db)
+  metric('saldo antes', antes.saleSaldo)
+  metric('aplicado', res.ok ? res.appliedAmount : res.code)
+  metric('saldo después', st.saleSaldo)
+  metric('payments.valor', st.totalRegistradoEnPayments)
+  assert(res.ok && res.appliedAmount === 5_000, 'el abono parcial debe aplicarse completo')
+  assert(st.saleSaldo === antes.saleSaldo - 5_000, 'el saldo no bajó exactamente lo abonado')
+  assert(st.totalRegistradoEnPayments === 5_000, 'payments debe guardar el valor efectivo')
+  assert(st.parcelas.every(p => p.saldo >= 0 && p.pagado <= p.valor), 'sin saldos negativos ni sobrepagos')
+})
+
+await spec('PAY-COLL-REG-003', 'App Cobrador', 'abono que completa la parcela la cierra y avanza a la siguiente', async () => {
+  const sc = escenarioAppCobrador()
+  const cuota = sc.installments[0].valor
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: cuota, actor: USER_COBRADOR, fecha: DIA_REG },
+    asDb(sc.db),
+  )
+  const st = await readFinancialState(sc.db)
+  metric('parcela pagada', res.ok ? res.paidInstallmentNumber : res.code)
+  metric('parcela actual tras el abono', res.ok ? res.currentInstallmentNumber : '—')
+  metric('estado parcela 1', st.parcelas[0].status)
+  assert(res.ok && res.paidInstallmentNumber === 1, 'debía cerrarse la parcela 1')
+  assert(st.parcelas[0].status === 'pagada' && st.parcelas[0].saldo === 0, 'la parcela 1 no quedó pagada')
+  assert(res.ok && res.currentInstallmentNumber === 2, 'la parcela actual debe avanzar a la 2')
+  assert(res.ok && res.installmentsCompleted.includes(1), 'debe reportarse la parcela cerrada')
+})
+
+await spec('PAY-COLL-REG-004', 'App Cobrador', 'abono que salda la venta la finaliza con fecha de finalización', async () => {
+  const sc = escenarioAppCobrador()
+  const total = calculateSaleBalance(sc.installments)
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: total, actor: USER_COBRADOR, fecha: DIA_REG },
+    asDb(sc.db),
+  )
+  const venta = await sc.db.sales.get(TEST_IDS.SALE_ID) as Sale
+  metric('saldo final', venta.saldo)
+  metric('estado', venta.status)
+  metric('fechaFinalizacion', venta.fechaFinalizacion)
+  assert(res.ok && res.newBalance === 0, 'el saldo debía quedar en 0')
+  assert(venta.status === 'finalizada', 'la venta debía finalizar')
+  assert(venta.fechaFinalizacion === DIA_REG, 'la fecha de finalización debe sellarse con la fecha CONTABLE del pago')
+})
+
+await spec('PAY-COLL-REG-005', 'App Cobrador', 'abono superior al saldo se topa: nunca sobrepaga', async () => {
+  const sc = escenarioAppCobrador()
+  const total = calculateSaleBalance(sc.installments)
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: total + 50_000, actor: USER_COBRADOR, fecha: DIA_REG },
+    asDb(sc.db),
+  )
+  const st = await readFinancialState(sc.db)
+  metric('solicitado', res.ok ? res.requestedAmount : res.code)
+  metric('aplicado', res.ok ? res.appliedAmount : '—')
+  metric('excedente rechazado', res.ok ? res.cappedAmount : '—')
+  metric('payments.valor', st.totalRegistradoEnPayments)
+  assert(res.ok && res.capped && res.appliedAmount === total, 'debía toparse exactamente al saldo')
+  assert(res.ok && res.cappedAmount === 50_000, 'el excedente debe reportarse')
+  assert(st.totalRegistradoEnPayments === total, 'payments jamás debe guardar el solicitado')
+  assert(st.saleSaldo === 0, 'la deuda no puede quedar negativa')
+})
+
+await spec('PAY-COLL-REG-006', 'App Cobrador', 'un Cobrador de OTRA ruta es rechazado de forma controlada', async () => {
+  const sc = escenarioAppCobrador()
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 5_000, actor: USER_OTRA_RUTA, fecha: DIA_REG },
+    asDb(sc.db),
+  )
+  const st = await readFinancialState(sc.db)
+  metric('resultado', res.ok ? 'ACEPTADO — ERROR' : `${res.code}: ${res.message}`)
+  metric('payments', st.totalRegistradoEnPayments)
+  assert(!res.ok && res.code === 'NOT_AUTHORIZED', 'un cobrador ajeno debe rechazarse por permisos')
+  assert(!res.ok && res.message !== 'Error al registrar el pago. No se guardó ningún cambio.', 'el mensaje debe ser específico, no el genérico de fallo')
+  assert(st.totalRegistradoEnPayments === 0, 'no debe quedar ninguna escritura')
+})
+
+await spec('PAY-COLL-REG-007', 'App Cobrador', 'con varios cobradores en la ruta, el propio Cobrador NO debe elegir responsable', async () => {
+  const sc = escenarioConCobradores([USER_COBRADOR.id, 'u-cobB', 'u-cobC'])
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 7_000, actor: USER_COBRADOR, fecha: DIA_REG },
+    asDb(sc.db),
+  )
+  const pago = (await sc.db.payments.toArray())[0] as Payment | undefined
+  metric('cobradores en la ruta', 3)
+  metric('resultado', res.ok ? `ACEPTADO (${res.collectorSource})` : `${res.code}`)
+  metric('collectorId', pago?.collectorId)
+  assert(res.ok, 'no debe pedirse responsable cuando el actor ES el cobrador')
+  assert(res.ok && res.collectorSource === 'actor', 'la atribución debe resolverse por el propio actor')
+  assert(pago?.collectorId === USER_COBRADOR.id, 'el dinero debe quedar a nombre del Cobrador que lo recibió')
+})
+
+await spec('PAY-COLL-REG-008', 'App Cobrador', 'el Supervisor registra el cobro recibido por otro Cobrador', async () => {
+  const sc = escenarioConCobradores(['u-cobA', 'u-cobB'])
+  const ambiguo = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 6_000, actor: USER_SUPERVISOR, fecha: DIA_REG },
+    asDb(sc.db),
+  )
+  const explicito = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 6_000, actor: USER_SUPERVISOR, collectorId: 'u-cobA', fecha: DIA_REG },
+    asDb(sc.db),
+  )
+  const pago = (await sc.db.payments.toArray())[0] as Payment | undefined
+  metric('sin indicar responsable', ambiguo.ok ? 'ACEPTADO — ERROR' : ambiguo.code)
+  metric('indicando responsable', explicito.ok ? `ACEPTADO (${explicito.collectorSource})` : explicito.code)
+  metric('collectorId', pago?.collectorId)
+  metric('createdByUserId', pago?.createdByUserId)
+  assert(!ambiguo.ok && ambiguo.code === 'COLLECTOR_REQUIRED', 'con varios cobradores no puede adivinarse quién cobró')
+  assert(explicito.ok, 'indicando el responsable el pago debe registrarse')
+  assert(pago?.collectorId === 'u-cobA', 'el dinero debe atribuirse al Cobrador que lo recibió')
+  assert(pago?.createdByUserId === USER_SUPERVISOR.id, 'debe constar que lo digitó el Supervisor')
+})
+
+await spec('PAY-COLL-REG-009', 'App Cobrador', 'un fallo a mitad de la escritura revierte TODO', async () => {
+  const sc = escenarioAppCobrador()
+  const antes = await readFinancialState(sc.db)
+  sc.db.injectFault({ op: 'installments.update', nth: 2 })
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 30_000, actor: USER_COBRADOR, fecha: DIA_REG },
+    asDb(sc.db),
+  )
+  sc.db.injectFault(null)
+  const st = await readFinancialState(sc.db)
+  metric('resultado', res.ok ? 'ACEPTADO — ERROR' : res.code)
+  metric('payments tras el fallo', st.totalRegistradoEnPayments)
+  metric('saldo tras el fallo', `${antes.saleSaldo} → ${st.saleSaldo}`)
+  metric('rollback registrado', sc.db.log.includes('transaction:rollback'))
+  assert(!res.ok && res.code === 'WRITE_FAILED', 'un fallo de persistencia debe rechazarse como tal')
+  assert(st.totalRegistradoEnPayments === 0, 'quedó un Payment huérfano')
+  assert(st.saleSaldo === antes.saleSaldo, 'la venta quedó modificada pese al fallo')
+  assert(JSON.stringify(st.parcelas) === JSON.stringify(antes.parcelas), 'quedaron parcelas modificadas')
+})
+
+await spec('PAY-COLL-REG-010', 'App Cobrador', 'el pago reversado conserva la atribución del Cobrador', async () => {
+  const sc = escenarioAppCobrador()
+  await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 9_000, actor: USER_COBRADOR, fecha: DIA_REG },
+    asDb(sc.db),
+  )
+  const original = (await sc.db.payments.toArray())[0] as Payment
+  // Reverso con la misma forma que usa paymentCorrectionService: el contrapago
+  // hereda la atribución del original (no se reasigna al que corrige).
+  await sc.db.payments.update(original.id, { state: 'reversed' })
+  await sc.db.payments.add({
+    ...original, id: 'pay-reversal', valor: -original.valor, state: 'reversal',
+    createdByUserId: USER_ADMIN.id,
+  })
+  const pagos = await sc.db.payments.toArray() as Payment[]
+  const efectivos = effectivePayments(pagos)
+  metric('pagos totales', pagos.length)
+  metric('efectivos tras el reverso', efectivos.length)
+  metric('collectorId del contrapago', pagos.find(p => p.id === 'pay-reversal')?.collectorId)
+  assert(pagos.every(p => p.collectorId === USER_COBRADOR.id), 'la atribución del recaudo debe mantenerse en el reverso')
+  assert(efectivos.length === 0, 'un pago reversado no debe contar como recaudo efectivo')
+})
+
+await spec('PAY-COLL-REG-011', 'App Cobrador', 'la caja personal del Cobrador refleja el abono recién registrado', async () => {
+  const sc = escenarioAppCobrador()
+  const antes = await getCollectorDailyCashSummary(
+    { routeId: TEST_IDS.ROUTE_ID, collectorId: USER_COBRADOR.id, fecha: DIA_REG },
+    sc.db as unknown as CollectorCashDatabase,
+  )
+  await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 12_000, actor: USER_COBRADOR, fecha: DIA_REG },
+    asDb(sc.db),
+  )
+  const despues = await getCollectorDailyCashSummary(
+    { routeId: TEST_IDS.ROUTE_ID, collectorId: USER_COBRADOR.id, fecha: DIA_REG },
+    sc.db as unknown as CollectorCashDatabase,
+  )
+  metric('recaudado antes', antes.recaudado)
+  metric('recaudado después', despues.recaudado)
+  metric('efectivo a entregar', despues.efectivoAEntregar)
+  assert(despues.recaudado === antes.recaudado + 12_000, 'la caja personal no recogió el abono')
+  assert(despues.efectivoAEntregar === antes.efectivoAEntregar + 12_000, 'el efectivo a entregar no refleja el abono')
+})
+
+await spec('PAY-COLL-REG-012', 'App Cobrador', 'CLEAN de extremo a extremo: ruta sin Cobrador → asignarlo → cliente → venta → abono', async () => {
+  // Reproduce el camino REAL del socio en CLEAN: base vacía, nada sembrado.
+  const db = new MemoryDb()
+  const audits: string[] = []
+  const sink = async (p: Parameters<AuditSink>[0]) => { audits.push(p.action) }
+
+  const su: User = {
+    id: 'u-su', tenantId: 'platform', nombre: 'Root', email: 'root@c.com', password: 'x',
+    rol: 'superadmin', status: 'activo', createdAt: '', updatedAt: '',
+  }
+  const cobrador: User = {
+    id: 'u-cob-clean', tenantId: 't-clean', nombre: 'Luis', email: 'luis@c.com', password: 'x',
+    rol: 'cobrador', status: 'activo', createdAt: '', updatedAt: '',
+  }
+  await db.users.add(cobrador)
+
+  // 1) Ruta creada SIN Cobrador (regla de rutas libres) — servicio real.
+  const ruta = await createRouteWithAdmins({
+    tenantId: 't-clean', nombre: 'Ruta CLEAN', tasaInteres: 20, tasaLibre: false,
+    montoMaximoPrestamo: 500_000, capitalInicial: 0, codigo: 'RT-001', adminIds: [],
+  }, su, db as unknown as RouteDatabase, sink)
+  metric('ruta sin Cobrador', ruta.cobradorId === undefined)
+
+  // 2) Cobrador asignado DESPUÉS — servicio real.
+  await updateRouteWithAssignments({
+    routeId: ruta.id, tenantId: 't-clean', nombre: ruta.nombre, ciudad: ruta.ciudad,
+    tasaInteres: ruta.tasaInteres, tasaLibre: ruta.tasaLibre, montoMaximoPrestamo: ruta.montoMaximoPrestamo,
+    cobradorId: cobrador.id, assignedUserIds: [cobrador.id], assignableUserIds: [cobrador.id],
+  }, su, db as unknown as RouteDatabase, sink)
+  const cobAsignado = (await db.users.toArray() as User[]).find(u => u.id === cobrador.id)!
+  metric('cobrador asignado', JSON.stringify(cobAsignado.authorizedRouteIds))
+
+  // 3) Cliente y 4) venta DESEMBOLSADA con sus parcelas.
+  await db.clients.add({ id: 'c-clean', tenantId: 't-clean', routeId: ruta.id, nombre: 'Cliente CLEAN', status: 'activo' })
+  const { valorInteres, valorTotal } = calculateTotalWithInterest({ valorVenta: 100_000, tasaInteres: 20 })
+  const numeroCuotas = 10
+  const valorCuota = Math.round(valorTotal / numeroCuotas)
+  const parcelas = generateInstallments({
+    saleId: 's-clean', valorTotal, numeroCuotas, valorCuota, frecuencia: 'diaria', fechaInicio: DIA_REG,
+  })
+  await db.sales.add({
+    id: 's-clean', tenantId: 't-clean', routeId: ruta.id, clientId: 'c-clean',
+    createdByUserId: cobrador.id, valorVenta: 100_000, tasaInteres: 20, valorInteres, valorTotal,
+    saldo: valorTotal, numeroCuotas, valorCuota, frecuenciaPago: 'diaria',
+    fechaInicio: DIA_REG, fechaFinalEstimada: '2026-12-31', status: 'activa',
+    disbursementStatus: 'desembolsado', createdAt: '', updatedAt: '',
+  } as Sale)
+  for (const p of parcelas) await db.installments.add(p)
+
+  // 5) El Cobrador registra el abono: EXACTAMENTE lo que fallaba en producción.
+  const res = await registerPayment(
+    { saleId: 's-clean', requestedAmount: 400, actor: cobAsignado, fecha: DIA_REG },
+    db as unknown as PaymentDatabase,
+    sink,
+  )
+  const pago = (await db.payments.toArray())[0] as Payment | undefined
+  const venta = await db.sales.get('s-clean') as Sale
+  metric('resultado del abono', res.ok ? `ACEPTADO ${res.appliedAmount}` : `RECHAZADO(${res.code}) — ${res.message}`)
+  metric('collectorId', pago?.collectorId)
+  metric('createdByUserId', pago?.createdByUserId)
+  metric('saldo tras el abono', `${valorTotal} → ${venta.saldo}`)
+  metric('auditoría', audits.join(','))
+  assert(res.ok, `el abono en CLEAN debe registrarse: ${res.ok ? '' : res.message}`)
+  assert(pago?.collectorId === cobrador.id && pago?.createdByUserId === cobrador.id, 'atribución incorrecta en CLEAN')
+  assert(venta.saldo === valorTotal - 400, 'el saldo no se actualizó en CLEAN')
+  assert(audits.includes('REGISTER_PAYMENT'), 'el abono no quedó auditado')
+})
+
+await spec('PAY-COLL-REG-013', 'App Cobrador', 'el servicio declara TODAS las tablas que usa dentro de la transacción', () => {
+  // CONTRATO DE DEXIE, verificado sobre el código real: cualquier tabla usada
+  // dentro de `db.transaction(...)` debe estar declarada en su alcance. Esta es la
+  // comprobación que habría atrapado el incidente en el commit que lo introdujo.
+  const body = paymentServiceBody()
+  const abre = body.indexOf('database.transaction')
+  const flecha = body.indexOf('=>', abre)
+  const alcance = new Set([...body.slice(abre, flecha).matchAll(/\bdatabase\.([a-zA-Z]+)\b/g)].map(m => m[1]))
+  alcance.delete('transaction')
+  const scope = extractTransactionScope(body)
+  const usadas = new Set([...scope.matchAll(/\bdatabase\.([a-zA-Z]+)\./g)].map(m => m[1]))
+  const fuera = [...usadas].filter(t => !alcance.has(t))
+  metric('tablas declaradas', [...alcance].sort().join(', '))
+  metric('tablas usadas dentro', [...usadas].sort().join(', '))
+  metric('fuera de alcance', fuera.length === 0 ? '(ninguna)' : fuera.join(', '))
+  assert(alcance.has('users'), 'la tabla users debe declararse: se lee dentro de la transacción')
+  assert(fuera.length === 0, `tablas usadas sin declarar en la transacción: ${fuera.join(', ')}`)
 })
 
 // ############################################################

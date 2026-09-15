@@ -306,28 +306,43 @@ dentro de sus rutas autorizadas.
 
 | Concepto | Antes | Después |
 |---|---|---|
-| Pruebas automáticas | 353 | **440** |
-| Resultado | PASS | **440 PASS · 0 FAIL** |
+| Pruebas automáticas | 353 | **466** |
+| Resultado | PASS | **466 PASS · 0 FAIL** |
 | Verificación de tipos (aplicación) | Sin errores | **Sin errores** |
 | Verificación de tipos (pruebas) | Sin errores | **Sin errores** |
+| Build de producción | OK | **OK** |
 
-Detalle de las 440 pruebas:
+Detalle de las 466 pruebas:
 
-- **228** de permisos y reglas de acceso
-- **123** financieras (pagos, caja, liquidación, reportes, historial, caja del cobrador)
-- **89** de arranque e instalación
+- **229** de permisos y reglas de acceso
+- **136** financieras (pagos, caja, liquidación, reportes, historial, caja del
+  cobrador, registro de abonos de la App Cobrador)
+- **101** de arranque e instalación
 
-Se agregaron **87 pruebas nuevas**, incluidas las que verifican que:
-una ruta con Cobrador y sin Administrador es válida; una ruta sin Cobrador sigue
-siendo inválida; un Administrador sin rutas sigue sin acceso; la liquidación de una
-ruta nunca incluye movimientos de otra; los reportes y sus CSV respetan la ruta y los
-permisos; un crédito activo nunca aparece como finalizado; un crédito perdido no
-inventa fecha; dos clientes con el mismo nombre no mezclan historiales; y dos
-cobradores de la misma ruta ven cada uno su propio efectivo.
+Entre las pruebas nuevas se verifica que: una ruta puede crearse **sin
+Administrador y sin Cobrador**; una ruta sin Cobrador se identifica como
+pendiente de asignación y **no** rompe listados ni panel; se le pueden asignar
+responsables después; un Administrador sin rutas sigue sin acceso; un Cobrador no
+asignado no puede operar la ruta; el Super Admin sí puede gestionarla; la
+liquidación de una ruta nunca incluye movimientos de otra; los reportes y sus CSV
+respetan la ruta y los permisos; un crédito activo nunca aparece como finalizado;
+un crédito perdido no inventa fecha; dos clientes con el mismo nombre no mezclan
+historiales; dos cobradores de la misma ruta ven cada uno su propio efectivo; y el
+Cobrador puede registrar abonos de extremo a extremo sobre datos CLEAN nuevos.
 
-Ninguna prueba existente fue eliminada. Una se modificó a propósito: la que exigía
-Administrador para crear una ruta, porque contradice la nueva regla acordada. La
-parte que impide crear una ruta sin Cobrador se conservó intacta.
+### Pruebas antiguas modificadas conscientemente
+
+Ninguna prueba existente fue eliminada. Se modificaron **a propósito** las que
+afirmaban reglas ya derogadas:
+
+- La que exigía **Administrador** para crear una ruta.
+- Las que exigían **al menos un Cobrador** para que la ruta fuera válida
+  (`COB CASO 5`, `COB CASO 7` y `ONB-ROUTE-007`): cero cobradores es ahora un
+  estado aceptado.
+- La que impedía **retirar al último Cobrador** (`COB CASO 1`): el retiro está
+  permitido y la ruta queda pendiente de asignación.
+
+Cada una se reescribió para afirmar la regla vigente, no se borró.
 
 ---
 
@@ -371,3 +386,14 @@ funcional.
 Un crédito marcado como perdido no guarda la fecha en que se dio por perdido. Por
 eso el historial muestra "—" en su fecha de finalización. Si el negocio necesita esa
 fecha, es un cambio aparte.
+
+---
+
+## Nota de mantenimiento
+
+**15/09/2026 — La App Cobrador no podía registrar abonos.** Tras RQ-05, la
+resolución del cobrador responsable leía la tabla `users` dentro de una transacción
+que no la declaraba en su alcance; Dexie la rechazaba y todo abono terminaba en
+«Error al registrar el pago». Corregido declarando la tabla, con diagnóstico
+interno del error real y 13 pruebas de regresión. Detalle completo en
+[FIX_REGISTRO_PAGOS_COBRADOR_2026-09-15.md](FIX_REGISTRO_PAGOS_COBRADOR_2026-09-15.md).

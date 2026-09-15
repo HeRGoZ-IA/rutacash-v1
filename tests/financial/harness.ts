@@ -26,7 +26,7 @@ type Row = Record<string, any>
 
 export class FakeTable<T extends Row> {
   private rows = new Map<string, T>()
-  constructor(private db: MemoryDb, private name: string) {}
+  constructor(private db: MemoryDb, readonly name: string) {}
 
   /** Dexie: Table.add — inserta; falla si la clave ya existe. */
   async add(obj: T): Promise<string> {
@@ -153,9 +153,34 @@ export class MemoryDb {
   private fault: FaultConfig | null = null
   /** Profundidad de transacción activa (para verificar atomicidad). */
   private txDepth = 0
+  /** Tablas DECLARADAS en el alcance de la transacción activa (contrato de Dexie). */
+  private txScope: Set<string> | null = null
 
   note(op: string) {
+    // El nombre de la tabla es el prefijo de la operación ("payments.add", ...).
+    const tabla = op.split('.')[0]
+    if (MemoryDb.TABLES.includes(tabla as never)) this.assertTableInTransaction(tabla)
     this.log.push(op)
+  }
+
+  /**
+   * CONTRATO DE DEXIE: dentro de `db.transaction(mode, tablas, fn)` solo pueden
+   * usarse las tablas DECLARADAS en el alcance. Dexie lanza
+   * `NotFoundError: Table X not part of transaction` (ver Table.prototype._trans
+   * y Transaction.prototype.table en dexie/dist/dexie.js) y el error NO es un
+   * rechazo de negocio: aborta la operación entera.
+   *
+   * El harness replicaba todo Dexie MENOS esta regla, así que una tabla leída
+   * fuera de alcance pasaba las pruebas y reventaba en el navegador. Ahora se
+   * replica también.
+   */
+  private assertTableInTransaction(tabla: string) {
+    if (this.txDepth === 0) return
+    if (this.txScope === null) return          // alcance no declarado: no se exige
+    if (this.txScope.has(tabla)) return
+    const err = new Error(`Table ${tabla} not part of transaction`)
+    err.name = 'NotFoundError'
+    throw err
   }
 
   maybeFail(op: string) {
@@ -172,27 +197,43 @@ export class MemoryDb {
     this.counters.clear()
   }
 
-  /** Dexie: db.transaction('rw', tablas, fn) con rollback total si fn lanza. */
-  async transaction<T>(_mode: string, _tables: any, fn: () => PromiseLike<T>): Promise<T> {
-    this.note('transaction:begin')
+  /**
+   * Dexie: db.transaction('rw', tablas, fn) con rollback total si fn lanza.
+   *
+   * Se replican DOS reglas de Dexie:
+   *  · ALCANCE: solo las tablas declaradas pueden tocarse dentro (ver
+   *    `assertTableInTransaction`). Una tabla fuera de alcance lanza NotFoundError.
+   *  · ROLLBACK: se restauran TODAS las tablas del alcance, no un trío fijo.
+   */
+  async transaction<T>(_mode: string, tables: unknown, fn: () => PromiseLike<T>): Promise<T> {
+    const declaradas = (Array.isArray(tables) ? tables : [tables])
+      .map(t => (t as FakeTable<Row> | undefined)?.name)
+      .filter((n): n is string => typeof n === 'string')
+    const scopePrevio = this.txScope
+    // Transacción anidada: Dexie exige que el alcance interno esté contenido en el
+    // externo; aquí basta con conservar el más restrictivo (el externo).
+    this.txScope = this.txDepth === 0
+      ? (declaradas.length > 0 ? new Set(declaradas) : null)
+      : scopePrevio
+
+    this.log.push('transaction:begin')
     this.txDepth++
-    const snap = {
-      payments: this.payments._snapshot(),
-      installments: this.installments._snapshot(),
-      sales: this.sales._snapshot(),
-    }
+    const alcance = this.txScope ? [...this.txScope] : [...MemoryDb.TABLES]
+    const tablas = (this as unknown as Record<string, FakeTable<Row>>)
+    const snap = alcance
+      .filter(t => tablas[t] instanceof FakeTable)
+      .map(t => [t, tablas[t]._snapshot()] as const)
     try {
       const r = await fn()
-      this.note('transaction:commit')
+      this.log.push('transaction:commit')
       return r
     } catch (err) {
-      this.payments._restore(snap.payments)
-      this.installments._restore(snap.installments)
-      this.sales._restore(snap.sales)
-      this.note('transaction:rollback')
+      for (const [t, rows] of snap) tablas[t]._restore(rows)
+      this.log.push('transaction:rollback')
       throw err
     } finally {
       this.txDepth--
+      this.txScope = this.txDepth === 0 ? null : scopePrevio
     }
   }
 

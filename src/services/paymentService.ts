@@ -59,7 +59,11 @@ export interface PaymentDatabase {
     get(key: string): Promise<Sale | undefined>
     update(key: string, changes: Partial<Sale>): Promise<number>
   }
-  /** Solo lectura: necesaria para resolver el COBRADOR RESPONSABLE del recaudo. */
+  /**
+   * Solo LECTURA: necesaria para resolver el COBRADOR RESPONSABLE del recaudo.
+   * Se lee dentro de la transacción, así que la tabla DEBE declararse en su
+   * alcance (ver `registerPayment`).
+   */
   users: {
     where(index: string): { equals(key: string): { toArray(): Promise<User[]> } }
   }
@@ -207,7 +211,13 @@ export async function registerPayment(
   let consolidated: RegisterPaymentSuccess
 
   try {
-    consolidated = await database.transaction('rw', [database.payments, database.installments, database.sales], async () => {
+    // ALCANCE DE LA TRANSACCIÓN — `users` va INCLUIDO a propósito: el paso 4.b lee
+    // los cobradores de la ruta DENTRO del ámbito atómico. Dexie solo permite usar
+    // las tablas DECLARADAS aquí; una tabla ausente lanza
+    // `NotFoundError: Table users not part of transaction`, que no es un rechazo de
+    // negocio y abortaba TODO el pago (incidente 15/09/2026, App Cobrador).
+    // `users` solo se lee; ninguna escritura la toca.
+    consolidated = await database.transaction('rw', [database.payments, database.installments, database.sales, database.users], async () => {
       // ---- 1. LECTURA FRESCA DENTRO DE LA TRANSACCIÓN -----------------------
       // Nada de lo que envía la UI se usa como fuente de verdad. El intervalo
       // lectura → cálculo → escritura queda dentro del mismo ámbito atómico.
@@ -342,9 +352,18 @@ export async function registerPayment(
       return result
     })
   } catch (err) {
-    // Rechazo de negocio: la transacción se abortó sin escribir nada.
+    // Rechazo de negocio: la transacción se abortó sin escribir nada. El mensaje ya
+    // es específico y accionable ("no tienes permiso...", "la venta no está
+    // activa...", "indica quién cobró...").
     if (err instanceof PaymentRejection) return { ok: false, code: err.code, message: err.message }
-    // Fallo de persistencia: Dexie ya revirtió la transacción completa.
+    // Fallo de persistencia: Dexie ya revirtió la transacción completa. Al usuario
+    // se le da un mensaje amable, pero la CAUSA REAL se registra en consola: sin
+    // esto, un error de esquema/alcance de Dexie quedaba indistinguible de
+    // cualquier otro y no había forma de diagnosticarlo desde producción.
+    console.error(
+      '[RutaCash] registerPayment falló y se revirtió por completo.',
+      { saleId: input.saleId, actorId: input.actor?.id, requestedAmount, error: err },
+    )
     return fail('WRITE_FAILED')
   }
 
