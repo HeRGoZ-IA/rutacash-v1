@@ -16,6 +16,7 @@ import { validateEmail, sameEmail } from '@/lib/email'
 import { nowISO, initials } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { getAssignedRouteIds } from '@/lib/roles'
+import { groupRoutesByOffice } from '@/lib/officeGrouping'
 import { setCobradorRoutes, clearRouteResponsibilities } from '@/services/routeAssignment'
 import { resetUserPassword } from '@/services/passwordService'
 import {
@@ -23,7 +24,7 @@ import {
   authorizedRouteIdsOf, isRouteUnrestricted,
   ROLE_LABELS,
 } from '@/lib/permissions'
-import type { User, Route, UserRole } from '@/models/types'
+import type { User, Route, UserRole, Office } from '@/models/types'
 
 /**
  * Roles cuya OPERACIÓN depende de tener al menos una ruta asignada.
@@ -48,6 +49,9 @@ export default function UsersPage() {
   const { tenantId } = useTenant()
   const [users, setUsers] = useState<User[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
+  // Catálogo de Oficinas SOLO para agrupar visualmente el selector de rutas.
+  // El usuario sigue siendo GENERAL DE LA EMPRESA: no se guarda ninguna Oficina.
+  const [offices, setOffices] = useState<Office[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
@@ -95,6 +99,7 @@ export default function UsersPage() {
     ])
     setUsers(us)
     setRoutes(rts)
+    setOffices(await db.offices.where('tenantId').equals(tenantId).toArray())
     setLoading(false)
   }
 
@@ -370,16 +375,26 @@ export default function UsersPage() {
                   <span className="font-medium"> podrás asignarlo al crear o editar una ruta.</span>
                 </p>
               ) : (
-                <div className="flex flex-wrap gap-2">
-                  {assignableRoutes.map(r => {
-                    const active = form.authorizedRouteIds.includes(r.id)
-                    return (
-                      <button key={r.id} type="button" onClick={() => toggleRoute(r.id)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${active ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
-                        {r.nombre}
-                      </button>
-                    )
-                  })}
+                /* Agrupadas por OFICINA (y "Sin Oficina" al final). La agrupación es
+                   solo presentación: se sigue guardando `authorizedRouteIds`, nunca
+                   oficinas. Un usuario puede quedar con rutas de varias Oficinas. */
+                <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                  {groupRoutesByOffice(assignableRoutes, offices).map(g => (
+                    <div key={g.key} className="space-y-1.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{g.label}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {g.routes.map(r => {
+                          const active = form.authorizedRouteIds.includes(r.id)
+                          return (
+                            <button key={r.id} type="button" onClick={() => toggleRoute(r.id)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${active ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+                              {r.nombre}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
               {form.rol === 'admin' && form.authorizedRouteIds.length === 0 && (

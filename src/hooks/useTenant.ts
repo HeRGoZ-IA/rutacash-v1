@@ -6,8 +6,8 @@ export function useTenant() {
     tenant,
     route,
     tenantId: tenant?.id ?? user?.tenantId ?? '',
-    // Legacy: ya no hay oficinas; se conserva officeId derivado del usuario por compatibilidad.
-    officeId: user?.officeId ?? '',
+    // Sin `officeId`: la Oficina NO es contexto del usuario. Vive en `Route.officeId`
+    // y se deriva por ruta. Exponerla aquí reintroduciría la atadura usuario↔oficina.
     routeId: route?.id ?? user?.routeId ?? '',
     currency: tenant?.moneda ?? 'COP',
   }

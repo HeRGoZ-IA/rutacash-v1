@@ -16,6 +16,7 @@ import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import { filterAccessibleRoutes, authorizedRouteIdsOf, isPartnerInScope, isTransferInScope } from '@/lib/permissions'
 import type { Transfer, Route, User, TransferEntityType } from '@/models/types'
+import { assertRouteOperationalContext } from '@/services/officeService'
 
 // Entidad participante (ruta o socio) para la vista agrupada (Revisión 2).
 interface EntityGroup {
@@ -40,7 +41,7 @@ function decodeEndpoint(v: string): { type: TransferEntityType; id: string } | n
 }
 
 export default function TransfersPage() {
-  const { tenantId, officeId, currency } = useTenant()
+  const { tenantId, currency } = useTenant()
   const { user } = useAuth()
   const [transfers, setTransfers] = useState<Transfer[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
@@ -114,7 +115,7 @@ export default function TransfersPage() {
     if (form.origen === form.destino) { toast.error('Origen y destino no pueden ser iguales'); return }
     const transferId = generateId()
     const t: Transfer = {
-      id: transferId, tenantId, officeId,
+      id: transferId, tenantId,
       origenType: origen.type, destinoType: destino.type,
       routeOrigenId: origen.type === 'route' ? origen.id : '',
       routeDestinoId: destino.type === 'route' ? destino.id : undefined,
@@ -130,6 +131,10 @@ export default function TransfersPage() {
     }
     setSaving(true)
     try {
+      // Oficina inactiva → bloquea AMBOS extremos de tipo ruta. Una transferencia
+      // hacia o desde una ruta congelada es una operación nueva, no una consulta.
+      if (origen.type === 'route') await assertRouteOperationalContext(origen.id)
+      if (destino.type === 'route') await assertRouteOperationalContext(destino.id)
       await db.transfers.add(t)
 
       // Impacto en Caja socios: si un socio participa, se crea su movimiento.

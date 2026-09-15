@@ -15,9 +15,10 @@ import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import type { Expense, ExpenseCategory, Route } from '@/models/types'
+import { assertRouteOperationalContext } from '@/services/officeService'
 
 export default function ExpensesPage() {
-  const { tenantId, officeId, currency } = useTenant()
+  const { tenantId, currency } = useTenant()
   const { user } = useAuth()
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [categories, setCategories] = useState<ExpenseCategory[]>([])
@@ -59,9 +60,12 @@ export default function ExpensesPage() {
     if (!canAccessRoute(user, form.routeId)) { toast.error('No tienes permiso sobre esa ruta.'); return }
     setSaving(true)
     try {
+      // Oficina inactiva → no se registran operaciones nuevas en sus rutas.
+      // (La consulta del histórico de esa ruta sigue disponible con normalidad.)
+      await assertRouteOperationalContext(form.routeId)
       const route = routes.find(r => r.id === form.routeId)
       const expense: Expense = {
-        id: generateId(), tenantId, officeId: route?.officeId ?? officeId,
+        id: generateId(), tenantId,
         routeId: form.routeId, categoryId: form.categoryId, valor: form.valor,
         descripcion: form.descripcion, fecha: form.fecha, userId: user?.id ?? '',
         syncStatus: 'synced', createdAt: nowISO(),

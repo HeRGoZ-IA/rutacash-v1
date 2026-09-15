@@ -9,7 +9,8 @@ import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { getAuthorizedRouteIds } from '@/lib/roles'
 import { formatCurrency } from '@/lib/formatters'
 import { isSaleDisbursed } from '@/services/installmentEngine'
-import type { Route } from '@/models/types'
+import { groupRoutesByOffice } from '@/lib/officeGrouping'
+import type { Office, Route } from '@/models/types'
 
 interface RouteSummary {
   route: Route
@@ -25,6 +26,9 @@ export default function CollectorSelectRoutePage() {
   const navigate = useNavigate()
   const base = useOpBase()
   const [summaries, setSummaries] = useState<RouteSummary[]>([])
+  // Oficinas SOLO para agrupar visualmente. Elegir una Oficina no existe como paso
+  // ni habilita rutas: las rutas mostradas son exactamente las autorizadas.
+  const [offices, setOffices] = useState<Office[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { load() }, [user])
@@ -34,6 +38,7 @@ export default function CollectorSelectRoutePage() {
     const ids = getAuthorizedRouteIds(user)
     const all = await db.routes.where('tenantId').equals(user.tenantId).toArray()
     const mine = all.filter(r => ids.includes(r.id))
+    setOffices(await db.offices.where('tenantId').equals(user.tenantId).toArray())
     const result: RouteSummary[] = []
     for (const route of mine) {
       const sales = (await db.sales.where('routeId').equals(route.id).and(s => s.status === 'activa').toArray()).filter(isSaleDisbursed)
@@ -64,8 +69,15 @@ export default function CollectorSelectRoutePage() {
       {loading ? (
         <div className="flex justify-center py-10"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
       ) : (
-        <div className="space-y-3">
-          {summaries.map(({ route, clientes, ventasActivas, cartera }) => {
+        <div className="space-y-5">
+          {groupRoutesByOffice(summaries.map(s => s.route), offices).map(grupo => (
+          <div key={grupo.key} className="space-y-3">
+            {/* Encabezado de Oficina: orientación, no un filtro ni un paso previo.
+                Con una sola ruta la autoselección del layout sigue entrando directo. */}
+            {(offices.length > 0 || grupo.key !== '__sin_oficina__') && summaries.length > 1 && (
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-primary-500 px-1">{grupo.label}</p>
+            )}
+          {grupo.routes.map(r => summaries.find(s => s.route.id === r.id)!).map(({ route, clientes, ventasActivas, cartera }) => {
             const isActive = route.id === activeRouteId
             const single = summaries.length === 1
             return (
@@ -107,6 +119,8 @@ export default function CollectorSelectRoutePage() {
               </div>
             )
           })}
+          </div>
+          ))}
         </div>
       )}
     </div>

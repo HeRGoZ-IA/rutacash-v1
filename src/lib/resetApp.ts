@@ -1,7 +1,9 @@
 import { db } from '@/lib/db'
 
 // Prefijos de claves locales que pertenecen a RutaCash (Zustand persist y demás).
-// Cubre: rutacash-auth, rutacash-collector-route, rutacash-office-filter, etc.
+// Cubre: rutacash-auth, rutacash-collector-route, rutacash-active-route, etc.
+// (`rutacash-office-filter` era de un hook eliminado: sus claves residuales también
+// caen por prefijo, de modo que no revive con semántica antigua.)
 // Solo se borran claves con estos prefijos para NO tocar datos de otros sistemas.
 const RUTACASH_KEY_PREFIXES = ['rutacash-', 'rutacash_']
 

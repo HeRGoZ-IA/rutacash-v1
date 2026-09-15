@@ -1,7 +1,7 @@
 import Dexie, { type Table } from 'dexie'
 import { lastEffectivePaymentDate } from '@/lib/paymentState'
 import type {
-  Tenant, Route, User, Client, Sale, Installment, Payment,
+  Tenant, Office, Route, User, Client, Sale, Installment, Payment,
   NoPaymentVisit, ExpenseCategory, Expense, CapitalMovement, Transfer,
   Withdrawal, CashboxMovement, WeeklySettlement, AuditLog, SaleRequest,
   PartnerCashMovement, PaymentAdjustmentRequest,
@@ -9,6 +9,7 @@ import type {
 
 export class RutaCashDB extends Dexie {
   tenants!: Table<Tenant>
+  offices!: Table<Office>
   routes!: Table<Route>
   users!: Table<User>
   clients!: Table<Client>
@@ -61,6 +62,10 @@ export class RutaCashDB extends Dexie {
     // v3: se elimina "Oficinas". Se borra la tabla `offices` y se quitan los
     // índices `officeId` de las demás tablas. El campo `officeId` queda como
     // dato legacy opcional dentro de los registros (Dexie lo conserva/ignora).
+    //
+    // NOTA (histórica): esta decisión se REVIRTIÓ en la v11, que vuelve a crear
+    // `offices` con el modelo Empresa → Oficina → Ruta. Aquel `officeId` legado
+    // disperso por nueve entidades se limpia allí: hoy solo `Route.officeId` existe.
     this.version(3).stores({
       offices: null,
       routes: 'id, tenantId, cobradorId, status',
@@ -298,6 +303,64 @@ export class RutaCashDB extends Dexie {
       })
 
       console.log(`[RutaCash][migración v10] Atribución separada: ${pagos} pago(s), ${gastos} gasto(s) y ${ventas} venta(s) desembolsada(s). Los valores históricos conservan la equivalencia legacy (registrador = responsable).`)
+    })
+
+    // ============================================================
+    // v11 (OFICINAS: Empresa → Oficina → Ruta): aditiva y segura.
+    //
+    // RECREA la tabla `offices`, que la v3 eliminó (`offices: null`). Declararla de
+    // nuevo aquí es legal en Dexie y está cubierto por OFFICE-MIG-001, que migra una
+    // base v1 → v11 pasando por el borrado de la v3.
+    //
+    // SANEAMIENTO (no destructivo). Antes de esta versión, `officeId` era un campo
+    // legacy duplicado en nueve entidades, con valores que apuntaban a oficinas
+    // inexistentes (el seed DEMO sembraba 'office-001'/'office-002' sin tabla que los
+    // respaldara). A partir de aquí SOLO `Route.officeId` existe:
+    //   · Rutas cuyo `officeId` no apunte a una Oficina REAL → `undefined`
+    //     ("Sin Oficina"). NO se inventan Oficinas para rescatar ids colgantes: las
+    //     rutas existentes quedan sin Oficina, tal como se decidió.
+    //   · Se borra `officeId` de users, clients, sales, expenses, capitalMovements,
+    //     transfers, withdrawals y weeklySettlements. La Oficina de cualquiera de
+    //     ellos se DERIVA por `routeId → Route.officeId`.
+    //
+    // No se borra ningún registro, no se tocan importes, estados ni `routeId`, y
+    // ninguna asignación de usuario (`authorizedRouteIds`) cambia.
+    // ============================================================
+    this.version(11).stores({
+      offices: 'id, tenantId, status',
+    }).upgrade(async (tx) => {
+      // 1) Rutas: conservar solo las Oficinas que existan de verdad.
+      const offices = await tx.table('offices').toArray() as Office[]
+      const officeIds = new Set(offices.map(o => o.id))
+      let rutasLimpiadas = 0
+      await tx.table('routes').toCollection().modify((r: Route) => {
+        if (r.officeId && !officeIds.has(r.officeId)) {
+          r.officeId = undefined
+          rutasLimpiadas++
+        }
+      })
+
+      // 2) Resto de entidades: el campo desaparece del modelo.
+      const CON_OFFICE_LEGACY = [
+        'users', 'clients', 'sales', 'expenses',
+        'capitalMovements', 'transfers', 'withdrawals', 'weeklySettlements',
+      ] as const
+      let registrosLimpiados = 0
+      for (const tabla of CON_OFFICE_LEGACY) {
+        await tx.table(tabla).toCollection().modify((row: Record<string, unknown>) => {
+          if ('officeId' in row) {
+            delete row.officeId
+            registrosLimpiados++
+          }
+        })
+      }
+
+      console.log(
+        `[RutaCash][migración v11] Oficinas habilitadas. ` +
+        `Rutas con Oficina inexistente → "Sin Oficina": ${rutasLimpiadas}. ` +
+        `officeId legado eliminado de ${registrosLimpiados} registro(s) de otras entidades. ` +
+        `Ninguna Oficina se creó automáticamente.`,
+      )
     })
   }
 }

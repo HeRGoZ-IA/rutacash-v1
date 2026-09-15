@@ -306,18 +306,20 @@ dentro de sus rutas autorizadas.
 
 | Concepto | Antes | Después |
 |---|---|---|
-| Pruebas automáticas | 353 | **466** |
-| Resultado | PASS | **466 PASS · 0 FAIL** |
+| Pruebas automáticas | 353 | **568** |
+| Resultado | PASS | **568 PASS · 0 FAIL** |
 | Verificación de tipos (aplicación) | Sin errores | **Sin errores** |
 | Verificación de tipos (pruebas) | Sin errores | **Sin errores** |
 | Build de producción | OK | **OK** |
 
-Detalle de las 466 pruebas:
+Detalle de las 568 pruebas:
 
-- **229** de permisos y reglas de acceso
-- **136** financieras (pagos, caja, liquidación, reportes, historial, caja del
+- **275** de permisos, reglas de acceso y agrupación por oficina
+- **151** financieras (pagos, caja, liquidación, reportes, historial, caja del
   cobrador, registro de abonos de la App Cobrador)
-- **101** de arranque e instalación
+- **129** de arranque e instalación
+- **13** de migración de base de datos y recorridos completos (smoke), ejecutadas
+  sobre el motor real de la base, no simulado
 
 Entre las pruebas nuevas se verifica que: una ruta puede crearse **sin
 Administrador y sin Cobrador**; una ruta sin Cobrador se identifica como
@@ -397,3 +399,14 @@ que no la declaraba en su alcance; Dexie la rechazaba y todo abono terminaba en
 «Error al registrar el pago». Corregido declarando la tabla, con diagnóstico
 interno del error real y 13 pruebas de regresión. Detalle completo en
 [FIX_REGISTRO_PAGOS_COBRADOR_2026-09-15.md](FIX_REGISTRO_PAGOS_COBRADOR_2026-09-15.md).
+
+---
+
+## Nota de mantenimiento — Oficinas
+
+**Septiembre 2026 — Empresa → Oficina → Ruta.** Se introdujo la entidad Oficina
+como agrupación de rutas. Los usuarios siguen siendo generales de la empresa y el
+acceso sigue naciendo solo de las rutas autorizadas: pertenecer a una oficina no
+concede ninguna ruta. Una ruta puede existir sin oficina, y las rutas que ya
+existían quedaron todas "Sin Oficina". Detalle completo en
+[IMPLEMENTACION_OFICINAS_2026-09.md](IMPLEMENTACION_OFICINAS_2026-09.md).

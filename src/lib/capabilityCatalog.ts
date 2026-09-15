@@ -48,6 +48,12 @@ export const CAPABILITY_METADATA: Record<Capability, CapabilityMeta> = {
   'capital.manage': { key: 'capital.manage', label: 'Gestionar capital', description: 'Registrar y ajustar el capital de las rutas.', category: 'Pagos y caja', risk: 'medio' },
 
   // Rutas
+  // Oficinas — CATÁLOGO de agrupación. Ninguna concede acceso a los datos de las
+  // rutas de la Oficina: eso depende exclusivamente de las rutas autorizadas.
+  'office.create': { key: 'office.create', label: 'Crear oficinas', description: 'Registrar nuevas oficinas para agrupar rutas. No concede acceso a sus rutas.', category: 'Rutas', risk: 'medio' },
+  'office.edit': { key: 'office.edit', label: 'Editar oficinas', description: 'Modificar nombre y código de una oficina. No concede acceso a sus rutas.', category: 'Rutas', risk: 'medio' },
+  'office.delete': { key: 'office.delete', label: 'Eliminar oficinas', description: 'Eliminar una oficina. Nunca elimina rutas: quedan Sin Oficina.', category: 'Rutas', risk: 'alto' },
+  'office.changeStatus': { key: 'office.changeStatus', label: 'Activar o inactivar oficinas', description: 'Una oficina inactiva bloquea las operaciones nuevas de sus rutas y conserva toda la consulta histórica.', category: 'Rutas', risk: 'alto' },
   'route.create': { key: 'route.create', label: 'Crear rutas', description: 'Crear nuevas rutas.', category: 'Rutas', risk: 'medio' },
   'route.edit': { key: 'route.edit', label: 'Editar rutas', description: 'Modificar la configuración de rutas autorizadas.', category: 'Rutas', risk: 'medio' },
   'route.block': { key: 'route.block', label: 'Bloquear o activar rutas', description: 'Activar o inactivar rutas.', category: 'Rutas', risk: 'medio' },

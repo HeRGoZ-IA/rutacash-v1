@@ -39,7 +39,7 @@ const TASA_OPTIONS = [
 ]
 
 export default function ActiveSalesPage() {
-  const { tenantId, officeId, currency } = useTenant()
+  const { tenantId, currency } = useTenant()
   const { user } = useAuth()
   const [sales, setSales] = useState<Sale[]>([])
   const [clients, setClients] = useState<Client[]>([])
@@ -194,7 +194,7 @@ export default function ActiveSalesPage() {
       const installments = generateInstallments({ saleId, valorTotal, numeroCuotas: form.numeroCuotas, valorCuota, frecuencia: form.frecuenciaPago, fechaInicio: form.fechaInicio, paymentDays: form.paymentDays })
       const route = routeMap.get(form.routeId)
       const sale: Sale = {
-        id: saleId, tenantId, officeId: route?.officeId ?? officeId,
+        id: saleId, tenantId,
         routeId: form.routeId, clientId: form.clientId,
         createdByUserId: user?.id ?? '', valorVenta: form.valorVenta,
         tasaInteres: form.tasaInteres, valorInteres, valorTotal, saldo: valorTotal,

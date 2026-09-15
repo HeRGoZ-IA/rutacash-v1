@@ -120,10 +120,13 @@ export function routeCanOperateCollection(params: { assignedCobradorIds: string[
 export function routeAssignmentWarnings(params: {
   hasAdmin: boolean
   hasCobrador: boolean
+  /** Oficina del borrador. `undefined` no se evalúa (pantallas que no la ofrecen). */
+  hasOffice?: boolean
   mode?: 'create' | 'edit'
 }): string[] {
   const verbo = params.mode === 'edit' ? 'quedará' : 'se creará'
   const out: string[] = []
+  if (params.hasOffice === false) out.push(`Esta ruta ${verbo} sin Oficina asignada. Podrás asignarla posteriormente.`)
   if (!params.hasAdmin) out.push(`Esta ruta ${verbo} sin Administrador asignado. Podrás asignarlo posteriormente.`)
   if (!params.hasCobrador) out.push(`Esta ruta ${verbo} sin Cobrador asignado. No tendrá operación de cobro hasta que se asigne uno.`)
   return out

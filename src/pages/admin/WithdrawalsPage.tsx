@@ -14,6 +14,7 @@ import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import type { Withdrawal, Route, User } from '@/models/types'
+import { assertRouteOperationalContext } from '@/services/officeService'
 
 // Revisión socio 25-jun — Retiros agrupados por ruta (presentación similar a Capital).
 // NO cambia la lógica contable de retiros: solo organiza la vista por ruta.
@@ -29,7 +30,7 @@ interface WithdrawalGroup {
 }
 
 export default function WithdrawalsPage() {
-  const { tenantId, officeId, currency } = useTenant()
+  const { tenantId, currency } = useTenant()
   const { user } = useAuth()
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
@@ -70,8 +71,11 @@ export default function WithdrawalsPage() {
     if (!canAccessRoute(user, form.routeId)) { toast.error('No tienes permiso sobre esa ruta.'); return }
     setSaving(true)
     try {
+      // Oficina inactiva → no se registran operaciones nuevas en sus rutas.
+      // (La consulta del histórico de esa ruta sigue disponible con normalidad.)
+      await assertRouteOperationalContext(form.routeId)
       const w: Withdrawal = {
-        id: generateId(), tenantId, officeId: routes.find(r => r.id === form.routeId)?.officeId ?? officeId,
+        id: generateId(), tenantId,
         routeId: form.routeId, valor: form.valor, descripcion: form.descripcion,
         fecha: form.fecha, userId: user?.id ?? '', createdAt: nowISO(),
       }

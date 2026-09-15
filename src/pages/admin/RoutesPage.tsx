@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, MapPin, Users, DollarSign, Edit, ToggleLeft, ToggleRight, Trash2, AlertTriangle } from 'lucide-react'
+import { Plus, MapPin, Users, DollarSign, Edit, ToggleLeft, ToggleRight, Trash2, AlertTriangle, Building2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -22,10 +22,12 @@ import { logAction } from '@/services/auditService'
 import { createRouteWithAdmins, updateRouteWithAssignments } from '@/services/routeService'
 import { cobradorRemovalBlock, validateCobradorInvariant, COBRADOR_REMOVAL_MESSAGE, routeAssignmentWarnings, routeCanOperateCollection, ROUTE_NO_COBRADOR_LABEL, ROUTE_NO_COBRADOR_OPERATION_MESSAGE } from '@/lib/cobradorRules'
 import { ASSIGNMENT_ROLE_ORDER } from '@/lib/routeAssignments'
+import { NO_OFFICE_LABEL, filterRoutesByOffice, ALL_OFFICES } from '@/lib/officeGrouping'
+import { OfficeSelector } from '@/components/ui/OfficeSelector'
 import { filterAccessibleRoutes, assignableRoles, canManageUser, ROLE_LABELS } from '@/lib/permissions'
 import { getAssignedRouteIds } from '@/lib/roles'
 import { useNavigate } from 'react-router-dom'
-import type { Route, User, RouteFinancialSummary } from '@/models/types'
+import type { Office, Route, User, RouteFinancialSummary } from '@/models/types'
 
 export default function RoutesPage() {
   const { user, refreshUser } = useAuth()
@@ -33,6 +35,11 @@ export default function RoutesPage() {
   const navigate = useNavigate()
   const [routes, setRoutes] = useState<Route[]>([])
   const [cobradores, setCobradores] = useState<User[]>([])
+  // Catálogo de Oficinas de la empresa (para el selector y las etiquetas). NO
+  // decide qué rutas se ven: eso lo sigue haciendo `filterAccessibleRoutes`.
+  const [offices, setOffices] = useState<Office[]>([])
+  // Filtro de listado por Oficina. Solo ESTRECHA lo que ya es accesible.
+  const [officeFilter, setOfficeFilter] = useState(ALL_OFFICES)
   const [allUsers, setAllUsers] = useState<User[]>([])
   const [summaryByRoute, setSummaryByRoute] = useState<Record<string, RouteFinancialSummary>>({})
   const [loading, setLoading] = useState(true)
@@ -48,7 +55,7 @@ export default function RoutesPage() {
   const [desde, setDesde] = useState('')
   const [hasta, setHasta] = useState('')
   const [form, setForm] = useState({
-    nombre: '', ciudad: '', cobradorId: '', adminIds: [] as string[],
+    nombre: '', ciudad: '', cobradorId: '', officeId: '', adminIds: [] as string[],
     // BORRADOR de asignaciones de usuarios (edición): NO persiste hasta "Actualizar".
     assignedUserIds: [] as string[],
     tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0,
@@ -89,6 +96,7 @@ export default function RoutesPage() {
     // RESTRICCIÓN POR RUTAS: el Administrador solo ve sus rutas autorizadas.
     const rts = filterAccessibleRoutes(user, all)
     setRoutes(rts)
+    setOffices(await db.offices.where('tenantId').equals(tenantId).toArray())
     const us = await db.users.where('tenantId').equals(tenantId).toArray()
     setAllUsers(us)
     setCobradores(us.filter(u => u.rol === 'cobrador'))
@@ -104,7 +112,10 @@ export default function RoutesPage() {
     setEditing(null)
     // El Administrador creador queda preseleccionado (y bloqueado): se autoasigna.
     const preselect = user?.rol === 'admin' && user?.id ? [user.id] : []
-    const init = { nombre: '', ciudad: '', cobradorId: '', adminIds: preselect, assignedUserIds: [], tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0 }
+    // Si el listado está filtrado por una Oficina concreta, se propone esa (sigue
+    // siendo opcional: puede dejarse en "Sin Oficina").
+    const officePorDefecto = officeFilter !== ALL_OFFICES && offices.some(o => o.id === officeFilter) ? officeFilter : ''
+    const init = { nombre: '', ciudad: '', cobradorId: '', officeId: officePorDefecto, adminIds: preselect, assignedUserIds: [], tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0 }
     setForm(init)
     setOriginal({ ...init })   // snapshot para dirty-check
     setModalOpen(true)
@@ -119,7 +130,7 @@ export default function RoutesPage() {
     const assignedUserIds = allUsers.filter(u => isAssignable(u) && getAssignedRouteIds(u).includes(route.id)).map(u => u.id)
     const init = {
       nombre: route.nombre, ciudad: route.ciudad ?? '',
-      cobradorId: route.cobradorId ?? '', adminIds: [] as string[], assignedUserIds,
+      cobradorId: route.cobradorId ?? '', officeId: route.officeId ?? '', adminIds: [] as string[], assignedUserIds,
       tasaInteres: route.tasaInteres, tasaLibre: route.tasaLibre,
       montoMaximoPrestamo: route.montoMaximoPrestamo, capitalInicial: route.capitalInicial,
     }
@@ -185,6 +196,7 @@ export default function RoutesPage() {
   // ADVERTENCIAS, NO BLOQUEOS: la ruta se crea/guarda igual sin responsables. Solo se
   // informa qué implica (sin Administrador nadie aprueba; sin Cobrador no hay cobro).
   const assignmentWarnings = routeAssignmentWarnings({
+    hasOffice: !!form.officeId,
     hasAdmin: editing
       ? form.assignedUserIds.some(id => allUsers.find(u => u.id === id)?.rol === 'admin')
       : lockAdminToSelf || form.adminIds.length > 0,
@@ -229,6 +241,7 @@ export default function RoutesPage() {
           routeId: editing.id, tenantId, nombre: form.nombre, ciudad: form.ciudad,
           tasaInteres: form.tasaInteres, tasaLibre: form.tasaLibre, montoMaximoPrestamo: form.montoMaximoPrestamo,
           cobradorId: form.cobradorId || undefined,
+          officeId: form.officeId || undefined,
           assignedUserIds: form.assignedUserIds,
           assignableUserIds: assignableToRoutes.map(u => u.id),
         }, user)
@@ -241,6 +254,7 @@ export default function RoutesPage() {
           tasaInteres: form.tasaInteres, tasaLibre: form.tasaLibre,
           montoMaximoPrestamo: form.montoMaximoPrestamo, capitalInicial: form.capitalInicial,
           codigo: nextRouteCode(routes), adminIds: form.adminIds, cobradorId: form.cobradorId || undefined,
+          officeId: form.officeId || undefined,
         }, user)
         if (form.adminIds.includes(user.id)) await refreshUser()
         toast.success('Ruta creada')
@@ -299,10 +313,15 @@ export default function RoutesPage() {
 
   // Filtro por fecha de creación de la ruta. No afecta los cálculos financieros
   // (Base actual / Cartera Activa son saldos a la fecha), solo qué rutas se listan.
-  const visibleRoutes = routes.filter(r => {
+  const visibleRoutes = filterRoutesByOffice(routes, officeFilter).filter(r => {
     const fecha = (r.createdAt ?? '').slice(0, 10)
     return (!desde || fecha >= desde) && (!hasta || fecha <= hasta)
   })
+  /** Nombre de la Oficina de una ruta (o "Sin Oficina"). Nunca lanza. */
+  const officeNameOf = (route: Route) =>
+    route.officeId ? (offices.find(o => o.id === route.officeId)?.nombre ?? route.officeId) : NO_OFFICE_LABEL
+  const officeInactivaDe = (route: Route) =>
+    !!route.officeId && offices.find(o => o.id === route.officeId)?.status === 'inactiva'
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -328,9 +347,18 @@ export default function RoutesPage() {
         </div>
       )}
 
-      {/* Filtro por fecha de creación (compacto) */}
-      <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta}
-        onClear={() => { setDesde(''); setHasta('') }} />
+      {/* Filtros: Oficina (agrupación) + fecha de creación. El de Oficina SOLO
+          estrecha las rutas que el usuario ya tiene autorizadas. */}
+      <div className="flex flex-wrap items-end gap-3">
+        <OfficeSelector
+          offices={offices}
+          value={officeFilter}
+          onChange={setOfficeFilter}
+          includeUnassigned={routes.some(r => !r.officeId)}
+        />
+        <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta}
+          onClear={() => { setDesde(''); setHasta('') }} />
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
@@ -351,12 +379,20 @@ export default function RoutesPage() {
                     <h3 className="font-semibold text-gray-900 text-sm">{route.nombre}</h3>
                   </div>
                   <p className="text-xs text-gray-400 ml-6">{route.codigo}{route.ciudad ? ` · ${route.ciudad}` : ''}</p>
+                  <p className={`text-xs ml-6 mt-0.5 font-medium ${route.officeId ? 'text-gray-500' : 'text-gray-400'}`}>
+                    <Building2 className="w-3 h-3 inline-block mr-1 -mt-0.5" />{officeNameOf(route)}
+                  </p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
                   <Badge variant={route.status === 'activa' ? 'success' : 'gray'}>
                     {route.status === 'activa' ? 'Activa' : 'Inactiva'}
                   </Badge>
                   {/* Ruta válida pero PENDIENTE DE ASIGNACIÓN: existe, no opera cobros. */}
+                  {officeInactivaDe(route) && (
+                    <span title="Esta ruta pertenece a una Oficina inactiva. No se pueden registrar nuevas operaciones; la consulta histórica sigue disponible.">
+                      <Badge variant="danger">Oficina inactiva</Badge>
+                    </span>
+                  )}
                   {!routeHasCobrador(route) && (
                     <span title={ROUTE_NO_COBRADOR_OPERATION_MESSAGE}>
                       <Badge variant="warning">{ROUTE_NO_COBRADOR_LABEL}</Badge>
@@ -432,6 +468,25 @@ export default function RoutesPage() {
             <Input label="Ciudad" value={form.ciudad} onChange={e => setForm(f => ({ ...f, ciudad: e.target.value }))} placeholder="Ej: Barranquilla" />
           </div>
           {editing && <p className="text-xs text-gray-400">Código de ruta: <span className="font-medium text-gray-600">{editing.codigo}</span></p>}
+
+          {/* OFICINA: OPCIONAL, tanto al crear como al editar. Cambiarla aquí MUEVE la
+              ruta de Oficina: una sola escritura sobre la ruta, sin tocar clientes,
+              ventas ni pagos (todos derivan la Oficina por su ruta). */}
+          <div>
+            <Select
+              label="Oficina"
+              value={form.officeId}
+              onChange={e => setForm(f => ({ ...f, officeId: e.target.value }))}
+              options={offices.map(o => ({
+                value: o.id,
+                label: o.status === 'inactiva' ? `${o.nombre} (inactiva)` : (o.codigo ? `${o.nombre} · ${o.codigo}` : o.nombre),
+              }))}
+              placeholder={`${NO_OFFICE_LABEL} (opcional)`}
+              hint={offices.length === 0
+                ? 'Aún no hay Oficinas. La ruta se creará sin Oficina; podrás asignarle una más adelante.'
+                : (editing ? 'Cambiar la Oficina solo reagrupa la ruta: no altera clientes, ventas ni pagos.' : undefined)}
+            />
+          </div>
 
           {/* Administrador responsable: OPCIONAL al crear. El Super Admin puede elegir
               uno, varios o ninguno; el Administrador queda SIEMPRE autoasignado (si no,

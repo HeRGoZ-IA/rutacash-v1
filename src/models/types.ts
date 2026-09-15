@@ -69,6 +69,11 @@ export type AuditAction =
   // --- Modelo de roles y permisos (nuevas acciones auditables) ---
   | 'CREATE_TENANT'
   | 'SUSPEND_TENANT'
+  // --- Oficinas (Empresa → Oficina → Ruta) ---
+  | 'CREATE_OFFICE'
+  | 'UPDATE_OFFICE'
+  | 'DELETE_OFFICE'
+  | 'BLOCK_OFFICE'
   | 'CREATE_ROUTE'
   | 'UPDATE_ROUTE'
   | 'BLOCK_ROUTE'
@@ -116,10 +121,51 @@ export interface Tenant {
 }
 
 
+/**
+ * OFICINA — agrupación de rutas dentro de una empresa.
+ *
+ * MODELO: Empresa → Oficina → Ruta. La Oficina ORGANIZA; la Ruta sigue siendo la
+ * unidad de scoping. Consecuencias que el código debe respetar siempre:
+ *
+ *  · Los USUARIOS son generales de la empresa: NO pertenecen a una Oficina y no
+ *    existe `User.officeId`. Su acceso nace de `authorizedRouteIds`.
+ *  · Tener acceso a UNA ruta de una Oficina NO concede las demás rutas de esa
+ *    Oficina. Las Oficinas visibles se DERIVAN de las rutas accesibles, nunca al revés.
+ *  · Una Oficina puede existir sin rutas; una ruta puede existir sin Oficina
+ *    ("Sin Oficina", estado válido y permanente).
+ *  · Ninguna entidad operativa o financiera guarda `officeId`: se deriva por
+ *    `routeId → Route.officeId`, para que mover una ruta de Oficina no deje copias
+ *    obsoletas en el histórico.
+ */
+export interface Office {
+  id: string
+  tenantId: string
+  /** Obligatorio. Único dentro de la empresa (comparación sin distinguir mayúsculas). */
+  nombre: string
+  /** Opcional. Si se indica, único dentro de la empresa (sin distinguir mayúsculas). */
+  codigo?: string
+  /**
+   * `inactiva` NO borra nada ni desasigna usuarios: bloquea las operaciones NUEVAS
+   * de sus rutas y mantiene intacta toda la consulta histórica.
+   */
+  status: 'activa' | 'inactiva'
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Route {
   id: string
   tenantId: string
-  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
+  /**
+   * OFICINA a la que pertenece la ruta. OPCIONAL: `undefined` = "Sin Oficina",
+   * un estado VÁLIDO y permanente (las rutas anteriores a las Oficinas quedan así,
+   * y crear una ruta nunca exige elegir Oficina).
+   *
+   * Es el ÚNICO lugar del modelo donde vive la Oficina: clientes, ventas, pagos,
+   * gastos, capital, retiros, transferencias y liquidaciones la DERIVAN por
+   * `routeId → Route.officeId`. Nunca se copia a esas entidades: una ruta puede
+   * cambiar de Oficina y la copia quedaría obsoleta para siempre.
+   */
   officeId?: string
   nombre: string
   codigo: string
@@ -140,7 +186,9 @@ export interface Route {
 export interface User {
   id: string
   tenantId: string
-  officeId?: string
+  // Sin `officeId`: los usuarios son GENERALES DE LA EMPRESA. No pertenecen a una
+  // Oficina y no se duplican por Oficina. Su acceso nace exclusivamente de
+  // `authorizedRouteIds`; las Oficinas que ve se DERIVAN de esas rutas.
   routeId?: string
   nombre: string
   email: string
@@ -191,8 +239,6 @@ export interface User {
 export interface Client {
   id: string
   tenantId: string
-  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
-  officeId?: string
   routeId: string
   nombre: string
   documento: string
@@ -212,8 +258,6 @@ export interface Client {
 export interface Sale {
   id: string
   tenantId: string
-  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
-  officeId?: string
   routeId: string
   clientId: string
   createdByUserId: string
@@ -457,8 +501,6 @@ export interface ExpenseCategory {
 export interface Expense {
   id: string
   tenantId: string
-  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
-  officeId?: string
   routeId: string
   categoryId: string
   valor: number
@@ -482,8 +524,6 @@ export interface Expense {
 export interface CapitalMovement {
   id: string
   tenantId: string
-  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
-  officeId?: string
   routeId: string
   tipo: 'ingresoCapital' | 'ajusteCapital'
   valor: number
@@ -502,8 +542,6 @@ export type TransferEntityType = 'route' | 'partner'
 export interface Transfer {
   id: string
   tenantId: string
-  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
-  officeId?: string
   /**
    * ID de la ruta origen cuando el origen es una RUTA. Se mantiene por
    * compatibilidad y porque el motor de caja indexa por este campo.
@@ -532,8 +570,6 @@ export interface Transfer {
 export interface Withdrawal {
   id: string
   tenantId: string
-  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
-  officeId?: string
   routeId: string
   valor: number
   descripcion?: string
@@ -593,8 +629,6 @@ export interface CashboxMovement {
 export interface WeeklySettlement {
   id: string
   tenantId: string
-  /** @deprecated Legacy: "Oficinas" se eliminó; el contexto es la ruta (routeId)/empresa (tenantId). */
-  officeId?: string
   routeId: string
   semanaInicio: string
   semanaFin: string

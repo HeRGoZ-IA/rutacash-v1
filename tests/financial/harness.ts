@@ -52,6 +52,13 @@ export class FakeTable<T extends Row> {
     return 1
   }
 
+  /** Dexie: Table.delete — elimina por clave; no falla si no existe. */
+  async delete(id: string): Promise<void> {
+    this.db.note(`${this.name}.delete`)
+    this.db.maybeFail(`${this.name}.delete`)
+    this.rows.delete(String(id))
+  }
+
   async get(id: string): Promise<T | undefined> {
     const r = this.rows.get(String(id))
     return r ? structuredClone(r) : undefined
@@ -111,6 +118,9 @@ export class MemoryDb {
   routes = new FakeTable<any>(this, 'routes')
   // Arranque de instalación limpia y autenticación (tests/bootstrap.test.ts).
   tenants = new FakeTable<any>(this, 'tenants')
+  // Oficinas (Empresa → Oficina → Ruta). Debe estar en TABLES para que el
+  // zero-state siga siendo exhaustivo: una tabla ausente aquí deja de verificarse.
+  offices = new FakeTable<any>(this, 'offices')
   users = new FakeTable<any>(this, 'users')
   expenseCategories = new FakeTable<any>(this, 'expenseCategories')
   expenses = new FakeTable<any>(this, 'expenses')
@@ -122,7 +132,7 @@ export class MemoryDb {
 
   /** Nombres de todas las tablas, para conteos exhaustivos en las pruebas. */
   static readonly TABLES = [
-    'users', 'tenants', 'routes', 'clients', 'sales', 'installments',
+    'users', 'tenants', 'offices', 'routes', 'clients', 'sales', 'installments',
     'payments', 'expenses', 'expenseCategories', 'noPaymentVisits',
     'capitalMovements', 'transfers', 'withdrawals',
   ] as const

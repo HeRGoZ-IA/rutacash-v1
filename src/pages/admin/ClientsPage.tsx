@@ -77,7 +77,7 @@ export default function ClientsPage() {
   const [form, setForm] = useState({
     nombre: '', documento: '', telefonoPrincipal: '', telefonoSecundario: '',
     direccionPrincipal: '', direccionSecundaria: '', negocio: '',
-    routeId: '', officeId: '', notas: '',
+    routeId: '', notas: '',
     fotoDocumentoUrl: '' as string | undefined,
     fotoNegocioUrl: '' as string | undefined,
   })
@@ -143,7 +143,7 @@ export default function ClientsPage() {
   function openCreate() {
     setEditing(null)
     setDupClient(null)
-    const init = { nombre: '', documento: '', telefonoPrincipal: '', telefonoSecundario: '', direccionPrincipal: '', direccionSecundaria: '', negocio: '', routeId: routes[0]?.id ?? '', officeId: '', notas: '', fotoDocumentoUrl: undefined as string | undefined, fotoNegocioUrl: undefined as string | undefined }
+    const init = { nombre: '', documento: '', telefonoPrincipal: '', telefonoSecundario: '', direccionPrincipal: '', direccionSecundaria: '', negocio: '', routeId: routes[0]?.id ?? '', notas: '', fotoDocumentoUrl: undefined as string | undefined, fotoNegocioUrl: undefined as string | undefined }
     setForm(init); setOriginal({ ...init })
     setAddSale(false)
     setSaleForm({ ...EMPTY_SALE_FORM, fechaInicio: today() })
@@ -158,7 +158,7 @@ export default function ClientsPage() {
       nombre: client.nombre, documento: client.documento,
       telefonoPrincipal: client.telefonoPrincipal, telefonoSecundario: client.telefonoSecundario ?? '',
       direccionPrincipal: client.direccionPrincipal, direccionSecundaria: client.direccionSecundaria ?? '',
-      negocio: client.negocio ?? '', routeId: client.routeId, officeId: client.officeId ?? '', notas: client.notas ?? '',
+      negocio: client.negocio ?? '', routeId: client.routeId, notas: client.notas ?? '',
       fotoDocumentoUrl: client.fotoDocumentoUrl, fotoNegocioUrl: client.fotoNegocioUrl,
     }
     setForm(init); setOriginal({ ...init })
@@ -234,7 +234,7 @@ export default function ClientsPage() {
         const fechaFinalEstimada = estimateFinalDate({ fechaInicio: saleForm.fechaInicio, numeroCuotas: saleForm.numeroCuotas, frecuencia: saleForm.frecuenciaPago, paymentDays: saleForm.paymentDays })
         const installments = generateInstallments({ saleId, valorTotal, numeroCuotas: saleForm.numeroCuotas, valorCuota, frecuencia: saleForm.frecuenciaPago, fechaInicio: saleForm.fechaInicio, paymentDays: saleForm.paymentDays })
         const sale: Sale = {
-          id: saleId, tenantId, officeId: route?.officeId ?? form.officeId,
+          id: saleId, tenantId,
           routeId: form.routeId, clientId: client.id, createdByUserId: user?.id ?? '',
           valorVenta: saleForm.valorVenta, tasaInteres: saleForm.tasaInteres, valorInteres, valorTotal,
           saldo: valorTotal, numeroCuotas: saleForm.numeroCuotas, valorCuota,

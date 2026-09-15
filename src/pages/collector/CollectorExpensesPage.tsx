@@ -9,6 +9,7 @@ import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatCurrencyInput, parseCurrencyInput, getCurrencySymbol, formatDate, today, nowISO } from '@/lib/formatters'
 import type { Expense, ExpenseCategory } from '@/models/types'
+import { assertRouteOperationalContext } from '@/services/officeService'
 
 export default function CollectorExpensesPage() {
   const { user } = useAuth()
@@ -40,9 +41,12 @@ export default function CollectorExpensesPage() {
     if (!user || !routeId) return
     setSaving(true)
     try {
+      // Oficina inactiva → no se registran operaciones nuevas en sus rutas.
+      // (La consulta del histórico de esa ruta sigue disponible con normalidad.)
+      await assertRouteOperationalContext(routeId)
       const route = await db.routes.get(routeId)
       const expense: Expense = {
-        id: generateId(), tenantId: user.tenantId, officeId: route?.officeId ?? '',
+        id: generateId(), tenantId: user.tenantId,
         routeId, categoryId: form.categoryId, valor: form.valor,
         descripcion: form.descripcion || undefined, receiptPhotoDataUrl: form.receiptPhotoDataUrl,
         fecha: today(),

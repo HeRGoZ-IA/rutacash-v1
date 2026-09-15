@@ -14,11 +14,10 @@ import {
 import type {
   Sale, Installment, SaleRequest, PaymentFrequency, DisbursementStatus, User,
 } from '@/models/types'
+import { assertRouteOperationalContext } from '@/services/officeService'
 
 export interface SaleInputs {
   tenantId: string
-  /** Legacy opcional (oficinas eliminadas). */
-  officeId?: string
   routeId: string
   clientId: string
   createdByUserId: string
@@ -51,7 +50,7 @@ export function buildSaleWithInstallments(
     frecuencia: input.frecuenciaPago, fechaInicio: input.fechaInicio, paymentDays: input.paymentDays,
   })
   const sale: Sale = {
-    id: saleId, tenantId: input.tenantId, officeId: input.officeId, routeId: input.routeId,
+    id: saleId, tenantId: input.tenantId, routeId: input.routeId,
     clientId: input.clientId, createdByUserId: input.createdByUserId,
     valorVenta: input.valorVenta, tasaInteres: input.tasaInteres, valorInteres, valorTotal,
     saldo: valorTotal, numeroCuotas: input.numeroCuotas, valorCuota,
@@ -71,6 +70,8 @@ export function buildSaleWithInstallments(
  * `actor` es opcional únicamente para compatibilidad con seeds/tests internos.
  */
 export async function createDirectSale(input: SaleInputs, actor?: User): Promise<Sale> {
+  // Oficina inactiva → no se admiten ventas nuevas en sus rutas (la consulta sigue intacta).
+  await assertRouteOperationalContext(input.routeId)
   if (actor && !can(actor, 'sale.createDirect', { routeId: input.routeId, tenantId: input.tenantId })) {
     throw new Error('No autorizado: este perfil no puede crear ventas directas. La venta debe enviarse como solicitud.')
   }
@@ -105,6 +106,7 @@ export function buildSaleRequest(input: SaleInputs): SaleRequest {
  * tenga `sale.createRequest` sobre la ruta (fail-closed) cuando se pasa `actor`.
  */
 export async function createSaleRequest(input: SaleInputs, actor?: User): Promise<SaleRequest> {
+  await assertRouteOperationalContext(input.routeId)
   if (actor) assertCan(actor, 'sale.createRequest', { routeId: input.routeId, tenantId: input.tenantId })
   const request = buildSaleRequest(input)
   await db.saleRequests.add(request)
@@ -131,6 +133,7 @@ export interface ApprovalOverrides {
  * (evidencia antes/después). El importe NO se modifica en la autorización.
  */
 export async function approveSaleRequest(request: SaleRequest, actor: User, overrides?: ApprovalOverrides): Promise<Sale> {
+  await assertRouteOperationalContext(request.routeId)
   // Guard de datos: solo quien puede APROBAR autorizaciones en ESA ruta.
   assertCan(actor, 'authorization.approve', { routeId: request.routeId, tenantId: request.tenantId })
   if (overrides && (overrides.interestRate !== undefined || overrides.frequency !== undefined || overrides.paymentDays !== undefined)) {
@@ -144,7 +147,7 @@ export async function approveSaleRequest(request: SaleRequest, actor: User, over
   const finalPaymentDays = overrides?.paymentDays ?? request.paymentDays ?? []
 
   const input: SaleInputs = {
-    tenantId: request.tenantId, officeId: route?.officeId ?? '', routeId: request.routeId,
+    tenantId: request.tenantId, routeId: request.routeId,
     clientId: request.clientId, createdByUserId: request.collectorId,
     valorVenta: request.amount, tasaInteres: finalInterest, numeroCuotas: request.installmentsCount,
     frecuenciaPago: finalFrequency, fechaInicio: request.startDate, paymentDays: finalPaymentDays,
@@ -224,6 +227,8 @@ export async function confirmDisbursement(saleId: string, actor?: User): Promise
   const sale = await db.sales.get(saleId)
   if (!sale) throw new Error('Venta no encontrada')
   if (actor) assertCan(actor, 'sale.confirmDisbursement', { routeId: sale.routeId, tenantId: sale.tenantId })
+  // Oficina inactiva → no se entregan desembolsos nuevos en sus rutas.
+  await assertRouteOperationalContext(sale.routeId)
   const fechaDesembolso = today()
   await db.transaction('rw', [db.sales, db.saleRequests], async () => {
     await db.sales.update(saleId, {

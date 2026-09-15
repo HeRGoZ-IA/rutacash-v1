@@ -3,6 +3,9 @@ import { CalendarRange, Download, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { LoadingState } from '@/components/ui/EmptyState'
 import { RouteSelector, routeFileTag } from '@/components/ui/RouteSelector'
+import { OfficeSelector } from '@/components/ui/OfficeSelector'
+import { useAccessibleOffices } from '@/hooks/useAccessibleOffices'
+import { ALL_OFFICES, filterRoutesByOffice } from '@/lib/officeGrouping'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
@@ -25,6 +28,10 @@ export default function WeeklySettlementPage() {
   const { user } = useAuth()
   const [routes, setRoutes] = useState<Route[]>([])
   const [routeId, setRouteId] = useState('')
+  // Oficinas derivadas de las rutas accesibles. Filtro PREVIO: la liquidación sigue
+  // siendo de UNA ruta; no existe liquidación consolidada por Oficina.
+  const { offices, hasUnassigned } = useAccessibleOffices()
+  const [officeId, setOfficeId] = useState(ALL_OFFICES)
   const [semanaInicio, setSemanaInicio] = useState(getWeekStart())
   const [semanaFin, setSemanaFin] = useState(getWeekEnd())
   const [settlement, setSettlement] = useState<WeeklySettlement | null>(null)
@@ -33,6 +40,18 @@ export default function WeeklySettlementPage() {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => { loadMeta() }, [tenantId, user])
+
+  // Rutas ofrecidas: las accesibles, recortadas por la Oficina elegida.
+  const routesInOffice = filterRoutesByOffice(routes, officeId)
+
+  /**
+   * Al cambiar de Oficina, si la ruta seleccionada ya no pertenece al filtro se
+   * LIMPIA: dejarla puesta mostraría "Generar" habilitado sobre una ruta invisible.
+   */
+  function changeOffice(next: string) {
+    setOfficeId(next)
+    if (routeId && !filterRoutesByOffice(routes, next).some(r => r.id === routeId)) setRouteId('')
+  }
 
   async function loadMeta() {
     // RESTRICCIÓN POR RUTAS: el selector solo ofrece rutas autorizadas.
@@ -102,7 +121,9 @@ export default function WeeklySettlementPage() {
 
       <div className="flex flex-wrap gap-3 items-end">
         {/* Ruta OBLIGATORIA: sin "Todas las rutas". */}
-        <RouteSelector routes={routes} value={routeId} onChange={setRouteId} className="w-64" />
+        <OfficeSelector offices={offices} value={officeId} onChange={changeOffice}
+          includeUnassigned={hasUnassigned} className="w-56" />
+        <RouteSelector routes={routesInOffice} value={routeId} onChange={setRouteId} className="w-64" />
         <div>
           <label className="block text-xs text-gray-500 mb-1.5">Inicio semana</label>
           <input type="date" value={semanaInicio} onChange={e => setSemanaInicio(e.target.value)}

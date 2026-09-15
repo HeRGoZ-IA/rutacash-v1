@@ -118,7 +118,7 @@ export default function CollectorNewSalePage() {
     const client = clients.find(c => c.id === form.clientId)
     if (!client || !user) return null
     return {
-      tenantId: user.tenantId, officeId: client.officeId, routeId: client.routeId,
+      tenantId: user.tenantId, routeId: client.routeId,
       clientId: client.id, createdByUserId: user.id,
       valorVenta: form.valorVenta, tasaInteres: form.tasaInteres, numeroCuotas: form.numeroCuotas,
       frecuenciaPago: form.frecuenciaPago, fechaInicio: form.fechaInicio, paymentDays: form.paymentDays,

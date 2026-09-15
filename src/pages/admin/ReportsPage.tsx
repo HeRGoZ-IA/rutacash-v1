@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { BarChart3, Download, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Input'
@@ -9,6 +9,9 @@ import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { useAccessibleRoutes } from '@/hooks/useAccessibleRoutes'
+import { useAccessibleOffices } from '@/hooks/useAccessibleOffices'
+import { OfficeSelector, officeFileTag } from '@/components/ui/OfficeSelector'
+import { ALL_OFFICES, NO_OFFICE, filterRoutesByOffice, narrowRouteIdsByOffice, officeNameByRouteId, officeCoverage, officeScopeLabel } from '@/lib/officeGrouping'
 import { getAccessibleRouteIdSet } from '@/lib/scope'
 import {
   buildReport, resolveReportRouteIds, REPORT_OPTIONS,
@@ -23,6 +26,10 @@ export default function ReportsPage() {
   // Rutas ACCESIBLES por el usuario (scoping central). El Administrador solo ve
   // sus rutas autorizadas; el Super Admin, todas las de la empresa seleccionada.
   const { routes } = useAccessibleRoutes()
+  // Oficinas DERIVADAS de las rutas accesibles: ver una Oficina no concede ninguna ruta.
+  const { offices, hasUnassigned } = useAccessibleOffices()
+  // '' = "Todas las oficinas" → todas las OFICINAS PERMITIDAS, nunca más.
+  const [officeId, setOfficeId] = useState<string>(ALL_OFFICES)
   const [reportType, setReportType] = useState<ReportType>('pagos')
   // '' = "Todas las rutas" → significa TODAS LAS PERMITIDAS, nunca todas las del sistema.
   const [routeId, setRouteId] = useState<string>(ALL_ROUTES)
@@ -32,6 +39,32 @@ export default function ReportsPage() {
   const [rows, setRows] = useState<ReportRow[]>([])
   /** Ruta con la que se generó el listado actual (para el CSV y el encabezado). */
   const [generatedRouteId, setGeneratedRouteId] = useState<string>(ALL_ROUTES)
+  /** Oficina con la que se generó el listado actual (para el CSV). */
+  const [generatedOfficeId, setGeneratedOfficeId] = useState<string>(ALL_OFFICES)
+
+  // Rutas ofrecidas en el selector: las accesibles, recortadas por la Oficina elegida.
+  const routesInOffice = filterRoutesByOffice(routes, officeId)
+  // Total de rutas que la Oficina tiene en la EMPRESA (no las accesibles): sirve
+  // únicamente para advertir de que el consolidado mostrado es parcial.
+  const [routeCountByOffice, setRouteCountByOffice] = useState<Record<string, number>>({})
+  const allRoutesOfOffice = (id: string) => routeCountByOffice[id] ?? 0
+
+  useEffect(() => {
+    if (!tenantId) return
+    db.routes.where('tenantId').equals(tenantId).toArray().then(all => {
+      const conteo: Record<string, number> = {}
+      for (const r of all) if (r.officeId) conteo[r.officeId] = (conteo[r.officeId] ?? 0) + 1
+      setRouteCountByOffice(conteo)
+    })
+  }, [tenantId])
+
+  /** Al cambiar de Oficina, una ruta que quede fuera del filtro se descarta. */
+  function changeOffice(next: string) {
+    setOfficeId(next)
+    if (routeId !== ALL_ROUTES && !filterRoutesByOffice(routes, next).some(r => r.id === routeId)) {
+      setRouteId(ALL_ROUTES)
+    }
+  }
 
   async function generateReport() {
     setLoading(true)
@@ -40,7 +73,12 @@ export default function ReportsPage() {
       const scope = await getAccessibleRouteIdSet(user, tenantId)
       // 2) RUTA SELECCIONADA: se INTERSECTA con el alcance. Una ruta fuera del
       //    alcance produce un conjunto vacío, nunca un acceso.
-      const routeIds = resolveReportRouteIds(scope, routeId)
+      // 2.a) OFICINA: estrecha el alcance ANTES de resolver la ruta. Nunca lo amplía:
+      //      se parte de `scope` (rutas autorizadas) y se filtra dentro de él.
+      const scopeEnOficina = narrowRouteIdsByOffice(scope, routes, officeId)
+      // 2.b) RUTA SELECCIONADA: se INTERSECTA con el alcance ya recortado. Una ruta
+      //      fuera del alcance produce un conjunto vacío, nunca un acceso.
+      const routeIds = resolveReportRouteIds(scopeEnOficina, routeId)
 
       if (routeId && routeIds.size === 0) {
         toast.error('No tienes acceso a la ruta seleccionada.')
@@ -66,6 +104,7 @@ export default function ReportsPage() {
 
       setRows(data)
       setGeneratedRouteId(routeId)
+      setGeneratedOfficeId(officeId)
       if (data.length === 0) toast.info('No hay datos para el período y la ruta seleccionados')
       else toast.success(`${data.length} registro(s) generados`)
     } catch { toast.error('Error al generar reporte') } finally { setLoading(false) }
@@ -76,13 +115,41 @@ export default function ReportsPage() {
     // El CSV se construye desde `rows`, que YA está filtrado por ruta y fechas:
     // no puede contener registros de una ruta distinta a la generada.
     const tag = routeFileTag(routes, generatedRouteId)
-    downloadCSV(rows, `reporte_${reportType}_${tag}_${fechaDesde}_${fechaHasta}.csv`)
+    const officeTag = generatedOfficeId === ALL_OFFICES ? '' : `${officeFileTag(offices, generatedOfficeId)}_`
+    downloadCSV(rowsConOficina, `reporte_${reportType}_${officeTag}${tag}_${fechaDesde}_${fechaHasta}.csv`)
     toast.success('CSV descargado')
   }
+
+  /**
+   * Columna "Oficina" añadida a cada fila. Se DERIVA de la ruta de la fila
+   * (`routeId → Route.officeId`): ninguna venta, pago o gasto guarda la Oficina, de
+   * modo que mover una ruta de Oficina reagrupa el reporte sin reescribir historia.
+   * Las filas sin `routeId` (agregados) se dejan intactas.
+   */
+  const officeByRoute = officeNameByRouteId(routes, offices)
+  const rowsConOficina = rows.map(r => {
+    const rid = typeof r.routeId === 'string' ? r.routeId : undefined
+    return rid ? { ...r, Oficina: officeByRoute.get(rid) ?? '' } : r
+  })
 
   const alcance = generatedRouteId
     ? routes.find(r => r.id === generatedRouteId)?.nombre ?? generatedRouteId
     : 'Todas tus rutas'
+
+  /**
+   * Rótulo honesto del alcance por Oficina. Si el usuario solo ve parte de las rutas
+   * de la Oficina elegida, el texto lo dice: un consolidado parcial NUNCA debe
+   * parecer el total de la Oficina.
+   */
+  const alcanceOficina = (() => {
+    if (generatedOfficeId === ALL_OFFICES) return null
+    if (generatedOfficeId === NO_OFFICE) return 'Rutas sin oficina'
+    const office = offices.find(o => o.id === generatedOfficeId)
+    if (!office) return null
+    const visibles = routes.filter(r => r.officeId === office.id).length
+    const totales = allRoutesOfOffice(office.id)
+    return officeScopeLabel(office.nombre, officeCoverage(visibles, totales))
+  })()
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -94,8 +161,11 @@ export default function ReportsPage() {
         <div className="flex flex-wrap gap-3 items-end">
           <Select label="Tipo de reporte" value={reportType} onChange={e => setReportType(e.target.value as ReportType)}
             options={REPORT_OPTIONS} className="w-56" />
-          {/* "Todas las rutas" = todas las AUTORIZADAS al usuario (nunca más). */}
-          <RouteSelector routes={routes} value={routeId} onChange={setRouteId} allowAll className="w-56" />
+          {/* OFICINA: filtro PREVIO. Solo estrecha las rutas ya autorizadas. */}
+          <OfficeSelector offices={offices} value={officeId} onChange={changeOffice}
+            includeUnassigned={hasUnassigned} className="w-56" />
+          {/* "Todas las rutas" = todas las AUTORIZADAS dentro del filtro de Oficina. */}
+          <RouteSelector routes={routesInOffice} value={routeId} onChange={setRouteId} allowAll className="w-56" />
           <div>
             <label className="block text-xs text-gray-500 mb-1.5">Desde</label>
             <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)}
@@ -120,7 +190,10 @@ export default function ReportsPage() {
           <LoadingState message="Generando reporte..." />
         ) : rows.length > 0 ? (
           <div className="overflow-x-auto">
-            <p className="text-xs text-gray-500 mb-2">{rows.length} registro(s) · Ruta: <span className="font-medium text-gray-700">{alcance}</span></p>
+            <p className="text-xs text-gray-500 mb-2">
+              {rows.length} registro(s) · Ruta: <span className="font-medium text-gray-700">{alcance}</span>
+              {alcanceOficina && <> · Oficina: <span className="font-medium text-gray-700">{alcanceOficina}</span></>}
+            </p>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">

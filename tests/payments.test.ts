@@ -32,6 +32,10 @@ import {
 import {
   createRouteWithAdmins, updateRouteWithAssignments, type RouteDatabase,
 } from '../src/services/routeService'
+import {
+  ALL_OFFICES, NO_OFFICE, NO_OFFICE_LABEL, filterRoutesByOffice, narrowRouteIdsByOffice,
+  groupRoutesByOffice, officeCoverage, officeScopeLabel, officeNameByRouteId,
+} from '../src/lib/officeGrouping'
 import { getCashboxSummary, type CashboxDatabase } from '../src/services/cashboxEngine'
 import {
   buildReport, resolveReportRouteIds, REPORT_OPTIONS,
@@ -44,6 +48,7 @@ import {
   buildClientCreditHistory, resolveSealedCompletionDate, CREDIT_STATUS_LABEL,
 } from '../src/lib/creditHistory'
 import { effectivePayments, lastEffectivePaymentDate } from '../src/lib/paymentState'
+import { filterAccessibleRoutes } from '../src/lib/permissions'
 import { getCollectorDailyCashSummary, hasCapitalForSale, type CollectorCashDatabase } from '../src/services/cashboxEngine'
 import { adminQuickPaymentFlow, operationalPaymentFlow } from './financial/flows'
 import {
@@ -2591,6 +2596,278 @@ await spec('PAY-COLL-REG-013', 'App Cobrador', 'el servicio declara TODAS las ta
   metric('fuera de alcance', fuera.length === 0 ? '(ninguna)' : fuera.join(', '))
   assert(alcance.has('users'), 'la tabla users debe declararse: se lee dentro de la transacción')
   assert(fuera.length === 0, `tablas usadas sin declarar en la transacción: ${fuera.join(', ')}`)
+})
+
+// ############################################################
+// GRUPO — OFICINAS EN LA CAPA FINANCIERA
+// ------------------------------------------------------------
+// Principio que estos casos protegen: la Oficina NUNCA se guarda en un movimiento
+// financiero. Se DERIVA por `routeId → Route.officeId`. Por eso mover una ruta de
+// Oficina reagrupa los informes sin reescribir un solo importe, y por eso el motor
+// de caja no cambió ni una línea.
+// ############################################################
+const OF_A = 'of-leticia'
+const OF_B = 'of-rio'
+
+/** Escenario con la venta en una ruta que pertenece a la Oficina indicada. */
+function escenarioConOficina(officeId?: string) {
+  const sc = buildScenario({ valorVenta: 100_000, numeroCuotas: 10 })
+  sc.db.offices._seed([
+    { id: OF_A, tenantId: TEST_IDS.TENANT_ID, nombre: 'Leticia', status: 'activa', createdAt: '', updatedAt: '' },
+    { id: OF_B, tenantId: TEST_IDS.TENANT_ID, nombre: 'Río', status: 'activa', createdAt: '', updatedAt: '' },
+  ])
+  sc.db.routes._seed([
+    { id: TEST_IDS.ROUTE_ID, tenantId: TEST_IDS.TENANT_ID, nombre: 'Centro', codigo: 'RT-001', officeId, status: 'activa' },
+  ])
+  sc.db.users._seed([{
+    id: USER_COBRADOR.id, tenantId: TEST_IDS.TENANT_ID, nombre: 'Cobrador', email: 'cob@t.com',
+    password: 'x', rol: 'cobrador', status: 'activo', authorizedRouteIds: [TEST_IDS.ROUTE_ID],
+    createdAt: '', updatedAt: '',
+  }])
+  return sc
+}
+
+await spec('OFFICE-STATUS-002F', 'Oficinas', 'una Oficina inactiva BLOQUEA el registro de pagos nuevos', async () => {
+  const sc = escenarioConOficina(OF_A)
+  const antes = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 5_000, actor: USER_COBRADOR, fecha: '2026-09-15' },
+    asDb(sc.db),
+  )
+  // Se inactiva la Oficina de la ruta de la venta.
+  await sc.db.offices.update(OF_A, { status: 'inactiva' })
+  const despues = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 5_000, actor: USER_COBRADOR, fecha: '2026-09-15' },
+    asDb(sc.db),
+  )
+  const st = await readFinancialState(sc.db)
+  metric('con Oficina activa', antes.ok ? `ACEPTADO ${antes.appliedAmount}` : antes.code)
+  metric('con Oficina inactiva', despues.ok ? 'ACEPTADO — ERROR' : `${despues.code}: ${despues.message}`)
+  metric('pagos registrados', st.totalRegistradoEnPayments)
+  assert(antes.ok, 'con la Oficina activa el pago debe registrarse')
+  assert(!despues.ok && despues.code === 'OFFICE_INACTIVE', 'con la Oficina inactiva el pago debe rechazarse')
+  assert(!despues.ok && despues.message.includes('Oficina inactiva'), 'el motivo debe ser comprensible')
+  assert(st.totalRegistradoEnPayments === 5_000, 'el pago bloqueado no debe dejar ninguna escritura')
+})
+
+await spec('OFFICE-STATUS-003F', 'Oficinas', 'una ruta SIN Oficina nunca se bloquea por esta regla', async () => {
+  const sc = escenarioConOficina(undefined)
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 5_000, actor: USER_COBRADOR, fecha: '2026-09-15' },
+    asDb(sc.db),
+  )
+  metric('resultado', res.ok ? `ACEPTADO ${res.appliedAmount}` : `${res.code}`)
+  assert(res.ok, 'una ruta sin Oficina no tiene Oficina que la pueda inactivar')
+})
+
+await spec('OFFICE-STATUS-005F', 'Oficinas', 'la Oficina inactiva NO impide consultar el histórico', async () => {
+  const sc = escenarioConOficina(OF_A)
+  await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 20_000, actor: USER_COBRADOR, fecha: DIA },
+    asDb(sc.db),
+  )
+  await sc.db.offices.update(OF_A, { status: 'inactiva' })
+
+  // Lectura: caja del cobrador y estado financiero siguen respondiendo.
+  const caja = await getCollectorDailyCashSummary(
+    { routeId: TEST_IDS.ROUTE_ID, collectorId: USER_COBRADOR.id, fecha: DIA },
+    sc.db as unknown as CollectorCashDatabase,
+  )
+  const st = await readFinancialState(sc.db)
+  metric('recaudado (histórico)', caja.recaudado)
+  metric('payments', st.totalRegistradoEnPayments)
+  metric('saldo', st.saleSaldo)
+  assert(caja.recaudado === 20_000, 'la caja histórica debe seguir consultándose con la Oficina inactiva')
+  assert(st.totalRegistradoEnPayments === 20_000, 'los pagos anteriores no se tocan')
+})
+
+await spec('OFFICE-CASH-001', 'Oficinas', 'la caja deriva la Oficina por la RUTA: ningún movimiento la guarda', async () => {
+  const sc = escenarioConOficina(OF_A)
+  await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 15_000, actor: USER_COBRADOR, fecha: DIA },
+    asDb(sc.db),
+  )
+  const pago = (await sc.db.payments.toArray())[0] as Record<string, unknown>
+  const venta = await sc.db.sales.get(TEST_IDS.SALE_ID) as unknown as Record<string, unknown>
+  metric('payment tiene officeId', 'officeId' in pago)
+  metric('sale tiene officeId', 'officeId' in venta)
+  metric('Oficina derivada de la ruta', (await sc.db.routes.get(TEST_IDS.ROUTE_ID) as { officeId?: string }).officeId)
+  assert(!('officeId' in pago), 'un pago NUNCA debe guardar la Oficina')
+  assert(!('officeId' in venta), 'una venta NUNCA debe guardar la Oficina')
+})
+
+await spec('OFFICE-CASH-002', 'Oficinas', 'el consolidado por Oficina es la suma de las rutas ACCESIBLES', async () => {
+  // Dos rutas en la misma Oficina; el usuario solo tiene autorizada una.
+  const sc = buildCashboxScenario([
+    { routeId: 'r-A', nombre: 'Centro', pagos: [{ fecha: DIA, valor: 60_000 }] },
+    { routeId: 'r-B', nombre: 'Norte', pagos: [{ fecha: DIA, valor: 40_000 }] },
+  ])
+  const rutas = [
+    { id: 'r-A', tenantId: 't-1', officeId: OF_A, nombre: 'Centro' },
+    { id: 'r-B', tenantId: 't-1', officeId: OF_A, nombre: 'Norte' },
+  ] as never[]
+  const usuario = mkUserRutas('admin', ['r-A'])
+
+  const accesibles = filterAccessibleRoutes(usuario, rutas)
+  const enOficina = filterRoutesByOffice(accesibles as unknown as { officeId?: string }[], OF_A)
+  const cobertura = officeCoverage(accesibles.length, rutas.length)
+
+  metric('rutas de la Oficina en la empresa', rutas.length)
+  metric('rutas accesibles en la Oficina', enOficina.length)
+  metric('rótulo', officeScopeLabel('Leticia', cobertura))
+  assert(enOficina.length === 1, 'el consolidado solo puede incluir rutas accesibles')
+  assert(cobertura.parcial, 'debe detectarse que la cobertura es parcial')
+  assert(officeScopeLabel('Leticia', cobertura).includes('1 de 2'),
+    'un consolidado parcial debe rotularse como parcial, no como el total de la Oficina')
+  void sc
+})
+
+await spec('OFFICE-CASH-003', 'Oficinas', 'mover una ruta de Oficina cambia la agrupación, no los movimientos', async () => {
+  const sc = escenarioConOficina(OF_A)
+  await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 25_000, actor: USER_COBRADOR, fecha: DIA },
+    asDb(sc.db),
+  )
+  const antes = JSON.stringify([
+    await sc.db.payments.toArray(), await sc.db.sales.toArray(), await sc.db.installments.toArray(),
+  ])
+  const cajaAntes = await getCollectorDailyCashSummary(
+    { routeId: TEST_IDS.ROUTE_ID, collectorId: USER_COBRADOR.id, fecha: DIA },
+    sc.db as unknown as CollectorCashDatabase,
+  )
+
+  // La ruta pasa de Leticia a Río.
+  await sc.db.routes.update(TEST_IDS.ROUTE_ID, { officeId: OF_B })
+
+  const despues = JSON.stringify([
+    await sc.db.payments.toArray(), await sc.db.sales.toArray(), await sc.db.installments.toArray(),
+  ])
+  const cajaDespues = await getCollectorDailyCashSummary(
+    { routeId: TEST_IDS.ROUTE_ID, collectorId: USER_COBRADOR.id, fecha: DIA },
+    sc.db as unknown as CollectorCashDatabase,
+  )
+  metric('movimientos idénticos', antes === despues)
+  metric('caja antes → después', `${cajaAntes.recaudado} → ${cajaDespues.recaudado}`)
+  metric('nueva Oficina', (await sc.db.routes.get(TEST_IDS.ROUTE_ID) as { officeId?: string }).officeId)
+  assert(antes === despues, 'mover la Oficina alteró movimientos financieros')
+  assert(cajaAntes.recaudado === cajaDespues.recaudado, 'la caja de la ruta no puede cambiar al reagrupar')
+})
+
+await spec('OFFICE-CASH-004', 'Oficinas', 'las rutas Sin Oficina entran en los totales, no se pierden', () => {
+  const rutas = [
+    { id: 'r-A', officeId: OF_A, nombre: 'Centro' },
+    { id: 'r-B', officeId: OF_B, nombre: 'Puerto' },
+    { id: 'r-X', officeId: undefined, nombre: 'Antigua' },
+  ]
+  const grupos = groupRoutesByOffice(rutas as never[], [
+    { id: OF_A, tenantId: 't-1', nombre: 'Leticia', status: 'activa', createdAt: '', updatedAt: '' },
+    { id: OF_B, tenantId: 't-1', nombre: 'Río', status: 'activa', createdAt: '', updatedAt: '' },
+  ])
+  const total = grupos.reduce((n, g) => n + g.routes.length, 0)
+  metric('grupos', grupos.map(g => `${g.label}(${g.routes.length})`).join(', '))
+  metric('rutas agrupadas', total)
+  assert(total === rutas.length, 'agrupar por Oficina no puede perder ninguna ruta')
+  assert(grupos.some(g => g.key === NO_OFFICE), 'debe existir el grupo "Sin Oficina"')
+})
+
+await spec('OFFICE-REPORT-001', 'Oficinas', 'un reporte de la Oficina A solo incluye rutas ACCESIBLES de A', () => {
+  const rutas = [
+    { id: 'r-A1', officeId: OF_A }, { id: 'r-A2', officeId: OF_A },
+    { id: 'r-B1', officeId: OF_B }, { id: 'r-X', officeId: undefined },
+  ] as never[]
+  // El usuario solo tiene A1, B1 y X: A2 no es suya aunque sea de la misma Oficina.
+  const alcance = new Set(['r-A1', 'r-B1', 'r-X'])
+  const enA = narrowRouteIdsByOffice(alcance, rutas, OF_A)
+  const ids = resolveReportRouteIds(enA, '')
+  metric('alcance del usuario', [...alcance].join(', '))
+  metric('rutas del reporte en A', [...ids].join(', '))
+  assert(ids.size === 1 && ids.has('r-A1'), 'el reporte incluyó una ruta de la Oficina que el usuario no tiene')
+  assert(!ids.has('r-A2'), 'filtrar por Oficina NO puede añadir rutas no autorizadas')
+})
+
+await spec('OFFICE-REPORT-002', 'Oficinas', '"Todas las rutas" dentro de una Oficina es la INTERSECCIÓN', () => {
+  const rutas = [
+    { id: 'r-A1', officeId: OF_A }, { id: 'r-A2', officeId: OF_A }, { id: 'r-B1', officeId: OF_B },
+  ] as never[]
+  const alcance = new Set(['r-A1', 'r-B1'])
+  const todasEnA = resolveReportRouteIds(narrowRouteIdsByOffice(alcance, rutas, OF_A), '')
+  const todasSinFiltro = resolveReportRouteIds(narrowRouteIdsByOffice(alcance, rutas, ALL_OFFICES), '')
+  metric('todas dentro de A', [...todasEnA].join(', '))
+  metric('todas sin filtro', [...todasSinFiltro].join(', '))
+  assert(todasEnA.size === 1 && todasEnA.has('r-A1'), '"todas" dentro de A debe ser A ∩ autorizadas')
+  assert(todasSinFiltro.size === 2, 'sin filtro de Oficina se mantienen todas las autorizadas')
+})
+
+await spec('OFFICE-REPORT-003', 'Oficinas', 'la Oficina del reporte se deriva de la RUTA, nunca del pago o la venta', () => {
+  const rutas = [
+    { id: 'r-A1', officeId: OF_A, nombre: 'Centro' },
+    { id: 'r-X', officeId: undefined, nombre: 'Antigua' },
+  ] as never[]
+  const oficinas = [{ id: OF_A, tenantId: 't-1', nombre: 'Leticia', status: 'activa' as const, createdAt: '', updatedAt: '' }]
+  const mapa = officeNameByRouteId(rutas, oficinas)
+  metric('r-A1', mapa.get('r-A1'))
+  metric('r-X', mapa.get('r-X'))
+  assert(mapa.get('r-A1') === 'Leticia' && mapa.get('r-X') === NO_OFFICE_LABEL, 'la derivación por ruta falló')
+
+  // Y la pantalla de reportes construye la columna así, no leyendo Sale/Payment.
+  const page = readSource('src/pages/admin/ReportsPage.tsx')
+  metric('usa officeNameByRouteId', page.includes('officeNameByRouteId(routes, offices)'))
+  assert(page.includes('officeNameByRouteId(routes, offices)'), 'la columna Oficina debe derivarse de las rutas')
+  assert(!/officeId:\s*(payment|sale|p)\./.test(page), 'no puede leerse la Oficina de un pago o una venta')
+})
+
+await spec('OFFICE-REPORT-004', 'Oficinas', 'el filtro "Sin Oficina" funciona y no arrastra rutas con Oficina', () => {
+  const rutas = [
+    { id: 'r-A1', officeId: OF_A }, { id: 'r-X1', officeId: undefined }, { id: 'r-X2', officeId: undefined },
+  ] as never[]
+  const alcance = new Set(['r-A1', 'r-X1', 'r-X2'])
+  const sinOficina = narrowRouteIdsByOffice(alcance, rutas, NO_OFFICE)
+  metric('rutas sin Oficina', [...sinOficina].join(', '))
+  assert(sinOficina.size === 2 && !sinOficina.has('r-A1'), 'el grupo "Sin Oficina" está mal resuelto')
+})
+
+await spec('OFFICE-REPORT-006', 'Oficinas', 'la pantalla resuelve el orden alcance → Oficina → Ruta', () => {
+  const page = readSource('src/pages/admin/ReportsPage.tsx')
+  const iAlcance = page.indexOf('getAccessibleRouteIdSet(user, tenantId)')
+  const iOficina = page.indexOf('narrowRouteIdsByOffice(scope, routes, officeId)')
+  const iRuta = page.indexOf('resolveReportRouteIds(scopeEnOficina, routeId)')
+  metric('orden', `alcance@${iAlcance} → oficina@${iOficina} → ruta@${iRuta}`)
+  assert(iAlcance > -1 && iOficina > iAlcance && iRuta > iOficina,
+    'el filtro de Oficina debe aplicarse SOBRE el alcance y ANTES de la ruta')
+  // Y el rótulo del consolidado parcial existe.
+  assert(page.includes('officeScopeLabel'), 'falta el rótulo honesto del consolidado parcial')
+})
+
+await spec('OFFICE-SETTLE-001', 'Oficinas', 'la liquidación sigue siendo de UNA ruta: no hay consolidado por Oficina', () => {
+  const page = readSource('src/pages/admin/WeeklySettlementPage.tsx')
+  const engine = readSource('src/services/weeklySettlementEngine.ts')
+  metric('la ruta sigue siendo obligatoria', page.includes("if (!routeId) { toast.error('Selecciona la ruta que deseas liquidar.'); return }"))
+  metric('el motor recibe officeId', /officeId/.test(engine))
+  assert(page.includes("if (!routeId)"), 'la ruta debe seguir siendo obligatoria')
+  assert(!/officeId/.test(engine), 'el motor de liquidación NO debe conocer las Oficinas')
+  assert(page.includes('generateWeeklySettlementForUser'), 'debe seguir usándose el mismo servicio por ruta')
+})
+
+await spec('OFFICE-SETTLE-002', 'Oficinas', 'cambiar de Oficina limpia la ruta que queda fuera del filtro', () => {
+  const page = readSource('src/pages/admin/WeeklySettlementPage.tsx')
+  metric('función changeOffice', page.includes('function changeOffice(next: string)'))
+  metric('limpia la ruta', page.includes("setRouteId('')"))
+  assert(page.includes('function changeOffice(next: string)'), 'falta el manejador de cambio de Oficina')
+  assert(/if \(routeId && !filterRoutesByOffice\(routes, next\)\.some\(r => r\.id === routeId\)\) setRouteId\(''\)/.test(page),
+    'al cambiar de Oficina debe descartarse una ruta que ya no pertenece al filtro')
+
+  // Comprobación funcional de la misma regla con datos.
+  const rutas = [{ id: 'r-A1', officeId: OF_A }, { id: 'r-B1', officeId: OF_B }] as never[]
+  const sigueValida = filterRoutesByOffice(rutas as unknown as { id: string; officeId?: string }[], OF_B).some(r => r.id === 'r-A1')
+  metric('la ruta de A sobrevive al filtro B', sigueValida)
+  assert(!sigueValida, 'una ruta de otra Oficina no puede seguir seleccionada')
+})
+
+await spec('OFFICE-SETTLE-003', 'Oficinas', 'se puede liquidar una ruta Sin Oficina', () => {
+  const rutas = [{ id: 'r-X', officeId: undefined }, { id: 'r-A1', officeId: OF_A }] as never[]
+  const enSinOficina = filterRoutesByOffice(rutas as unknown as { id: string; officeId?: string }[], NO_OFFICE)
+  metric('rutas liquidables sin Oficina', enSinOficina.map(r => r.id).join(', '))
+  assert(enSinOficina.length === 1 && enSinOficina[0].id === 'r-X',
+    'una ruta sin Oficina debe poder seleccionarse para liquidar')
 })
 
 // ############################################################

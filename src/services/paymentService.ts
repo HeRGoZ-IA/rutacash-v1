@@ -37,8 +37,9 @@ import {
   applyPaymentToInstallments, calculateSaleBalance,
   calculateCurrentInstallment, getLastPaidInstallmentNumber,
 } from '@/services/installmentEngine'
+import { isRouteOperationBlocked, OFFICE_MESSAGES } from '@/services/officeService'
 import type {
-  Installment, Payment, PaymentType, Sale, SaleStatus, SyncStatus, User,
+  Installment, Office, Payment, PaymentType, Route, Sale, SaleStatus, SyncStatus, User,
 } from '@/models/types'
 
 // ------------------------------------------------------------
@@ -67,6 +68,9 @@ export interface PaymentDatabase {
   users: {
     where(index: string): { equals(key: string): { toArray(): Promise<User[]> } }
   }
+  /** Solo LECTURA: ruta y Oficina de la venta, para la guarda de Oficina inactiva. */
+  routes: { get(key: string): Promise<Route | undefined> }
+  offices: { get(key: string): Promise<Office | undefined> }
   transaction<U>(mode: 'rw', tables: any, scope: () => PromiseLike<U>): Promise<U>
 }
 
@@ -83,6 +87,7 @@ export type PaymentRejectionCode =
   | 'NO_BALANCE'          // la venta ya no tiene saldo pendiente
   | 'COLLECTOR_REQUIRED'  // varios cobradores en la ruta: hay que indicar quién cobró
   | 'COLLECTOR_INVALID'   // el cobrador indicado no es cobrador activo de esa ruta
+  | 'OFFICE_INACTIVE'     // la Oficina de la ruta está inactiva: no admite operaciones nuevas
   | 'WRITE_FAILED'        // fallo de persistencia: se revirtió todo
 
 export interface RegisterPaymentInput {
@@ -180,6 +185,7 @@ const REJECTION_MESSAGES: Record<PaymentRejectionCode, string> = {
   NO_BALANCE: 'Esta venta ya no tiene saldo pendiente.',
   COLLECTOR_REQUIRED: COLLECTOR_ATTRIBUTION_MESSAGE.ambiguous,
   COLLECTOR_INVALID: COLLECTOR_ATTRIBUTION_MESSAGE.invalid,
+  OFFICE_INACTIVE: OFFICE_MESSAGES.inactiveOffice,
   WRITE_FAILED: 'Error al registrar el pago. No se guardó ningún cambio.',
 }
 
@@ -217,7 +223,7 @@ export async function registerPayment(
     // `NotFoundError: Table users not part of transaction`, que no es un rechazo de
     // negocio y abortaba TODO el pago (incidente 15/09/2026, App Cobrador).
     // `users` solo se lee; ninguna escritura la toca.
-    consolidated = await database.transaction('rw', [database.payments, database.installments, database.sales, database.users], async () => {
+    consolidated = await database.transaction('rw', [database.payments, database.installments, database.sales, database.users, database.routes, database.offices], async () => {
       // ---- 1. LECTURA FRESCA DENTRO DE LA TRANSACCIÓN -----------------------
       // Nada de lo que envía la UI se usa como fuente de verdad. El intervalo
       // lectura → cálculo → escritura queda dentro del mismo ámbito atómico.
@@ -227,6 +233,17 @@ export async function registerPayment(
       // ---- 2. AUTORIZACIÓN CONTRA LA RUTA REAL DE LA VENTA ------------------
       if (!can(input.actor, 'payment.register', { routeId: sale.routeId, tenantId: sale.tenantId })) {
         throw new PaymentRejection('NOT_AUTHORIZED', REJECTION_MESSAGES.NOT_AUTHORIZED)
+      }
+
+      // ---- 2.b OFICINA ACTIVA -----------------------------------------------
+      // Una Oficina inactiva bloquea las operaciones NUEVAS de sus rutas, pero no
+      // afecta a ninguna consulta. Una ruta SIN Oficina nunca se bloquea aquí.
+      const routeOfSale = await database.routes.get(sale.routeId)
+      if (routeOfSale?.officeId) {
+        const office = await database.offices.get(routeOfSale.officeId)
+        if (isRouteOperationBlocked(office)) {
+          throw new PaymentRejection('OFFICE_INACTIVE', REJECTION_MESSAGES.OFFICE_INACTIVE)
+        }
       }
 
       // ---- 3. REGLAS DE NEGOCIO (idénticas para todas las interfaces) -------

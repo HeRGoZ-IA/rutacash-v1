@@ -131,7 +131,7 @@ export default function CollectorNewClientPage() {
     try {
       const route = routes.find(r => r.id === form.routeId)
       const client: Client = {
-        id: generateId(), tenantId: user.tenantId, officeId: route?.officeId ?? user.officeId ?? '',
+        id: generateId(), tenantId: user.tenantId,
         routeId: form.routeId, nombre: form.nombre.trim(), documento: form.documento.trim(),
         telefonoPrincipal: form.telefonoPrincipal.trim(), telefonoSecundario: form.telefonoSecundario.trim() || undefined,
         direccionPrincipal: form.direccionPrincipal.trim(), direccionSecundaria: form.direccionSecundaria.trim(),
@@ -150,7 +150,7 @@ export default function CollectorNewClientPage() {
 
       // Cliente + venta/solicitud asociada a la ruta activa y al cobrador actual
       const input: SaleInputs = {
-        tenantId: user.tenantId, officeId: client.officeId, routeId: client.routeId,
+        tenantId: user.tenantId, routeId: client.routeId,
         clientId: client.id, createdByUserId: user.id,
         valorVenta: saleForm.valorVenta, tasaInteres: saleForm.tasaInteres, numeroCuotas: saleForm.numeroCuotas,
         frecuenciaPago: saleForm.frecuenciaPago, fechaInicio: saleForm.fechaInicio, paymentDays: saleForm.paymentDays,

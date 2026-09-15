@@ -13,6 +13,7 @@ import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import type { CapitalMovement, Route, Withdrawal, RouteFinancialSummary } from '@/models/types'
+import { assertRouteOperationalContext } from '@/services/officeService'
 
 // Paquete 3 — Resumen de capital agrupado por ruta.
 interface CapitalGroup {
@@ -31,7 +32,7 @@ interface CapitalGroup {
 }
 
 export default function CapitalPage() {
-  const { tenantId, officeId, currency } = useTenant()
+  const { tenantId, currency } = useTenant()
   const { user } = useAuth()
   const [movements, setMovements] = useState<CapitalMovement[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
@@ -73,8 +74,11 @@ export default function CapitalPage() {
     if (!canAccessRoute(user, form.routeId)) { toast.error('No tienes permiso sobre esa ruta.'); return }
     setSaving(true)
     try {
+      // Oficina inactiva → no se registran operaciones nuevas en sus rutas.
+      // (La consulta del histórico de esa ruta sigue disponible con normalidad.)
+      await assertRouteOperationalContext(form.routeId)
       const mov: CapitalMovement = {
-        id: generateId(), tenantId, officeId: routes.find(r => r.id === form.routeId)?.officeId ?? officeId,
+        id: generateId(), tenantId,
         routeId: form.routeId, tipo: form.tipo, valor: form.valor,
         descripcion: form.descripcion, fecha: form.fecha, userId: user?.id ?? '', createdAt: nowISO(),
       }

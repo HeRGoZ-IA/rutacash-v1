@@ -32,6 +32,11 @@ import {
   type RouteDatabase, type RouteAuditSink,
 } from '../src/services/routeService'
 import { getRouteAssignmentsByRole, hasAnyAssignment } from '../src/lib/routeAssignments'
+import {
+  createOffice, updateOffice, setOfficeStatus, deleteOffice, moveRouteToOffice,
+  assertRouteOperationalContext, isRouteOperational,
+  type OfficeDatabase,
+} from '../src/services/officeService'
 import { MemoryDb } from './financial/harness'
 import type { Tenant, User } from '../src/models/types'
 import { readSource, containsLine, SRC } from './financial/sourceContract'
@@ -1377,6 +1382,476 @@ await spec('ROUTE-FREE-012', 'Ruta libre', 'retirar al último Cobrador deja la 
   const limpia = routesPage.includes('if (removing && id === f.cobradorId) cobradorId =')
   metric('la pantalla limpia el responsable', limpia)
   assert(limpia, 'la pantalla no limpia el Cobrador responsable retirado')
+})
+
+// ############################################################
+// GRUPO — OFICINAS: Empresa → Oficina → Ruta
+// ------------------------------------------------------------
+// La Oficina AGRUPA; la Ruta CONTROLA el acceso. Estos casos ejercitan el SERVICIO
+// REAL (`officeService` + `routeService`) sobre la base en memoria: no simulan el
+// efecto, ejecutan las mismas funciones que usa producción.
+// ############################################################
+const asOfficeDb = (db: MemoryDb) => db as unknown as OfficeDatabase
+
+/** Empresa con Super Admin, un Admin y un Cobrador, sin Oficinas ni rutas. */
+async function empresaParaOficinas() {
+  const { db, su, admin } = await empresaSinRutas()
+  const cobrador = nuevoUsuario({ id: 'u-cob-1', nombre: 'Luis', email: 'luis@c.com' })
+  await db.users.add(cobrador)
+  const audits: string[] = []
+  const sink: RouteAuditSink = async (p) => { audits.push(`${p.action}:${p.descripcion}`) }
+  return { db, su, admin, cobrador, audits, sink }
+}
+
+const datosRuta = (over: Record<string, unknown> = {}) => ({
+  tenantId: 't-1', nombre: 'Ruta Norte', ciudad: 'Barranquilla',
+  tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000,
+  capitalInicial: 0, codigo: 'RT-001', adminIds: [] as string[],
+  ...over,
+})
+
+// ------------------------------------------------------------
+// CRUD del catálogo
+// ------------------------------------------------------------
+
+await spec('OFFICE-CRUD-001', 'Oficinas', 'se crea una Oficina VACÍA, sin ninguna ruta', async () => {
+  const { db, su, audits, sink } = await empresaParaOficinas()
+  const office = await createOffice({ tenantId: 't-1', nombre: 'Oficina Leticia', codigo: 'LET' }, su, asOfficeDb(db), sink)
+  const guardadas = await db.offices.toArray()
+  metric('oficinas', guardadas.length)
+  metric('rutas', (await db.routes.toArray()).length)
+  metric('estado', office.status)
+  metric('auditoría', audits.join(' | '))
+  assert(guardadas.length === 1, 'la Oficina no se creó')
+  assert(office.status === 'activa', 'una Oficina nueva debe nacer activa')
+  assert((await db.routes.toArray()).length === 0, 'crear una Oficina no debe crear rutas')
+  assert(audits.some(a => a.startsWith('CREATE_OFFICE')), 'falta la auditoría de creación')
+})
+
+await spec('OFFICE-CRUD-002', 'Oficinas', 'el nombre duplicado en la empresa se rechaza sin distinguir mayúsculas', async () => {
+  const { db, su, sink } = await empresaParaOficinas()
+  await createOffice({ tenantId: 't-1', nombre: 'Oficina Leticia' }, su, asOfficeDb(db), sink)
+  let error = ''
+  try {
+    await createOffice({ tenantId: 't-1', nombre: '  oficina leticia  ' }, su, asOfficeDb(db), sink)
+  } catch (e) { error = e instanceof Error ? e.message : String(e) }
+  metric('resultado', error || 'ACEPTADO — ERROR')
+  metric('oficinas', (await db.offices.toArray()).length)
+  assert(!!error, 'el nombre duplicado debía rechazarse')
+  assert((await db.offices.toArray()).length === 1, 'no debe quedar una segunda Oficina')
+})
+
+await spec('OFFICE-CRUD-003', 'Oficinas', 'el mismo nombre en OTRA empresa sí se permite', async () => {
+  const { db, su, sink } = await empresaParaOficinas()
+  await createOffice({ tenantId: 't-1', nombre: 'Oficina Leticia' }, su, asOfficeDb(db), sink)
+  await createOffice({ tenantId: 't-2', nombre: 'Oficina Leticia' }, su, asOfficeDb(db), sink)
+  const todas = await db.offices.toArray()
+  metric('oficinas totales', todas.length)
+  metric('empresas', [...new Set(todas.map(o => o.tenantId))].join(', '))
+  assert(todas.length === 2, 'la unicidad NO debe ser global entre empresas')
+})
+
+await spec('OFFICE-CRUD-004', 'Oficinas', 'el código duplicado en la empresa se rechaza; el libre se acepta', async () => {
+  const { db, su, sink } = await empresaParaOficinas()
+  await createOffice({ tenantId: 't-1', nombre: 'Leticia', codigo: 'LET' }, su, asOfficeDb(db), sink)
+  let error = ''
+  try {
+    await createOffice({ tenantId: 't-1', nombre: 'Río', codigo: 'let' }, su, asOfficeDb(db), sink)
+  } catch (e) { error = e instanceof Error ? e.message : String(e) }
+  await createOffice({ tenantId: 't-1', nombre: 'Río', codigo: 'RIO' }, su, asOfficeDb(db), sink)
+  metric('código duplicado', error || 'ACEPTADO — ERROR')
+  metric('oficinas', (await db.offices.toArray()).length)
+  assert(!!error, 'el código duplicado debía rechazarse')
+  assert((await db.offices.toArray()).length === 2, 'el código libre debía aceptarse')
+})
+
+await spec('OFFICE-CRUD-005', 'Oficinas', 'eliminar una Oficina VACÍA está permitido', async () => {
+  const { db, su, sink } = await empresaParaOficinas()
+  const office = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const { detached } = await deleteOffice({ officeId: office.id, tenantId: 't-1' }, su, asOfficeDb(db), sink)
+  metric('rutas desvinculadas', detached.length)
+  metric('oficinas restantes', (await db.offices.toArray()).length)
+  assert((await db.offices.toArray()).length === 0, 'la Oficina vacía debía eliminarse')
+  assert(detached.length === 0, 'no había rutas que desvincular')
+})
+
+await spec('OFFICE-CRUD-006', 'Oficinas', 'eliminar una Oficina CON rutas NO elimina ninguna ruta', async () => {
+  const { db, su, sink } = await empresaParaOficinas()
+  const office = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const ruta = await createRouteWithAdmins(datosRuta({ officeId: office.id }), su, asRouteDb(db), sink)
+
+  // Sin pedir desvincular explícitamente, el borrado se RECHAZA.
+  let error = ''
+  try {
+    await deleteOffice({ officeId: office.id, tenantId: 't-1' }, su, asOfficeDb(db), sink)
+  } catch (e) { error = e instanceof Error ? e.message : String(e) }
+  metric('borrado directo', error || 'ACEPTADO — ERROR')
+  metric('rutas', (await db.routes.toArray()).length)
+  metric('oficinas', (await db.offices.toArray()).length)
+  assert(!!error, 'no debe poder borrarse una Oficina con rutas sin decidir qué hacer con ellas')
+  assert((await db.routes.toArray()).length === 1, 'la ruta no puede desaparecer')
+  assert((await db.offices.toArray()).length === 1, 'la Oficina no debía borrarse')
+  void ruta
+})
+
+await spec('OFFICE-CRUD-007', 'Oficinas', 'desvincular y eliminar deja las rutas "Sin Oficina", con sus datos intactos', async () => {
+  const { db, su, cobrador, sink } = await empresaParaOficinas()
+  const office = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const ruta = await createRouteWithAdmins(datosRuta({ officeId: office.id, cobradorId: cobrador.id }), su, asRouteDb(db), sink)
+  await db.clients.add({ id: 'c-1', tenantId: 't-1', routeId: ruta.id, nombre: 'Cliente' })
+
+  const { detached } = await deleteOffice({ officeId: office.id, tenantId: 't-1', detachRoutes: true }, su, asOfficeDb(db), sink)
+
+  const guardada = (await db.routes.toArray())[0]
+  const cob = (await db.users.toArray() as User[]).find(u => u.id === cobrador.id)!
+  metric('rutas desvinculadas', detached.join(', '))
+  metric('officeId de la ruta', String(guardada.officeId))
+  metric('clientes', (await db.clients.toArray()).length)
+  metric('asignación del cobrador', JSON.stringify(cob.authorizedRouteIds))
+  assert((await db.offices.toArray()).length === 0, 'la Oficina debía eliminarse')
+  assert(guardada.officeId === undefined, 'la ruta debía quedar Sin Oficina')
+  assert((await db.clients.toArray()).length === 1, 'no puede perderse ningún cliente')
+  assert(cob.authorizedRouteIds?.includes(ruta.id) === true, 'las asignaciones de usuarios deben conservarse')
+})
+
+// ------------------------------------------------------------
+// Rutas y Oficinas
+// ------------------------------------------------------------
+
+await spec('OFFICE-ROUTE-001', 'Oficinas', 'se crea una Ruta SIN Oficina (y sin Admin ni Cobrador)', async () => {
+  const { db, su, sink } = await empresaParaOficinas()
+  const ruta = await createRouteWithAdmins(datosRuta(), su, asRouteDb(db), sink)
+  metric('officeId', String(ruta.officeId))
+  metric('cobradorId', String(ruta.cobradorId))
+  metric('estado', ruta.status)
+  assert(ruta.officeId === undefined, 'no debe inventarse una Oficina')
+  assert(ruta.status === 'activa', 'la ruta debe nacer activa')
+  assert((await db.routes.toArray()).length === 1, 'la ruta no se creó')
+})
+
+await spec('OFFICE-ROUTE-002', 'Oficinas', 'se crea una Ruta CON Oficina', async () => {
+  const { db, su, sink } = await empresaParaOficinas()
+  const office = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const ruta = await createRouteWithAdmins(datosRuta({ officeId: office.id }), su, asRouteDb(db), sink)
+  metric('officeId', ruta.officeId)
+  assert(ruta.officeId === office.id, 'la ruta no quedó en la Oficina indicada')
+})
+
+await spec('OFFICE-ROUTE-002b', 'Oficinas', 'una Oficina de OTRA empresa se rechaza (aislamiento por tenant)', async () => {
+  const { db, su, sink } = await empresaParaOficinas()
+  const ajena = await createOffice({ tenantId: 't-2', nombre: 'Ajena' }, su, asOfficeDb(db), sink)
+  let error = ''
+  try {
+    await createRouteWithAdmins(datosRuta({ officeId: ajena.id }), su, asRouteDb(db), sink)
+  } catch (e) { error = e instanceof Error ? e.message : String(e) }
+  metric('resultado', error || 'ACEPTADO — ERROR')
+  metric('rutas creadas', (await db.routes.toArray()).length)
+  assert(!!error, 'no puede asignarse una Oficina de otra empresa')
+  assert((await db.routes.toArray()).length === 0, 'no debe quedar ninguna ruta')
+})
+
+await spec('OFFICE-ROUTE-003', 'Oficinas', 'a una ruta Sin Oficina se le asigna una DESPUÉS', async () => {
+  const { db, su, sink } = await empresaParaOficinas()
+  const ruta = await createRouteWithAdmins(datosRuta(), su, asRouteDb(db), sink)
+  const office = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+
+  await moveRouteToOffice({ routeId: ruta.id, tenantId: 't-1', officeId: office.id }, su, asOfficeDb(db), sink)
+
+  const guardada = (await db.routes.toArray())[0]
+  metric('officeId tras asignar', guardada.officeId)
+  assert(guardada.officeId === office.id, 'la asignación posterior no se persistió')
+})
+
+await spec('OFFICE-ROUTE-004', 'Oficinas', 'mover una Ruta de la Oficina A a la B es UNA sola escritura auditada', async () => {
+  const { db, su, audits, sink } = await empresaParaOficinas()
+  const a = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const b = await createOffice({ tenantId: 't-1', nombre: 'Río' }, su, asOfficeDb(db), sink)
+  const ruta = await createRouteWithAdmins(datosRuta({ officeId: a.id }), su, asRouteDb(db), sink)
+
+  db.resetLog()
+  await moveRouteToOffice({ routeId: ruta.id, tenantId: 't-1', officeId: b.id }, su, asOfficeDb(db), sink)
+
+  const escrituras = db.log.filter(op => op.endsWith('.add') || op.endsWith('.update'))
+  const guardada = (await db.routes.toArray())[0]
+  metric('escrituras realizadas', escrituras.join(', ') || '(ninguna)')
+  metric('officeId final', guardada.officeId)
+  metric('auditoría', audits.filter(x => x.includes('Oficina')).join(' | '))
+  assert(guardada.officeId === b.id, 'la ruta no se movió')
+  assert(escrituras.length === 1 && escrituras[0] === 'routes.update',
+    `mover una ruta debe ser UNA sola escritura sobre routes; hubo: ${escrituras.join(', ')}`)
+})
+
+await spec('OFFICE-ROUTE-005', 'Oficinas', 'una ruta Sin Oficina sigue plenamente operativa', async () => {
+  const { db, su, cobrador, sink } = await empresaParaOficinas()
+  const ruta = await createRouteWithAdmins(datosRuta({ cobradorId: cobrador.id }), su, asRouteDb(db), sink)
+  const cob = (await db.users.toArray() as User[]).find(u => u.id === cobrador.id)!
+  metric('officeId', String(ruta.officeId))
+  metric('cobrador operativo', hasOperationalRoutes(cob))
+  metric('accede a la ruta', canAccessRoute(cob, ruta.id))
+  metric('puede registrar pagos', can(cob, 'payment.register', { routeId: ruta.id }))
+  assert(ruta.officeId === undefined, 'precondición: la ruta no tiene Oficina')
+  assert(hasOperationalRoutes(cob) && canAccessRoute(cob, ruta.id), 'una ruta sin Oficina debe operar igual')
+  assert(can(cob, 'payment.register', { routeId: ruta.id }), 'no tener Oficina no puede quitar capacidades')
+})
+
+await spec('OFFICE-ROUTE-006', 'Oficinas', 'mover una Ruta NO toca clientes, ventas, pagos ni parcelas', async () => {
+  const { db, su, cobrador, sink } = await empresaParaOficinas()
+  const a = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const b = await createOffice({ tenantId: 't-1', nombre: 'Río' }, su, asOfficeDb(db), sink)
+  const ruta = await createRouteWithAdmins(datosRuta({ officeId: a.id, cobradorId: cobrador.id }), su, asRouteDb(db), sink)
+
+  await db.clients.add({ id: 'c-1', tenantId: 't-1', routeId: ruta.id, nombre: 'Cliente' })
+  await db.sales.add({ id: 's-1', tenantId: 't-1', routeId: ruta.id, clientId: 'c-1', saldo: 1000, status: 'activa' } as never)
+  await db.installments.add({ id: 'i-1', saleId: 's-1', numero: 1, valor: 1000, pagado: 0, saldo: 1000, status: 'pendiente' } as never)
+  await db.payments.add({ id: 'p-1', tenantId: 't-1', saleId: 's-1', clientId: 'c-1', routeId: ruta.id, collectorId: cobrador.id, valor: 500 })
+
+  const antes = JSON.stringify([
+    await db.clients.toArray(), await db.sales.toArray(),
+    await db.installments.toArray(), await db.payments.toArray(),
+  ])
+
+  await moveRouteToOffice({ routeId: ruta.id, tenantId: 't-1', officeId: b.id }, su, asOfficeDb(db), sink)
+
+  const despues = JSON.stringify([
+    await db.clients.toArray(), await db.sales.toArray(),
+    await db.installments.toArray(), await db.payments.toArray(),
+  ])
+  metric('entidades hijas idénticas', antes === despues)
+  metric('officeId de la ruta', (await db.routes.toArray())[0].officeId)
+  assert(antes === despues, 'mover la Oficina modificó entidades que dependen de la RUTA, no de la Oficina')
+  assert((await db.routes.toArray())[0].officeId === b.id, 'la ruta no se movió')
+})
+
+await spec('OFFICE-ROUTE-007', 'Oficinas', 'crear una Ruta no exige Oficina, ni Administrador, ni Cobrador', async () => {
+  const { db, su, sink } = await empresaParaOficinas()
+  const ruta = await createRouteWithAdmins(datosRuta(), su, asRouteDb(db), sink)
+  const users = await db.users.toArray() as User[]
+  metric('ruta creada', `${ruta.nombre} · ${ruta.codigo}`)
+  metric('sin Oficina / sin Cobrador', `${ruta.officeId === undefined} / ${ruta.cobradorId === undefined}`)
+  metric('usuarios asignados', users.filter(u => (u.authorizedRouteIds ?? []).includes(ruta.id)).length)
+  assert(!!ruta.id, 'la ruta debe crearse solo con sus datos básicos')
+  assert(ruta.officeId === undefined && ruta.cobradorId === undefined, 'no debe inventarse ningún responsable ni Oficina')
+
+  // Y la advertencia combinada las menciona a las tres.
+  const avisos = routeAssignmentWarnings({ hasOffice: false, hasAdmin: false, hasCobrador: false })
+  metric('advertencias', avisos.length)
+  assert(avisos.length === 3, 'deben avisarse Oficina, Administrador y Cobrador ausentes')
+  assert(avisos.some(a => a.includes('sin Oficina')), 'falta la advertencia de Oficina')
+})
+
+// ------------------------------------------------------------
+// Oficina inactiva
+// ------------------------------------------------------------
+
+await spec('OFFICE-STATUS-001', 'Oficinas', 'una Oficina inactiva conserva TODA la consulta histórica', async () => {
+  const { db, su, cobrador, sink } = await empresaParaOficinas()
+  const office = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const ruta = await createRouteWithAdmins(datosRuta({ officeId: office.id, cobradorId: cobrador.id }), su, asRouteDb(db), sink)
+  await db.clients.add({ id: 'c-1', tenantId: 't-1', routeId: ruta.id, nombre: 'Cliente' })
+  await db.sales.add({ id: 's-1', tenantId: 't-1', routeId: ruta.id, clientId: 'c-1', saldo: 1000, status: 'activa' } as never)
+
+  await setOfficeStatus({ officeId: office.id, tenantId: 't-1', status: 'inactiva' }, su, asOfficeDb(db), sink)
+
+  const cob = (await db.users.toArray() as User[]).find(u => u.id === cobrador.id)!
+  const rutaGuardada = (await db.routes.toArray())[0]
+  metric('clientes visibles', (await db.clients.toArray()).length)
+  metric('ventas visibles', (await db.sales.toArray()).length)
+  metric('status de la ruta', rutaGuardada.status)
+  metric('asignación del cobrador', JSON.stringify(cob.authorizedRouteIds))
+  metric('sigue accediendo a la ruta', canAccessRoute(cob, ruta.id))
+  assert((await db.clients.toArray()).length === 1 && (await db.sales.toArray()).length === 1, 'la consulta histórica debe seguir intacta')
+  assert(rutaGuardada.status === 'activa', 'inactivar la Oficina NO debe cambiar el estado de la ruta')
+  assert(cob.authorizedRouteIds?.includes(ruta.id) === true, 'no debe desasignarse a nadie')
+  assert(canAccessRoute(cob, ruta.id), 'el acceso de consulta no se toca')
+})
+
+await spec('OFFICE-STATUS-002', 'Oficinas', 'la guarda bloquea operaciones NUEVAS en rutas de Oficina inactiva', async () => {
+  const { db, su, sink } = await empresaParaOficinas()
+  const office = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const ruta = await createRouteWithAdmins(datosRuta({ officeId: office.id }), su, asRouteDb(db), sink)
+
+  await assertRouteOperationalContext(ruta.id, asOfficeDb(db))   // activa: no lanza
+  const operativaAntes = await isRouteOperational(ruta.id, asOfficeDb(db))
+
+  await setOfficeStatus({ officeId: office.id, tenantId: 't-1', status: 'inactiva' }, su, asOfficeDb(db), sink)
+  let error = ''
+  try { await assertRouteOperationalContext(ruta.id, asOfficeDb(db)) } catch (e) { error = e instanceof Error ? e.message : String(e) }
+  const operativaDespues = await isRouteOperational(ruta.id, asOfficeDb(db))
+
+  metric('operativa con Oficina activa', operativaAntes)
+  metric('operativa con Oficina inactiva', operativaDespues)
+  metric('mensaje', error)
+  assert(operativaAntes, 'con la Oficina activa la ruta debe operar')
+  assert(!operativaDespues && !!error, 'con la Oficina inactiva debe bloquearse')
+  assert(error.includes('Oficina inactiva'), 'el mensaje debe explicar el motivo con claridad')
+})
+
+await spec('OFFICE-STATUS-003', 'Oficinas', 'una ruta SIN Oficina nunca se bloquea por esta regla', async () => {
+  const { db, su, sink } = await empresaParaOficinas()
+  const ruta = await createRouteWithAdmins(datosRuta(), su, asRouteDb(db), sink)
+  const operativa = await isRouteOperational(ruta.id, asOfficeDb(db))
+  metric('officeId', String(ruta.officeId))
+  metric('operativa', operativa)
+  assert(operativa, 'una ruta sin Oficina no tiene Oficina que la pueda inactivar')
+})
+
+await spec('OFFICE-STATUS-004', 'Oficinas', 'inactivar una Oficina no afecta a las rutas de OTRAS Oficinas', async () => {
+  const { db, su, sink } = await empresaParaOficinas()
+  const a = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const b = await createOffice({ tenantId: 't-1', nombre: 'Río' }, su, asOfficeDb(db), sink)
+  const rA = await createRouteWithAdmins(datosRuta({ officeId: a.id }), su, asRouteDb(db), sink)
+  const rB = await createRouteWithAdmins(datosRuta({ officeId: b.id, codigo: 'RT-002', nombre: 'Ruta Río' }), su, asRouteDb(db), sink)
+
+  await setOfficeStatus({ officeId: a.id, tenantId: 't-1', status: 'inactiva' }, su, asOfficeDb(db), sink)
+
+  metric('ruta de Leticia operativa', await isRouteOperational(rA.id, asOfficeDb(db)))
+  metric('ruta de Río operativa', await isRouteOperational(rB.id, asOfficeDb(db)))
+  assert(!(await isRouteOperational(rA.id, asOfficeDb(db))), 'la ruta de la Oficina inactiva debía bloquearse')
+  assert(await isRouteOperational(rB.id, asOfficeDb(db)), 'la ruta de otra Oficina no debe verse afectada')
+})
+
+await spec('OFFICE-STATUS-006', 'Oficinas', 'reactivar la Oficina restablece la operación sin reasignar a nadie', async () => {
+  const { db, su, cobrador, sink } = await empresaParaOficinas()
+  const office = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const ruta = await createRouteWithAdmins(datosRuta({ officeId: office.id, cobradorId: cobrador.id }), su, asRouteDb(db), sink)
+
+  const asignacionInicial = JSON.stringify(((await db.users.toArray() as User[]).find(u => u.id === cobrador.id))!.authorizedRouteIds)
+  await setOfficeStatus({ officeId: office.id, tenantId: 't-1', status: 'inactiva' }, su, asOfficeDb(db), sink)
+  await setOfficeStatus({ officeId: office.id, tenantId: 't-1', status: 'activa' }, su, asOfficeDb(db), sink)
+
+  const asignacionFinal = JSON.stringify(((await db.users.toArray() as User[]).find(u => u.id === cobrador.id))!.authorizedRouteIds)
+  metric('operativa tras reactivar', await isRouteOperational(ruta.id, asOfficeDb(db)))
+  metric('asignación antes → después', `${asignacionInicial} → ${asignacionFinal}`)
+  assert(await isRouteOperational(ruta.id, asOfficeDb(db)), 'reactivar debe restablecer la operación')
+  assert(asignacionInicial === asignacionFinal, 'reactivar no debe tocar las asignaciones de usuarios')
+})
+
+// ------------------------------------------------------------
+// Usuarios generales de empresa
+// ------------------------------------------------------------
+
+await spec('OFFICE-USER-001', 'Oficinas', 'un usuario puede tener rutas de VARIAS Oficinas', async () => {
+  const { db, su, cobrador, sink } = await empresaParaOficinas()
+  const let_ = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const rio = await createOffice({ tenantId: 't-1', nombre: 'Río' }, su, asOfficeDb(db), sink)
+  const rL = await createRouteWithAdmins(datosRuta({ officeId: let_.id, nombre: 'Centro', codigo: 'RT-001' }), su, asRouteDb(db), sink)
+  const rR = await createRouteWithAdmins(datosRuta({ officeId: rio.id, nombre: 'Puerto', codigo: 'RT-002' }), su, asRouteDb(db), sink)
+  // Ruta de Leticia a la que NO se le asigna: la prueba de que la Oficina no contagia.
+  const rL2 = await createRouteWithAdmins(datosRuta({ officeId: let_.id, nombre: 'Norte', codigo: 'RT-003' }), su, asRouteDb(db), sink)
+
+  await db.users.update(cobrador.id, { authorizedRouteIds: [rL.id, rR.id] })
+  const cob = (await db.users.toArray() as User[]).find(u => u.id === cobrador.id)!
+  const rutas = await db.routes.toArray()
+  const accesibles = filterAccessibleRoutes(cob, rutas as never[])
+
+  metric('authorizedRouteIds', JSON.stringify(cob.authorizedRouteIds))
+  metric('rutas accesibles', accesibles.length)
+  metric('tiene officeIds', 'officeIds' in (cob as unknown as Record<string, unknown>))
+  assert(accesibles.length === 2, 'debe ver exactamente sus dos rutas')
+  assert(canAccessRoute(cob, rL.id) && canAccessRoute(cob, rR.id), 'debe acceder a sus dos rutas')
+  assert(!canAccessRoute(cob, rL2.id), 'tener una ruta de Leticia NO puede conceder las demás de Leticia')
+  assert(!('officeIds' in (cob as unknown as Record<string, unknown>)), 'no debe guardarse ninguna lista de oficinas')
+  assert(!('officeId' in (cob as unknown as Record<string, unknown>)), 'el usuario no pertenece a una Oficina')
+})
+
+await spec('OFFICE-USER-003', 'Oficinas', 'cambiar la Oficina de una Ruta NO cambia authorizedRouteIds', async () => {
+  const { db, su, cobrador, sink } = await empresaParaOficinas()
+  const a = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const b = await createOffice({ tenantId: 't-1', nombre: 'Río' }, su, asOfficeDb(db), sink)
+  const ruta = await createRouteWithAdmins(datosRuta({ officeId: a.id, cobradorId: cobrador.id }), su, asRouteDb(db), sink)
+
+  const antes = JSON.stringify(await db.users.toArray())
+  await moveRouteToOffice({ routeId: ruta.id, tenantId: 't-1', officeId: b.id }, su, asOfficeDb(db), sink)
+  const despues = JSON.stringify(await db.users.toArray())
+
+  metric('usuarios idénticos', antes === despues)
+  metric('sigue accediendo', canAccessRoute((await db.users.toArray() as User[]).find(u => u.id === cobrador.id)!, ruta.id))
+  assert(antes === despues, 'mover la ruta de Oficina alteró los usuarios')
+})
+
+await spec('OFFICE-USER-004', 'Oficinas', 'eliminar la Oficina conserva las asignaciones de los usuarios', async () => {
+  const { db, su, cobrador, sink } = await empresaParaOficinas()
+  const office = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const ruta = await createRouteWithAdmins(datosRuta({ officeId: office.id, cobradorId: cobrador.id }), su, asRouteDb(db), sink)
+
+  await deleteOffice({ officeId: office.id, tenantId: 't-1', detachRoutes: true }, su, asOfficeDb(db), sink)
+
+  const cob = (await db.users.toArray() as User[]).find(u => u.id === cobrador.id)!
+  metric('authorizedRouteIds', JSON.stringify(cob.authorizedRouteIds))
+  metric('ruta Sin Oficina', (await db.routes.toArray())[0].officeId === undefined)
+  metric('sigue operativo', hasOperationalRoutes(cob))
+  assert(cob.authorizedRouteIds?.includes(ruta.id) === true, 'la asignación debe sobrevivir al borrado de la Oficina')
+  assert(hasOperationalRoutes(cob), 'el cobrador debe seguir operativo')
+})
+
+// ------------------------------------------------------------
+// CLEAN y DEMO
+// ------------------------------------------------------------
+
+await spec('OFFICE-CLEAN-001', 'Oficinas', 'una instalación CLEAN arranca con CERO Oficinas', async () => {
+  const db = await freshCleanInstall()
+  const c = await db.counts()
+  metric('offices', c.offices)
+  metric('routes', c.routes)
+  assert(c.offices === 0, 'CLEAN no debe traer ninguna Oficina')
+  assert(Object.values(c).every(n => n === 0), 'CLEAN debe seguir naciendo completamente vacía')
+})
+
+await spec('OFFICE-CLEAN-002', 'Oficinas', 'el recorrido CLEAN se completa SIN crear ninguna Oficina', async () => {
+  const { db, su, cobrador, sink } = await empresaParaOficinas()
+  const ruta = await createRouteWithAdmins(datosRuta({ cobradorId: cobrador.id }), su, asRouteDb(db), sink)
+  await db.clients.add({ id: 'c-1', tenantId: 't-1', routeId: ruta.id, nombre: 'Cliente' })
+  const cob = (await db.users.toArray() as User[]).find(u => u.id === cobrador.id)!
+
+  metric('oficinas creadas', (await db.offices.toArray()).length)
+  metric('ruta operativa', await isRouteOperational(ruta.id, asOfficeDb(db)))
+  metric('cobrador operativo', hasOperationalRoutes(cob))
+  assert((await db.offices.toArray()).length === 0, 'el recorrido no debe exigir ninguna Oficina')
+  assert(await isRouteOperational(ruta.id, asOfficeDb(db)), 'la ruta sin Oficina debe operar')
+  assert(hasOperationalRoutes(cob) && canAccessRoute(cob, ruta.id), 'el cobrador debe poder trabajar')
+
+  // Y el checklist de arranque NO incorpora las Oficinas como paso.
+  const checklist = readSource('src/components/ui/SetupChecklist.tsx')
+  metric('checklist menciona Oficinas', /[Oo]ficina/.test(checklist))
+  assert(!/[Oo]ficina/.test(checklist), 'las Oficinas son opcionales: no deben entrar en el checklist')
+})
+
+await spec('OFFICE-CLEAN-003', 'Oficinas', 'el reset de empresa limpia también las Oficinas', () => {
+  const seed = readSource('src/data/seed.ts')
+  const bloque = seed.slice(seed.indexOf('export async function resetCleanDatabase'))
+  metric('limpia offices', bloque.includes("db.offices.where('tenantId')"))
+  assert(bloque.includes("db.offices.where('tenantId')"), 'resetCleanDatabase dejaría Oficinas huérfanas')
+  // Y el reset total borra la base completa (cubre cualquier tabla nueva).
+  const reset = readSource('src/lib/resetApp.ts')
+  assert(reset.includes('db.delete()'), 'el reset total debe seguir borrando la base entera')
+})
+
+await spec('OFFICE-DEMO-001', 'Oficinas', 'DEMO siembra Oficinas y una ruta deliberadamente Sin Oficina', () => {
+  const seed = readSource('src/data/seed.ts')
+  metric('Oficina Barranquilla', seed.includes("nombre: 'Oficina Barranquilla'"))
+  metric('Oficina Soledad', seed.includes("nombre: 'Oficina Soledad'"))
+  metric('ruta sin Oficina', seed.includes('ROUTE5_ID'))
+  assert(seed.includes("nombre: 'Oficina Barranquilla'") && seed.includes("nombre: 'Oficina Soledad'"),
+    'DEMO debe traer las dos oficinas representativas')
+  assert(seed.includes('ROUTE5_ID'), 'DEMO debe incluir una ruta Sin Oficina para mostrar ese estado')
+
+  // La tabla DEBE estar declarada en la transacción del seed (lección del 15/09).
+  const tx = seed.slice(seed.indexOf("await db.transaction('rw', ["), seed.indexOf('await db.tenants.add(tenant)'))
+  metric('db.offices en el alcance de la transacción', tx.includes('db.offices'))
+  assert(tx.includes('db.offices'), 'toda tabla usada dentro de una transacción debe declararse en su alcance')
+  assert(seed.includes('await db.offices.bulkAdd(offices)'), 'DEMO no siembra las oficinas')
+})
+
+await spec('OFFICE-DEMO-002', 'Oficinas', 'DEMO no guarda officeId fuera de las rutas', () => {
+  const seed = readSource('src/data/seed.ts')
+  // Las únicas asignaciones admisibles son `officeId: OFFICE1_ID` / `OFFICE2_ID`
+  // dentro del array de rutas.
+  const asignaciones = seed.match(/officeId:\s*[^,\n}]+/g) ?? []
+  const fuera = asignaciones.filter(a => !/OFFICE[12]_ID/.test(a))
+  metric('asignaciones de officeId', asignaciones.length)
+  metric('fuera de Route', fuera.length === 0 ? '(ninguna)' : fuera.join(' | '))
+  assert(fuera.length === 0, `DEMO guarda officeId fuera de las rutas: ${fuera.join(', ')}`)
+  assert(asignaciones.length === 4, `se esperaban 4 rutas con Oficina; hay ${asignaciones.length}`)
 })
 
 // ############################################################

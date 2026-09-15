@@ -18,8 +18,21 @@ import { shallowDirty } from '../src/hooks/useDirtyForm'
 import { computeRouteAssignmentDiff } from '../src/lib/routeAssignmentDiff'
 import { getRouteAssignmentsByRole, getUsersAssignedToRoute, ASSIGNMENT_ROLE_ORDER, hasAnyAssignment } from '../src/lib/routeAssignments'
 import { cobradorRemovalBlock, validateCobradorInvariant } from '../src/lib/cobradorRules'
+import {
+  accessibleOfficeIdsOf, hasRoutesWithoutOffice, filterRoutesByOffice, narrowRouteIdsByOffice,
+  groupRoutesByOffice, officeCoverage, officeScopeLabel, officeLabelForRoute, officeNameByRouteId,
+  ALL_OFFICES, NO_OFFICE, NO_OFFICE_LABEL,
+} from '../src/lib/officeGrouping'
+import { validateOfficeIdentity, isRouteOperationBlocked } from '../src/services/officeService'
+import { readFileSync as readFileSyncForOffices } from 'node:fs'
+import { resolve as resolvePathForOffices } from 'node:path'
 import { resolveResponsibleCollector, hasPersonalCashbox } from '../src/lib/collectorAttribution'
-import type { User, UserRole, Tenant } from '../src/models/types'
+import type { User, UserRole, Tenant, Office, Route } from '../src/models/types'
+
+/** Lee un archivo de producción para verificar contratos estructurales. */
+function readSourceFile(rel: string): string {
+  return readFileSyncForOffices(resolvePathForOffices(process.cwd(), rel), 'utf8')
+}
 
 let passed = 0
 let failed = 0
@@ -511,6 +524,238 @@ check('la nueva capacidad tiene etiqueta humana', !!CAPABILITY_METADATA['cashbox
 
 // ============================================================
 // RQ-05 — ATRIBUCION DEL RECAUDO: REGISTRAR != RESPONDER POR EL DINERO
+
+// ============================================================
+// OFICINAS — SCOPING DERIVADO Y CONTRATO DE ARQUITECTURA
+// ------------------------------------------------------------
+// La regla que estos casos existen para proteger:
+//
+//     accessibleOffices = Oficinas presentes en accessibleRoutes
+//
+// y NUNCA a la inversa. Una Oficina solo puede ESTRECHAR un conjunto de rutas ya
+// permitido; jamás ampliarlo. Si alguien invirtiera esa dirección, aquí se cae.
+// ============================================================
+const mkRoute = (id: string, officeId?: string, nombre = id): Route =>
+  ({ id, tenantId: 't1', officeId, nombre, codigo: id.toUpperCase(), tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 1, capitalInicial: 0, capitalActual: 0, status: 'activa', createdAt: '', updatedAt: '' }) as Route
+
+const mkOffice = (id: string, nombre: string, status: Office['status'] = 'activa'): Office =>
+  ({ id, tenantId: 't1', nombre, status, createdAt: '', updatedAt: '' })
+
+const OF_LETICIA = mkOffice('of-let', 'Leticia')
+const OF_RIO = mkOffice('of-rio', 'Río')
+const OFICINAS = [OF_LETICIA, OF_RIO]
+
+// Empresa: Leticia tiene 3 rutas, Río tiene 2, y hay 1 ruta sin Oficina.
+const TODAS_LAS_RUTAS = [
+  mkRoute('r-L1', 'of-let', 'Centro'), mkRoute('r-L2', 'of-let', 'Norte'), mkRoute('r-L3', 'of-let', 'Sur'),
+  mkRoute('r-R1', 'of-rio', 'Puerto'), mkRoute('r-R2', 'of-rio', 'Mercado'),
+  mkRoute('r-X', undefined, 'Antigua'),
+]
+
+// OFFICE-SCOPE-001 — un usuario con rutas en dos Oficinas ve exactamente esas dos.
+const fabio = mkUser('cobrador', { id: 'u-fabio', authorizedRouteIds: ['r-L1', 'r-R1'] })
+const rutasDeFabio = filterAccessibleRoutes(fabio, TODAS_LAS_RUTAS)
+const oficinasDeFabio = accessibleOfficeIdsOf(rutasDeFabio)
+check('OFFICE-SCOPE-001 — rutas en dos Oficinas → ve las dos Oficinas',
+  oficinasDeFabio.size === 2 && oficinasDeFabio.has('of-let') && oficinasDeFabio.has('of-rio'))
+
+// OFFICE-SCOPE-002 — LA REGLA CRÍTICA: tener 1 ruta de Leticia NO da las otras 2.
+check('OFFICE-SCOPE-002 — una ruta de una Oficina NO concede las demás rutas de esa Oficina',
+  rutasDeFabio.length === 2 &&
+  rutasDeFabio.every(r => r.id === 'r-L1' || r.id === 'r-R1') &&
+  !rutasDeFabio.some(r => r.id === 'r-L2' || r.id === 'r-L3' || r.id === 'r-R2'))
+check('OFFICE-SCOPE-002b — canAccessRoute sigue negando las hermanas de la misma Oficina',
+  canAccessRoute(fabio, 'r-L1') && !canAccessRoute(fabio, 'r-L2') && !canAccessRoute(fabio, 'r-L3'))
+
+// OFFICE-SCOPE-003 — las Oficinas se DERIVAN de las rutas, no se consultan aparte.
+const soloSinOficina = mkUser('cobrador', { id: 'u-x', authorizedRouteIds: ['r-X'] })
+const rutasSinOf = filterAccessibleRoutes(soloSinOficina, TODAS_LAS_RUTAS)
+check('OFFICE-SCOPE-003 — sin rutas con Oficina, el conjunto de Oficinas es vacío',
+  accessibleOfficeIdsOf(rutasSinOf).size === 0 && hasRoutesWithoutOffice(rutasSinOf))
+
+// OFFICE-SCOPE-004 — el fail-closed del Administrador no cambia con Oficinas.
+const adminSinRutas = mkUser('admin', { id: 'u-adm0', authorizedRouteIds: undefined })
+check('OFFICE-SCOPE-004 — Admin sin rutas sigue fail-closed aunque existan Oficinas',
+  filterAccessibleRoutes(adminSinRutas, TODAS_LAS_RUTAS).length === 0 &&
+  accessibleOfficeIdsOf(filterAccessibleRoutes(adminSinRutas, TODAS_LAS_RUTAS)).size === 0 &&
+  !hasOperationalRoutes(adminSinRutas))
+
+// OFFICE-SCOPE-005 — el Cobrador solo opera sus rutas, elija la Oficina que elija.
+check('OFFICE-SCOPE-005 — el Cobrador no registra pagos en rutas hermanas de su Oficina',
+  can(fabio, 'payment.register', { routeId: 'r-L1' }) &&
+  !can(fabio, 'payment.register', { routeId: 'r-L2' }))
+
+// OFFICE-SCOPE-006 — gestionar el CATÁLOGO no concede acceso a los datos.
+const adminGestor = mkUser('admin', { id: 'u-adm1', authorizedRouteIds: ['r-L1'] })
+check('OFFICE-SCOPE-006 — el Admin gestiona Oficinas pero no accede a rutas ajenas',
+  can(adminGestor, 'office.create') && can(adminGestor, 'office.edit') &&
+  can(adminGestor, 'office.delete') && can(adminGestor, 'office.changeStatus') &&
+  !canAccessRoute(adminGestor, 'r-L2') && !canAccessRoute(adminGestor, 'r-L3'))
+
+// Las capacidades de catálogo NO se reparten a los roles operativos ni de consulta.
+for (const rol of ['cobrador', 'secretario', 'socio', 'supervisor'] as UserRole[]) {
+  const u = mkUser(rol, { authorizedRouteIds: ['r-L1'] })
+  check(`OFFICE-SCOPE-006b — ${rol} no gestiona Oficinas`,
+    !can(u, 'office.create') && !can(u, 'office.edit') &&
+    !can(u, 'office.delete') && !can(u, 'office.changeStatus'))
+}
+
+// El Super Admin, al no estar limitado por rutas, ve todas las Oficinas con rutas.
+check('OFFICE-SCOPE-007 — el Super Admin ve todas las Oficinas con rutas de la empresa',
+  accessibleOfficeIdsOf(filterAccessibleRoutes(superadmin, TODAS_LAS_RUTAS)).size === 2)
+
+// --- Filtro por Oficina: SOLO estrecha ---
+check('OFFICE-SCOPE-008 — "Todas las oficinas" no altera el conjunto',
+  filterRoutesByOffice(rutasDeFabio, ALL_OFFICES).length === rutasDeFabio.length)
+check('OFFICE-SCOPE-009 — filtrar por Oficina nunca devuelve rutas no accesibles',
+  filterRoutesByOffice(rutasDeFabio, 'of-let').every(r => r.id === 'r-L1'))
+check('OFFICE-SCOPE-010 — "Sin Oficina" selecciona solo las rutas sin Oficina',
+  filterRoutesByOffice(TODAS_LAS_RUTAS, NO_OFFICE).length === 1 &&
+  filterRoutesByOffice(TODAS_LAS_RUTAS, NO_OFFICE)[0].id === 'r-X')
+
+// `narrowRouteIdsByOffice` parte SIEMPRE del alcance: no puede inventar rutas.
+const alcanceFabio = new Set(['r-L1', 'r-R1'])
+check('OFFICE-SCOPE-011 — estrechar por Oficina no puede ampliar el alcance',
+  narrowRouteIdsByOffice(alcanceFabio, TODAS_LAS_RUTAS, 'of-let').size === 1 &&
+  narrowRouteIdsByOffice(alcanceFabio, TODAS_LAS_RUTAS, 'of-let').has('r-L1') &&
+  narrowRouteIdsByOffice(alcanceFabio, TODAS_LAS_RUTAS, ALL_OFFICES).size === 2)
+
+// --- Agrupación ---
+const gruposFabio = groupRoutesByOffice(rutasDeFabio, OFICINAS)
+check('OFFICE-SCOPE-012 — la agrupación solo contiene rutas accesibles',
+  gruposFabio.flatMap(g => g.routes).length === 2)
+const gruposTodos = groupRoutesByOffice(TODAS_LAS_RUTAS, OFICINAS)
+check('OFFICE-SCOPE-013 — "Sin Oficina" va siempre al final',
+  gruposTodos[gruposTodos.length - 1].key === NO_OFFICE)
+check('OFFICE-SCOPE-014 — las Oficinas se ordenan alfabéticamente',
+  gruposTodos[0].label === 'Leticia' && gruposTodos[1].label === 'Río')
+check('OFFICE-SCOPE-015 — una Oficina inexistente no hace desaparecer su ruta',
+  groupRoutesByOffice([mkRoute('r-huerfana', 'of-borrada')], OFICINAS).flatMap(g => g.routes).length === 1)
+
+// --- Consolidado parcial rotulado con honestidad ---
+check('OFFICE-CONS-001 — cobertura completa no se rotula como parcial',
+  officeScopeLabel('Leticia', officeCoverage(3, 3)) === 'Leticia')
+check('OFFICE-CONS-002 — cobertura parcial se rotula como parcial',
+  officeScopeLabel('Leticia', officeCoverage(1, 3)).includes('1 de 3') &&
+  officeScopeLabel('Leticia', officeCoverage(1, 3)).includes('rutas autorizadas'))
+
+// --- Derivación de la Oficina de una ruta (para etiquetas y CSV) ---
+check('OFFICE-DERIVE-001 — la Oficina se deriva de la ruta',
+  officeLabelForRoute(TODAS_LAS_RUTAS[0], OFICINAS) === 'Leticia')
+check('OFFICE-DERIVE-002 — una ruta sin Oficina se etiqueta "Sin Oficina"',
+  officeLabelForRoute(TODAS_LAS_RUTAS[5], OFICINAS) === NO_OFFICE_LABEL)
+const mapaOficinas = officeNameByRouteId(TODAS_LAS_RUTAS, OFICINAS)
+check('OFFICE-DERIVE-003 — el mapa routeId→Oficina cubre también las rutas sin Oficina',
+  mapaOficinas.get('r-L1') === 'Leticia' && mapaOficinas.get('r-X') === NO_OFFICE_LABEL)
+
+// --- Guarda de Oficina inactiva (decisión PURA) ---
+check('OFFICE-STATUS-000a — Oficina activa no bloquea', !isRouteOperationBlocked(OF_LETICIA))
+check('OFFICE-STATUS-000b — Oficina inactiva bloquea', isRouteOperationBlocked(mkOffice('of-x', 'X', 'inactiva')))
+check('OFFICE-STATUS-000c — sin Oficina no hay bloqueo por Oficina', !isRouteOperationBlocked(undefined))
+
+// --- Unicidad de nombre y código dentro de la empresa ---
+const EXISTENTES = [
+  { id: 'of-1', nombre: 'Oficina Leticia', codigo: 'LET' },
+  { id: 'of-2', nombre: 'Oficina Río', codigo: undefined },
+]
+check('OFFICE-CRUD-002 — nombre duplicado (distinta caja y espacios) se rechaza',
+  validateOfficeIdentity({ nombre: '  oficina LETICIA ', existentes: EXISTENTES }).ok === false)
+check('OFFICE-CRUD-002b — nombre nuevo se acepta',
+  validateOfficeIdentity({ nombre: 'Oficina Malambo', existentes: EXISTENTES }).ok === true)
+check('OFFICE-CRUD-004 — código duplicado sin distinguir mayúsculas se rechaza',
+  validateOfficeIdentity({ nombre: 'Otra', codigo: 'let', existentes: EXISTENTES }).ok === false)
+check('OFFICE-CRUD-004b — código libre se acepta',
+  validateOfficeIdentity({ nombre: 'Otra', codigo: 'MAL', existentes: EXISTENTES }).ok === true)
+check('OFFICE-CRUD-004c — el código es opcional',
+  validateOfficeIdentity({ nombre: 'Otra', existentes: EXISTENTES }).ok === true)
+check('OFFICE-CRUD-002c — al editar, la propia Oficina no colisiona consigo misma',
+  validateOfficeIdentity({ nombre: 'Oficina Leticia', codigo: 'LET', existentes: EXISTENTES, excludeId: 'of-1' }).ok === true)
+check('OFFICE-CRUD-008 — el nombre es obligatorio',
+  validateOfficeIdentity({ nombre: '   ', existentes: [] }).ok === false)
+
+// ============================================================
+// CONTRATO DE ARQUITECTURA — verificado sobre el código fuente real
+// ============================================================
+
+// OFFICE-MODEL-003 — SOLO Route puede tener officeId.
+{
+  const types = readSourceFile('src/models/types.ts')
+  const ocurrencias = (types.match(/officeId\?: string/g) ?? []).length
+  check('OFFICE-MODEL-003 — officeId existe exactamente una vez en el modelo (Route)', ocurrencias === 1)
+  const bloqueRoute = types.slice(types.indexOf('export interface Route {'), types.indexOf('export interface User {'))
+  check('OFFICE-MODEL-003b — ese único officeId pertenece a Route', bloqueRoute.includes('officeId?: string'))
+}
+
+// OFFICE-USER-002 — User no tiene officeId ni officeIds, ni nadie los escribe.
+{
+  const types = readSourceFile('src/models/types.ts')
+  const bloqueUser = types.slice(types.indexOf('export interface User {'), types.indexOf('export interface Client {'))
+  // Se busca la DECLARACIÓN del campo. La palabra puede aparecer en un comentario
+  // que explique justamente por qué el campo no existe.
+  check('OFFICE-USER-002 — User no declara officeId', !/^\s*officeId\??:/m.test(bloqueUser))
+  check('OFFICE-USER-002b — no existe officeIds en ninguna parte del modelo', !types.includes('officeIds'))
+  const tenantHook = readSourceFile('src/hooks/useTenant.ts')
+  check('OFFICE-USER-002c — useTenant no devuelve officeId', !/^\s*officeId:/m.test(tenantHook))
+}
+
+// OFFICE-ARCH-001 — ninguna escritura copia Route.officeId a otra entidad.
+{
+  const SOSPECHOSOS = [
+    'src/services/routeService.ts', 'src/services/saleRequestService.ts',
+    'src/pages/admin/ActiveSalesPage.tsx', 'src/pages/admin/ClientsPage.tsx',
+    'src/pages/admin/CapitalPage.tsx', 'src/pages/admin/ExpensesPage.tsx',
+    'src/pages/admin/WithdrawalsPage.tsx', 'src/pages/admin/TransfersPage.tsx',
+    'src/pages/collector/CollectorExpensesPage.tsx', 'src/pages/collector/CollectorNewClientPage.tsx',
+    'src/pages/collector/CollectorNewSalePage.tsx',
+  ]
+  // Patrón prohibido: DERIVAR la Oficina desde otra entidad para guardarla en una
+  // nueva. `Route` es la única dueña del campo, así que su propia asignación
+  // (`officeId: input.officeId` dentro del literal `const route: Route = {`) es
+  // legítima y se comprueba aparte.
+  const derivacion = /officeId:\s*(route\??\.|client\??\.|user\??\.|sale\??\.|form\.officeId\s*\?\?)/
+  const infractores = SOSPECHOSOS.filter(f => derivacion.test(readSourceFile(f)))
+  check('OFFICE-ARCH-001 — nadie deriva Route.officeId hacia clientes/ventas/gastos/etc.',
+    infractores.length === 0)
+
+  // Y en routeService la ÚNICA asignación de officeId es la de la propia Route.
+  const rs = readSourceFile('src/services/routeService.ts')
+  const asignaciones = (rs.match(/officeId:\s*[^,\n}]+/g) ?? [])
+    .filter(a => !a.includes('officeId: input.officeId')
+              && !a.includes('officeId: route.officeId ?? null')
+              && !a.includes('officeId: params.officeId')
+              && !a.includes('officeId: prevRoute.officeId')
+              && !a.includes("officeId: input.officeId ?? null"))
+  check('OFFICE-ARCH-001b — routeService solo asigna officeId a la propia Route',
+    asignaciones.length === 0)
+
+  // Ninguna entidad operativa vuelve a declarar el campo.
+  const tiposFuente = readSourceFile('src/models/types.ts')
+  const ENTIDADES_SIN_OFICINA = ['Client', 'Sale', 'Payment', 'Installment', 'Expense',
+    'CapitalMovement', 'Transfer', 'Withdrawal', 'WeeklySettlement', 'SaleRequest']
+  const conCampo = ENTIDADES_SIN_OFICINA.filter(nombre => {
+    const ini = tiposFuente.indexOf(`export interface ${nombre} {`)
+    if (ini === -1) return false
+    const fin = tiposFuente.indexOf('\n}', ini)
+    return /^\s*officeId\??:/m.test(tiposFuente.slice(ini, fin))
+  })
+  check('OFFICE-ARCH-001c — ninguna entidad operativa declara officeId',
+    conCampo.length === 0)
+}
+
+// OFFICE-ARCH-002 — permissions.ts no usa Office para resolver acceso.
+{
+  const perms = readSourceFile('src/lib/permissions.ts')
+  const cuerpoScoping = perms.slice(perms.indexOf('export function authorizedRouteIdsOf'))
+  check('OFFICE-ARCH-002 — el scoping por rutas no menciona officeId en su lógica',
+    !/officeId/.test(cuerpoScoping))
+  check('OFFICE-ARCH-002b — permissions.ts no importa nada de oficinas',
+    !perms.includes("from '@/lib/officeGrouping'") && !perms.includes("from '@/services/officeService'"))
+  // El módulo de agrupación jamás debe recibir una Oficina y devolver sus rutas.
+  const grouping = readSourceFile('src/lib/officeGrouping.ts')
+  check('OFFICE-ARCH-002c — officeGrouping no consulta la base de datos',
+    !grouping.includes("from '@/lib/db'"))
+}
+
 // ============================================================
 const atrCobA = { id: 'u-atrCobA', rol: 'cobrador' as UserRole, status: 'activo' as const }
 const atrCobB = { id: 'u-atrCobB', rol: 'cobrador' as UserRole, status: 'activo' as const }

@@ -27,6 +27,14 @@ export type Capability =
   | 'settings.access'
   | 'settings.edit'
   | 'capital.manage'
+  // Oficinas (CATÁLOGO de agrupación, NO acceso a datos)
+  // ADVERTENCIA: ninguna de estas capacidades concede acceso a las rutas de una
+  // Oficina. Gestionar el catálogo y poder ver los datos de sus rutas son cosas
+  // distintas: lo segundo sigue naciendo SOLO de `authorizedRouteIds`.
+  | 'office.create'
+  | 'office.edit'
+  | 'office.delete'
+  | 'office.changeStatus'
   // Rutas
   | 'route.create'
   | 'route.edit'
@@ -97,6 +105,7 @@ const SUPERADMIN_CAPS: Capability[] = [
   'platform.access', 'company.create', 'company.edit', 'company.suspend',
   'company.enterPanel', 'company.viewConsolidated',
   'settings.access', 'settings.edit', 'capital.manage',
+  'office.create', 'office.edit', 'office.delete', 'office.changeStatus',
   'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
   'route.viewAll', 'route.viewAssigned',
   'user.viewAll', 'user.create', 'user.edit', 'user.block', 'user.setRole',
@@ -119,6 +128,7 @@ const SUPERADMIN_CAPS: Capability[] = [
 const ADMIN_CAPS: Capability[] = [
   'company.enterPanel', 'company.viewConsolidated',
   'settings.access', 'capital.manage',
+  'office.create', 'office.edit', 'office.delete', 'office.changeStatus',
   'route.create', 'route.edit', 'route.block', 'route.assign', 'route.viewAssigned',
   'user.viewAll', 'user.create', 'user.edit', 'user.block', 'user.setRole',
   'user.grantCapabilities', 'user.resetPassword', 'password.changeOwn',

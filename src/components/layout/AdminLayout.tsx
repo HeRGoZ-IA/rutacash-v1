@@ -3,8 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, MapPin, CreditCard, Wallet,
   ArrowLeftRight, TrendingDown, Archive, BarChart3, CalendarRange,
-  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt, ArrowLeft
-} from 'lucide-react'
+  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt, ArrowLeft, Building2 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { cn } from '@/lib/utils'
@@ -25,6 +24,9 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { path: '/admin/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
+  // Oficinas = CATÁLOGO/agrupación. No sustituye a Rutas: las rutas siguen siendo
+  // accesibles directamente, sin obligar a pasar por una Oficina.
+  { path: '/admin/offices', label: 'Oficinas', icon: <Building2 className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
   { path: '/admin/routes', label: 'Rutas', icon: <MapPin className="w-4 h-4" /> },
   { path: '/admin/clients', label: 'Clientes', icon: <Users className="w-4 h-4" /> },
   { path: '/admin/active-sales', label: 'Ventas Activas', icon: <CreditCard className="w-4 h-4" /> },

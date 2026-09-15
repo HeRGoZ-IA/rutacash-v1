@@ -16,6 +16,10 @@
 //     enviara otra cosa.
 //   · Si SÍ se seleccionan Administradores, cada uno debe ser un admin ACTIVO del
 //     mismo tenant y gestionable por el actor.
+//   · La OFICINA también es OPCIONAL. Sin Oficina la ruta queda agrupada bajo
+//     "Sin Oficina", que es un estado válido y permanente; puede asignarse después
+//     con `moveRouteToOffice` (officeService). La Oficina AGRUPA: no concede acceso
+//     ni condiciona la creación.
 //
 // No hay migración de `Route`: el modelo nunca tuvo campo de Administrador; la
 // relación Admin↔Ruta vive exclusivamente en `User.authorizedRouteIds`.
@@ -30,7 +34,7 @@ import { getAssignedRouteIds } from '@/lib/roles'
 import { canManageUser, authorizedRouteIdsOf } from '@/lib/permissions'
 import { computeRouteAssignmentDiff } from '@/lib/routeAssignmentDiff'
 import { validateCobradorInvariant } from '@/lib/cobradorRules'
-import type { CapitalMovement, Route, User } from '@/models/types'
+import type { CapitalMovement, Office, Route, User } from '@/models/types'
 
 // ------------------------------------------------------------
 // Contrato de base de datos (mismo patrón que `PaymentDatabase`)
@@ -53,6 +57,8 @@ export interface RouteDatabase {
     where(index: string): { equals(key: string): { toArray(): Promise<User[]> } }
   }
   capitalMovements: { add(item: CapitalMovement): Promise<unknown> }
+  /** Solo LECTURA: validar que la Oficina indicada existe y es del mismo tenant. */
+  offices: { get(key: string): Promise<Office | undefined> }
   transaction<U>(mode: 'rw', tables: unknown, scope: () => PromiseLike<U>): Promise<U>
 }
 
@@ -68,6 +74,11 @@ export interface CreateRouteInput {
   montoMaximoPrestamo: number
   capitalInicial: number
   codigo: string
+  /**
+   * OFICINA a la que pertenece la ruta. OPCIONAL: sin ella la ruta queda
+   * "Sin Oficina" y se le puede asignar una más adelante.
+   */
+  officeId?: string
   /**
    * Administradores responsables. OPCIONAL: puede ir vacío y la ruta se crea igual.
    * Fuente única: se agrega la ruta a su `authorizedRouteIds`.
@@ -121,8 +132,17 @@ export async function createRouteWithAdmins(
     throw new AuthzError('Cobrador responsable inválido o inactivo.')
   }
 
+  // 3.b) OFICINA: opcional. Si se indica, debe existir y ser de la misma empresa
+  //      (aislamiento por tenant). Si no, la ruta nace "Sin Oficina".
+  if (input.officeId) {
+    const office = await database.offices.get(input.officeId)
+    if (!office || office.tenantId !== input.tenantId) {
+      throw new AuthzError('La Oficina indicada no existe o pertenece a otra empresa.')
+    }
+  }
+
   const route: Route = {
-    id: generateId(), tenantId: input.tenantId, officeId: '',
+    id: generateId(), tenantId: input.tenantId, officeId: input.officeId || undefined,
     nombre: input.nombre, codigo: input.codigo, ciudad: input.ciudad,
     tasaInteres: input.tasaInteres, tasaLibre: input.tasaLibre,
     montoMaximoPrestamo: input.montoMaximoPrestamo, capitalInicial: input.capitalInicial,
@@ -136,7 +156,7 @@ export async function createRouteWithAdmins(
     await database.routes.add(route)
     if (input.capitalInicial > 0) {
       await database.capitalMovements.add({
-        id: generateId(), tenantId: input.tenantId, officeId: '', routeId: route.id,
+        id: generateId(), tenantId: input.tenantId, routeId: route.id,
         tipo: 'ingresoCapital', valor: input.capitalInicial, descripcion: 'Capital inicial',
         fecha: nowISO().slice(0, 10), userId: actor.id, createdAt: nowISO(),
       })
@@ -172,8 +192,9 @@ export async function createRouteWithAdmins(
       ? `Ruta creada SIN ${faltantes.join(' ni ')} responsable: ${route.nombre}`
       : `Ruta creada: ${route.nombre}`,
     after: {
-      adminIds, cobradorId: input.cobradorId,
+      adminIds, cobradorId: input.cobradorId, officeId: input.officeId ?? null,
       sinAdministrador: adminIds.length === 0, sinCobrador: !cobrador,
+      sinOficina: !input.officeId,
     },
   })
   for (const id of adminIds) {
@@ -202,6 +223,8 @@ export interface UpdateRouteInput {
   tasaLibre: boolean
   montoMaximoPrestamo: number
   cobradorId?: string
+  /** Oficina de la ruta. `undefined` = "Sin Oficina" (estado válido). */
+  officeId?: string
   /** Membresía DESEADA (draft) entre los usuarios asignables. */
   assignedUserIds: string[]
   /** Universo de usuarios que el actor puede togglear (para acotar los retiros). */
@@ -219,13 +242,23 @@ export async function updateRouteWithAssignments(
   const prevRoute = await database.routes.get(input.routeId)
   if (!prevRoute) throw new AuthzError('Ruta no encontrada')
 
+  // La Oficina indicada debe existir y ser del mismo tenant (o ninguna).
+  if (input.officeId) {
+    const office = await database.offices.get(input.officeId)
+    if (!office || office.tenantId !== input.tenantId) {
+      throw new AuthzError('La Oficina indicada no existe o pertenece a otra empresa.')
+    }
+  }
+
   const beforeGeneral = {
     nombre: prevRoute.nombre, ciudad: prevRoute.ciudad ?? '', tasaInteres: prevRoute.tasaInteres,
-    tasaLibre: prevRoute.tasaLibre, montoMaximoPrestamo: prevRoute.montoMaximoPrestamo, cobradorId: prevRoute.cobradorId ?? '',
+    tasaLibre: prevRoute.tasaLibre, montoMaximoPrestamo: prevRoute.montoMaximoPrestamo,
+    cobradorId: prevRoute.cobradorId ?? '', officeId: prevRoute.officeId ?? '',
   }
   const afterGeneral = {
     nombre: input.nombre, ciudad: input.ciudad ?? '', tasaInteres: input.tasaInteres,
-    tasaLibre: input.tasaLibre, montoMaximoPrestamo: input.montoMaximoPrestamo, cobradorId: input.cobradorId ?? '',
+    tasaLibre: input.tasaLibre, montoMaximoPrestamo: input.montoMaximoPrestamo,
+    cobradorId: input.cobradorId ?? '', officeId: input.officeId ?? '',
   }
 
   let added: string[] = []
@@ -265,7 +298,11 @@ export async function updateRouteWithAssignments(
     await database.routes.update(input.routeId, {
       nombre: input.nombre, ciudad: input.ciudad, tasaInteres: input.tasaInteres,
       tasaLibre: input.tasaLibre, montoMaximoPrestamo: input.montoMaximoPrestamo,
-      cobradorId: input.cobradorId || undefined, updatedAt: nowISO(),
+      cobradorId: input.cobradorId || undefined,
+      // Cambiar de Oficina es UNA escritura: ninguna entidad hija se toca, porque
+      // todas derivan la Oficina por `routeId`.
+      officeId: input.officeId || undefined,
+      updatedAt: nowISO(),
     })
 
     // Relaciones User.authorizedRouteIds (agregar/retirar routeId sin duplicados).
