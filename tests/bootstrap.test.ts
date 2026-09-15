@@ -23,8 +23,15 @@ import {
   hasOperationalRoutes, canManageRole, canAccessRoute, can,
   filterAccessibleRoutes, filterByAccessibleRoute,
 } from '../src/lib/permissions'
-import { validateCobradorInvariant } from '../src/lib/cobradorRules'
-import { resolveRouteAdminIds } from '../src/services/routeService'
+import {
+  validateCobradorInvariant, cobradorRemovalBlock, routeCanOperateCollection,
+  routeAssignmentWarnings, ROUTE_NO_COBRADOR_LABEL,
+} from '../src/lib/cobradorRules'
+import {
+  resolveRouteAdminIds, createRouteWithAdmins, updateRouteWithAssignments,
+  type RouteDatabase, type RouteAuditSink,
+} from '../src/services/routeService'
+import { getRouteAssignmentsByRole, hasAnyAssignment } from '../src/lib/routeAssignments'
 import { MemoryDb } from './financial/harness'
 import type { Tenant, User } from '../src/models/types'
 import { readSource, containsLine, SRC } from './financial/sourceContract'
@@ -872,21 +879,26 @@ await spec('ONB-ROUTE-006', 'Primera ruta', 'crear la primera Ruta asigna la Rut
   assert(hasOperationalRoutes(adm), 'el Admin debe quedar operativo tras la asignación')
 })
 
-await spec('ONB-ROUTE-007', 'Primera ruta', 'NO se puede crear una Ruta sin Cobrador', async () => {
+await spec('ONB-ROUTE-007', 'Primera ruta', 'una Ruta SÍ puede crearse sin Cobrador (regla revisada)', async () => {
   const { db, su, admin } = await empresaSinRutas()
   void db
-  // Invariante intacto: sin cobradores asignados, el borrador se rechaza.
+  // REGLA REVISADA: sin cobradores asignados el borrador es VÁLIDO (la ruta queda
+  // "pendiente de asignación"). Antes se rechazaba con el código 'no-cobrador'.
   const sinCobrador = validateCobradorInvariant({
     routeTenantId: 't-1', assignedUserIds: [admin.id], cobradorId: undefined,
     userById: (id) => [admin, su].find(u => u.id === id),
   })
-  metric('sin cobrador asignado', sinCobrador.ok ? 'ACEPTADO — ERROR' : sinCobrador.code)
-  assert(!sinCobrador.ok && sinCobrador.code === 'no-cobrador', 'una ruta sin cobrador debe rechazarse')
+  metric('sin cobrador asignado', sinCobrador.ok ? 'ACEPTADO (pendiente de asignación)' : sinCobrador.code)
+  assert(sinCobrador.ok, 'una ruta sin cobrador ya NO debe rechazarse')
 
-  // Y el servicio lo exige explícitamente.
+  // Y el servicio ya no lo exige.
   const routeService = readSource('src/services/routeService.ts')
   metric('routeService exige cobrador', routeService.includes('Debes seleccionar un Cobrador responsable para la ruta.'))
-  assert(routeService.includes('Debes seleccionar un Cobrador responsable para la ruta.'), 'el servicio dejó de exigir cobrador')
+  assert(!routeService.includes('Debes seleccionar un Cobrador responsable para la ruta.'), 'el servicio sigue exigiendo cobrador')
+  // La pantalla tampoco lo exige.
+  const routesPage = readSource('src/pages/admin/RoutesPage.tsx')
+  metric('RoutesPage exige cobrador', routesPage.includes("toast.error('Debes seleccionar un Cobrador responsable para la ruta.')"))
+  assert(!routesPage.includes("toast.error('Debes seleccionar un Cobrador responsable para la ruta.')"), 'la pantalla sigue exigiendo cobrador')
   // REGLA REVISADA (revisión del socio): el Administrador ya NO es obligatorio.
   // Solo el Cobrador lo es. Las dos guardas antiguas deben haber desaparecido.
   metric('exige Administrador activo en la empresa', routeService.includes('primero debe existir al menos un Administrador activo'))
@@ -922,14 +934,16 @@ await spec('ONB-ROUTE-008', 'Primera ruta', 'no se crea ninguna ruta ficticia au
 await spec('ONB-ROUTE-009', 'Primera ruta', 'la asignación de la primera Ruta es transaccional', () => {
   const routeService = readSource('src/services/routeService.ts')
   const body = routeService.slice(routeService.indexOf('export async function createRouteWithAdmins'))
-  const iTx = body.indexOf('db.transaction')
-  const iRuta = body.indexOf('db.routes.add', iTx)
-  const iAdmin = body.indexOf('await db.users.update(id,', iTx)
-  const iCob = body.indexOf('await db.users.update(cobrador.id,', iTx)
+  // La base es INYECTABLE (`database`, con el `db` real por defecto), igual que en
+  // paymentService: por eso se busca `database.*` y no `db.*`.
+  const iTx = body.indexOf('database.transaction')
+  const iRuta = body.indexOf('database.routes.add', iTx)
+  const iAdmin = body.indexOf('await database.users.update(id,', iTx)
+  const iCob = body.indexOf('await database.users.update(cobrador.id,', iTx)
   metric('abre transacción', iTx > -1)
   metric('crea la ruta dentro', iRuta > iTx)
   metric('asigna al Admin dentro', iAdmin > iTx)
-  metric('asigna al Cobrador dentro', iCob > iTx)
+  metric('asigna al Cobrador dentro (cuando lo hay)', iCob > iTx)
   metric('mecanismo reutilizado', 'createRouteWithAdmins (no se duplicó lógica de asignación)')
   assert(iTx > -1, 'la creación de ruta dejó de ser transaccional')
   assert(iRuta > iTx && iAdmin > iTx && iCob > iTx, 'ruta y asignaciones deben ir en la MISMA transacción')
@@ -1099,6 +1113,270 @@ await spec('ONB-ROUTE-016', 'Primera ruta', 'el checklist de arranque no exige A
   assert(!checklist.includes('routeHasAdmin'), 'el checklist sigue exigiendo Administrador en la ruta')
   assert(checklist.includes('hasOperationalRoute'), 'falta la condición basada en la ruta con Cobrador')
   assert(!checklist.includes('Crea una ruta y asígnale un Administrador'), 'el texto sigue exigiendo Administrador')
+})
+
+// ############################################################
+// GRUPO — RUTA LIBRE: CREACIÓN SIN RESPONSABLES OBLIGATORIOS
+// ------------------------------------------------------------
+// REGLA DEFINITIVA (revisión del socio): la creación de una ruta NO depende de
+// tener Administrador ni Cobrador. 0 Admin + 0 Cobrador = ruta VÁLIDA, en estado
+// "creada, pendiente de asignación". Se muestran advertencias, nunca bloqueos.
+// Lo que sigue exigiendo Cobrador es la OPERACIÓN DE COBRO, no la existencia.
+//
+// Estos casos ejercitan el SERVICIO REAL (`createRouteWithAdmins` /
+// `updateRouteWithAssignments`) inyectando la base en memoria: no se simula el
+// efecto, se ejecuta la misma función que usa producción.
+// ############################################################
+const asRouteDb = (db: MemoryDb) => db as unknown as RouteDatabase
+
+/** Empresa con Super Admin, un Admin y un Cobrador, SIN ninguna ruta. */
+async function empresaConEquipo() {
+  const { db, su, admin } = await empresaSinRutas()
+  const cobrador = nuevoUsuario({ id: 'u-cob-1', nombre: 'Luis', email: 'luis@c.com' })
+  await db.users.add(cobrador)
+  const audits: string[] = []
+  const sink: RouteAuditSink = async (p) => { audits.push(`${p.action}:${p.descripcion}`) }
+  return { db, su, admin, cobrador, audits, sink }
+}
+
+/** Datos BÁSICOS de una ruta: lo único que la creación debería exigir. */
+const datosBasicos = (over: Record<string, unknown> = {}) => ({
+  tenantId: 't-1', nombre: 'Ruta Norte', ciudad: 'Barranquilla',
+  tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000,
+  capitalInicial: 0, codigo: 'RT-001', adminIds: [] as string[],
+  ...over,
+})
+
+await spec('ROUTE-FREE-001', 'Ruta libre', 'Super Admin crea una ruta SIN Administrador y SIN Cobrador', async () => {
+  const { db, su, audits, sink } = await empresaConEquipo()
+  const ruta = await createRouteWithAdmins(datosBasicos(), su, asRouteDb(db), sink)
+
+  const users = await db.users.toArray() as User[]
+  const asignados = users.filter(u => (u.authorizedRouteIds ?? []).includes(ruta.id))
+  metric('ruta creada', `${ruta.nombre} (${ruta.codigo})`)
+  metric('cobradorId', String(ruta.cobradorId))
+  metric('usuarios asignados', asignados.length)
+  metric('auditoría', audits.join(' | '))
+  assert((await db.routes.toArray()).length === 1, 'la ruta NO se creó sin responsables')
+  assert(ruta.cobradorId === undefined, 'no debe inventarse un Cobrador responsable')
+  assert(asignados.length === 0, 'no debe asignarse nadie que no se haya pedido')
+  assert(ruta.status === 'activa', 'la ruta debe nacer activa, no "inválida"')
+  assert(audits.some(a => a.includes('SIN Administrador ni Cobrador')), 'la auditoría no deja constancia del estado pendiente')
+})
+
+await spec('ROUTE-FREE-002', 'Ruta libre', 'Super Admin crea una ruta CON Administrador y SIN Cobrador', async () => {
+  const { db, su, admin, sink } = await empresaConEquipo()
+  const ruta = await createRouteWithAdmins(datosBasicos({ adminIds: [admin.id] }), su, asRouteDb(db), sink)
+
+  const adm = (await db.users.toArray() as User[]).find(u => u.id === admin.id)!
+  metric('cobradorId', String(ruta.cobradorId))
+  metric('admin asignado', JSON.stringify(adm.authorizedRouteIds))
+  metric('admin operativo', hasOperationalRoutes(adm))
+  assert(!!ruta && ruta.cobradorId === undefined, 'la ruta debe crearse sin Cobrador')
+  assert((adm.authorizedRouteIds ?? []).includes(ruta.id), 'el Administrador indicado debe quedar asignado')
+  assert(hasOperationalRoutes(adm), 'el Administrador asignado debe quedar operativo')
+})
+
+await spec('ROUTE-FREE-003', 'Ruta libre', 'Super Admin crea una ruta SIN Administrador y CON Cobrador', async () => {
+  const { db, su, cobrador, sink } = await empresaConEquipo()
+  const ruta = await createRouteWithAdmins(datosBasicos({ cobradorId: cobrador.id }), su, asRouteDb(db), sink)
+
+  const users = await db.users.toArray() as User[]
+  const cob = users.find(u => u.id === cobrador.id)!
+  const admins = users.filter(u => u.rol === 'admin' && (u.authorizedRouteIds ?? []).includes(ruta.id))
+  metric('cobrador responsable', String(ruta.cobradorId))
+  metric('cobrador asignado', JSON.stringify(cob.authorizedRouteIds))
+  metric('administradores en la ruta', admins.length)
+  assert(ruta.cobradorId === cobrador.id, 'el Cobrador elegido debe quedar como responsable')
+  assert((cob.authorizedRouteIds ?? []).includes(ruta.id), 'el Cobrador debe quedar asignado a la ruta')
+  assert(admins.length === 0, 'no debe asignarse ningún Administrador que nadie pidió')
+})
+
+await spec('ROUTE-FREE-004', 'Ruta libre', 'a una ruta sin responsables se le asigna el Cobrador DESPUÉS', async () => {
+  const { db, su, cobrador, sink } = await empresaConEquipo()
+  const ruta = await createRouteWithAdmins(datosBasicos(), su, asRouteDb(db), sink)
+  metric('operación de cobro al nacer', routeCanOperateCollection({ assignedCobradorIds: [], cobradorId: ruta.cobradorId }))
+
+  await updateRouteWithAssignments({
+    routeId: ruta.id, tenantId: 't-1', nombre: ruta.nombre, ciudad: ruta.ciudad,
+    tasaInteres: ruta.tasaInteres, tasaLibre: ruta.tasaLibre, montoMaximoPrestamo: ruta.montoMaximoPrestamo,
+    cobradorId: cobrador.id, assignedUserIds: [cobrador.id], assignableUserIds: [cobrador.id],
+  }, su, asRouteDb(db), sink)
+
+  const cob = (await db.users.toArray() as User[]).find(u => u.id === cobrador.id)!
+  const guardada = (await db.routes.toArray())[0]
+  metric('cobrador responsable tras asignar', guardada.cobradorId)
+  metric('cobrador asignado', JSON.stringify(cob.authorizedRouteIds))
+  metric('operación de cobro tras asignar', routeCanOperateCollection({ assignedCobradorIds: [cob.id], cobradorId: guardada.cobradorId }))
+  assert(guardada.cobradorId === cobrador.id, 'la asignación posterior de Cobrador no se persistió')
+  assert((cob.authorizedRouteIds ?? []).includes(ruta.id), 'el Cobrador debe quedar asignado a la ruta')
+  assert(hasOperationalRoutes(cob), 'el Cobrador asignado debe quedar operativo')
+})
+
+await spec('ROUTE-FREE-005', 'Ruta libre', 'a una ruta sin responsables se le asigna el Administrador DESPUÉS', async () => {
+  const { db, su, admin, sink } = await empresaConEquipo()
+  const ruta = await createRouteWithAdmins(datosBasicos(), su, asRouteDb(db), sink)
+  const antes = (await db.users.toArray() as User[]).find(u => u.id === admin.id)!
+  assert(!hasOperationalRoutes(antes), 'precondición: el Admin no debe tener acceso todavía')
+
+  await updateRouteWithAssignments({
+    routeId: ruta.id, tenantId: 't-1', nombre: ruta.nombre, ciudad: ruta.ciudad,
+    tasaInteres: ruta.tasaInteres, tasaLibre: ruta.tasaLibre, montoMaximoPrestamo: ruta.montoMaximoPrestamo,
+    cobradorId: undefined, assignedUserIds: [admin.id], assignableUserIds: [admin.id],
+  }, su, asRouteDb(db), sink)
+
+  const adm = (await db.users.toArray() as User[]).find(u => u.id === admin.id)!
+  const guardada = (await db.routes.toArray())[0]
+  metric('admin asignado', JSON.stringify(adm.authorizedRouteIds))
+  metric('sigue sin Cobrador', guardada.cobradorId === undefined)
+  metric('accede a la ruta', canAccessRoute(adm, ruta.id))
+  assert((adm.authorizedRouteIds ?? []).includes(ruta.id), 'la asignación posterior de Administrador no se persistió')
+  assert(canAccessRoute(adm, ruta.id), 'el Administrador asignado debe acceder a la ruta')
+  assert(guardada.cobradorId === undefined, 'asignar Administrador no debe inventar un Cobrador')
+})
+
+await spec('ROUTE-FREE-006', 'Ruta libre', 'la ruta sin Cobrador se identifica como "Sin Cobrador asignado"', async () => {
+  const { db, su, sink } = await empresaConEquipo()
+  const ruta = await createRouteWithAdmins(datosBasicos(), su, asRouteDb(db), sink)
+  const users = await db.users.toArray() as User[]
+  const cobradoresDeLaRuta = users.filter(u => u.rol === 'cobrador' && (u.authorizedRouteIds ?? []).includes(ruta.id))
+  const opera = routeCanOperateCollection({ assignedCobradorIds: cobradoresDeLaRuta.map(c => c.id), cobradorId: ruta.cobradorId })
+
+  metric('etiqueta', ROUTE_NO_COBRADOR_LABEL)
+  metric('opera cobros', opera)
+  assert(!opera, 'una ruta sin cobradores no debe declararse operativa para cobro')
+
+  // La etiqueta se muestra en la tarjeta de ruta y en el resumen de asignados.
+  const routesPage = readSource('src/pages/admin/RoutesPage.tsx')
+  const resumen = readSource('src/components/ui/RouteAssignedUsers.tsx')
+  metric('tarjeta de ruta muestra la etiqueta', routesPage.includes('ROUTE_NO_COBRADOR_LABEL'))
+  metric('resumen de asignados muestra la etiqueta', resumen.includes('ROUTE_NO_COBRADOR_LABEL'))
+  assert(routesPage.includes('ROUTE_NO_COBRADOR_LABEL'), 'la tarjeta de ruta no identifica la ruta sin Cobrador')
+  assert(resumen.includes('ROUTE_NO_COBRADOR_LABEL'), 'el resumen de asignados no identifica la ruta sin Cobrador')
+
+  // Y las advertencias son informativas, con las dos causas cuando faltan ambas.
+  const avisos = routeAssignmentWarnings({ hasAdmin: false, hasCobrador: false })
+  metric('advertencias combinadas', avisos.length)
+  assert(avisos.length === 2, 'deben mostrarse las dos advertencias cuando faltan ambos responsables')
+  assert(avisos.some(a => a.includes('sin Administrador')) && avisos.some(a => a.includes('sin Cobrador')), 'falta alguna advertencia')
+})
+
+await spec('ROUTE-FREE-007', 'Ruta libre', 'la ruta sin responsables no rompe listado ni dashboard', async () => {
+  const { db, su, sink } = await empresaConEquipo()
+  const ruta = await createRouteWithAdmins(datosBasicos(), su, asRouteDb(db), sink)
+  const users = await db.users.toArray() as User[]
+  const routes = await db.routes.toArray()
+
+  // Listado: el resumen de asignados resuelve sin lanzar y reporta "nadie asignado".
+  const asignaciones = getRouteAssignmentsByRole(users, ruta.id, 't-1')
+  metric('hasAnyAssignment', hasAnyAssignment(asignaciones))
+  metric('rutas visibles para el Super Admin', filterAccessibleRoutes(su, routes as never[]).length)
+  assert(!hasAnyAssignment(asignaciones), 'una ruta sin responsables debe reportar cero asignados, no fallar')
+  assert(filterAccessibleRoutes(su, routes as never[]).length === 1, 'la ruta debe listarse para el Super Admin')
+
+  // Dashboard: la ruta sin cobrador es un AVISO, no un error que la invalide.
+  const dashboard = readSource('src/pages/admin/DashboardPage.tsx')
+  const desde = dashboard.indexOf('const rutasSinCobrador')
+  const bloque = dashboard.slice(desde, desde + 500)
+  metric('severidad del aviso', bloque.includes("severity: 'warning'") ? 'warning' : 'error')
+  assert(bloque.includes("severity: 'warning'"), 'el dashboard sigue tratando la ruta sin Cobrador como error')
+
+  // El checklist de arranque da el paso por hecho en cuanto existe la ruta.
+  const checklist = readSource('src/components/ui/SetupChecklist.tsx')
+  metric('checklist: paso hecho con la ruta creada', checklist.includes('done: routes.length > 0'))
+  assert(checklist.includes('done: routes.length > 0'), 'el checklist sigue exigiendo Cobrador para dar la ruta por creada')
+})
+
+await spec('ROUTE-FREE-008', 'Ruta libre', 'un Administrador NO asignado sigue fail-closed sobre esa ruta', async () => {
+  const { db, su, admin, sink } = await empresaConEquipo()
+  const ruta = await createRouteWithAdmins(datosBasicos(), su, asRouteDb(db), sink)
+  const adm = (await db.users.toArray() as User[]).find(u => u.id === admin.id)!
+
+  metric('hasOperationalRoutes', hasOperationalRoutes(adm))
+  metric('canAccessRoute', canAccessRoute(adm, ruta.id))
+  metric('rutas visibles', filterAccessibleRoutes(adm, [{ id: ruta.id } as never]).length)
+  metric('ventas visibles', filterByAccessibleRoute(adm, [{ routeId: ruta.id } as never]).length)
+  metric('can(client.view)', can(adm, 'client.view', { routeId: ruta.id }))
+  assert(!hasOperationalRoutes(adm), 'una ruta sin responsables NO puede conceder acceso implícito')
+  assert(!canAccessRoute(adm, ruta.id), 'el fail-closed se rompió')
+  assert(filterAccessibleRoutes(adm, [{ id: ruta.id } as never]).length === 0, 'el Admin ve una ruta que no tiene asignada')
+  assert(filterByAccessibleRoute(adm, [{ routeId: ruta.id } as never]).length === 0, 'el Admin ve datos de una ruta ajena')
+  assert(!can(adm, 'client.view', { routeId: ruta.id }), 'el Admin no asignado consulta clientes de la ruta')
+})
+
+await spec('ROUTE-FREE-009', 'Ruta libre', 'un Cobrador NO asignado no puede operar la ruta', async () => {
+  const { db, su, cobrador, sink } = await empresaConEquipo()
+  const ruta = await createRouteWithAdmins(datosBasicos(), su, asRouteDb(db), sink)
+  const cob = (await db.users.toArray() as User[]).find(u => u.id === cobrador.id)!
+
+  metric('hasOperationalRoutes', hasOperationalRoutes(cob))
+  metric('canAccessRoute', canAccessRoute(cob, ruta.id))
+  metric('can(payment.register)', can(cob, 'payment.register', { routeId: ruta.id }))
+  metric('ventas visibles', filterByAccessibleRoute(cob, [{ routeId: ruta.id } as never]).length)
+  assert(!hasOperationalRoutes(cob), 'un Cobrador sin asignación NO debe tener acceso operativo')
+  assert(!canAccessRoute(cob, ruta.id), 'el Cobrador no asignado accede a la ruta')
+  assert(!can(cob, 'payment.register', { routeId: ruta.id }), 'el Cobrador no asignado registra pagos')
+  assert(filterByAccessibleRoute(cob, [{ routeId: ruta.id } as never]).length === 0, 'el Cobrador no asignado ve ventas de la ruta')
+})
+
+await spec('ROUTE-FREE-010', 'Ruta libre', 'el Super Admin SÍ puede gestionar la ruta sin responsables', async () => {
+  const { db, su, cobrador, sink } = await empresaConEquipo()
+  const ruta = await createRouteWithAdmins(datosBasicos(), su, asRouteDb(db), sink)
+
+  metric('canAccessRoute', canAccessRoute(su, ruta.id))
+  metric('can(route.edit)', can(su, 'route.edit', { routeId: ruta.id, tenantId: 't-1' }))
+  assert(canAccessRoute(su, ruta.id), 'el Super Admin debe acceder a la ruta sin responsables')
+  assert(can(su, 'route.edit', { routeId: ruta.id, tenantId: 't-1' }), 'el Super Admin debe poder editarla')
+
+  // Y la edita de verdad: renombrarla no exige designar responsables.
+  await updateRouteWithAssignments({
+    routeId: ruta.id, tenantId: 't-1', nombre: 'Ruta Norte (renombrada)', ciudad: ruta.ciudad,
+    tasaInteres: 25, tasaLibre: false, montoMaximoPrestamo: ruta.montoMaximoPrestamo,
+    cobradorId: undefined, assignedUserIds: [], assignableUserIds: [cobrador.id],
+  }, su, asRouteDb(db), sink)
+  const guardada = (await db.routes.toArray())[0]
+  metric('nombre tras editar', guardada.nombre)
+  metric('tasa tras editar', guardada.tasaInteres)
+  assert(guardada.nombre === 'Ruta Norte (renombrada)', 'no se pudo editar una ruta sin responsables')
+  assert(guardada.tasaInteres === 25, 'no se guardaron los datos generales')
+})
+
+await spec('ROUTE-FREE-011', 'Ruta libre', 'un Administrador que crea una ruta NO queda auto-bloqueado', async () => {
+  const { db, admin, sink } = await empresaConEquipo()
+  // El Admin crea la ruta SIN seleccionar responsables (ni a sí mismo).
+  const ruta = await createRouteWithAdmins(datosBasicos(), admin, asRouteDb(db), sink)
+
+  const adm = (await db.users.toArray() as User[]).find(u => u.id === admin.id)!
+  metric('adminIds enviados', '(vacío)')
+  metric('authorizedRouteIds tras crear', JSON.stringify(adm.authorizedRouteIds))
+  metric('hasOperationalRoutes', hasOperationalRoutes(adm))
+  metric('cobradorId de la ruta', String(ruta.cobradorId))
+  assert((adm.authorizedRouteIds ?? []).includes(ruta.id), 'el Administrador creador quedó fuera de su propia ruta')
+  assert(hasOperationalRoutes(adm), 'el Administrador creador quedó auto-bloqueado')
+  assert(ruta.cobradorId === undefined, 'la autoasignación del Admin no debe arrastrar un Cobrador')
+
+  // La autoasignación es una protección INTERNA del actor Admin, no una atadura del
+  // formulario: la pantalla no exige seleccionar Administrador.
+  const routesPage = readSource('src/pages/admin/RoutesPage.tsx')
+  metric('formulario exige Administrador', routesPage.includes('Selecciona al menos un Administrador responsable.'))
+  assert(!routesPage.includes('Selecciona al menos un Administrador responsable.'), 'el formulario sigue exigiendo Administrador')
+})
+
+await spec('ROUTE-FREE-012', 'Ruta libre', 'retirar al último Cobrador deja la ruta sin Cobrador, no la bloquea', () => {
+  // Regla DEROGADA: 'last-cobrador'. Ahora el retiro se permite y la ruta queda
+  // "pendiente de asignación"; solo se exige reemplazo cuando QUEDAN otros cobradores.
+  const ultimo = cobradorRemovalBlock({ isCobrador: true, assignedCobradorIds: ['c1'], responsibleId: 'c1', userId: 'c1' })
+  const responsableConOtros = cobradorRemovalBlock({ isCobrador: true, assignedCobradorIds: ['c1', 'c2'], responsibleId: 'c1', userId: 'c1' })
+  metric('retirar al último cobrador', ultimo === null ? 'PERMITIDO' : ultimo)
+  metric('retirar al responsable con otros', responsableConOtros)
+  assert(ultimo === null, 'retirar al último Cobrador sigue bloqueado')
+  assert(responsableConOtros === 'responsible-needs-replacement', 'con otros cobradores debe elegirse reemplazo')
+
+  // Y el borrador de la pantalla limpia el responsable al retirarlo.
+  const routesPage = readSource('src/pages/admin/RoutesPage.tsx')
+  const limpia = routesPage.includes('if (removing && id === f.cobradorId) cobradorId =')
+  metric('la pantalla limpia el responsable', limpia)
+  assert(limpia, 'la pantalla no limpia el Cobrador responsable retirado')
 })
 
 // ############################################################

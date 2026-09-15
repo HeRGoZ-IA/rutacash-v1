@@ -20,7 +20,7 @@ import { generateId } from '@/lib/utils'
 import { formatCurrency, nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { createRouteWithAdmins, updateRouteWithAssignments } from '@/services/routeService'
-import { cobradorRemovalBlock, validateCobradorInvariant, COBRADOR_REMOVAL_MESSAGE } from '@/lib/cobradorRules'
+import { cobradorRemovalBlock, validateCobradorInvariant, COBRADOR_REMOVAL_MESSAGE, routeAssignmentWarnings, routeCanOperateCollection, ROUTE_NO_COBRADOR_LABEL, ROUTE_NO_COBRADOR_OPERATION_MESSAGE } from '@/lib/cobradorRules'
 import { ASSIGNMENT_ROLE_ORDER } from '@/lib/routeAssignments'
 import { filterAccessibleRoutes, assignableRoles, canManageUser, ROLE_LABELS } from '@/lib/permissions'
 import { getAssignedRouteIds } from '@/lib/roles'
@@ -152,7 +152,11 @@ export default function RoutesPage() {
       const assigned = removing ? f.assignedUserIds.filter(x => x !== id) : [...f.assignedUserIds, id]
       // Al AGREGAR un cobrador cuando aún no hay responsable, se vuelve responsable
       // (un único cobrador asignado es, por definición, el responsable de la ruta).
-      const cobradorId = !removing && u?.rol === 'cobrador' && !f.cobradorId ? id : f.cobradorId
+      // Al RETIRAR al responsable (permitido si era el último), la ruta queda SIN
+      // Cobrador: estado válido, se limpia el responsable en vez de bloquear.
+      let cobradorId = f.cobradorId
+      if (!removing && u?.rol === 'cobrador' && !f.cobradorId) cobradorId = id
+      if (removing && id === f.cobradorId) cobradorId = ''
       return { ...f, assignedUserIds: assigned, cobradorId }
     })
   }
@@ -176,6 +180,22 @@ export default function RoutesPage() {
   const assignableToRoutes = allUsers.filter(isAssignable)
   // Cobradores válidos para responsable: activos del tenant (+ el actual si quedó inactivo).
   const responsibleOptions = cobradores.filter(c => c.status === 'activo' || c.id === form.cobradorId)
+  // Cobradores del BORRADOR (edición: membresía; creación: solo el responsable elegido).
+  const draftCobradorIds = form.assignedUserIds.filter(id => allUsers.find(u => u.id === id)?.rol === 'cobrador')
+  // ADVERTENCIAS, NO BLOQUEOS: la ruta se crea/guarda igual sin responsables. Solo se
+  // informa qué implica (sin Administrador nadie aprueba; sin Cobrador no hay cobro).
+  const assignmentWarnings = routeAssignmentWarnings({
+    hasAdmin: editing
+      ? form.assignedUserIds.some(id => allUsers.find(u => u.id === id)?.rol === 'admin')
+      : lockAdminToSelf || form.adminIds.length > 0,
+    hasCobrador: routeCanOperateCollection({ assignedCobradorIds: draftCobradorIds, cobradorId: form.cobradorId || undefined }),
+    mode: editing ? 'edit' : 'create',
+  })
+  /** ¿La ruta YA GUARDADA tiene operación de cobro? (fuente única + responsable legado). */
+  const routeHasCobrador = (route: Route) => routeCanOperateCollection({
+    assignedCobradorIds: allUsers.filter(u => u.rol === 'cobrador' && getAssignedRouteIds(u).includes(route.id)).map(u => u.id),
+    cobradorId: route.cobradorId,
+  })
   // Asignables agrupados por rol (orden Administrador→…→Secretario; alfabético dentro de cada rol).
   const assignableGroups = ASSIGNMENT_ROLE_ORDER
     .map(g => ({ ...g, list: assignableToRoutes.filter(u => u.rol === g.rol).sort((a, b) => a.nombre.localeCompare(b.nombre)) }))
@@ -184,23 +204,17 @@ export default function RoutesPage() {
   async function handleSave(force = false) {
     if (!user) return
     if (!form.nombre) { toast.error('El nombre de la ruta es obligatorio'); return }
-    // COBRADOR RESPONSABLE obligatorio (crear y editar): sin él no se guarda. NO se
-    // corrige silenciosamente; se informa el motivo. El servicio revalida (rollback).
-    if (!form.cobradorId) { toast.error('Debes seleccionar un Cobrador responsable para la ruta.'); return }
-    if (!editing) {
-      // Administrador responsable OPCIONAL: crear sin Administrador es válido y no
-      // se bloquea. Solo el Cobrador responsable (validado arriba) es obligatorio.
-    } else {
-      // Invariante completo de cobradores sobre el borrador (≥1 cobrador, responsable
-      // válido y asignado). La UI ya lo bloquea; esto evita guardar un estado inválido.
-      const inv = validateCobradorInvariant({
-        routeTenantId: tenantId,
-        assignedUserIds: form.assignedUserIds,
-        cobradorId: form.cobradorId || undefined,
-        userById: (id) => allUsers.find(u => u.id === id),
-      })
-      if (!inv.ok) { toast.error(inv.message); return }
-    }
+    // CREACIÓN LIBRE: ni el Administrador ni el Cobrador son obligatorios. Una ruta
+    // sin responsables se crea igual (queda "pendiente de asignación") y solo se
+    // muestran advertencias. Lo único que se valida es la COHERENCIA del responsable
+    // designado, si lo hay. El servicio revalida lo mismo (rollback).
+    const inv = validateCobradorInvariant({
+      routeTenantId: tenantId,
+      assignedUserIds: form.assignedUserIds,
+      cobradorId: form.cobradorId || undefined,
+      userById: (id) => allUsers.find(u => u.id === id),
+    })
+    if (editing && !inv.ok) { toast.error(inv.message); return }
     // Confirmación al Actualizar: no dejar una ruta ACTIVA sin ningún Administrador.
     if (editing && !force && editing.status === 'activa') {
       const draftAdmins = form.assignedUserIds.filter(id => allUsers.find(u => u.id === id)?.rol === 'admin')
@@ -297,7 +311,7 @@ export default function RoutesPage() {
           <h1 className="text-xl font-bold text-gray-900">Rutas</h1>
           <p className="text-sm text-gray-500 mt-0.5">{visibleRoutes.length} de {routes.length} ruta(s)</p>
         </div>
-        {/* Crear ruta NO depende de que exista un Administrador (solo del Cobrador). */}
+        {/* Crear ruta NO depende de responsables: ni Administrador ni Cobrador. */}
         <Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Nueva ruta</Button>
       </div>
 
@@ -308,7 +322,7 @@ export default function RoutesPage() {
           <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-sm text-amber-800 font-medium">Aún no hay Administradores en la empresa.</p>
-            <p className="text-xs text-amber-700 mt-0.5">Puedes crear la ruta igualmente (solo se exige un Cobrador) y asignarle un Administrador más adelante.</p>
+            <p className="text-xs text-amber-700 mt-0.5">Puedes crear la ruta igualmente (no se exige ningún responsable) y asignarle un Administrador más adelante.</p>
             <Button size="sm" variant="secondary" className="mt-2" onClick={() => navigate('/admin/users')} icon={<Users className="w-3.5 h-3.5" />}>Crear Administrador</Button>
           </div>
         </div>
@@ -338,9 +352,17 @@ export default function RoutesPage() {
                   </div>
                   <p className="text-xs text-gray-400 ml-6">{route.codigo}{route.ciudad ? ` · ${route.ciudad}` : ''}</p>
                 </div>
-                <Badge variant={route.status === 'activa' ? 'success' : 'gray'}>
-                  {route.status === 'activa' ? 'Activa' : 'Inactiva'}
-                </Badge>
+                <div className="flex flex-col items-end gap-1">
+                  <Badge variant={route.status === 'activa' ? 'success' : 'gray'}>
+                    {route.status === 'activa' ? 'Activa' : 'Inactiva'}
+                  </Badge>
+                  {/* Ruta válida pero PENDIENTE DE ASIGNACIÓN: existe, no opera cobros. */}
+                  {!routeHasCobrador(route) && (
+                    <span title={ROUTE_NO_COBRADOR_OPERATION_MESSAGE}>
+                      <Badge variant="warning">{ROUTE_NO_COBRADOR_LABEL}</Badge>
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Revisión socio 25-jun — Base actual vs Cartera en calle por ruta */}
@@ -444,11 +466,15 @@ export default function RoutesPage() {
             </div>
           )}
 
-          {/* Cobrador RESPONSABLE (obligatorio): al elegir uno no asignado, se agrega
-              automáticamente al borrador de asignados. Solo lista cobradores válidos. */}
-          <Select label="Cobrador responsable" required value={form.cobradorId} onChange={e => setResponsible(e.target.value)}
-            options={responsibleOptions.map(c => ({ value: c.id, label: c.status === 'activo' ? c.nombre : `${c.nombre} (inactivo)` }))}
-            placeholder="Selecciona un cobrador" />
+          {/* Cobrador RESPONSABLE: OPCIONAL. Se puede dejar vacío y asignarlo después;
+              al elegir uno no asignado, se agrega automáticamente al borrador de
+              asignados. Solo lista cobradores válidos. */}
+          <div>
+            <Select label="Cobrador responsable" value={form.cobradorId} onChange={e => setResponsible(e.target.value)}
+              options={responsibleOptions.map(c => ({ value: c.id, label: c.status === 'activo' ? c.nombre : `${c.nombre} (inactivo)` }))}
+              placeholder={`${ROUTE_NO_COBRADOR_LABEL} (opcional)`}
+              hint={responsibleOptions.length === 0 ? 'No hay Cobradores activos. La ruta se creará sin Cobrador; podrás asignarle uno más adelante.' : undefined} />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <Input label="Tasa de interés (%)" type="number" value={form.tasaInteres} onChange={e => setForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} min={0} max={100} />
             <MoneyInput label="Monto máx. préstamo" currency={currency} value={form.montoMaximoPrestamo} onValueChange={v => setForm(f => ({ ...f, montoMaximoPrestamo: v }))} />
@@ -498,6 +524,19 @@ export default function RoutesPage() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ADVERTENCIAS (no bloquean): responsables ausentes. El botón Crear /
+              Actualizar sigue habilitado; la ruta queda "pendiente de asignación". */}
+          {assignmentWarnings.length > 0 && (
+            <div className="flex items-start gap-3 p-3 rounded-xl bg-amber-50 border border-amber-200">
+              <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
+              <ul className="space-y-1">
+                {assignmentWarnings.map(w => (
+                  <li key={w} className="text-xs text-amber-800">{w}</li>
+                ))}
+              </ul>
             </div>
           )}
         </div>

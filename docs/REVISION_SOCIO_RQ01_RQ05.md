@@ -5,40 +5,89 @@ resolver las cinco solicitudes de la revisión.
 
 ---
 
-## RQ-01 — Creación de rutas sin Administrador obligatorio
+## RQ-01 — Creación de rutas sin responsables obligatorios
 
 **Qué se pidió**
-Al crear una ruta, el sistema exigía indicar un Administrador responsable. La
-solicitud fue que el Administrador dejara de ser obligatorio.
+Primero, que el Administrador dejara de ser obligatorio al crear una ruta. Después,
+en una segunda revisión, que **tampoco el Cobrador** lo fuera: una ruta debe poder
+crearse únicamente con sus datos básicos.
 
-**Qué se cambió**
-- Ya **no** se exige Administrador para crear una ruta. Tampoco es necesario que
-  exista un Administrador en la empresa: antes el botón "Nueva ruta" aparecía
-  bloqueado hasta crear uno.
-- El **Cobrador responsable sigue siendo obligatorio**. Una ruta sin cobrador
-  continúa siendo inválida: eso no cambió.
-- Cuando quien crea la ruta es un **Administrador**, queda asignado a ella de forma
-  automática. Esto es intencional: el acceso de un Administrador depende de las
-  rutas que tenga asignadas, así que si creara una ruta y quedara fuera, perdería
-  el acceso a la ruta que acaba de crear y necesitaría al Super Admin para
-  recuperarlo.
-- El **Super Admin** puede crear rutas con Administrador o sin él.
-- Un Administrador puede asignarse a una ruta **después**, desde el editor de la
-  ruta o desde Gestión de usuarios, como siempre.
+**Antes**
+La ruta estaba condicionada a tener responsables obligatorios. En la primera
+entrega se liberó el Administrador, pero el **Cobrador seguía siendo obligatorio**:
+si no se elegía uno, el formulario no dejaba guardar y el servicio rechazaba la
+creación. Además, una ruta que se quedara sin Cobrador se consideraba inválida y
+no se permitía retirar al último Cobrador asignado.
 
-**Cómo funciona ahora**
-Crear una ruta requiere: nombre y Cobrador responsable. El Administrador es
-opcional y aparece marcado como tal. Si la ruta queda sin Administrador, el sistema
-lo permite y lo deja registrado en la auditoría, con un aviso de que nadie podrá
-aprobar solicitudes de venta de esa ruta hasta que se le asigne uno.
+**Ahora**
+Una ruta puede crearse **sin Administrador y sin Cobrador**. Los cuatro casos son
+válidos:
 
-También se actualizaron los textos de acompañamiento: la lista de "Primeros pasos"
-del panel ya no deja el paso de la ruta como pendiente solo porque falte un
-Administrador — ahora una ruta cuenta como lista cuando tiene su Cobrador.
+| Administrador | Cobrador | Crear ruta |
+|---|---|---|
+| ninguno | ninguno | permitido |
+| ninguno | 1 | permitido |
+| 1 | ninguno | permitido |
+| 1 | 1 o más | permitido |
 
-**Lo que NO cambió**
-Un Administrador sin rutas asignadas sigue sin ver clientes, ventas, caja ni
-reportes. Esa protección se mantiene intacta y está verificada con pruebas.
+Crear una ruta requiere únicamente sus **datos básicos** (nombre y parámetros).
+Administrador y Cobrador son **opcionales** y pueden asignarse en cualquier momento
+posterior, desde el editor de la ruta o desde Gestión de usuarios.
+
+**Advertencias, no bloqueos**
+Si faltan responsables, el sistema **avisa pero no impide guardar**. El botón
+"Crear" nunca se deshabilita, no se lanza ningún error y no hace falta crear
+usuarios previamente:
+
+- Sin Administrador: *"Esta ruta se creará sin Administrador asignado. Podrás
+  asignarlo posteriormente."*
+- Sin Cobrador: *"Esta ruta se creará sin Cobrador asignado. No tendrá operación de
+  cobro hasta que se asigne uno."*
+- Si faltan los dos, se muestran ambas advertencias juntas.
+
+La ausencia de responsables se trata como **"ruta creada, pendiente de asignación"**,
+nunca como "ruta inválida". Queda constancia en la auditoría del estado con el que
+nació la ruta.
+
+**Cómo se identifica una ruta sin Cobrador**
+Se marca de forma explícita como **"Sin Cobrador asignado"** en la tarjeta de la
+ruta y en el resumen de usuarios asignados. En el panel aparece como un **aviso**
+(no como un error): la ruta existe y se gestiona con normalidad.
+
+**Existir no es operar**
+La regla es: **la ruta puede existir, pero la operación de cobro requiere Cobrador.**
+Una ruta sin Cobrador no queda habilitada para cobrar; eso no impide crearla,
+editarla, ni asignarle responsables después. En cuanto se le asigna un Cobrador,
+queda operativa.
+
+**Asignación posterior**
+Asignar el Cobrador o el Administrador más tarde funciona igual que siempre, con la
+misma fuente única de asignaciones. También se puede retirar al último Cobrador de
+una ruta: la ruta queda "Sin Cobrador asignado" en vez de bloquear la operación. Lo
+único que sigue pidiéndose es elegir un reemplazo cuando se retira al Cobrador
+responsable **y quedan otros cobradores** en la ruta (para no adivinar quién
+responde por el dinero).
+
+**El Administrador que crea una ruta**
+Cuando quien crea la ruta es un **Administrador**, queda asignado a ella de forma
+automática. Es una **protección interna**, no una atadura del formulario: el acceso
+de un Administrador depende de las rutas que tenga asignadas, así que si creara una
+ruta y quedara fuera, perdería el acceso a la ruta que acaba de crear. El formulario
+**no** le exige seleccionar Administrador. El **Super Admin** no se autoasigna:
+puede crear la ruta sin asignarse ni asignar a nadie.
+
+**Lo que NO cambió — scoping y permisos**
+Permitir una ruta sin usuarios **no relaja ningún permiso**:
+
+- Un Administrador **no asignado** no ve esa ruta ni sus clientes, ventas, caja o
+  reportes (fail-closed intacto).
+- Un Cobrador **no asignado** no puede operarla ni registrar pagos en ella.
+- El **Super Admin** sí puede gestionarla y editarla.
+- Se mantienen el aislamiento por empresa (tenant), `authorizedRouteIds` y el
+  scoping por ruta.
+
+Todo esto está cubierto por pruebas ejecutables (grupo **ROUTE-FREE**, que ejercita
+el servicio real de creación de rutas, no una simulación).
 
 ---
 

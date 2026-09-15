@@ -45,9 +45,10 @@ export function SetupChecklist() {
       const activeAdmins = users.filter(u => u.rol === 'admin' && u.status === 'activo')
       const otherOps = users.some(u => ['supervisor', 'cobrador', 'socio', 'secretario'].includes(u.rol))
 
-      // RUTA OPERATIVA = ruta con al menos un COBRADOR asignado. El Administrador es
-      // OPCIONAL desde la revisión del socio, así que una ruta sin Administrador NO
-      // deja este paso incompleto: lo que hace operativa a una ruta es su cobrador.
+      // CREAR LA RUTA no depende de responsables: el paso se da por hecho en cuanto
+      // existe una ruta. Administrador y Cobrador son OPCIONALES al crearla.
+      // RUTA OPERATIVA = ruta con al menos un COBRADOR asignado: no condiciona el
+      // paso, solo el texto de ayuda (sin Cobrador la ruta existe pero no cobra).
       const cobradores = users.filter(u => u.rol === 'cobrador')
       const hasOperationalRoute = routes.some(r =>
         cobradores.some(c => authorizedRouteIdsOf(c).includes(r.id)) || !!r.cobradorId
@@ -55,7 +56,14 @@ export function SetupChecklist() {
 
       setSteps([
         { id: 'admin', label: 'Crea al menos un Administrador', description: 'Responsable de rutas y operación', path: '/admin/users', cta: 'Crear Administrador', done: activeAdmins.length > 0 },
-        { id: 'ruta', label: 'Crea una ruta con su Cobrador', description: 'Zona de cobranza con responsable de cobro', path: '/admin/routes', cta: 'Crear Ruta', done: hasOperationalRoute },
+        {
+          id: 'ruta',
+          label: 'Crea una ruta',
+          description: routes.length > 0 && !hasOperationalRoute
+            ? 'Ruta creada sin Cobrador: asígnale uno para habilitar el cobro'
+            : 'Zona de cobranza (el Cobrador puede asignarse después)',
+          path: '/admin/routes', cta: 'Crear Ruta', done: routes.length > 0,
+        },
         { id: 'usuario', label: 'Agrega Supervisor / Cobrador / Socio / Secretario', description: 'Equipo operativo de la empresa', path: '/admin/users', cta: 'Crear Usuario', done: otherOps },
         { id: 'cliente', label: 'Registra tu primer Cliente', description: 'Persona o negocio al que prestarás', path: '/admin/clients', cta: 'Crear Cliente', done: clients > 0 },
         { id: 'venta', label: 'Crea tu primera Venta', description: 'Préstamo con cuotas y tasa de interés', path: '/admin/active-sales', cta: 'Crear Venta', done: sales > 0 },

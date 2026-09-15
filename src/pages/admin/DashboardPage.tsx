@@ -130,9 +130,11 @@ export default function DashboardPage() {
       if (pagosPendientesSync > 0) {
         alertas.push({ tipo: 'sync', mensaje: `${pagosPendientesSync} pagos pendientes de sincronizar`, severity: 'warning' })
       }
+      // Ruta sin Cobrador = estado VÁLIDO (pendiente de asignación), no un error:
+      // la ruta existe, simplemente no tiene operación de cobro todavía.
       const rutasSinCobrador = routes.filter(r => !r.cobradorId && r.status === 'activa')
       if (rutasSinCobrador.length > 0) {
-        alertas.push({ tipo: 'ruta', mensaje: `${rutasSinCobrador.length} ruta(s) sin cobrador asignado`, severity: 'error' })
+        alertas.push({ tipo: 'ruta', mensaje: `${rutasSinCobrador.length} ruta(s) sin Cobrador asignado: sin operación de cobro hasta asignarlo`, severity: 'warning' })
       }
       if (rutasConMoraSet.size > 0) {
         alertas.push({ tipo: 'mora', mensaje: `${rutasConMoraSet.size} ruta(s) tienen clientes en mora`, severity: 'warning' })

@@ -406,9 +406,11 @@ const admB = mkAssign('admB', 'admin', 'Beto Admin', ['rA'])
 const byId = (list: User[]) => (id: string) => list.find(u => u.id === id)
 
 // --- Retiro inmediato (cobradorRemovalBlock) ---
-// CASO 1 — único cobrador asignado: no se puede retirar.
-check('COB CASO 1 — último cobrador bloqueado',
-  cobradorRemovalBlock({ isCobrador: true, assignedCobradorIds: ['cobA'], responsibleId: 'cobA', userId: 'cobA' }) === 'last-cobrador')
+// CASO 1 — REGLA REVISADA: el último cobrador SÍ se puede retirar. La ruta queda
+// "Sin Cobrador asignado" (estado válido, pendiente de asignación). Antes se
+// bloqueaba con 'last-cobrador'; esa regla ya no aplica.
+check('COB CASO 1 — retirar al último cobrador ya NO se bloquea',
+  cobradorRemovalBlock({ isCobrador: true, assignedCobradorIds: ['cobA'], responsibleId: 'cobA', userId: 'cobA' }) === null)
 // CASO 2 — cobrador NO responsable con otros: retiro permitido.
 check('COB CASO 2 — cobrador no responsable se puede retirar',
   cobradorRemovalBlock({ isCobrador: true, assignedCobradorIds: ['cobA', 'cobB'], responsibleId: 'cobA', userId: 'cobB' }) === null)
@@ -422,16 +424,18 @@ check('COB CASO 4 — tras cambiar responsable, el anterior se puede retirar',
 check('COB — retirar un no-cobrador nunca bloquea',
   cobradorRemovalBlock({ isCobrador: false, assignedCobradorIds: ['cobA'], responsibleId: 'cobA', userId: 'admB' }) === null)
 
-// --- Invariante al guardar (validateCobradorInvariant) ---
-// CASO 5 — estado manipulado con CERO cobradores: rechazado.
-check('COB CASO 5 — cero cobradores rechazado',
-  validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: ['admB'], cobradorId: undefined, userById: byId([admB]) }).ok === false)
+// --- Coherencia al guardar (validateCobradorInvariant) ---
+// CASO 5 — REGLA REVISADA: cero cobradores es un estado VÁLIDO (ruta pendiente de
+// asignación). Antes se rechazaba con 'no-cobrador'.
+check('COB CASO 5 — cero cobradores ACEPTADO (ruta pendiente de asignación)',
+  validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: ['admB'], cobradorId: undefined, userById: byId([admB]) }).ok === true)
 // CASO 6 — responsable FUERA de los asignados: rechazado con código específico.
 const r6 = validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: ['cobA'], cobradorId: 'cobB', userById: byId([cobA, cobB]) })
 check('COB CASO 6 — responsable fuera de asignados rechazado', r6.ok === false && (r6 as { code: string }).code === 'responsible-not-assigned')
-// CASO 7 — crear/guardar sin cobrador: rechazado (mismo invariante que aplica el servicio).
-check('COB CASO 7 — sin cobrador rechazado',
-  validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: [], cobradorId: undefined, userById: byId([]) }).ok === false)
+// CASO 7 — REGLA REVISADA: crear/guardar SIN NADIE es válido (misma validación que
+// aplica el servicio). Antes se rechazaba: una ruta vacía ya no es "inválida".
+check('COB CASO 7 — ruta sin ningún usuario ACEPTADA',
+  validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: [], cobradorId: undefined, userById: byId([]) }).ok === true)
 // Responsable inactivo → inválido.
 const cobInact = mkAssign('cx', 'cobrador', 'Inact', ['rA']); cobInact.status = 'inactivo'
 check('COB — responsable inactivo inválido',
@@ -440,6 +444,9 @@ check('COB — responsable inactivo inválido',
 const cobOtro = mkAssign('cy', 'cobrador', 'Otro', ['rA'], 't2')
 check('COB — responsable de otro tenant inválido',
   validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: ['cy'], cobradorId: 'cy', userById: byId([cobOtro]) }).ok === false)
+// Responsable designado pero SIN asignar → inválido (incoherencia, no ausencia).
+check('COB — responsable designado fuera de asignados inválido',
+  validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: [], cobradorId: 'cobA', userById: byId([cobA]) }).ok === false)
 // Responsable que no es cobrador (rol admin) → inválido.
 check('COB — responsable con rol no-cobrador inválido',
   validateCobradorInvariant({ routeTenantId: 't1', assignedUserIds: ['admB'], cobradorId: 'admB', userById: byId([admB]) }).ok === false)

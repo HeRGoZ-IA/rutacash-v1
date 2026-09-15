@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Users } from 'lucide-react'
 import { getRouteAssignmentsByRole, ASSIGNMENT_ROLE_ORDER, hasAnyAssignment } from '@/lib/routeAssignments'
+import { ROUTE_NO_COBRADOR_LABEL, routeCanOperateCollection } from '@/lib/cobradorRules'
 import type { User } from '@/models/types'
 
 /**
@@ -8,8 +9,11 @@ import type { User } from '@/models/types'
  * Fuente única: `authorizedRouteIds` (via getRouteAssignmentsByRole). Agrupa por rol en
  * el orden Administrador → Socio → Supervisor → Cobrador → Secretario; alfabético dentro
  * de cada rol; máximo 2 por rol con "+N más" y un "Ver todos" para expandir. Marca al
- * cobrador RESPONSABLE (route.cobradorId). Nunca muestra "Sin cobrador" si hay otros
- * usuarios asignados.
+ * cobrador RESPONSABLE (route.cobradorId).
+ *
+ * Una ruta SIN Cobrador es un estado VÁLIDO (pendiente de asignación), pero se
+ * identifica siempre de forma explícita: "Sin Cobrador asignado", tanto cuando no
+ * hay nadie asignado como cuando hay otros roles pero ningún Cobrador.
  */
 export function RouteAssignedUsers({ users, routeId, tenantId, responsibleCobradorId }: {
   users: User[]
@@ -21,11 +25,18 @@ export function RouteAssignedUsers({ users, routeId, tenantId, responsibleCobrad
   const a = getRouteAssignmentsByRole(users, routeId, tenantId)
   const groups = ASSIGNMENT_ROLE_ORDER.map(g => ({ ...g, list: a[g.key] })).filter(g => g.list.length > 0)
   const hasOverflow = groups.some(g => g.list.length > 2)
+  const sinCobrador = !routeCanOperateCollection({
+    assignedCobradorIds: a.cobradores.map(c => c.id),
+    cobradorId: responsibleCobradorId,
+  })
 
   if (!hasAnyAssignment(a)) {
     return (
-      <div className="flex items-center gap-2 text-xs text-gray-400">
-        <Users className="w-3.5 h-3.5" /> Sin usuarios asignados
+      <div className="space-y-1">
+        <div className="flex items-center gap-2 text-xs text-gray-400">
+          <Users className="w-3.5 h-3.5" /> Sin usuarios asignados
+        </div>
+        <p className="text-xs font-medium text-amber-600">{ROUTE_NO_COBRADOR_LABEL} · pendiente de asignación</p>
       </div>
     )
   }
@@ -62,6 +73,9 @@ export function RouteAssignedUsers({ users, routeId, tenantId, responsibleCobrad
             </div>
           )
         })}
+        {sinCobrador && (
+          <p className="text-xs font-medium text-amber-600">{ROUTE_NO_COBRADOR_LABEL} · pendiente de asignación</p>
+        )}
       </div>
     </div>
   )
