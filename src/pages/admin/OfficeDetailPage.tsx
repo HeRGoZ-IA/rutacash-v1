@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   Building2, MapPin, Users, AlertTriangle, ChevronRight, Plus, Edit,
-  ArrowRightLeft, BarChart3, CalendarRange, UserCog, CreditCard, Archive,
+  ArrowRightLeft, BarChart3, CalendarRange, UserCog, CreditCard, Archive, Download, History,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -16,6 +16,10 @@ import { useTenant } from '@/hooks/useTenant'
 import { can, ROLE_LABELS, canManageUser } from '@/lib/permissions'
 import { formatCurrency } from '@/lib/formatters'
 import { NO_OFFICE_LABEL } from '@/lib/officeGrouping'
+import { officeSummaryCsvRows, officeRoutesCsvRows } from '@/lib/officeExecutive'
+import { officeFileTag } from '@/components/ui/OfficeSelector'
+import { downloadCSV } from '@/lib/utils'
+import { formatDateTime } from '@/lib/formatters'
 import { ROUTE_STATE_LABEL, applyOfficeRouteSelection, officeStateSummary } from '@/lib/officeManagement'
 import {
   getOfficeManagementSummary, moveRouteToOffice, setUserOfficeRoutes,
@@ -89,7 +93,32 @@ export default function OfficeDetailPage() {
   }
 
   const { office, accessibleOfficeRoutes, facts, kpis, alerts, scope, relatedUsers, assignableUsers } = data
-  const { routeOps, ops, finance, opsAlerts: alertasOperativas, fecha } = data
+  const { routeOps, ops, finance, opsAlerts: alertasOperativas, fecha, activity } = data
+
+  /**
+   * EXPORTACIÓN: el CSV contiene EXACTAMENTE lo que hay en pantalla — las rutas
+   * visibles y nada más — y declara el alcance cuando es parcial, para que nadie
+   * lea un consolidado parcial como si fuera el total de la Oficina.
+   */
+  function exportarResumen() {
+    downloadCSV(
+      officeSummaryCsvRows({
+        office, fecha, visibles: scope.visibles, totales: scope.totales,
+        totals: ops, alertas: alerts.length + alertasOperativas.length,
+      }),
+      `oficina_${officeFileTag([office], office.id)}_resumen_${fecha}.csv`,
+    )
+    toast.success('Resumen exportado')
+  }
+
+  function exportarRutas() {
+    if (routeOps.length === 0) { toast.warning('No hay rutas visibles que exportar'); return }
+    downloadCSV(
+      officeRoutesCsvRows({ office, fecha, facts: routeOps }),
+      `oficina_${officeFileTag([office], office.id)}_rutas_${fecha}.csv`,
+    )
+    toast.success('Comparativo de rutas exportado')
+  }
   const officeRouteIds = accessibleOfficeRoutes.map(r => r.id)
   const puedeEditarRutas = can(user, 'route.edit', { tenantId })
   const puedeCrearRutas = can(user, 'route.create', { tenantId })
@@ -202,6 +231,14 @@ export default function OfficeDetailPage() {
             {puedeAsignar && accessibleOfficeRoutes.length > 0 && (
               <Button size="sm" variant="secondary" icon={<UserCog className="w-3.5 h-3.5" />} onClick={() => openAssign()}>
                 Gestionar asignaciones
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" icon={<Download className="w-3.5 h-3.5" />} onClick={exportarResumen}>
+              Exportar
+            </Button>
+            {routeOps.length > 0 && (
+              <Button size="sm" variant="ghost" icon={<Download className="w-3.5 h-3.5" />} onClick={exportarRutas}>
+                Exportar rutas
               </Button>
             )}
           </div>
@@ -505,14 +542,38 @@ export default function OfficeDetailPage() {
         )}
       </div>
 
-      {/* Espacio para que la barra anclada no tape la última sección. */}
-      <div className="h-16" aria-hidden />
+      {/* ACTIVIDAD RECIENTE — derivada de la auditoría existente y recortada a las
+          rutas accesibles de esta Oficina. No hay tabla nueva. */}
+      {activity.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+            <History className="w-4 h-4 text-gray-400" /> Actividad reciente
+          </h2>
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-card divide-y divide-gray-50">
+            {activity.map(a => (
+              <div key={a.id} className="flex items-start justify-between gap-3 px-4 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm text-gray-700 truncate">{a.descripcion}</p>
+                  <p className="text-xs text-gray-400">
+                    {a.routeNombre ?? '—'}{a.actorNombre ? ` · ${a.actorNombre}` : ''}
+                  </p>
+                </div>
+                <span className="text-xs text-gray-400 flex-shrink-0">{formatDateTime(a.createdAt)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-      {/* BARRA DE ACCIONES ANCLADA. Cada destino lleva `?officeId=` y abre ya
-          filtrado por esta Oficina, sobre las rutas autorizadas del usuario.
-          Se mantiene accesible durante todo el scroll; en pantallas estrechas la
-          fila se desplaza horizontalmente en vez de romperse. */}
-      <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-gray-200 bg-white/95 backdrop-blur shadow-[0_-2px_12px_rgba(0,0,0,0.06)]">
+      {/* BARRA DE ACCIONES ANCLADA al borde inferior del ÁREA DE CONTENIDO.
+          `sticky` dentro del <main> del AdminLayout —que es el contenedor de
+          scroll— en vez de `fixed` al viewport: así queda acotada al ancho real
+          del contenido y NO invade el sidebar ni tapa el avatar o "Cerrar sesión".
+          Sin desplazamientos hardcodeados: si el sidebar cambia de ancho o se
+          colapsa en móvil, la barra lo sigue sola.
+          Los márgenes negativos cancelan el padding de la página para que llegue
+          de borde a borde del área principal. */}
+      <div className="sticky bottom-0 z-20 -mx-4 md:-mx-6 border-t border-gray-200 bg-white/95 backdrop-blur shadow-[0_-2px_12px_rgba(0,0,0,0.06)]">
         <div className="px-4 md:px-6 py-2.5 overflow-x-auto">
           <div className="flex items-center gap-2 w-max md:w-auto">
             <Button variant="ghost" size="sm" icon={<Users className="w-3.5 h-3.5" />}

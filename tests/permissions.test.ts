@@ -37,6 +37,11 @@ import {
   type RouteCashLike,
 } from '../src/lib/officeOperations'
 import {
+  officeComparison, companyOfficesSummary, officeSummaryCsvRows, officeRoutesCsvRows,
+  officeActivity, alcanceCsv, type ActivityRowLike,
+} from '../src/lib/officeExecutive'
+import type { RouteOpsFacts } from '../src/lib/officeOperations'
+import {
   routeOperationalState, officeKpis, officeStateSummary, officeScope, officeAlerts,
   relatedUsersOfOffice, applyOfficeRouteSelection, officeRoutesOf, unassignedRoutesOf,
   type OfficeRouteFacts,
@@ -1466,21 +1471,88 @@ function rutaDeEjemplo(routeId: string, nombre: string) {
   return { routeId, nombre, sales: ventas, installmentsBySale: cuotas, today: OPS_HOY }
 }
 
-// --- OFFICE-OPS-001/002/003/004: cobranza del día ---
+// ============================================================
+// SEMÁNTICA DE "A COBRAR HOY" — los dos casos canónicos
+// ------------------------------------------------------------
+// Definición única de RutaCash, alineada con `quickAmounts` (que propone cobrar el
+// SALDO de la cuota en curso) y con `applyPaymentToInstallments` (que aplica los
+// pagos a la primera cuota no pagada, de modo que un adelanto de ayer reduce el
+// saldo de hoy):
+//
+//     pendienteHoy = Σ saldo ACTUAL de las cuotas que vencen hoy
+//     aCobrarHoy   = pendienteHoy + recaudadoHoy   ← meta al empezar la jornada
+//
+// Reconstruir la meta sumando lo ya cobrado evita que cobrar encoja la meta.
+// ============================================================
+{
+  // CASO 1 — cuota de hoy 100, sin abonos previos, se cobran 60 hoy.
+  // El pago YA redujo el saldo de la cuota (así funciona el motor real).
+  const caso1 = routeOpsFacts({
+    routeId: 'r-c1', nombre: 'Caso 1',
+    sales: [mkVentaOps('s1', 'r-c1', 'c1')],
+    installmentsBySale: new Map([['s1', [
+      { id: 'i1', saleId: 's1', numero: 1, fechaVencimiento: OPS_HOY, valor: 100, pagado: 60, saldo: 40, status: 'parcial', diasMora: 0 },
+    ]]]),
+    payments: [mkPagoOps('p1', 'r-c1', OPS_HOY, 60)],
+    expenses: [], today: OPS_HOY,
+  })
+  check('OFFICE-COLLECTION-SEMANTICS-001a — meta = pendiente + recaudado = 100',
+    caso1.aCobrarHoy === 100)
+  check('OFFICE-COLLECTION-SEMANTICS-001b — pendiente hoy es el saldo que aún falta',
+    caso1.pendienteHoy === 40)
+  check('OFFICE-COLLECTION-SEMANTICS-001c — cumplimiento 60 %',
+    caso1.recaudadoHoy === 60 && caso1.cumplimiento === 60)
+
+  // CASO 2 — cuota de hoy 100 con 40 abonados AYER; hoy se cobran los 60 que
+  // faltaban. La deuda del día queda saldada: es un 100 %, no un 60 %.
+  const caso2 = routeOpsFacts({
+    routeId: 'r-c2', nombre: 'Caso 2',
+    sales: [mkVentaOps('s2', 'r-c2', 'c2')],
+    installmentsBySale: new Map([['s2', [
+      { id: 'i2', saleId: 's2', numero: 1, fechaVencimiento: OPS_HOY, valor: 100, pagado: 100, saldo: 0, status: 'pagada', diasMora: 0 },
+    ]]]),
+    payments: [mkPagoOps('p2', 'r-c2', OPS_HOY, 60)],   // los 40 de ayer no son de hoy
+    expenses: [], today: OPS_HOY,
+  })
+  check('OFFICE-COLLECTION-SEMANTICS-002a — la meta descuenta el adelanto de ayer',
+    caso2.aCobrarHoy === 60)
+  check('OFFICE-COLLECTION-SEMANTICS-002b — no queda nada pendiente del día',
+    caso2.pendienteHoy === 0)
+  check('OFFICE-COLLECTION-SEMANTICS-002c — cumplimiento 100 %: la deuda del día quedó saldada',
+    caso2.cumplimiento === 100)
+
+  // CASO 3 — nada cobrado: la meta es el saldo íntegro y el cumplimiento 0 %.
+  const caso3 = routeOpsFacts({
+    routeId: 'r-c3', nombre: 'Caso 3',
+    sales: [mkVentaOps('s3', 'r-c3', 'c3')],
+    installmentsBySale: new Map([['s3', [
+      { id: 'i3', saleId: 's3', numero: 1, fechaVencimiento: OPS_HOY, valor: 100, pagado: 0, saldo: 100, status: 'pendiente', diasMora: 0 },
+    ]]]),
+    payments: [], expenses: [], today: OPS_HOY,
+  })
+  check('OFFICE-COLLECTION-SEMANTICS-003 — sin cobrar, meta íntegra y cumplimiento 0 %',
+    caso3.aCobrarHoy === 100 && caso3.pendienteHoy === 100 && caso3.cumplimiento === 0)
+
+  // La meta NO se encoge al cobrar: es el fallo que traía la Entrega 3.
+  check('OFFICE-COLLECTION-SEMANTICS-004 — cobrar no reduce la meta del día',
+    caso1.aCobrarHoy === caso3.aCobrarHoy)
+}
+
+// --- OFFICE-OPS-001/002/003/004: cobranza del día sobre el escenario base ---
 {
   const base = rutaDeEjemplo('r-1', 'Centro')
   const f = routeOpsFacts({ ...base, payments: [mkPagoOps('p-1', 'r-1', OPS_HOY, 50)], expenses: [] })
 
-  check('OFFICE-OPS-001 — "a cobrar hoy" suma solo las cuotas que vencen hoy con saldo',
-    f.aCobrarHoy === 80)   // i-1 (40) + i-3? no: i-3 vence ayer. i-1 40 + i-4 40 = 80
+  check('OFFICE-OPS-001 — el pendiente del día es el saldo de las cuotas que vencen hoy',
+    f.pendienteHoy === 80)   // i-1 (40) + i-4 (40); i-3 vence ayer
   check('OFFICE-OPS-001b — las ventas NO desembolsadas no entran en la cobranza',
-    !f.aCobrarHoy.toString().includes('120') && f.ventasActivas === 2)
+    f.ventasActivas === 2)
   check('OFFICE-OPS-002 — "recaudado hoy" toma los pagos vigentes de hoy',
     f.recaudadoHoy === 50)
-  check('OFFICE-OPS-003 — pendiente hoy = a cobrar − recaudado, nunca negativo',
-    f.pendienteHoy === 30)
-  check('OFFICE-OPS-004 — el cumplimiento es el porcentaje recaudado de la cuota del día',
-    f.cumplimiento === 63)   // 50/80 = 62.5 → 63
+  check('OFFICE-OPS-003 — la meta reconstruye lo que había al empezar el día',
+    f.aCobrarHoy === 130)   // 80 pendiente + 50 ya cobrado
+  check('OFFICE-OPS-004 — el cumplimiento es recaudado / meta',
+    f.cumplimiento === 38)   // 50/130 = 38,4 → 38
 }
 
 // El recaudo excluye pagos REVERTIDOS y sus contrapartidas.
@@ -1555,11 +1627,13 @@ check('OFFICE-OPS-004e — cumplimiento exacto',
   check('OFFICE-DASH-ADV-001 — el comparativo por ruta produce un hecho por ruta',
     fCentro.routeId === 'r-1' && fNorte.routeId === 'r-2' && fCentro.nombre === 'Centro')
   check('OFFICE-OPS-007 — los totales suman exactamente las rutas recibidas',
-    totales.aCobrarHoy === 160 && totales.recaudadoHoy === 120 && totales.carteraActiva === 300)
+    totales.aCobrarHoy === 280 && totales.recaudadoHoy === 120 && totales.carteraActiva === 300)
   check('OFFICE-OPS-007b — el cumplimiento del total se recalcula, no se promedia',
-    totales.cumplimiento === 75)
+    totales.cumplimiento === 43)   // 120/280
+  check('OFFICE-OPS-007b2 — el pendiente total suma los pendientes reales de cada ruta',
+    totales.pendienteHoy === 160)
   check('OFFICE-OPS-007c — una ruta NO incluida no puede aparecer en los totales',
-    officeOpsTotals([fCentro]).aCobrarHoy === 80)
+    officeOpsTotals([fCentro]).aCobrarHoy === 120)
   check('OFFICE-OPS-007d — una Oficina sin rutas visibles da totales en cero',
     officeOpsTotals([]).aCobrarHoy === 0 && officeOpsTotals([]).cumplimiento === 0)
 }
@@ -1692,16 +1766,254 @@ check('OFFICE-OPS-004e — cumplimiento exacto',
     !detalle.includes('Editar sus rutas de esta oficina') &&
     detalle.includes('onClick={() => openAssign(u.id)}>Editar</Button>'))
 
-  check('OFFICE-ACTIONBAR-001 — la barra de acciones está anclada al borde inferior',
-    detalle.includes('fixed bottom-0 left-0 right-0'))
-  check('OFFICE-ACTIONBAR-001b — se reserva espacio para que no tape contenido',
-    detalle.includes('<div className="h-16" aria-hidden />'))
+  check('OFFICE-ACTIONBAR-001 — la barra de acciones queda anclada al borde inferior',
+    detalle.includes('sticky bottom-0'))
   check('OFFICE-ACTIONBAR-001c — en pantallas estrechas se desplaza en vez de romperse',
     detalle.includes('overflow-x-auto'))
+
+  // --- Corrección: la barra NO puede invadir el sidebar ---
+  check('OFFICE-ACTIONBAR-003 — pertenece al contenedor principal, no al viewport',
+    detalle.includes('sticky bottom-0') && !detalle.includes('fixed bottom-0'))
+  check('OFFICE-ACTIONBAR-004 — no ocupa el ancho del viewport ignorando el sidebar',
+    !detalle.includes('left-0 right-0'))
+  // El <main> del layout es el contenedor de scroll: `sticky` se ancla a él.
+  const layout = readSourceFile('src/components/layout/AdminLayout.tsx')
+  check('OFFICE-ACTIONBAR-005a — el layout ofrece un contenedor de scroll propio',
+    layout.includes('<main className="flex-1 overflow-y-auto">'))
+  // Se inspecciona SOLO el bloque de la barra: en el resto de la pantalla hay
+  // sangrías legítimas (`ml-6`, `ml-7`) que no tienen que ver con el sidebar.
+  const barra = detalle.slice(detalle.indexOf('BARRA DE ACCIONES ANCLADA'),
+                              detalle.indexOf('Mover ruta de Oficina'))
+  check('OFFICE-ACTIONBAR-005b — la barra no usa desplazamientos hardcodeados del sidebar',
+    !/left-\[?\d/.test(barra) && !/ml-\d+/.test(barra) &&
+    !barra.includes('w-56') && !barra.includes('w-64') && !barra.includes('calc('))
+  check('OFFICE-ACTIONBAR-006a — la barra llega de borde a borde del área de contenido',
+    detalle.includes('sticky bottom-0 z-20 -mx-4 md:-mx-6'))
+  check('OFFICE-ACTIONBAR-006b — en responsive todos los accesos siguen alcanzables',
+    detalle.includes('overflow-x-auto') && detalle.includes('w-max md:w-auto'))
   for (const destino of ['clients', 'active-sales', 'cashbox', 'reports', 'weekly-settlement', 'routes']) {
     check(`OFFICE-ACTIONBAR-002 — la barra incluye ${destino} con contexto de Oficina`,
       detalle.includes(`/admin/${destino}?officeId=\${office.id}`))
   }
+}
+
+
+// ============================================================
+// ENTREGA 4 — VISIÓN EJECUTIVA, ROLES Y EXPORTACIONES
+// ------------------------------------------------------------
+// El comparativo entre Oficinas y el resumen de empresa se construyen SOLO con
+// los hechos de las rutas accesibles. El conteo de rutas totales sirve para
+// declarar el alcance parcial; es un número, no un acceso.
+// ============================================================
+const EXEC_HOY = '2026-09-16'
+
+const mkFact = (routeId: string, nombre: string, over: Partial<RouteOpsFacts> = {}): RouteOpsFacts => ({
+  routeId, nombre, clientesActivos: 1, ventasActivas: 1, parcelasPendientes: 1,
+  aCobrarHoy: 100, recaudadoHoy: 50, pendienteHoy: 50, cumplimiento: 50,
+  carteraActiva: 1000, carteraVencida: 0, clientesConAtraso: 0,
+  gastosHoy: 10, desembolsosPendientes: 0, ...over,
+})
+
+const OFI_A = { id: 'of-a', tenantId: 't1', nombre: 'Leticia', codigo: 'LET', status: 'activa' as const, createdAt: '', updatedAt: '' }
+const OFI_B = { id: 'of-b', tenantId: 't1', nombre: 'Río', status: 'inactiva' as const, createdAt: '', updatedAt: '' }
+
+// Empresa: Leticia 3 rutas, Río 1, una Sin Oficina. El usuario ve 2 de Leticia,
+// la de Río y la suelta. NO ve la tercera de Leticia.
+const EXEC_TODAS = [
+  { id: 'r-a1', officeId: 'of-a' }, { id: 'r-a2', officeId: 'of-a' }, { id: 'r-a3', officeId: 'of-a' },
+  { id: 'r-b1', officeId: 'of-b' },
+  { id: 'r-x', officeId: undefined },
+]
+const EXEC_ACCESIBLES = EXEC_TODAS.filter(r => r.id !== 'r-a3')
+const EXEC_FACTS = [
+  mkFact('r-a1', 'Centro'), mkFact('r-a2', 'Mercado', { carteraVencida: 200, clientesConAtraso: 2 }),
+  mkFact('r-b1', 'Puerto', { recaudadoHoy: 100, pendienteHoy: 0, aCobrarHoy: 100, cumplimiento: 100 }),
+  mkFact('r-x', 'Antigua'),
+]
+
+const EXEC_FILAS = officeComparison({
+  facts: EXEC_FACTS, accessibleRoutes: EXEC_ACCESIBLES, allRoutes: EXEC_TODAS,
+  offices: [OFI_A, OFI_B], alertCountByOffice: { 'of-a': 3 },
+})
+
+// --- OFFICE-COMPARE-001/002 ---
+check('OFFICE-COMPARE-001 — el comparativo suma solo las rutas accesibles',
+  EXEC_FILAS.find(f => f.officeId === 'of-a')!.rutasVisibles === 2)
+check('OFFICE-COMPARE-001b — la fila declara el alcance parcial',
+  EXEC_FILAS.find(f => f.officeId === 'of-a')!.parcial &&
+  EXEC_FILAS.find(f => f.officeId === 'of-a')!.alcance === '2/3 rutas')   // Leticia tiene 3 en la empresa
+check('OFFICE-COMPARE-001c — una Oficina con alcance completo no se marca parcial',
+  !EXEC_FILAS.find(f => f.officeId === 'of-b')!.parcial)
+check('OFFICE-COMPARE-001d — los totales de la fila agregan sus rutas visibles',
+  EXEC_FILAS.find(f => f.officeId === 'of-a')!.totals.carteraActiva === 2000 &&
+  EXEC_FILAS.find(f => f.officeId === 'of-a')!.totals.carteraVencida === 200)
+check('OFFICE-COMPARE-001e — el estado de la Oficina viaja a la fila',
+  EXEC_FILAS.find(f => f.officeId === 'of-b')!.status === 'inactiva')
+
+{
+  const empresa = companyOfficesSummary(EXEC_FILAS)
+  const sumaFilas = EXEC_FILAS.reduce((n, f) => n + f.totals.carteraActiva, 0)
+  check('OFFICE-COMPARE-002 — el total cuadra exactamente con la suma de las filas',
+    empresa.totals.carteraActiva === sumaFilas && sumaFilas === 4000)
+  check('OFFICE-COMPARE-002b — el cumplimiento del total se recalcula sobre la meta agregada',
+    empresa.totals.cumplimiento === 63)   // 250/400
+  check('OFFICE-COMPARE-002c — el conteo de rutas visibles cuadra',
+    empresa.rutasVisibles === 4 && empresa.rutasSinOficina === 1)
+  check('OFFICE-COMPARE-002d — las alertas se agregan',
+    empresa.alertas === 3)
+}
+
+// --- OFFICE-EXEC-001/002/003 ---
+check('OFFICE-EXEC-001 — el resumen de empresa agrupa las Oficinas visibles',
+  companyOfficesSummary(EXEC_FILAS).oficinasVisibles === 2)
+check('OFFICE-EXEC-002 — "Sin Oficina" aparece como grupo derivado, al final',
+  EXEC_FILAS[EXEC_FILAS.length - 1].officeId === NO_OFFICE &&
+  EXEC_FILAS[EXEC_FILAS.length - 1].nombre === NO_OFFICE_LABEL)
+check('OFFICE-EXEC-002b — no se inventa un registro de Oficina para ese grupo',
+  !EXEC_FILAS.some(f => f.officeId === NO_OFFICE && f.status !== null))
+check('OFFICE-EXEC-003 — la ruta no autorizada no aporta a ninguna fila',
+  !EXEC_FILAS.some(f => f.totals.carteraActiva > 2000) &&
+  EXEC_FILAS.reduce((n, f) => n + f.rutasVisibles, 0) === 4)
+check('OFFICE-EXEC-003b — el orden es alfabético con "Sin Oficina" al final',
+  EXEC_FILAS.map(f => f.nombre).join(',') === 'Leticia,Río,Sin Oficina')
+
+// Una Oficina sin rutas visibles no genera fila: no se insinúa lo que no se ve.
+check('OFFICE-EXEC-004 — una Oficina sin rutas accesibles no aparece en el comparativo',
+  !officeComparison({
+    facts: [mkFact('r-a1', 'Centro')],
+    accessibleRoutes: [{ id: 'r-a1', officeId: 'of-a' }],
+    allRoutes: EXEC_TODAS, offices: [OFI_A, OFI_B],
+  }).some(f => f.officeId === 'of-b'))
+
+// --- OFFICE-EXPORT-001/002 ---
+{
+  const resumen = officeSummaryCsvRows({
+    office: OFI_A, fecha: EXEC_HOY, visibles: 2, totales: 4,
+    totals: EXEC_FILAS.find(f => f.officeId === 'of-a')!.totals, alertas: 3,
+  })
+  check('OFFICE-EXPORT-001 — el CSV de resumen trae una fila con las cifras visibles',
+    resumen.length === 1 && resumen[0]['Rutas visibles'] === 2 && resumen[0].Cartera === 2000)
+  check('OFFICE-EXPORT-002 — el CSV declara el alcance parcial',
+    resumen[0].Alcance === '2 de 4 rutas autorizadas')
+  check('OFFICE-EXPORT-002b — con alcance completo lo dice explícitamente',
+    (officeSummaryCsvRows({
+      office: OFI_A, fecha: EXEC_HOY, visibles: 4, totales: 4,
+      totals: EXEC_FILAS[0].totals, alertas: 0,
+    })[0].Alcance as string).includes('alcance completo'))
+
+  const rutas = officeRoutesCsvRows({ office: OFI_A, fecha: EXEC_HOY, facts: EXEC_FACTS.slice(0, 2) })
+  check('OFFICE-EXPORT-001b — el CSV de rutas trae una fila por ruta visible',
+    rutas.length === 2 && rutas[0].Ruta === 'Centro')
+  check('OFFICE-EXPORT-001c — el CSV de rutas nunca incluye una ruta no visible',
+    !rutas.some(r => r.Ruta === 'Norte'))
+  check('OFFICE-EXPORT-003 — el texto de alcance es explícito en ambos casos',
+    alcanceCsv(2, 4) === '2 de 4 rutas autorizadas' && alcanceCsv(4, 4).includes('completo'))
+}
+
+// --- OFFICE-ACTIVITY-001/002 ---
+{
+  const filas: ActivityRowLike[] = [
+    { id: 'a1', createdAt: '2026-09-16T10:00:00.000Z', action: 'REGISTER_PAYMENT', descripcion: 'Pago registrado por 50', routeId: 'r-a1', userId: 'u-1' },
+    { id: 'a2', createdAt: '2026-09-16T11:00:00.000Z', action: 'CREATE_SALE', descripcion: 'Venta creada', routeId: 'r-a3', userId: 'u-1' },
+    { id: 'a3', createdAt: '2026-09-16T09:00:00.000Z', action: 'CREATE_EXPENSE', descripcion: 'Gasto registrado', routeId: 'r-a2', userId: 'u-2' },
+    { id: 'a4', createdAt: '2026-09-16T12:00:00.000Z', action: 'UPDATE_TENANT', descripcion: 'Empresa actualizada', userId: 'u-1' },
+  ]
+  const vista = officeActivity({
+    rows: filas, officeRouteIds: ['r-a1', 'r-a2'],
+    routeNameById: new Map([['r-a1', 'Centro'], ['r-a2', 'Mercado']]),
+    userNameById: new Map([['u-1', 'Ana'], ['u-2', 'Luis']]),
+  })
+
+  check('OFFICE-ACTIVITY-001 — la actividad de una ruta autorizada aparece',
+    vista.some(v => v.id === 'a1') && vista.some(v => v.id === 'a3'))
+  check('OFFICE-ACTIVITY-002 — la actividad de una ruta NO autorizada no aparece',
+    !vista.some(v => v.id === 'a2'))
+  check('OFFICE-ACTIVITY-002b — una acción sin ruta no se atribuye a la Oficina',
+    !vista.some(v => v.id === 'a4'))
+  check('OFFICE-ACTIVITY-003 — se ordena de más reciente a más antigua',
+    vista[0].id === 'a1' && vista[1].id === 'a3')
+  check('OFFICE-ACTIVITY-004 — se resuelven los nombres de ruta y actor',
+    vista[0].routeNombre === 'Centro' && vista[0].actorNombre === 'Ana')
+  check('OFFICE-ACTIVITY-005 — se respeta el límite',
+    officeActivity({ rows: filas, officeRouteIds: ['r-a1', 'r-a2'], limit: 1 }).length === 1)
+  check('OFFICE-ACTIVITY-006 — sin rutas accesibles no hay actividad',
+    officeActivity({ rows: filas, officeRouteIds: [] }).length === 0)
+}
+
+// --- Roles: Supervisor, Secretario y Socio ---
+{
+  const RUTAS_ROL = [
+    mkRutaE2('r-L1', OFI_LET, 'Centro'), mkRutaE2('r-L2', OFI_LET, 'Norte'),
+    mkRutaE2('r-R1', OFI_RIO, 'Puerto'),
+  ]
+  const sup = mkUser('supervisor', { id: 'u-sup', authorizedRouteIds: ['r-L1', 'r-R1'] })
+  const suyas = filterAccessibleRoutes(sup, RUTAS_ROL)
+  const grupos = groupRoutesByOffice(suyas, [mkOficinaE2(OFI_LET, 'Leticia'), mkOficinaE2(OFI_RIO, 'Río')])
+
+  check('OFFICE-ROLE-SUP-001 — el Supervisor multi-Oficina ve solo sus rutas',
+    suyas.length === 2 && !suyas.some(r => r.id === 'r-L2'))
+  check('OFFICE-ROLE-SUP-001b — agrupadas por Oficina, sin las hermanas no autorizadas',
+    grupos.length === 2 && grupos.every(g => g.routes.length === 1))
+  check('OFFICE-ROLE-SUP-002 — el Supervisor no gestiona el catálogo de Oficinas',
+    !can(sup, 'office.create') && !can(sup, 'office.edit') && !can(sup, 'office.delete'))
+  check('OFFICE-ROLE-SUP-003 — y sigue sin acceder a la ruta hermana',
+    !canAccessRoute(sup, 'r-L2'))
+
+  const sec = mkUser('secretario', { id: 'u-sec', authorizedRouteIds: ['r-L1'] })
+  const clientesSec = [{ id: 'c1', routeId: 'r-L1' }, { id: 'c2', routeId: 'r-L2' }]
+  const visiblesSec = visibleRouteIds({ accessibleRoutes: filterAccessibleRoutes(sec, RUTAS_ROL), officeId: OFI_LET })
+  check('OFFICE-ROLE-SEC-001 — el Secretario filtra clientes por Oficina y Ruta',
+    filterRowsByVisibleRoutes(clientesSec, visiblesSec).map(c => c.id).join() === 'c1')
+  check('OFFICE-ROLE-SEC-002 — sus correcciones no escapan del alcance',
+    can(sec, 'payment.correct', { routeId: 'r-L1' }) && !can(sec, 'payment.correct', { routeId: 'r-L2' }))
+  check('OFFICE-ROLE-SEC-003 — el Secretario tampoco gestiona Oficinas',
+    !can(sec, 'office.create') && !can(sec, 'office.changeStatus'))
+
+  const socio = mkUser('socio', { id: 'u-socio', authorizedRouteIds: ['r-L1'] })
+  const suyasSocio = filterAccessibleRoutes(socio, RUTAS_ROL)
+  const filasSocio = officeComparison({
+    facts: [mkFact('r-L1', 'Centro')],
+    accessibleRoutes: suyasSocio.map(r => ({ id: r.id, officeId: r.officeId })),
+    allRoutes: RUTAS_ROL.map(r => ({ id: r.id, officeId: r.officeId })),
+    offices: [mkOficinaE2(OFI_LET, 'Leticia'), mkOficinaE2(OFI_RIO, 'Río')],
+  })
+  check('OFFICE-ROLE-PARTNER-001 — el Socio ve el consolidado de SUS rutas por Oficina',
+    filasSocio.length === 1 && filasSocio[0].nombre === 'Leticia' && filasSocio[0].rutasVisibles === 1)
+  check('OFFICE-ROLE-PARTNER-002 — con alcance parcial no aparenta el total de la Oficina',
+    filasSocio[0].parcial && filasSocio[0].alcance === '1/2 rutas')
+  check('OFFICE-ROLE-PARTNER-003 — el Socio es de consulta: no gestiona Oficinas ni rutas',
+    !can(socio, 'office.create') && !can(socio, 'route.edit', { routeId: 'r-L1' }))
+}
+
+// --- Contrato de código de la Entrega 4 ---
+{
+  const exec = readSourceFile('src/lib/officeExecutive.ts')
+  check('OFFICE-EXEC-ARCH-001 — el módulo ejecutivo es puro (no importa la base)',
+    !exec.includes("from '@/lib/db'"))
+  const svc = readSourceFile('src/services/officeService.ts')
+  check('OFFICE-EXEC-ARCH-002 — el resumen ejecutivo recorta por usuario antes de agrupar',
+    svc.includes('const accessible = filterAccessibleRoutes(user, allRoutes)') &&
+    svc.indexOf('const accessible = filterAccessibleRoutes(user, allRoutes)') < svc.indexOf('officeComparison({'))
+  check('OFFICE-EXEC-ARCH-003 — la actividad se recorta por las rutas accesibles',
+    svc.includes('officeRouteIds: [...routeIds]'))
+
+  const panel = readSourceFile('src/components/ui/OfficesExecutivePanel.tsx')
+  check('OFFICE-EXEC-ARCH-004 — el panel ejecutivo permite entrar a cada Oficina',
+    panel.includes('/admin/offices/${officeId}') && panel.includes("'/admin/offices/sin-oficina'"))
+  const dash = readSourceFile('src/pages/admin/DashboardPage.tsx')
+  check('OFFICE-EXEC-ARCH-005 — el Dashboard de empresa monta el panel de Oficinas',
+    dash.includes('<OfficesExecutivePanel />'))
+
+  // Roles: las pantallas usan el filtro compartido, no una implementación propia.
+  for (const [rol, archivo] of [
+    ['Secretario', 'src/pages/secretario/SecretarioClientsPage.tsx'],
+    ['Socio', 'src/pages/socio/SocioClientsPage.tsx'],
+  ] as const) {
+    check(`OFFICE-ROLE-ARCH — ${rol} usa el filtro Oficina → Ruta compartido`,
+      readSourceFile(archivo).includes('useOfficeRouteFilter()'))
+  }
+  check('OFFICE-ROLE-ARCH-b — el panel del Socio agrupa su consolidado por Oficina',
+    readSourceFile('src/pages/socio/SocioDashboardPage.tsx').includes('groupRoutesByOffice(routes, allOffices)'))
 }
 
 // ============================================================

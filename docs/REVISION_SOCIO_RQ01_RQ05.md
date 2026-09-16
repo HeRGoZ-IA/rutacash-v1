@@ -310,20 +310,20 @@ dentro de sus rutas autorizadas.
 
 | Concepto | Antes | Después |
 |---|---|---|
-| Pruebas automáticas | 353 | **803** |
-| Resultado | PASS | **803 PASS · 0 FAIL** |
+| Pruebas automáticas | 353 | **869** |
+| Resultado | PASS | **869 PASS · 0 FAIL** |
 | Verificación de tipos (aplicación) | Sin errores | **Sin errores** |
 | Verificación de tipos (pruebas) | Sin errores | **Sin errores** |
 | Build de producción | OK | **OK** |
 
-Detalle de las 803 pruebas:
+Detalle de las 869 pruebas:
 
-- **461** de permisos, reglas de acceso, agrupación por oficina y modelo de
+- **521** de permisos, reglas de acceso, agrupación por oficina y modelo de
   múltiples Administradores
 - **151** financieras (pagos, caja, liquidación, reportes, historial, caja del
   cobrador, registro de abonos de la App Cobrador)
 - **155** de arranque, instalación, gestión de oficinas y administradores
-- **36** de migración de base de datos y recorridos completos (smoke), ejecutadas
+- **42** de migración de base de datos y recorridos completos (smoke), ejecutadas
   sobre el motor real de la base, no simulado
 
 Entre las pruebas nuevas se verifica que: una ruta puede crearse **sin

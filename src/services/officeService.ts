@@ -25,7 +25,7 @@ import { assertCan, AuthzError } from '@/services/authz'
 import { canManageUser } from '@/lib/permissions'
 import { setCobradorRoutes } from '@/services/routeAssignment'
 import { applyOfficeRouteSelection } from '@/lib/officeManagement'
-import type { Client, Expense, Installment, Office, Payment, Route, Sale, User } from '@/models/types'
+import type { AuditLog, Client, Expense, Installment, Office, Payment, Route, Sale, User } from '@/models/types'
 
 // ------------------------------------------------------------
 // Contrato de base de datos
@@ -58,6 +58,8 @@ export interface OfficeSummaryDatabase extends OfficeDatabase {
   payments: { where(index: string): { equals(key: string): { toArray(): Promise<Payment[]> } } }
   installments: { toArray(): Promise<Installment[]> }
   expenses: { where(index: string): { equals(key: string): { toArray(): Promise<Expense[]> } } }
+  /** Solo LECTURA: actividad reciente. Se reutiliza la auditoría existente. */
+  auditLogs: { where(index: string): { equals(key: string): { toArray(): Promise<AuditLog[]> } } }
 }
 
 export type OfficeAuditSink = (params: Parameters<typeof logAction>[0]) => Promise<void>
@@ -406,6 +408,7 @@ import {
   type OfficeFinanceTotals, type OfficeOpsTotals, type OpsAlert, type RouteOpsFacts,
 } from '@/lib/officeOperations'
 import { routeAdmins } from '@/lib/routeAdmins'
+import { officeActivity, type OfficeActivityEntry } from '@/lib/officeExecutive'
 import { getCashboxSummary } from '@/services/cashboxEngine'
 import { today as hoyISO } from '@/lib/formatters'
 import { can } from '@/lib/permissions'
@@ -437,6 +440,8 @@ export interface OfficeManagementSummary {
   opsAlerts: OpsAlert[]
   /** Fecha contable usada para los cálculos del día. */
   fecha: string
+  /** Actividad reciente, recortada a las rutas accesibles de la Oficina. */
+  activity: OfficeActivityEntry[]
 }
 
 export async function getOfficeManagementSummary(
@@ -550,11 +555,31 @@ export async function getOfficeManagementSummary(
     .filter(r => routeAdmins(users, r.id, tenantId).length === 0)
     .map(r => ({ routeId: r.id, nombre: r.nombre }))
 
+  // ---- ACTIVIDAD RECIENTE -------------------------------------------------
+  // Se parte de las rutas ACCESIBLES de la Oficina y se filtra la auditoría por
+  // ellas. Un registro de una ruta no autorizada no aparece aunque pertenezca a
+  // esta Oficina.
+  let activity: OfficeActivityEntry[] = []
+  try {
+    const logs = await database.auditLogs.where('tenantId').equals(tenantId).toArray()
+    activity = officeActivity({
+      rows: logs,
+      officeRouteIds: [...routeIds],
+      routeNameById: new Map(accessibleOfficeRoutes.map(r => [r.id, r.nombre])),
+      userNameById: new Map(users.map(u => [u.id, u.nombre])),
+      limit: 15,
+    })
+  } catch {
+    // La auditoría es informativa: si no se puede leer, el panel sigue completo.
+    activity = []
+  }
+
   return {
     office,
     accessibleOfficeRoutes,
     facts,
     kpis,
+    activity,
     routeOps,
     ops: officeOpsTotals(routeOps),
     finance,
@@ -678,4 +703,82 @@ export async function assignRoutesToOffice(
     })
   }
   return { moved: rutas.map(r => r.id) }
+}
+
+// ============================================================
+// RESUMEN EJECUTIVO DE OFICINAS (Dashboard de empresa y comparativo)
+// ------------------------------------------------------------
+// Mismo orden de siempre: rutas de la empresa → recorte por usuario → agrupación
+// por Oficina → métricas. Cada fila se construye SOLO con las rutas accesibles de
+// su Oficina; el total de rutas de cada una es un conteo estructural que permite
+// declarar el alcance parcial sin exponer ningún dato ajeno.
+// ============================================================
+import {
+  officeComparison, companyOfficesSummary,
+  type CompanyOfficesSummary, type OfficeComparisonRow,
+} from '@/lib/officeExecutive'
+
+export interface OfficesExecutiveSummary {
+  rows: OfficeComparisonRow[]
+  company: CompanyOfficesSummary
+  fecha: string
+}
+
+export async function getOfficesExecutiveSummary(
+  params: { user: User | null | undefined; tenantId: string },
+  database: OfficeSummaryDatabase = db,
+): Promise<OfficesExecutiveSummary | null> {
+  const { user, tenantId } = params
+  if (!user || !tenantId) return null
+
+  const [allRoutes, offices, users, sales, payments, expenses, installments] = await Promise.all([
+    database.routes.where('tenantId').equals(tenantId).toArray(),
+    database.offices.where('tenantId').equals(tenantId).toArray(),
+    database.users.where('tenantId').equals(tenantId).toArray(),
+    database.sales.where('tenantId').equals(tenantId).toArray(),
+    database.payments.where('tenantId').equals(tenantId).toArray(),
+    database.expenses.where('tenantId').equals(tenantId).toArray(),
+    database.installments.toArray(),
+  ])
+
+  const accessible = filterAccessibleRoutes(user, allRoutes)
+  const routeIds = new Set(accessible.map(r => r.id))
+  const fecha = hoyISO()
+
+  // Índices en memoria: ninguna consulta por ruta ni por fila.
+  const ventasVisibles = sales.filter(s => routeIds.has(s.routeId))
+  const idsDeVenta = new Set(ventasVisibles.map(s => s.id))
+  const installmentsBySale = new Map<string, Installment[]>()
+  for (const i of installments) {
+    if (!idsDeVenta.has(i.saleId)) continue
+    const lista = installmentsBySale.get(i.saleId) ?? []
+    lista.push(i)
+    installmentsBySale.set(i.saleId, lista)
+  }
+
+  const facts = accessible.map(r => routeOpsFacts({
+    routeId: r.id,
+    nombre: r.nombre,
+    sales: ventasVisibles.filter(s => s.routeId === r.id),
+    installmentsBySale,
+    payments: payments.filter(p => p.routeId === r.id),
+    expenses: expenses.filter(e => e.routeId === r.id),
+    today: fecha,
+  }))
+
+  // Alertas por Oficina: se cuentan las operativas de sus rutas visibles más las
+  // rutas sin Administrador efectivo. Misma derivación que el panel de Oficina.
+  const sinAdmin = accessible
+    .filter(r => routeAdmins(users, r.id, tenantId).length === 0)
+    .map(r => ({ routeId: r.id, nombre: r.nombre }))
+  const alertas = opsAlerts({ facts, routesWithoutAdmin: sinAdmin })
+  const officeOf = new Map(accessible.map(r => [r.id, r.officeId]))
+  const alertCountByOffice: Record<string, number> = {}
+  for (const a of alertas) {
+    const clave = (a.routeId ? officeOf.get(a.routeId) : undefined) || '__sin_oficina__'
+    alertCountByOffice[clave] = (alertCountByOffice[clave] ?? 0) + 1
+  }
+
+  const rows = officeComparison({ facts, accessibleRoutes: accessible, allRoutes, offices, alertCountByOffice })
+  return { rows, company: companyOfficesSummary(rows), fecha }
 }

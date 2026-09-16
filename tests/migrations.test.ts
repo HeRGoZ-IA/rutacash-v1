@@ -1283,6 +1283,224 @@ await spec('SMOKE-E3-6', 'Smoke oficina operativa', 'una Oficina inactiva sigue 
   db.close()
 })
 
+
+// ############################################################
+// GRUPO — SMOKE ENTREGA 4 (Dexie real)
+// ------------------------------------------------------------
+// Visión ejecutiva, roles, actividad y exportación con datos reales.
+// ############################################################
+
+await spec('SMOKE-E4-1', 'Smoke ejecutivo', 'Supervisor multi-Oficina ve solo sus rutas, agrupadas', async () => {
+  const db = await baseLimpia()
+  const { createOffice } = await import('../src/services/officeService')
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+  const { filterAccessibleRoutes, canAccessRoute } = await import('../src/lib/permissions')
+  const { groupRoutesByOffice } = await import('../src/lib/officeGrouping')
+
+  const leticia = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, SU)
+  const rio = await createOffice({ tenantId: 't-1', nombre: 'Río' }, SU)
+  const centro = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Centro', codigo: 'RT-001' }), SU)
+  const norte = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Norte', codigo: 'RT-002' }), SU)
+  const puerto = await createRouteWithAdmins(datosRutaSmoke({ officeId: rio.id, nombre: 'Puerto', codigo: 'RT-003' }), SU)
+
+  await db.users.add({
+    id: 'u-sup', tenantId: 't-1', nombre: 'Sara', email: 'sara@c.com', password: 'x',
+    rol: 'supervisor', status: 'activo', authorizedRouteIds: [centro.id, puerto.id],
+    createdAt: '', updatedAt: '',
+  } as never)
+  const sup = (await db.users.get('u-sup'))!
+
+  const suyas = filterAccessibleRoutes(sup, await db.routes.toArray())
+  const grupos = groupRoutesByOffice(suyas, await db.offices.toArray())
+
+  metric('rutas visibles', suyas.map(r => r.nombre).sort().join(', '))
+  metric('grupos', grupos.map(g => `${g.label}(${g.routes.length})`).join(', '))
+  assert(suyas.length === 2, 'debe ver exactamente sus dos rutas')
+  assert(grupos.length === 2 && grupos.every(g => g.routes.length === 1), 'una ruta por Oficina')
+  assert(!canAccessRoute(sup, norte.id), 'no puede acceder a la ruta hermana de Leticia')
+  db.close()
+})
+
+await spec('SMOKE-E4-2', 'Smoke ejecutivo', 'Secretario: clientes filtrados por Oficina sin escapar del alcance', async () => {
+  const db = await baseLimpia()
+  const { createOffice } = await import('../src/services/officeService')
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+  const { filterAccessibleRoutes, can } = await import('../src/lib/permissions')
+  const { visibleRouteIds, filterRowsByVisibleRoutes } = await import('../src/lib/officeRouteFilter')
+
+  const leticia = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, SU)
+  const centro = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Centro', codigo: 'RT-001' }), SU)
+  const norte = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Norte', codigo: 'RT-002' }), SU)
+  await ventaLista(db, centro.id, 'c-centro', 's-centro')
+  await ventaLista(db, norte.id, 'c-norte', 's-norte')
+
+  await db.users.add({
+    id: 'u-sec', tenantId: 't-1', nombre: 'Sonia', email: 'sonia@c.com', password: 'x',
+    rol: 'secretario', status: 'activo', authorizedRouteIds: [centro.id],
+    createdAt: '', updatedAt: '',
+  } as never)
+  const sec = (await db.users.get('u-sec'))!
+
+  const accesibles = filterAccessibleRoutes(sec, await db.routes.toArray())
+  const visibles = visibleRouteIds({ accessibleRoutes: accesibles, officeId: leticia.id })
+  const clientes = filterRowsByVisibleRoutes(await db.clients.toArray(), visibles)
+
+  metric('clientes visibles', clientes.map(c => c.id).join(', '))
+  metric('puede corregir en Centro', can(sec, 'payment.correct', { routeId: centro.id }))
+  metric('puede corregir en Norte', can(sec, 'payment.correct', { routeId: norte.id }))
+  assert(clientes.length === 1 && clientes[0].routeId === centro.id, 'solo el cliente de su ruta')
+  assert(can(sec, 'payment.correct', { routeId: centro.id }), 'debe poder corregir en su ruta')
+  assert(!can(sec, 'payment.correct', { routeId: norte.id }), 'no puede corregir fuera de su alcance')
+  db.close()
+})
+
+await spec('SMOKE-E4-3', 'Smoke ejecutivo', 'Socio parcial: consolidado y CSV solo de sus rutas, rotulado parcial', async () => {
+  const db = await baseLimpia()
+  const { createOffice, getOfficesExecutiveSummary } = await import('../src/services/officeService')
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+  const { officeSummaryCsvRows } = await import('../src/lib/officeExecutive')
+
+  const leticia = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, SU)
+  const rutas = []
+  for (let i = 1; i <= 4; i++) {
+    rutas.push(await createRouteWithAdmins(
+      datosRutaSmoke({ officeId: leticia.id, nombre: `Ruta ${i}`, codigo: `RT-00${i}` }), SU))
+  }
+  for (let i = 0; i < 4; i++) await ventaLista(db, rutas[i].id, `c-${i}`, `s-${i}`)
+
+  await db.users.add({
+    id: 'u-socio', tenantId: 't-1', nombre: 'Pablo', email: 'pablo@c.com', password: 'x',
+    rol: 'socio', status: 'activo', authorizedRouteIds: [rutas[0].id, rutas[1].id],
+    createdAt: '', updatedAt: '',
+  } as never)
+  const socio = (await db.users.get('u-socio'))!
+
+  const exec = (await getOfficesExecutiveSummary({ user: socio, tenantId: 't-1' }))!
+  const fila = exec.rows.find(r => r.officeId === leticia.id)!
+
+  metric('rutas visibles', fila.rutasVisibles)
+  metric('alcance', fila.alcance)
+  metric('clientes en el consolidado', fila.totals.clientesActivos)
+  assert(fila.rutasVisibles === 2 && fila.rutasTotales === 4, 'debe ver 2 de las 4 rutas')
+  assert(fila.parcial && fila.alcance === '2/4 rutas', 'el alcance parcial debe declararse')
+  assert(fila.totals.clientesActivos === 2, 'el consolidado solo agrega sus rutas')
+
+  const csv = officeSummaryCsvRows({
+    office: { nombre: 'Leticia', codigo: undefined, status: 'activa' },
+    fecha: exec.fecha, visibles: fila.rutasVisibles, totales: fila.rutasTotales,
+    totals: fila.totals, alertas: fila.alertas,
+  })
+  metric('alcance en CSV', csv[0].Alcance)
+  assert(csv[0].Alcance === '2 de 4 rutas autorizadas', 'el CSV debe declarar el alcance parcial')
+  assert(csv[0]['Rutas visibles'] === 2, 'el CSV solo contiene lo que el Socio ve')
+  db.close()
+})
+
+await spec('SMOKE-E4-4', 'Smoke ejecutivo', 'Dashboard de empresa: Leticia, Río y Sin Oficina con totales cuadrados', async () => {
+  const db = await baseLimpia()
+  const { createOffice, getOfficesExecutiveSummary } = await import('../src/services/officeService')
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+
+  const leticia = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, SU)
+  const rio = await createOffice({ tenantId: 't-1', nombre: 'Río' }, SU)
+  const centro = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Centro', codigo: 'RT-001' }), SU)
+  const puerto = await createRouteWithAdmins(datosRutaSmoke({ officeId: rio.id, nombre: 'Puerto', codigo: 'RT-002' }), SU)
+  const suelta = await createRouteWithAdmins(datosRutaSmoke({ nombre: 'Antigua', codigo: 'RT-003' }), SU)
+  let n = 0
+  for (const r of [centro, puerto, suelta]) { n++; await ventaLista(db, r.id, `c-${n}`, `s-${n}`) }
+
+  const exec = (await getOfficesExecutiveSummary({ user: SU, tenantId: 't-1' }))!
+
+  metric('filas', exec.rows.map(r => `${r.nombre}(${r.rutasVisibles})`).join(', '))
+  metric('oficinas visibles', exec.company.oficinasVisibles)
+  metric('rutas sin oficina', exec.company.rutasSinOficina)
+  assert(exec.rows.length === 3, 'Leticia, Río y Sin Oficina')
+  assert(exec.rows[exec.rows.length - 1].nombre === 'Sin Oficina', '"Sin Oficina" va al final')
+  assert(exec.company.oficinasVisibles === 2 && exec.company.rutasSinOficina === 1, 'el resumen debe cuadrar')
+
+  const sumaFilas = exec.rows.reduce((s, r) => s + r.totals.clientesActivos, 0)
+  metric('clientes: suma de filas vs total', `${sumaFilas} / ${exec.company.totals.clientesActivos}`)
+  assert(sumaFilas === exec.company.totals.clientesActivos,
+    'el total de empresa debe cuadrar exactamente con la suma de las filas')
+  db.close()
+})
+
+await spec('SMOKE-E4-5', 'Smoke ejecutivo', 'actividad reciente: aparece la de rutas visibles y no la ajena', async () => {
+  const db = await baseLimpia()
+  const { createOffice, getOfficeManagementSummary } = await import('../src/services/officeService')
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+  const { registerPayment } = await import('../src/services/paymentService')
+  const { today } = await import('../src/lib/formatters')
+
+  const leticia = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, SU)
+  const centro = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Centro', codigo: 'RT-001' }), SU)
+  const norte = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Norte', codigo: 'RT-002' }), SU)
+  await ventaLista(db, centro.id, 'c-1', 's-1')
+  await ventaLista(db, norte.id, 'c-2', 's-2')
+
+  await db.users.add({
+    id: 'u-adm', tenantId: 't-1', nombre: 'Ana', email: 'ana@c.com', password: 'x',
+    rol: 'admin', status: 'activo', authorizedRouteIds: [centro.id, norte.id],
+    createdAt: '', updatedAt: '',
+  } as never)
+  const admin = (await db.users.get('u-adm'))!
+
+  // Un pago en CADA ruta: ambos quedan auditados.
+  await registerPayment({ saleId: 's-1', requestedAmount: 500, actor: admin, fecha: today() })
+  await registerPayment({ saleId: 's-2', requestedAmount: 700, actor: admin, fecha: today() })
+
+  // Ahora el Admin pierde Norte: su actividad debe desaparecer de la vista.
+  await db.users.update('u-adm', { authorizedRouteIds: [centro.id] })
+  const recortado = (await db.users.get('u-adm'))!
+  const r = (await getOfficeManagementSummary({ user: recortado, tenantId: 't-1', officeId: leticia.id }))!
+
+  metric('actividades visibles', r.activity.length)
+  metric('rutas en la actividad', [...new Set(r.activity.map(a => a.routeNombre))].join(', '))
+  assert(r.activity.length > 0, 'debe verse la actividad de su ruta')
+  assert(r.activity.every(a => a.routeId === centro.id),
+    'no puede aparecer actividad de una ruta que ya no tiene autorizada')
+  assert(r.activity.some(a => a.action === 'REGISTER_PAYMENT'), 'el pago registrado debe aparecer')
+  assert(r.activity[0].actorNombre === 'Ana', 'debe resolverse el actor')
+  db.close()
+})
+
+await spec('SMOKE-E4-6', 'Smoke ejecutivo', 'el CSV exportado coincide con lo que muestra la pantalla', async () => {
+  const db = await baseLimpia()
+  const { createOffice, getOfficeManagementSummary } = await import('../src/services/officeService')
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+  const { officeSummaryCsvRows, officeRoutesCsvRows } = await import('../src/lib/officeExecutive')
+
+  const leticia = await createOffice({ tenantId: 't-1', nombre: 'Leticia', codigo: 'LET' }, SU)
+  const centro = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Centro', codigo: 'RT-001' }), SU)
+  const norte = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Norte', codigo: 'RT-002' }), SU)
+  await ventaLista(db, centro.id, 'c-1', 's-1')
+  await ventaLista(db, norte.id, 'c-2', 's-2')
+
+  await db.users.add({
+    id: 'u-adm', tenantId: 't-1', nombre: 'Ana', email: 'ana@c.com', password: 'x',
+    rol: 'admin', status: 'activo', authorizedRouteIds: [centro.id],
+    createdAt: '', updatedAt: '',
+  } as never)
+  const admin = (await db.users.get('u-adm'))!
+  const r = (await getOfficeManagementSummary({ user: admin, tenantId: 't-1', officeId: leticia.id }))!
+
+  const resumen = officeSummaryCsvRows({
+    office: r.office, fecha: r.fecha, visibles: r.scope.visibles, totales: r.scope.totales,
+    totals: r.ops, alertas: r.alerts.length + r.opsAlerts.length,
+  })
+  const rutasCsv = officeRoutesCsvRows({ office: r.office, fecha: r.fecha, facts: r.routeOps })
+
+  metric('cartera en pantalla', r.ops.carteraActiva)
+  metric('cartera en CSV', resumen[0].Cartera)
+  metric('filas de rutas en CSV', rutasCsv.length)
+  metric('alcance', resumen[0].Alcance)
+  assert(resumen[0].Cartera === r.ops.carteraActiva, 'el CSV debe traer la misma cifra que la pantalla')
+  assert(resumen[0]['Rutas visibles'] === 1 && rutasCsv.length === 1, 'solo la ruta visible')
+  assert(!rutasCsv.some(f => f.Ruta === 'Norte'), 'el CSV no puede incluir una ruta no autorizada')
+  assert(resumen[0].Alcance === '1 de 2 rutas autorizadas', 'el CSV declara el alcance parcial')
+  db.close()
+})
+
 // ############################################################
 // INFORME
 // ############################################################

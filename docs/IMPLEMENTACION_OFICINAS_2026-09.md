@@ -865,3 +865,147 @@ Familias `OFFICE-OPS-*`, `OFFICE-FIN-*`, `OFFICE-UX-*`, `OFFICE-DASH-ADV-*`,
   ranking comparativo, integración profunda de Secretario y Socio, exportaciones
   del resumen de Oficina, auditoría ejecutiva, persistencia y cierre de
   liquidaciones, snapshot histórico de Oficina.
+
+---
+
+# Evolución 4 — Integración por roles y gestión ejecutiva
+
+Cierra la integración de Oficinas: los roles operativos y de consulta las usan como
+contexto, y la empresa gana una lectura ejecutiva de todas ellas.
+
+## Semántica final de "A cobrar hoy"
+
+La Entrega 3 la definió por el **valor nominal** de las cuotas del día. Al revisarlo
+contra el modelo real, esa definición **contradecía lo que el sistema ya hacía**:
+
+- `quickAmounts().parcela` — lo que la app propone cobrar al Cobrador — es
+  `calculateCurrentInstallment(...).saldo`, el **saldo** de la cuota en curso.
+- `applyPaymentToInstallments` aplica los pagos a la primera cuota no pagada en
+  orden, **sin emparejar por fecha**: un abono adelantado de ayer reduce el saldo de
+  la cuota de hoy.
+
+Medir por el nominal habría penalizado al cobrador por los adelantos que ya
+consiguió. **Definición adoptada, única para todo RutaCash:**
+
+```
+pendienteHoy = Σ saldo ACTUAL de las cuotas que vencen hoy
+recaudadoHoy = Σ pagos vigentes con fecha de hoy
+aCobrarHoy   = pendienteHoy + recaudadoHoy     ← meta al empezar la jornada
+cumplimiento = recaudadoHoy / aCobrarHoy
+```
+
+Reconstruir la meta sumando lo ya cobrado evita el error original de la Entrega 3
+(medirla por el saldo a secas la encogía al cobrar y el cumplimiento salía inflado).
+
+| Caso | Situación | Meta | Recaudado | Cumplimiento |
+|---|---|---|---|---|
+| 1 | Cuota 100, sin abonos previos, se cobran 60 | 100 | 60 | **60 %** |
+| 2 | Cuota 100 con 40 de ayer, se cobran los 60 restantes | 60 | 60 | **100 %** |
+| 3 | Cuota 100, no se cobra nada | 100 | 0 | **0 %** |
+
+El caso 2 es la decisión de fondo: la deuda del día quedó saldada, así que es un
+100 %, no un 60 %.
+
+**Aproximación conocida y aceptada:** `recaudadoHoy` son todos los pagos del día sin
+distinguir a qué cuota se aplicaron (el modelo no enlaza pago↔parcela). Cobrar
+atrasos sube tanto el recaudo como la meta, de modo que el porcentaje sigue acotado.
+
+Probado en `OFFICE-COLLECTION-SEMANTICS-001..004`.
+
+## Supervisor
+
+Sus rutas se agrupan por Oficina en el selector y comparte el patrón Oficina → Ruta
+de los módulos administrativos. **No gana ninguna capacidad estructural**: no
+gestiona el catálogo de Oficinas, y sigue sin acceder a las rutas hermanas.
+
+## Secretario
+
+Clientes con filtro Oficina → Ruta y contexto **"Leticia / Centro"** en cada fila,
+derivado de la ruta del cliente. Las correcciones de pago siguen sujetas al mismo
+alcance: `payment.correct` funciona en su ruta y falla fuera de ella.
+
+## Socio
+
+- **Clientes** con el filtro compartido.
+- **Panel consolidado** agrupado por Oficina, con el subtotal de base y cartera de
+  **sus** rutas en cada grupo.
+- Si su alcance es parcial, la fila del comparativo lo declara ("2/4 rutas") y el
+  CSV también. Nunca aparenta el total de la Oficina.
+
+## Dashboard general de empresa
+
+Nuevo [`OfficesExecutivePanel`](../src/components/ui/OfficesExecutivePanel.tsx) en el
+panel del Administrador/Super Admin: una tarjeta por Oficina (rutas, clientes,
+cartera, recaudo de hoy, cumplimiento, alertas) con botón **Entrar**, más el grupo
+**Sin Oficina** que lleva a su página de organización.
+
+## Comparativo de Oficinas
+
+Tabla objetiva —**sin ranking**, porque comparar oficinas es una lectura, no una
+clasificación— con rutas, clientes, ventas, cartera, vencida, recaudo, cumplimiento,
+gastos y alertas. El pie muestra el **total visible**, que se calcula con el mismo
+agregador que las filas para que nunca puedan divergir (`OFFICE-COMPARE-002`).
+
+Una Oficina de la que el usuario no ve ninguna ruta **no genera fila**: no se
+insinúa lo que no se puede ver.
+
+## Actividad reciente
+
+Sección compacta en el panel de Oficina, derivada de la **auditoría existente**. Sin
+tabla nueva.
+
+El recorte sigue el principio de siempre: se parte de las rutas accesibles de la
+Oficina y se filtran los registros por ellas. Una acción de una ruta no autorizada
+no aparece aunque pertenezca a esa Oficina, y una acción sin `routeId` (de empresa)
+no se atribuye aquí. `SMOKE-E4-5` lo comprueba quitándole una ruta al usuario y
+verificando que su actividad desaparece de la vista.
+
+## Exportaciones
+
+Dos CSV desde el panel de Oficina: **resumen** (una fila) y **comparativo de rutas**
+(una fila por ruta visible). Contienen exactamente lo que hay en pantalla, y el
+campo **Alcance** declara *"2 de 4 rutas autorizadas"* cuando es parcial. Sin PDF en
+esta entrega.
+
+## Gastos del período y transferencias
+
+El consolidado financiero trae el gasto del período que calcula el motor de caja; el
+comparativo por ruta muestra el **del día**, y ambos van etiquetados como tales para
+que no se confundan. Las transferencias se presentan como entradas y salidas
+agregadas. El detalle por contraparte sigue pendiente: sin enlace directo
+Oficina↔transferencia, aportaba poco frente al ruido que añadía al panel.
+
+## Corrección de la barra flotante
+
+La barra invadía el sidebar porque era `fixed` al **viewport**. Ahora es
+**`sticky bottom-0` dentro del `<main>` del AdminLayout**, que es el contenedor de
+scroll real.
+
+Es una solución estructural, no un parche: no hay `left: 200px` ni `calc()` ni
+ningún ancho del sidebar escrito a mano. Si el sidebar cambia de ancho o se colapsa
+en móvil, la barra lo sigue sola. Los márgenes negativos (`-mx-4 md:-mx-6`) cancelan
+el padding de la página para que llegue de borde a borde del área de contenido.
+
+Verificado por `OFFICE-ACTIONBAR-003..006`: pertenece al contenedor principal, no
+usa el ancho del viewport, no contiene desplazamientos hardcodeados y conserva el
+scroll horizontal interno en pantallas estrechas.
+
+## Tests
+
+| Suite | Antes | Después |
+|---|---|---|
+| Permisos | 461 | **521** |
+| Financiera | 151 | **151** |
+| Arranque | 155 | **155** |
+| Migraciones y smoke | 36 | **42** |
+| **Total** | **803** | **869 PASS · 0 FAIL** |
+
+Familias `OFFICE-COLLECTION-SEMANTICS-*`, `OFFICE-ROLE-SUP-*`, `OFFICE-ROLE-SEC-*`,
+`OFFICE-ROLE-PARTNER-*`, `OFFICE-EXEC-*`, `OFFICE-COMPARE-*`, `OFFICE-ACTIVITY-*`,
+`OFFICE-EXPORT-*`, `OFFICE-ACTIONBAR-003..006`, y los smoke `SMOKE-E4-1..6`.
+
+## Pendientes estructurales
+
+Fuera de alcance por diseño: persistencia real de liquidaciones semanales, cierre y
+reapertura de períodos, snapshot histórico de Oficina en liquidación, backend,
+sincronización remota, PWA/offline robusto y PDF de Oficina.

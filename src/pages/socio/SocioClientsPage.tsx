@@ -11,6 +11,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useAccessibleRoutes } from '@/hooks/useAccessibleRoutes'
 import { filterByAccessibleRoute } from '@/lib/permissions'
+import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
+import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import { formatCurrency } from '@/lib/formatters'
 import type { Client, Sale } from '@/models/types'
 
@@ -22,6 +24,7 @@ export default function SocioClientsPage() {
   const { user } = useAuth()
   const { currency } = useTenant()
   const { routes } = useAccessibleRoutes()
+  const officeFilter = useOfficeRouteFilter()
   const [clients, setClients] = useState<Client[]>([])
   const [sales, setSales] = useState<Sale[]>([])
   const [search, setSearch] = useState('')
@@ -51,10 +54,10 @@ export default function SocioClientsPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return clients
+    return officeFilter.filterRows(clients)
       .filter(c => !q || c.nombre.toLowerCase().includes(q) || c.documento.includes(q))
       .sort((a, b) => a.nombre.localeCompare(b.nombre))
-  }, [clients, search])
+  }, [clients, search, officeFilter])
 
   return (
     <div className="p-4 md:p-6 space-y-5">
@@ -67,6 +70,19 @@ export default function SocioClientsPage() {
       </div>
 
       <div className="max-w-sm">
+      {/* FILTRO OFICINA → RUTA. Solo estrecha lo ya autorizado. */}
+      <OfficeRouteFilterBar
+        offices={officeFilter.offices}
+        officeId={officeFilter.officeId}
+        onOfficeChange={officeFilter.setOfficeId}
+        routesInOffice={officeFilter.routesInOffice}
+        routeId={officeFilter.routeId}
+        onRouteChange={officeFilter.setRouteId}
+        hasUnassigned={officeFilter.hasUnassigned}
+        contextLabel={officeFilter.contextLabel}
+        showContext={officeFilter.hasOfficeFilter}
+      />
+
         <Input placeholder="Buscar por nombre o documento…" value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />
       </div>
 

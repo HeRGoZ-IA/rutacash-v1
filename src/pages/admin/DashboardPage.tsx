@@ -8,6 +8,7 @@ import { KPICard } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { LoadingState } from '@/components/ui/EmptyState'
 import { SetupChecklist } from '@/components/ui/SetupChecklist'
+import { OfficesExecutivePanel } from '@/components/ui/OfficesExecutivePanel'
 import { db } from '@/lib/db'
 import { getRouteFinancialSummary } from '@/services/cashboxEngine'
 import { getAccessibleRouteIdSet } from '@/lib/scope'
@@ -178,6 +179,10 @@ export default function DashboardPage() {
       {/* Onboarding "Primeros pasos": aparece mientras existan pasos esenciales
           pendientes (empresa nueva); se auto-oculta al completarse. */}
       <SetupChecklist />
+
+      {/* Resumen ejecutivo por Oficina: tarjetas + comparativo objetivo, siempre
+          sobre las rutas autorizadas del usuario. Se oculta solo si no hay ninguna. */}
+      <OfficesExecutivePanel />
 
       {/* Alerts */}
       {data.alertas.length > 0 && (

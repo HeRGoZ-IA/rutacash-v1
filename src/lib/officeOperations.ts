@@ -11,6 +11,42 @@
 // No se creó ningún motor financiero nuevo: se reutilizan las reglas que ya existen
 // (`effectivePayments` para el recaudo vigente, `isSaleDisbursed` para lo que está
 // realmente en la calle) y el saldo de las parcelas, que es el libro mayor.
+//
+// ------------------------------------------------------------
+// SEMÁNTICA DE "A COBRAR HOY" — decisión única para toda RutaCash
+// ------------------------------------------------------------
+// El sistema YA tenía una semántica establecida y es la del SALDO PENDIENTE, no la
+// del valor nominal:
+//   · `quickAmounts().parcela` — lo que la app propone cobrar al Cobrador — es
+//     `calculateCurrentInstallment(...).saldo`, el saldo de la cuota en curso.
+//   · `applyPaymentToInstallments` aplica los pagos a la primera cuota no pagada en
+//     orden, sin emparejar por fecha: un abono adelantado de ayer REDUCE el saldo de
+//     la cuota de hoy.
+// Medir la meta del día por el valor nominal contradiría ambas cosas y penalizaría
+// al cobrador por los adelantos que ya consiguió.
+//
+// DEFINICIÓN ADOPTADA:
+//
+//     pendienteHoy = Σ saldo ACTUAL de las cuotas que vencen hoy
+//     recaudadoHoy = Σ pagos vigentes con fecha de hoy
+//     aCobrarHoy   = pendienteHoy + recaudadoHoy      ← meta al empezar la jornada
+//     cumplimiento = recaudadoHoy / aCobrarHoy
+//
+// Reconstruir la meta sumando lo ya cobrado evita el error de la Entrega 3: medirla
+// por el saldo actual a secas la encogía a medida que se cobraba y el cumplimiento
+// salía inflado (cobrar 60 de 100 daba 60/40 → 100 %).
+//
+// Casos de referencia (probados en OFFICE-COLLECTION-SEMANTICS-*):
+//   CASO 1 — cuota 100, sin abonos previos, se cobran 60 hoy:
+//            pendiente 40 + recaudado 60 → meta 100, cumplimiento 60 %.
+//   CASO 2 — cuota 100 con 40 abonados ayer, se cobran los 60 restantes hoy:
+//            pendiente 0 + recaudado 60 → meta 60, cumplimiento 100 %.
+//            La deuda del día quedó saldada: es un 100 %, no un 60 %.
+//
+// APROXIMACIÓN CONOCIDA Y ACEPTADA: `recaudadoHoy` son TODOS los pagos del día, sin
+// distinguir a qué cuota se aplicaron (el modelo no enlaza pago↔parcela). Cobrar
+// atrasos sube tanto el recaudo como la meta, de modo que el porcentaje sigue
+// acotado y refleja "de lo que había que cobrar hoy, cuánto se cobró".
 // ============================================================
 import type { Expense, Installment, Payment, Sale } from '@/models/types'
 import { effectivePayments } from '@/lib/paymentState'
@@ -23,13 +59,16 @@ export interface RouteOpsFacts {
   clientesActivos: number
   ventasActivas: number
   parcelasPendientes: number
-  /** META del día: valor de las cuotas que vencen hoy (no el saldo restante). */
+  /**
+   * META del día: lo que había por cobrar hoy AL EMPEZAR la jornada.
+   * = `pendienteHoy` + `recaudadoHoy`. Ver la nota de semántica arriba.
+   */
   aCobrarHoy: number
   /** Recaudo VIGENTE de hoy (excluye pagos revertidos y sus contrapartidas). */
   recaudadoHoy: number
-  /** Lo que falta de la cuota de hoy. Nunca negativo. */
+  /** Saldo que AÚN falta de las cuotas que vencen hoy. Nunca negativo. */
   pendienteHoy: number
-  /** % de la cuota de hoy efectivamente recaudada. */
+  /** % de la meta del día efectivamente recaudado. */
   cumplimiento: number
   /** Saldo por cobrar de ventas activas YA desembolsadas. */
   carteraActiva: number
@@ -69,7 +108,7 @@ export function routeOpsFacts(input: RouteOpsInput): RouteOpsFacts {
   const activas = input.sales.filter(s => s.status === 'activa' && isSaleDisbursed(s))
   const pendientesDesembolso = input.sales.filter(s => s.status === 'activa' && !isSaleDisbursed(s))
 
-  let aCobrarHoy = 0
+  let pendienteHoy = 0
   let carteraActiva = 0
   let carteraVencida = 0
   let parcelasPendientes = 0
@@ -78,15 +117,12 @@ export function routeOpsFacts(input: RouteOpsInput): RouteOpsFacts {
   for (const venta of activas) {
     const parcelas = input.installmentsBySale.get(venta.id) ?? []
     for (const p of parcelas) {
-      // META DEL DÍA: el VALOR de la cuota que vence hoy, no su saldo restante.
-      // Con el saldo, cobrar reducía la meta y el cumplimiento salía inflado
-      // (cobrar 60 de 100 daba 60/40 → 100 %). Con el valor, 60/100 = 60 %.
-      // Una cuota de hoy ya saldada sigue contando como meta cumplida.
-      if (p.fechaVencimiento === input.today) aCobrarHoy += p.valor
-
       if (p.saldo <= 0) continue
       parcelasPendientes++
       carteraActiva += p.saldo
+      // Lo que AÚN falta de la cuota de hoy. La meta se reconstruye después
+      // sumándole lo ya recaudado, para que cobrar no encoja la meta.
+      if (p.fechaVencimiento === input.today) pendienteHoy += p.saldo
       if (p.fechaVencimiento < input.today) {
         carteraVencida += p.saldo
         clientesConAtraso.add(venta.clientId)
@@ -98,6 +134,9 @@ export function routeOpsFacts(input: RouteOpsInput): RouteOpsFacts {
     .filter(p => p.fecha === input.today)
     .reduce((s, p) => s + p.valor, 0)
 
+  // META = lo que faltaba al EMPEZAR el día = lo que aún falta + lo ya cobrado hoy.
+  const aCobrarHoy = pendienteHoy + recaudadoHoy
+
   return {
     routeId: input.routeId,
     nombre: input.nombre,
@@ -106,7 +145,7 @@ export function routeOpsFacts(input: RouteOpsInput): RouteOpsFacts {
     parcelasPendientes,
     aCobrarHoy,
     recaudadoHoy,
-    pendienteHoy: Math.max(0, aCobrarHoy - recaudadoHoy),
+    pendienteHoy,
     cumplimiento: cumplimientoPct(aCobrarHoy, recaudadoHoy),
     carteraActiva,
     carteraVencida,
@@ -141,7 +180,9 @@ export function officeOpsTotals(facts: RouteOpsFacts[]): OfficeOpsTotals {
     parcelasPendientes: sum(f => f.parcelasPendientes),
     aCobrarHoy,
     recaudadoHoy,
-    pendienteHoy: Math.max(0, aCobrarHoy - recaudadoHoy),
+    // Se SUMAN los pendientes reales de cada ruta; no se deduce por diferencia,
+    // para que una ruta que cobró de más no tape el pendiente de otra.
+    pendienteHoy: sum(f => f.pendienteHoy),
     cumplimiento: cumplimientoPct(aCobrarHoy, recaudadoHoy),
     carteraActiva: sum(f => f.carteraActiva),
     carteraVencida: sum(f => f.carteraVencida),

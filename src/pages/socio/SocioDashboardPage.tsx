@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { ShieldAlert, TrendingUp, Wallet, Users, CreditCard } from 'lucide-react'
 import { useAccessibleRoutes } from '@/hooks/useAccessibleRoutes'
+import { useAccessibleOffices } from '@/hooks/useAccessibleOffices'
+import { groupRoutesByOffice } from '@/lib/officeGrouping'
 import { useTenant } from '@/hooks/useTenant'
 import { getRouteFinancialSummary } from '@/services/cashboxEngine'
 import { formatCurrency } from '@/lib/formatters'
@@ -13,6 +15,9 @@ import type { RouteFinancialSummary, Route } from '@/models/types'
  */
 export default function SocioDashboardPage() {
   const { routes, loading } = useAccessibleRoutes()
+  // Oficinas DERIVADAS de las rutas autorizadas del Socio: agrupan su consolidado
+  // sin concederle ninguna ruta adicional.
+  const { allOffices } = useAccessibleOffices()
   const { currency } = useTenant()
   const [summaries, setSummaries] = useState<Record<string, RouteFinancialSummary>>({})
   const [busy, setBusy] = useState(false)
@@ -69,9 +74,21 @@ export default function SocioDashboardPage() {
       </div>
 
       <div>
-        <h2 className="text-sm font-semibold text-gray-700 mb-2">Detalle por ruta</h2>
+        <h2 className="text-sm font-semibold text-gray-700 mb-2">Detalle por oficina y ruta</h2>
+        {groupRoutesByOffice(routes, allOffices).map(grupo => {
+          // Consolidado del grupo: SOLO las rutas que el Socio tiene autorizadas.
+          const base = grupo.routes.reduce((n, r) => n + (summaries[r.id]?.baseActual ?? 0), 0)
+          const cartera = grupo.routes.reduce((n, r) => n + (summaries[r.id]?.carteraEnCalle ?? 0), 0)
+          return (
+        <div key={grupo.key} className="mb-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary-500">{grupo.label}</p>
+            <p className="text-xs text-gray-500">
+              {grupo.routes.length} ruta(s) autorizada(s) · Base {formatCurrency(base, currency)} · Cartera {formatCurrency(cartera, currency)}
+            </p>
+          </div>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {routes.map((r: Route) => {
+          {grupo.routes.map((r: Route) => {
             const s = summaries[r.id]
             return (
               <div key={r.id} className="bg-white rounded-2xl border border-gray-100 shadow-card p-4 space-y-3">
@@ -93,6 +110,9 @@ export default function SocioDashboardPage() {
             )
           })}
         </div>
+        </div>
+          )
+        })}
       </div>
     </div>
   )
