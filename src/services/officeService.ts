@@ -25,7 +25,7 @@ import { assertCan, AuthzError } from '@/services/authz'
 import { canManageUser } from '@/lib/permissions'
 import { setCobradorRoutes } from '@/services/routeAssignment'
 import { applyOfficeRouteSelection } from '@/lib/officeManagement'
-import type { Client, Office, Route, Sale, User } from '@/models/types'
+import type { Client, Expense, Installment, Office, Payment, Route, Sale, User } from '@/models/types'
 
 // ------------------------------------------------------------
 // Contrato de base de datos
@@ -54,6 +54,10 @@ export interface OfficeSummaryDatabase extends OfficeDatabase {
   users: { where(index: string): { equals(key: string): { toArray(): Promise<User[]> } } }
   clients: { where(index: string): { equals(key: string): { toArray(): Promise<Client[]> } } }
   sales: { where(index: string): { equals(key: string): { toArray(): Promise<Sale[]> } } }
+  /** Solo LECTURA: hechos operativos (cobranza, cartera, gastos) de la Oficina. */
+  payments: { where(index: string): { equals(key: string): { toArray(): Promise<Payment[]> } } }
+  installments: { toArray(): Promise<Installment[]> }
+  expenses: { where(index: string): { equals(key: string): { toArray(): Promise<Expense[]> } } }
 }
 
 export type OfficeAuditSink = (params: Parameters<typeof logAction>[0]) => Promise<void>
@@ -397,6 +401,14 @@ import {
   officeKpis, officeAlerts, officeScope, relatedUsersOfOffice, routeOperationalState,
   type OfficeAlert, type OfficeKpis, type OfficeRouteFacts, type OfficeScope, type RelatedUser,
 } from '@/lib/officeManagement'
+import {
+  routeOpsFacts, officeOpsTotals, officeFinanceTotals, opsAlerts,
+  type OfficeFinanceTotals, type OfficeOpsTotals, type OpsAlert, type RouteOpsFacts,
+} from '@/lib/officeOperations'
+import { routeAdmins } from '@/lib/routeAdmins'
+import { getCashboxSummary } from '@/services/cashboxEngine'
+import { today as hoyISO } from '@/lib/formatters'
+import { can } from '@/lib/permissions'
 
 export interface OfficeManagementSummary {
   office: Office
@@ -412,6 +424,19 @@ export interface OfficeManagementSummary {
   relatedUsers: RelatedUser[]
   /** Usuarios de la empresa que el actor podría asignar (para el gestor de asignaciones). */
   assignableUsers: User[]
+  /** Hechos operativos por ruta VISIBLE (cobranza, cartera, atrasos). */
+  routeOps: RouteOpsFacts[]
+  /** Totales operativos de la Oficina: la suma de `routeOps`. */
+  ops: OfficeOpsTotals
+  /**
+   * Consolidado financiero de la Oficina. `null` cuando el rol no tiene permiso
+   * financiero sobre las rutas: el dato no se calcula ni se envía a la pantalla.
+   */
+  finance: OfficeFinanceTotals | null
+  /** Alertas operativas avanzadas (cartera vencida, atrasos, cumplimiento, sin Admin). */
+  opsAlerts: OpsAlert[]
+  /** Fecha contable usada para los cálculos del día. */
+  fecha: string
 }
 
 export async function getOfficeManagementSummary(
@@ -470,11 +495,71 @@ export async function getOfficeManagementSummary(
 
   const kpis = officeKpis(facts)
 
+  // ---- OPERACIÓN Y FINANZAS ----------------------------------------------
+  // Se cargan las filas de la EMPRESA una sola vez y se indexan en memoria: con el
+  // recorte por `routeIds` no hay ninguna consulta por ruta ni por fila (sin N+1).
+  const fecha = hoyISO()
+  const [payments, expenses, installments] = await Promise.all([
+    database.payments.where('tenantId').equals(tenantId).toArray(),
+    database.expenses.where('tenantId').equals(tenantId).toArray(),
+    database.installments.toArray(),
+  ])
+
+  const ventasDeLaOficina = sales.filter(s => routeIds.has(s.routeId))
+  const idsDeVenta = new Set(ventasDeLaOficina.map(s => s.id))
+  const installmentsBySale = new Map<string, Installment[]>()
+  for (const i of installments) {
+    if (!idsDeVenta.has(i.saleId)) continue
+    const lista = installmentsBySale.get(i.saleId) ?? []
+    lista.push(i)
+    installmentsBySale.set(i.saleId, lista)
+  }
+
+  const routeOps: RouteOpsFacts[] = accessibleOfficeRoutes.map(r => routeOpsFacts({
+    routeId: r.id,
+    nombre: r.nombre,
+    sales: ventasDeLaOficina.filter(s => s.routeId === r.id),
+    installmentsBySale,
+    payments: payments.filter(p => p.routeId === r.id),
+    expenses: expenses.filter(e => e.routeId === r.id),
+    today: fecha,
+  }))
+
+  // FINANZAS: solo para roles con permiso sobre la caja de ruta. Si no lo tienen,
+  // el dato ni siquiera se calcula.
+  const puedeVerFinanzas = accessibleOfficeRoutes.some(r =>
+    can(user, 'cashbox.viewRoute', { routeId: r.id, tenantId }))
+  let finance: OfficeFinanceTotals | null = null
+  if (puedeVerFinanzas && accessibleOfficeRoutes.length > 0) {
+    try {
+      const cajas = await Promise.all(accessibleOfficeRoutes.map(r => getCashboxSummary(r.id)))
+      const financieros = accessibleOfficeRoutes.map(r => {
+        const fin = (resumenes as Record<string, { baseActual?: number; carteraEnCalle?: number }>)[r.id]
+        return { baseActual: fin?.baseActual ?? 0, carteraEnCalle: fin?.carteraEnCalle ?? 0 }
+      })
+      finance = officeFinanceTotals(cajas, financieros)
+    } catch {
+      // El motor de caja no respondió: se muestra el panel sin consolidado en vez
+      // de dejar la pantalla caída. Los indicadores operativos no dependen de él.
+      finance = null
+    }
+  }
+
+  // Rutas de la Oficina sin ningún Administrador EFECTIVO (activo y asignado).
+  const routesWithoutAdmin = accessibleOfficeRoutes
+    .filter(r => routeAdmins(users, r.id, tenantId).length === 0)
+    .map(r => ({ routeId: r.id, nombre: r.nombre }))
+
   return {
     office,
     accessibleOfficeRoutes,
     facts,
     kpis,
+    routeOps,
+    ops: officeOpsTotals(routeOps),
+    finance,
+    opsAlerts: opsAlerts({ facts: routeOps, routesWithoutAdmin }),
+    fecha,
     alerts: officeAlerts({ office, facts }),
     scope: officeScope(accessibleOfficeRoutes.length, totalRoutesInOffice),
     relatedUsers: relatedUsersOfOffice(users, accessibleOfficeRoutes, tenantId),

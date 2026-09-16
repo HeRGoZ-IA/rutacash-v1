@@ -16,7 +16,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { can, ROLE_LABELS, canManageUser } from '@/lib/permissions'
 import { formatCurrency } from '@/lib/formatters'
 import { NO_OFFICE_LABEL } from '@/lib/officeGrouping'
-import { ROUTE_STATE_LABEL, applyOfficeRouteSelection } from '@/lib/officeManagement'
+import { ROUTE_STATE_LABEL, applyOfficeRouteSelection, officeStateSummary } from '@/lib/officeManagement'
 import {
   getOfficeManagementSummary, moveRouteToOffice, setUserOfficeRoutes,
   type OfficeManagementSummary,
@@ -89,11 +89,13 @@ export default function OfficeDetailPage() {
   }
 
   const { office, accessibleOfficeRoutes, facts, kpis, alerts, scope, relatedUsers, assignableUsers } = data
+  const { routeOps, ops, finance, opsAlerts: alertasOperativas, fecha } = data
   const officeRouteIds = accessibleOfficeRoutes.map(r => r.id)
   const puedeEditarRutas = can(user, 'route.edit', { tenantId })
   const puedeCrearRutas = can(user, 'route.create', { tenantId })
   const puedeAsignar = can(user, 'route.assign', { tenantId })
   const factOf = (routeId: string) => facts.find(f => f.routeId === routeId)
+  const opsOf = (routeId: string) => routeOps.find(o => o.routeId === routeId)
 
   // --- Mover ruta ---
   async function confirmMove() {
@@ -186,6 +188,7 @@ export default function OfficeDetailPage() {
             <p className="text-xs text-gray-500 mt-0.5 ml-7">
               {office.codigo ? `Código: ${office.codigo} · ` : ''}
               <span className={scope.parcial ? 'font-medium text-amber-600' : ''}>{scope.label}</span>
+              {kpis.rutasVisibles > 0 && <> · {officeStateSummary(kpis)}</>}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -244,11 +247,110 @@ export default function OfficeDetailPage() {
         )}
       </div>
 
+      {/* OPERACIÓN DEL DÍA — todo sobre las rutas visibles de esta oficina. */}
+      <div className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold text-gray-700">Cobranza de hoy</h2>
+          <span className="text-xs text-gray-400">{fecha}</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Card className="py-3">
+            <p className="text-xs text-gray-400">A cobrar hoy</p>
+            <p className="text-base font-bold text-gray-800 truncate">{formatCurrency(ops.aCobrarHoy, currency)}</p>
+          </Card>
+          <Card className="py-3">
+            <p className="text-xs text-gray-400">Recaudado hoy</p>
+            <p className="text-base font-bold text-emerald-600 truncate">{formatCurrency(ops.recaudadoHoy, currency)}</p>
+          </Card>
+          <Card className="py-3">
+            <p className="text-xs text-gray-400">Pendiente hoy</p>
+            <p className={`text-base font-bold truncate ${ops.pendienteHoy > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+              {formatCurrency(ops.pendienteHoy, currency)}
+            </p>
+          </Card>
+          <Card className="py-3">
+            <p className="text-xs text-gray-400">Cumplimiento</p>
+            <p className={`text-base font-bold ${ops.cumplimiento >= 80 ? 'text-emerald-600' : ops.cumplimiento >= 50 ? 'text-amber-600' : 'text-red-500'}`}>
+              {ops.cumplimiento}%
+            </p>
+          </Card>
+        </div>
+      </div>
+
+      {/* CARTERA Y COBRANZA */}
+      <div className="space-y-2">
+        <h2 className="text-sm font-semibold text-gray-700">Cartera</h2>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <Card className="py-3">
+            <p className="text-xs text-gray-400">Cartera activa</p>
+            <p className="text-base font-bold text-indigo-600 truncate">{formatCurrency(ops.carteraActiva, currency)}</p>
+          </Card>
+          <Card className="py-3">
+            <p className="text-xs text-gray-400">Cartera vencida</p>
+            <p className={`text-base font-bold truncate ${ops.carteraVencida > 0 ? 'text-red-500' : 'text-gray-400'}`}>
+              {formatCurrency(ops.carteraVencida, currency)}
+            </p>
+          </Card>
+          <Card className="py-3 text-center">
+            <p className={`text-base font-bold ${ops.clientesConAtraso > 0 ? 'text-red-500' : 'text-gray-400'}`}>{ops.clientesConAtraso}</p>
+            <p className="text-xs text-gray-400">Clientes con atraso</p>
+          </Card>
+          <Card className="py-3 text-center">
+            <p className="text-base font-bold text-gray-700">{ops.ventasActivas}</p>
+            <p className="text-xs text-gray-400">Ventas activas</p>
+          </Card>
+          <Card className="py-3 text-center">
+            <p className="text-base font-bold text-gray-700">{ops.parcelasPendientes}</p>
+            <p className="text-xs text-gray-400">Parcelas pendientes</p>
+          </Card>
+        </div>
+      </div>
+
+      {/* CONSOLIDADO FINANCIERO — solo para roles con permiso sobre la caja de ruta.
+          Es la SUMA de los resúmenes por ruta que ya produce el motor de caja. */}
+      {finance && (
+        <div className="space-y-2">
+          <h2 className="text-sm font-semibold text-gray-700">Resumen financiero</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+            <Card className="py-3">
+              <p className="text-xs text-gray-400">Base actual</p>
+              <p className="text-sm font-bold text-primary-700 truncate">{formatCurrency(finance.baseActual, currency)}</p>
+            </Card>
+            <Card className="py-3">
+              <p className="text-xs text-gray-400">Total controlado</p>
+              <p className="text-sm font-bold text-gray-800 truncate">{formatCurrency(finance.totalControlado, currency)}</p>
+            </Card>
+            <Card className="py-3">
+              <p className="text-xs text-gray-400">Cobros</p>
+              <p className="text-sm font-bold text-emerald-600 truncate">{formatCurrency(finance.cobros, currency)}</p>
+            </Card>
+            <Card className="py-3">
+              <p className="text-xs text-gray-400">Desembolsos</p>
+              <p className="text-sm font-bold text-gray-700 truncate">{formatCurrency(finance.prestamosEntregados, currency)}</p>
+            </Card>
+            <Card className="py-3">
+              <p className="text-xs text-gray-400">Gastos</p>
+              <p className="text-sm font-bold text-amber-600 truncate">{formatCurrency(finance.gastos, currency)}</p>
+            </Card>
+            <Card className="py-3">
+              <p className="text-xs text-gray-400">Retiros</p>
+              <p className="text-sm font-bold text-gray-700 truncate">{formatCurrency(finance.retiros, currency)}</p>
+            </Card>
+            <Card className="py-3">
+              <p className="text-xs text-gray-400">Transferencias</p>
+              <p className="text-sm font-bold text-gray-700 truncate">
+                +{formatCurrency(finance.transferenciasEntradas, currency)} / −{formatCurrency(finance.transferenciasSalidas, currency)}
+              </p>
+            </Card>
+          </div>
+        </div>
+      )}
+
       {/* Alertas derivadas: se recalculan al abrir, no hay tabla de alertas. */}
-      {alerts.length > 0 && (
+      {[...alerts, ...alertasOperativas].length > 0 && (
         <div className="space-y-2">
           <h2 className="text-sm font-semibold text-gray-700">Alertas</h2>
-          {alerts.map((a, i) => (
+          {[...alerts, ...alertasOperativas].map((a, i) => (
             <div key={`${a.kind}-${a.routeId ?? 'office'}-${i}`}
               className={`flex items-start gap-3 p-3 rounded-xl border ${a.severity === 'error' ? 'bg-red-50 border-red-100' : 'bg-amber-50 border-amber-100'}`}>
               <AlertTriangle className={`w-4 h-4 mt-0.5 flex-shrink-0 ${a.severity === 'error' ? 'text-red-500' : 'text-amber-500'}`} />
@@ -312,6 +414,32 @@ export default function OfficeDetailPage() {
                     </div>
                   </div>
 
+                  {/* COMPARATIVO OPERATIVO de la ruta dentro de la oficina. */}
+                  {(() => {
+                    const o = opsOf(route.id)
+                    if (!o) return null
+                    return (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-gray-400">Hoy</span>
+                          <span className="text-gray-600">
+                            {formatCurrency(o.recaudadoHoy, currency)} / {formatCurrency(o.aCobrarHoy, currency)}
+                          </span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                          <div className={`h-full rounded-full ${o.cumplimiento >= 80 ? 'bg-emerald-500' : o.cumplimiento >= 50 ? 'bg-amber-500' : 'bg-red-400'}`}
+                            style={{ width: `${o.cumplimiento}%` }} />
+                        </div>
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
+                          <span>Cartera {formatCurrency(o.carteraActiva, currency)}</span>
+                          {o.carteraVencida > 0 && <span className="text-red-500">Vencida {formatCurrency(o.carteraVencida, currency)}</span>}
+                          {o.clientesConAtraso > 0 && <span className="text-red-500">{o.clientesConAtraso} en atraso</span>}
+                          {o.gastosHoy > 0 && <span>Gastos {formatCurrency(o.gastosHoy, currency)}</span>}
+                        </div>
+                      </div>
+                    )
+                  })()}
+
                   {/* Usuarios de ESTA oficina asignados a la ruta. */}
                   <div className="border-t border-gray-50 pt-2">
                     {(() => {
@@ -352,63 +480,54 @@ export default function OfficeDetailPage() {
             <button onClick={() => openAssign()} className="text-xs text-primary-600 hover:underline">Gestionar</button>
           )}
         </div>
-        <p className="text-xs text-gray-400">
-          Los usuarios pertenecen a la empresa, no a la oficina. Aquí se muestran sus rutas
-          <span className="font-medium"> de esta oficina</span>; las de otras oficinas no se ven ni se modifican desde aquí.
-        </p>
-
         {relatedUsers.length === 0 ? (
           <Card><p className="text-xs text-gray-400">Ningún usuario tiene rutas asignadas en esta oficina todavía.</p></Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          /* Lista COMPACTA: una fila por usuario. Ocupa poca altura y se escanea de
+              un vistazo, sin restar protagonismo a indicadores y rutas. */
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-card divide-y divide-gray-50">
             {relatedUsers.map(u => (
-              <Card key={u.id} className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Users className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                    <p className="text-sm font-semibold text-gray-800 truncate">{u.nombre}</p>
-                  </div>
-                  <Badge variant="gray">{ROLE_LABELS[u.rol]}</Badge>
+              <div key={u.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <Users className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" />
+                  <span className="text-sm font-medium text-gray-800 truncate">{u.nombre}</span>
+                  <Badge variant="gray" size="sm">{ROLE_LABELS[u.rol]}</Badge>
                 </div>
-                <ul className="space-y-0.5 ml-6">
-                  {u.routes.map(r => (
-                    <li key={r.id} className="text-xs text-gray-600 flex items-center gap-1.5">
-                      <MapPin className="w-3 h-3 text-primary-400" />{r.nombre}
-                    </li>
-                  ))}
-                </ul>
+                <span className="text-xs text-gray-500 truncate hidden sm:block flex-1 text-right">
+                  {u.routes.map(r => r.nombre).join(' · ')}
+                </span>
                 {puedeAsignar && (
-                  <button onClick={() => openAssign(u.id)} className="text-xs text-primary-600 hover:underline ml-6">
-                    Editar sus rutas de esta oficina
-                  </button>
+                  <Button variant="ghost" size="sm" onClick={() => openAssign(u.id)}>Editar</Button>
                 )}
-              </Card>
+              </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* ACCESOS RÁPIDOS CON CONTEXTO: cada destino recibe `?officeId=` y abre ya
-          filtrado por esta Oficina, sobre las rutas que el usuario tenga autorizadas.
-          No son enlaces al módulo general. */}
-      <div className="pt-2 border-t border-gray-100 space-y-2">
-        <p className="text-xs text-gray-400">
-          Estos accesos abren cada módulo filtrado por <span className="font-medium">{office.nombre}</span>,
-          con tus rutas autorizadas de esta oficina.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" size="sm" icon={<Users className="w-3.5 h-3.5" />}
-            onClick={() => navigate(`/admin/clients?officeId=${office.id}`)}>Ver Clientes</Button>
-          <Button variant="ghost" size="sm" icon={<CreditCard className="w-3.5 h-3.5" />}
-            onClick={() => navigate(`/admin/active-sales?officeId=${office.id}`)}>Ver Ventas</Button>
-          <Button variant="ghost" size="sm" icon={<Archive className="w-3.5 h-3.5" />}
-            onClick={() => navigate(`/admin/cashbox?officeId=${office.id}`)}>Ver Caja</Button>
-          <Button variant="ghost" size="sm" icon={<BarChart3 className="w-3.5 h-3.5" />}
-            onClick={() => navigate(`/admin/reports?officeId=${office.id}`)}>Ver Reportes</Button>
-          <Button variant="ghost" size="sm" icon={<CalendarRange className="w-3.5 h-3.5" />}
-            onClick={() => navigate(`/admin/weekly-settlement?officeId=${office.id}`)}>Liquidación</Button>
-          <Button variant="ghost" size="sm" icon={<MapPin className="w-3.5 h-3.5" />}
-            onClick={() => navigate(`/admin/routes?officeId=${office.id}`)}>Ver Rutas</Button>
+      {/* Espacio para que la barra anclada no tape la última sección. */}
+      <div className="h-16" aria-hidden />
+
+      {/* BARRA DE ACCIONES ANCLADA. Cada destino lleva `?officeId=` y abre ya
+          filtrado por esta Oficina, sobre las rutas autorizadas del usuario.
+          Se mantiene accesible durante todo el scroll; en pantallas estrechas la
+          fila se desplaza horizontalmente en vez de romperse. */}
+      <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-gray-200 bg-white/95 backdrop-blur shadow-[0_-2px_12px_rgba(0,0,0,0.06)]">
+        <div className="px-4 md:px-6 py-2.5 overflow-x-auto">
+          <div className="flex items-center gap-2 w-max md:w-auto">
+            <Button variant="ghost" size="sm" icon={<Users className="w-3.5 h-3.5" />}
+              onClick={() => navigate(`/admin/clients?officeId=${office.id}`)}>Ver Clientes</Button>
+            <Button variant="ghost" size="sm" icon={<CreditCard className="w-3.5 h-3.5" />}
+              onClick={() => navigate(`/admin/active-sales?officeId=${office.id}`)}>Ver Ventas</Button>
+            <Button variant="ghost" size="sm" icon={<Archive className="w-3.5 h-3.5" />}
+              onClick={() => navigate(`/admin/cashbox?officeId=${office.id}`)}>Ver Caja</Button>
+            <Button variant="ghost" size="sm" icon={<BarChart3 className="w-3.5 h-3.5" />}
+              onClick={() => navigate(`/admin/reports?officeId=${office.id}`)}>Ver Reportes</Button>
+            <Button variant="ghost" size="sm" icon={<CalendarRange className="w-3.5 h-3.5" />}
+              onClick={() => navigate(`/admin/weekly-settlement?officeId=${office.id}`)}>Liquidación</Button>
+            <Button variant="ghost" size="sm" icon={<MapPin className="w-3.5 h-3.5" />}
+              onClick={() => navigate(`/admin/routes?officeId=${office.id}`)}>Ver Rutas</Button>
+          </div>
         </div>
       </div>
 

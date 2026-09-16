@@ -740,3 +740,128 @@ Recaudo analítico por Oficina; cartera avanzada; dashboard ejecutivo comparativ
 ranking entre Oficinas; integración profunda de Secretario y Socio; exportaciones
 del resumen de Oficina; auditoría ejecutiva; persistencia y cierre de liquidaciones;
 snapshot histórico de Oficina.
+
+---
+
+# Evolución 3 — Oficina operativa y financiera
+
+La Oficina pasa de ser un contexto de navegación a una **unidad operativa**: al
+entrar se ve cómo va la cobranza del día, la cartera, el consolidado financiero y
+qué rutas necesitan atención.
+
+## Ajustes UX absorbidos de Entrega 2
+
+Resueltos dentro del paquete, sin abrir mini-parches:
+
+1. **Textos explicativos eliminados.** Fuera el banner *"Las oficinas agrupan
+   rutas…"* de Oficinas, la explicación de *"Los usuarios pertenecen a la empresa,
+   no a la oficina"* y el texto *"Estos accesos abren cada módulo filtrado por…"*.
+   La app no explica lo obvio. Se conservó el texto del estado vacío de Oficinas
+   porque es **accionable**: dice qué hacer cuando no hay ninguna.
+2. **Lista de usuarios compacta.** Las tarjetas grandes se sustituyeron por filas
+   de una línea: nombre · rol · rutas de esta oficina · **[Editar]**. El enlace
+   largo "Editar sus rutas de esta oficina" desapareció. La edición conserva el
+   comportamiento: solo toca rutas de esta Oficina.
+3. **Barra de acciones anclada.** Los seis accesos (Clientes, Ventas, Caja,
+   Reportes, Liquidación, Rutas) viven ahora en una barra fija al borde inferior,
+   con fondo difuminado y elevación. Se reserva un espaciador de 64 px para que no
+   tape la última sección, y en pantallas estrechas la fila se desplaza en
+   horizontal en vez de romperse. Sin texto explicativo.
+4. **Jerarquía visual.** El estado operativo derivado ("5 rutas · 4 operativas · 1
+   sin Cobrador") se movió a la cabecera, junto al alcance, para que el contexto
+   quepa en una línea.
+
+## KPIs operativos
+
+Nuevo módulo **puro** [`src/lib/officeOperations.ts`](../src/lib/officeOperations.ts):
+no importa la base de datos y **no conoce la Oficina** — solo recibe filas de
+rutas. Quien llama le pasa únicamente las de las rutas accesibles.
+
+**Cobranza de hoy:** a cobrar hoy, recaudado hoy, pendiente hoy y % de
+cumplimiento.
+
+Una decisión que importa: **"a cobrar hoy" es el VALOR de las cuotas que vencen
+hoy, no su saldo restante.** La primera implementación usaba el saldo y el
+cumplimiento salía inflado — cobrar 60 de 100 daba 60/40 → 100 %. Con el valor da
+60 %. El smoke con datos reales lo detectó antes de publicarse.
+
+El recaudo usa `effectivePayments`: un pago revertido no cuenta, ni su asiento de
+reversión. Solo entran ventas **activas y desembolsadas**, igual que en
+`getRouteFinancialSummary`.
+
+## KPIs financieros
+
+Consolidado de Oficina = **suma de los resúmenes por ruta que ya produce
+`cashboxEngine`**. No hay motor nuevo y el existente no se tocó: `git diff` sobre
+`cashboxEngine`, `installmentEngine` y `permissions.ts` está **vacío**.
+
+Muestra base actual, total controlado, cobros, desembolsos, gastos, retiros y
+transferencias. **Solo se calcula si el rol tiene `cashbox.viewRoute`**: sin
+permiso, el dato ni siquiera se consulta ni viaja a la pantalla. Un Cobrador con
+las mismas rutas recibe `finance: null` pero conserva sus indicadores operativos.
+
+Si el motor de caja no responde, el panel se muestra sin consolidado en vez de
+caerse: los indicadores operativos no dependen de él.
+
+## Cartera y cobranza
+
+Cartera activa, cartera vencida, clientes con atraso, ventas activas y parcelas
+pendientes. La cartera vencida suma el saldo de cuotas con fecha anterior a hoy, y
+los clientes con atraso son los **distintos** con alguna de esas cuotas.
+
+## Comparativo por rutas
+
+Dentro de la misma tarjeta de cada ruta, sin módulo aparte: barra de progreso del
+cumplimiento del día, recaudado/meta, cartera, cartera vencida, clientes en atraso
+y gastos del día.
+
+## Alertas avanzadas
+
+Derivadas al abrir, sin persistencia nueva: cartera vencida, clientes con atraso,
+cumplimiento bajo (umbral 50 %) y rutas sin Administrador efectivo. Se suman a las
+de Entrega 1 (Oficina inactiva, ruta sin Cobrador, ruta inactiva, desembolsos
+pendientes).
+
+Un día **sin cuotas no se marca como incumplimiento**: no hay meta que incumplir.
+
+## Estado operativo calculado
+
+Derivado, nunca persistido, en la cabecera junto al alcance.
+
+## Scoping y seguridad
+
+`permissions.ts` sin cambios. Cadena verificada por prueba sobre el código:
+`authorizedRouteIds` → `filterAccessibleRoutes` → rutas de la Oficina → filas
+recortadas por `routeIds` → hechos operativos. `SMOKE-E3-2` lo comprueba con datos
+reales: una ruta no autorizada con 999.999 pendientes **no aparece en ningún
+indicador ni en ninguna alerta**.
+
+## Rendimiento
+
+Las filas (pagos, gastos, parcelas) se cargan **una vez** y se indexan en memoria
+(`installmentsBySale`). Sin consultas por ruta ni por fila.
+
+## Tests
+
+| Suite | Antes | Después |
+|---|---|---|
+| Permisos | 402 | **461** |
+| Financiera | 151 | **151** |
+| Arranque | 155 | **155** |
+| Migraciones y smoke | 30 | **36** |
+| **Total** | **738** | **803 PASS · 0 FAIL** |
+
+Familias `OFFICE-OPS-*`, `OFFICE-FIN-*`, `OFFICE-UX-*`, `OFFICE-DASH-ADV-*`,
+`OFFICE-ACTIONBAR-*` y los smoke `SMOKE-E3-1..6` sobre Dexie real.
+
+## Limitaciones y pendientes
+
+- **Gastos del período**: se muestra el gasto **del día** en el comparativo por
+  ruta. El consolidado financiero sí trae el gasto del período que calcula el motor
+  de caja. Un selector de período propio en el panel queda pendiente.
+- **Transferencias**: se muestran entradas y salidas agregadas; falta el detalle
+  por contraparte.
+- Fuera de alcance, para etapas posteriores: dashboard ejecutivo entre Oficinas,
+  ranking comparativo, integración profunda de Secretario y Socio, exportaciones
+  del resumen de Oficina, auditoría ejecutiva, persistencia y cierre de
+  liquidaciones, snapshot histórico de Oficina.

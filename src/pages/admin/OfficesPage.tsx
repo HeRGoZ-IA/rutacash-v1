@@ -155,15 +155,6 @@ export default function OfficesPage() {
         {puedeCrear && <Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Nueva oficina</Button>}
       </div>
 
-      <div className="flex items-start gap-3 p-4 rounded-2xl bg-gray-50 border border-gray-200">
-        <Building2 className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
-        <p className="text-xs text-gray-600">
-          Las oficinas <span className="font-medium">agrupan rutas</span>. No cambian quién puede ver qué:
-          el acceso sigue dependiendo de las rutas asignadas a cada usuario. Una ruta puede
-          existir sin oficina, y los usuarios pueden trabajar en rutas de oficinas distintas.
-        </p>
-      </div>
-
       {/* SIN OFICINA — agrupación DERIVADA (route.officeId === undefined).
           No existe ningún registro Office llamado así: es donde quedaron las rutas
           que ya existían cuando se introdujeron las Oficinas. */}

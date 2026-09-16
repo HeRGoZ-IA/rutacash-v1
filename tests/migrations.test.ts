@@ -1079,6 +1079,210 @@ await spec('SMOKE-E2-7', 'Smoke transversal', 'un officeId ajeno no amplía el a
   db.close()
 })
 
+
+// ############################################################
+// GRUPO — SMOKE OFICINA OPERATIVA (Dexie real)
+// ------------------------------------------------------------
+// El panel de Oficina con datos reales: cobranza del día, cartera, consolidado
+// financiero y alertas, siempre sobre las rutas visibles del usuario.
+// ############################################################
+
+/** Crea una venta desembolsada con parcelas en fechas controladas. */
+async function ventaConCuotas(
+  db: Awaited<ReturnType<typeof baseLimpia>>,
+  params: { routeId: string; clientId: string; saleId: string; cuotas: { fecha: string; valor: number; pagado?: number }[] },
+) {
+  await db.clients.add({
+    id: params.clientId, tenantId: 't-1', routeId: params.routeId, nombre: params.clientId,
+    documento: params.clientId, telefonoPrincipal: '1', direccionPrincipal: 'x',
+    status: 'activo', createdAt: '', updatedAt: '',
+  } as never)
+  const total = params.cuotas.reduce((s, c) => s + c.valor, 0)
+  await db.sales.add({
+    id: params.saleId, tenantId: 't-1', routeId: params.routeId, clientId: params.clientId,
+    createdByUserId: 'u', valorVenta: total, tasaInteres: 0, valorInteres: 0, valorTotal: total,
+    saldo: total, numeroCuotas: params.cuotas.length, valorCuota: params.cuotas[0]?.valor ?? 0,
+    frecuenciaPago: 'diaria', fechaInicio: '2026-09-01', fechaFinalEstimada: '2026-12-31',
+    status: 'activa', disbursementStatus: 'desembolsado', createdAt: '', updatedAt: '',
+  } as never)
+  let n = 0
+  for (const c of params.cuotas) {
+    n++
+    const pagado = c.pagado ?? 0
+    await db.installments.add({
+      id: `${params.saleId}-i${n}`, saleId: params.saleId, numero: n,
+      fechaVencimiento: c.fecha, valor: c.valor, pagado, saldo: c.valor - pagado,
+      status: c.valor - pagado <= 0 ? 'pagada' : 'pendiente', diasMora: 0,
+    } as never)
+  }
+}
+
+/**
+ * Oficina Leticia con 3 rutas (Centro, Mercado, Norte) y una en Río.
+ * El Admin ve Centro y Mercado, NO Norte: el alcance parcial de siempre.
+ */
+async function oficinaOperativa() {
+  const db = await baseLimpia()
+  const { createOffice } = await import('../src/services/officeService')
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+  const { today } = await import('../src/lib/formatters')
+  const hoy = today()
+
+  const leticia = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, SU)
+  const centro = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Centro', codigo: 'RT-001' }), SU)
+  const mercado = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Mercado', codigo: 'RT-002' }), SU)
+  const norte = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Norte', codigo: 'RT-003' }), SU)
+
+  // Centro: cuota de hoy 100, recaudado 60. Mercado: cuota de hoy 50, sin recaudo,
+  // y una cuota vencida de 200 (cliente en atraso).
+  await ventaConCuotas(db, { routeId: centro.id, clientId: 'c-centro', saleId: 's-centro', cuotas: [{ fecha: hoy, valor: 100 }] })
+  await ventaConCuotas(db, { routeId: mercado.id, clientId: 'c-merc', saleId: 's-merc', cuotas: [{ fecha: '2026-01-05', valor: 200 }, { fecha: hoy, valor: 50 }] })
+  // Norte (NO autorizada): cifras grandes que no deben aparecer en ningún indicador.
+  await ventaConCuotas(db, { routeId: norte.id, clientId: 'c-norte', saleId: 's-norte', cuotas: [{ fecha: hoy, valor: 999_999 }] })
+
+  await db.users.add({
+    id: 'u-adm', tenantId: 't-1', nombre: 'Ana', email: 'ana@c.com', password: 'x',
+    rol: 'admin', status: 'activo', authorizedRouteIds: [centro.id, mercado.id],
+    createdAt: '', updatedAt: '',
+  } as never)
+  const admin = (await db.users.get('u-adm'))!
+
+  // Recaudo real del día en Centro, con el servicio de pagos de producción.
+  const { registerPayment } = await import('../src/services/paymentService')
+  const pago = await registerPayment({ saleId: 's-centro', requestedAmount: 60, actor: admin, fecha: hoy })
+  if (!pago.ok) throw new Error(`precondición: el pago debía registrarse (${pago.code})`)
+
+  // Gasto del día en Centro.
+  await db.expenses.add({
+    id: 'e-hoy', tenantId: 't-1', routeId: centro.id, categoryId: 'cat', userId: 'u-adm',
+    valor: 15, fecha: hoy, syncStatus: 'synced', createdAt: '',
+  } as never)
+
+  return { db, admin, leticia, centro, mercado, norte, hoy }
+}
+
+await spec('SMOKE-E3-1', 'Smoke oficina operativa', 'los indicadores del día salen de las rutas visibles', async () => {
+  const { db, admin, leticia, hoy } = await oficinaOperativa()
+  const { getOfficeManagementSummary } = await import('../src/services/officeService')
+  const r = (await getOfficeManagementSummary({ user: admin, tenantId: 't-1', officeId: leticia.id }))!
+
+  metric('fecha', r.fecha === hoy)
+  metric('a cobrar hoy', r.ops.aCobrarHoy)
+  metric('recaudado hoy', r.ops.recaudadoHoy)
+  metric('pendiente hoy', r.ops.pendienteHoy)
+  metric('cumplimiento', `${r.ops.cumplimiento}%`)
+  assert(r.ops.aCobrarHoy === 150, `Centro 100 + Mercado 50 = 150; llegó ${r.ops.aCobrarHoy}`)
+  assert(r.ops.recaudadoHoy === 60, 'el recaudo debe salir del pago real registrado')
+  assert(r.ops.pendienteHoy === 90, 'pendiente = 150 − 60')
+  assert(r.ops.cumplimiento === 40, '60/150 = 40%')
+  db.close()
+})
+
+await spec('SMOKE-E3-2', 'Smoke oficina operativa', 'una ruta NO autorizada no contamina ningún indicador', async () => {
+  const { db, admin, leticia, norte } = await oficinaOperativa()
+  const { getOfficeManagementSummary } = await import('../src/services/officeService')
+  const r = (await getOfficeManagementSummary({ user: admin, tenantId: 't-1', officeId: leticia.id }))!
+
+  metric('alcance', r.scope.label)
+  metric('rutas con hechos operativos', r.routeOps.map(o => o.nombre).sort().join(', '))
+  metric('a cobrar hoy', r.ops.aCobrarHoy)
+  assert(r.scope.label === '2 de 3 rutas visibles — rutas autorizadas', 'el alcance parcial debe rotularse')
+  assert(r.routeOps.length === 2 && !r.routeOps.some(o => o.routeId === norte.id),
+    'Norte no puede aparecer en el comparativo')
+  assert(r.ops.aCobrarHoy === 150, 'los 999.999 de Norte NO pueden entrar en los indicadores')
+  assert(!r.opsAlerts.some(a => a.mensaje.includes('Norte')), 'ninguna alerta puede revelar Norte')
+  db.close()
+})
+
+await spec('SMOKE-E3-3', 'Smoke oficina operativa', 'cartera, atrasos y comparativo por ruta', async () => {
+  const { db, admin, leticia, centro, mercado } = await oficinaOperativa()
+  const { getOfficeManagementSummary } = await import('../src/services/officeService')
+  const r = (await getOfficeManagementSummary({ user: admin, tenantId: 't-1', officeId: leticia.id }))!
+
+  const opsCentro = r.routeOps.find(o => o.routeId === centro.id)!
+  const opsMercado = r.routeOps.find(o => o.routeId === mercado.id)!
+
+  metric('cartera activa', r.ops.carteraActiva)
+  metric('cartera vencida', r.ops.carteraVencida)
+  metric('clientes con atraso', r.ops.clientesConAtraso)
+  metric('Centro: cumplimiento', `${opsCentro.cumplimiento}%`)
+  metric('Mercado: cumplimiento', `${opsMercado.cumplimiento}%`)
+  metric('gastos hoy', r.ops.gastosHoy)
+
+  assert(r.ops.carteraVencida === 200, 'la cuota vencida de Mercado debe contarse')
+  assert(r.ops.clientesConAtraso === 1, 'un solo cliente en atraso')
+  assert(r.ops.carteraActiva === 290, 'saldo pendiente: 40 (Centro) + 250 (Mercado)')
+  assert(opsCentro.cumplimiento === 60 && opsMercado.cumplimiento === 0,
+    'el comparativo por ruta debe distinguir su cumplimiento')
+  assert(r.ops.gastosHoy === 15, 'el gasto del día debe agregarse')
+  db.close()
+})
+
+await spec('SMOKE-E3-4', 'Smoke oficina operativa', 'el consolidado financiero solo llega a roles con permiso', async () => {
+  const { db, admin, leticia, centro, mercado } = await oficinaOperativa()
+  const { getOfficeManagementSummary } = await import('../src/services/officeService')
+  const { can } = await import('../src/lib/permissions')
+
+  // Admin: SÍ tiene caja de ruta.
+  const conPermiso = (await getOfficeManagementSummary({ user: admin, tenantId: 't-1', officeId: leticia.id }))!
+  metric('admin ve finanzas', conPermiso.finance !== null)
+  metric('base actual', conPermiso.finance?.baseActual)
+  metric('cobros consolidados', conPermiso.finance?.cobros)
+  assert(conPermiso.finance !== null, 'el Administrador debe ver el consolidado')
+  assert(typeof conPermiso.finance!.totalControlado === 'number', 'el consolidado debe traer cifras')
+
+  // Cobrador con las MISMAS rutas: no tiene `cashbox.viewRoute`.
+  await db.users.add({
+    id: 'u-cob', tenantId: 't-1', nombre: 'Luis', email: 'luis@c.com', password: 'x',
+    rol: 'cobrador', status: 'activo', authorizedRouteIds: [centro.id, mercado.id],
+    createdAt: '', updatedAt: '',
+  } as never)
+  const cob = (await db.users.get('u-cob'))!
+  const sinPermiso = (await getOfficeManagementSummary({ user: cob, tenantId: 't-1', officeId: leticia.id }))!
+
+  metric('cobrador puede ver caja de ruta', can(cob, 'cashbox.viewRoute', { routeId: centro.id }))
+  metric('cobrador recibe finanzas', sinPermiso.finance !== null)
+  assert(!can(cob, 'cashbox.viewRoute', { routeId: centro.id }), 'el Cobrador no tiene caja financiera de ruta')
+  assert(sinPermiso.finance === null, 'sin permiso el consolidado NO debe calcularse ni enviarse')
+  // Pero sus indicadores operativos sí existen: no es un panel vacío.
+  assert(sinPermiso.ops.aCobrarHoy === 150, 'la operación del día sigue disponible para el Cobrador')
+  db.close()
+})
+
+await spec('SMOKE-E3-5', 'Smoke oficina operativa', 'las alertas avanzadas aparecen cuando corresponde', async () => {
+  const { db, admin, leticia, mercado } = await oficinaOperativa()
+  const { getOfficeManagementSummary } = await import('../src/services/officeService')
+  const r = (await getOfficeManagementSummary({ user: admin, tenantId: 't-1', officeId: leticia.id }))!
+
+  const tipos = r.opsAlerts.map(a => a.kind)
+  metric('alertas operativas', tipos.join(', '))
+  metric('mensajes', r.opsAlerts.map(a => a.mensaje).join(' | '))
+  assert(tipos.includes('cartera-vencida'), 'debe avisarse la cartera vencida')
+  assert(tipos.includes('clientes-atraso'), 'debe avisarse el cliente en atraso')
+  assert(tipos.includes('cumplimiento-bajo'), 'debe avisarse el cumplimiento bajo')
+  // Ana es Administradora efectiva de las dos rutas: no debe avisarse lo contrario.
+  assert(!tipos.includes('sin-administrador'),
+    'no puede avisarse "sin Administrador" en rutas que sí lo tienen')
+  assert(r.opsAlerts.some(a => a.routeId === mercado.id), 'las alertas deben identificar la ruta')
+  db.close()
+})
+
+await spec('SMOKE-E3-6', 'Smoke oficina operativa', 'una Oficina inactiva sigue mostrando su operación histórica', async () => {
+  const { db, admin, leticia } = await oficinaOperativa()
+  const { getOfficeManagementSummary, setOfficeStatus } = await import('../src/services/officeService')
+  await setOfficeStatus({ officeId: leticia.id, tenantId: 't-1', status: 'inactiva' }, SU)
+
+  const r = (await getOfficeManagementSummary({ user: admin, tenantId: 't-1', officeId: leticia.id }))!
+  metric('panel accesible', !!r)
+  metric('estado', r.office.status)
+  metric('a cobrar hoy', r.ops.aCobrarHoy)
+  metric('finanzas disponibles', r.finance !== null)
+  assert(r.office.status === 'inactiva', 'el panel debe reflejar el estado')
+  assert(r.ops.aCobrarHoy === 150 && r.ops.carteraVencida === 200, 'la operación histórica sigue visible')
+  assert(r.alerts.some(a => a.kind === 'oficina-inactiva'), 'debe avisarse que está inactiva')
+  db.close()
+})
+
 // ############################################################
 // INFORME
 // ############################################################
