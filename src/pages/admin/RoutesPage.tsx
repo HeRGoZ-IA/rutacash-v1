@@ -22,6 +22,7 @@ import { logAction } from '@/services/auditService'
 import { createRouteWithAdmins, updateRouteWithAssignments } from '@/services/routeService'
 import { cobradorRemovalBlock, validateCobradorInvariant, COBRADOR_REMOVAL_MESSAGE, routeAssignmentWarnings, routeCanOperateCollection, ROUTE_NO_COBRADOR_LABEL, ROUTE_NO_COBRADOR_OPERATION_MESSAGE } from '@/lib/cobradorRules'
 import { ASSIGNMENT_ROLE_ORDER } from '@/lib/routeAssignments'
+import { effectiveAdminIdsAfterSave, routeAdmins, shouldConfirmRouteWithoutAdmin } from '@/lib/routeAdmins'
 import { NO_OFFICE_LABEL, filterRoutesByOffice, ALL_OFFICES } from '@/lib/officeGrouping'
 import { OfficeSelector } from '@/components/ui/OfficeSelector'
 import { filterAccessibleRoutes, assignableRoles, canManageUser, ROLE_LABELS } from '@/lib/permissions'
@@ -227,11 +228,28 @@ export default function RoutesPage() {
   const draftCobradorIds = form.assignedUserIds.filter(id => allUsers.find(u => u.id === id)?.rol === 'cobrador')
   // ADVERTENCIAS, NO BLOQUEOS: la ruta se crea/guarda igual sin responsables. Solo se
   // informa qué implica (sin Administrador nadie aprueba; sin Cobrador no hay cobro).
+  /**
+   * Administradores que tendrá la ruta DESPUÉS de guardar.
+   *
+   * No se mira solo el borrador: un Administrador no puede gestionar a otros
+   * Administradores, así que el borrador de un actor Admin nunca los contiene y
+   * mirarlo daba el falso «quedará sin Administrador» aunque no se tocara nada.
+   * Los admins fuera del alcance del actor conservan su asignación porque el
+   * guardado (`computeRouteAssignmentDiff`) solo retira dentro de `assignableUserIds`.
+   */
+  const effectiveAdminIds = editing
+    ? effectiveAdminIdsAfterSave({
+        routeId: editing.id,
+        users: allUsers,
+        assignableUserIds: assignableToRoutes.map(u => u.id),
+        draftAssignedUserIds: form.assignedUserIds,
+        tenantId,
+      })
+    : (lockAdminToSelf && user ? [user.id] : form.adminIds)
+
   const assignmentWarnings = routeAssignmentWarnings({
     hasOffice: !!form.officeId,
-    hasAdmin: editing
-      ? form.assignedUserIds.some(id => allUsers.find(u => u.id === id)?.rol === 'admin')
-      : lockAdminToSelf || form.adminIds.length > 0,
+    hasAdmin: effectiveAdminIds.length > 0,
     hasCobrador: routeCanOperateCollection({ assignedCobradorIds: draftCobradorIds, cobradorId: form.cobradorId || undefined }),
     mode: editing ? 'edit' : 'create',
   })
@@ -259,11 +277,17 @@ export default function RoutesPage() {
       userById: (id) => allUsers.find(u => u.id === id),
     })
     if (editing && !inv.ok) { toast.error(inv.message); return }
-    // Confirmación al Actualizar: no dejar una ruta ACTIVA sin ningún Administrador.
-    if (editing && !force && editing.status === 'activa') {
-      const draftAdmins = form.assignedUserIds.filter(id => allUsers.find(u => u.id === id)?.rol === 'admin')
-      const prevAdmins = allUsers.filter(a => a.rol === 'admin' && getAssignedRouteIds(a).includes(editing.id))
-      if (draftAdmins.length === 0 && prevAdmins.length > 0) { setNoAdminConfirm(true); return }
+    // Confirmación al Actualizar: solo si el guardado REALMENTE deja la ruta ACTIVA
+    // sin ningún Administrador efectivo. Antes se comparaba el borrador (que nunca
+    // contiene admins cuando el actor es Administrador) contra los previos, y por eso
+    // la advertencia saltaba en falso al editar una ruta que sí tenía Administrador.
+    if (editing && !force) {
+      const confirmar = shouldConfirmRouteWithoutAdmin({
+        routeStatus: editing.status,
+        adminIdsBefore: routeAdmins(allUsers, editing.id, tenantId).map(a => a.id),
+        effectiveAdminIdsAfterSave: effectiveAdminIds,
+      })
+      if (confirmar) { setNoAdminConfirm(true); return }
     }
     setSaving(true)
     try {

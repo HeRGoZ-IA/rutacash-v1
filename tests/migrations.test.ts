@@ -685,6 +685,204 @@ await spec('SMOKE-E', 'Smoke gestión', 'Oficina inactiva: el panel se consulta,
   db.close()
 })
 
+
+// ############################################################
+// GRUPO — SMOKE MULTI-ADMINISTRADOR (Dexie real)
+// ------------------------------------------------------------
+// Reproduce el recorrido de las capturas y los casos de múltiples
+// Administradores, con la base y los servicios reales.
+// ############################################################
+
+/** Empresa real con dos Administradores y una ruta que tiene a ambos. */
+async function empresaDosAdmins() {
+  const db = await baseLimpia()
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+
+  for (const a of [{ id: 'u-carlos', nombre: 'Carlos' }, { id: 'u-juan', nombre: 'Juan' }]) {
+    await db.users.add({
+      id: a.id, tenantId: 't-1', nombre: a.nombre, email: `${a.id}@c.com`, password: 'x',
+      rol: 'admin', status: 'activo', createdAt: '', updatedAt: '',
+    } as never)
+  }
+  const sur = await createRouteWithAdmins(
+    datosRutaSmoke({ nombre: 'Ruta Sur', codigo: 'RT-001', adminIds: ['u-carlos', 'u-juan'] }), SU,
+  )
+  return { db, sur }
+}
+
+/** Reproduce lo que hace la pantalla al abrir el editor de una ruta. */
+async function abrirEditor(db: Awaited<ReturnType<typeof baseLimpia>>, routeId: string, actor: User) {
+  const { assignableRoles, canManageUser } = await import('../src/lib/permissions')
+  const { getAssignedRouteIds } = await import('../src/lib/roles')
+  const users = await db.users.toArray()
+  const asignables = users.filter(u =>
+    u.rol !== 'superadmin' && assignableRoles(actor).includes(u.rol) && canManageUser(actor, u))
+  return {
+    users,
+    assignableUserIds: asignables.map(u => u.id),
+    // Hidratación del borrador: asignables que ya están en la ruta.
+    draftAssignedUserIds: asignables.filter(u => getAssignedRouteIds(u).includes(routeId)).map(u => u.id),
+  }
+}
+
+await spec('SMOKE-ADMIN-A', 'Smoke multi-admin', 'editar una ruta con DOS Admin y guardar sin cambios NO advierte', async () => {
+  const { db, sur } = await empresaDosAdmins()
+  const { routeAdmins, effectiveAdminIdsAfterSave, shouldConfirmRouteWithoutAdmin } = await import('../src/lib/routeAdmins')
+
+  const admins = routeAdmins(await db.users.toArray(), sur.id, 't-1')
+  metric('administradores de la ruta', admins.map(a => a.nombre).sort().join(', '))
+  assert(admins.length === 2, 'precondición: la ruta debe tener a Carlos y Juan')
+
+  // Caso de la captura: el ACTOR es un Administrador.
+  const carlos = (await db.users.get('u-carlos'))!
+  const editorAdmin = await abrirEditor(db, sur.id, carlos)
+  const efectivosAdmin = effectiveAdminIdsAfterSave({
+    routeId: sur.id, users: editorAdmin.users, tenantId: 't-1',
+    assignableUserIds: editorAdmin.assignableUserIds,
+    draftAssignedUserIds: editorAdmin.draftAssignedUserIds,
+  })
+  const adviertePorAdmin = shouldConfirmRouteWithoutAdmin({
+    routeStatus: sur.status, adminIdsBefore: admins.map(a => a.id),
+    effectiveAdminIdsAfterSave: efectivosAdmin,
+  })
+  metric('borrador del actor Admin contiene admins', editorAdmin.draftAssignedUserIds.length)
+  metric('efectivos tras guardar (actor Admin)', efectivosAdmin.length)
+  metric('advertencia (actor Admin)', adviertePorAdmin)
+  assert(efectivosAdmin.length === 2, 'los dos Administradores deben seguir siendo efectivos')
+  assert(!adviertePorAdmin, 'NO debe advertirse: nadie tocó los Administradores')
+
+  // Y con el Super Admin, que sí los gestiona, el borrador los hidrata.
+  const editorSuper = await abrirEditor(db, sur.id, SU)
+  const efectivosSuper = effectiveAdminIdsAfterSave({
+    routeId: sur.id, users: editorSuper.users, tenantId: 't-1',
+    assignableUserIds: editorSuper.assignableUserIds,
+    draftAssignedUserIds: editorSuper.draftAssignedUserIds,
+  })
+  metric('borrador del Super Admin hidrata ambos', editorSuper.draftAssignedUserIds.filter(id => id.startsWith('u-carlos') || id.startsWith('u-juan')).length)
+  metric('efectivos (Super Admin)', efectivosSuper.length)
+  assert(efectivosSuper.length === 2, 'el editor del Super Admin debe conservar ambos')
+  assert(!shouldConfirmRouteWithoutAdmin({
+    routeStatus: sur.status, adminIdsBefore: admins.map(a => a.id), effectiveAdminIdsAfterSave: efectivosSuper,
+  }), 'tampoco debe advertir con el Super Admin')
+  db.close()
+})
+
+await spec('SMOKE-ADMIN-B', 'Smoke multi-admin', 'quitar a Juan: sin advertencia, Carlos sigue y las rutas de Juan se conservan', async () => {
+  const { db, sur } = await empresaDosAdmins()
+  const { createRouteWithAdmins, updateRouteWithAssignments } = await import('../src/services/routeService')
+  const { routeAdmins, effectiveAdminIdsAfterSave, shouldConfirmRouteWithoutAdmin } = await import('../src/lib/routeAdmins')
+
+  // Juan tiene además otra ruta que no se está editando.
+  const otra = await createRouteWithAdmins(
+    datosRutaSmoke({ nombre: 'Ruta Norte', codigo: 'RT-002', adminIds: ['u-juan'] }), SU,
+  )
+
+  const users = await db.users.toArray()
+  const antes = routeAdmins(users, sur.id, 't-1').map(a => a.id)
+  const efectivos = effectiveAdminIdsAfterSave({
+    routeId: sur.id, users, tenantId: 't-1',
+    assignableUserIds: ['u-carlos', 'u-juan'],
+    draftAssignedUserIds: ['u-carlos'],           // se desmarca Juan
+  })
+  metric('advertencia', shouldConfirmRouteWithoutAdmin({ routeStatus: sur.status, adminIdsBefore: antes, effectiveAdminIdsAfterSave: efectivos }))
+  assert(!shouldConfirmRouteWithoutAdmin({ routeStatus: sur.status, adminIdsBefore: antes, effectiveAdminIdsAfterSave: efectivos }),
+    'dejando a Carlos no debe advertirse')
+
+  await updateRouteWithAssignments({
+    routeId: sur.id, tenantId: 't-1', nombre: 'Ruta Sur', ciudad: undefined,
+    tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500_000,
+    cobradorId: undefined, assignedUserIds: ['u-carlos'], assignableUserIds: ['u-carlos', 'u-juan'],
+  }, SU)
+
+  const finales = await db.users.toArray()
+  const juan = finales.find(u => u.id === 'u-juan')!
+  metric('admins de Ruta Sur', routeAdmins(finales, sur.id, 't-1').map(a => a.nombre).join(', '))
+  metric('rutas de Juan', JSON.stringify(juan.authorizedRouteIds))
+  assert(routeAdmins(finales, sur.id, 't-1').map(a => a.id).join() === 'u-carlos', 'solo Carlos debe quedar en Ruta Sur')
+  assert((juan.authorizedRouteIds ?? []).includes(otra.id), 'SE PERDIÓ la otra ruta de Juan al desasignarlo de Ruta Sur')
+  db.close()
+})
+
+await spec('SMOKE-ADMIN-C', 'Smoke multi-admin', 'quitar a los DOS: advierte, se confirma y la ruta queda sin Admin', async () => {
+  const { db, sur } = await empresaDosAdmins()
+  const { updateRouteWithAssignments } = await import('../src/services/routeService')
+  const { routeAdmins, effectiveAdminIdsAfterSave, shouldConfirmRouteWithoutAdmin } = await import('../src/lib/routeAdmins')
+
+  const users = await db.users.toArray()
+  const antes = routeAdmins(users, sur.id, 't-1').map(a => a.id)
+  const efectivos = effectiveAdminIdsAfterSave({
+    routeId: sur.id, users, tenantId: 't-1',
+    assignableUserIds: ['u-carlos', 'u-juan'], draftAssignedUserIds: [],
+  })
+  const advierte = shouldConfirmRouteWithoutAdmin({ routeStatus: sur.status, adminIdsBefore: antes, effectiveAdminIdsAfterSave: efectivos })
+  metric('advertencia', advierte)
+  assert(advierte, 'quitar a todos los Administradores SÍ debe advertir')
+
+  // El usuario confirma "Guardar de todos modos": el guardado procede igual.
+  await updateRouteWithAssignments({
+    routeId: sur.id, tenantId: 't-1', nombre: 'Ruta Sur', ciudad: undefined,
+    tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500_000,
+    cobradorId: undefined, assignedUserIds: [], assignableUserIds: ['u-carlos', 'u-juan'],
+  }, SU)
+
+  const finales = await db.users.toArray()
+  const ruta = await db.routes.get(sur.id)
+  metric('admins tras confirmar', routeAdmins(finales, sur.id, 't-1').length)
+  metric('estado de la ruta', ruta?.status)
+  assert(routeAdmins(finales, sur.id, 't-1').length === 0, 'la ruta debía quedar sin Administrador')
+  assert(ruta?.status === 'activa', 'una ruta sin Administrador sigue siendo válida: no hay rollback')
+  db.close()
+})
+
+await spec('SMOKE-ADMIN-D', 'Smoke multi-admin', 'un Admin nuevo nace sin rutas y solo recibe la que se le asigna', async () => {
+  const { db } = await empresaDosAdmins()
+  const { createOffice, createRouteWithAdmins } = await import('../src/services/officeService')
+    .then(async o => ({ createOffice: o.createOffice, createRouteWithAdmins: (await import('../src/services/routeService')).createRouteWithAdmins }))
+  const { setUserOfficeRoutes } = await import('../src/services/officeService')
+
+  const rio = await createOffice({ tenantId: 't-1', nombre: 'Río' }, SU)
+  const puerto = await createRouteWithAdmins(datosRutaSmoke({ officeId: rio.id, nombre: 'Puerto', codigo: 'RT-009' }), SU)
+
+  await db.users.add({
+    id: 'u-pedro', tenantId: 't-1', nombre: 'Pedro', email: 'pedro@c.com', password: 'x',
+    rol: 'admin', status: 'activo', createdAt: '', updatedAt: '',
+  } as never)
+  const reciennacido = (await db.users.get('u-pedro'))!
+  metric('rutas al crearse', JSON.stringify(reciennacido.authorizedRouteIds))
+  metric('rutas existentes en la empresa', (await db.routes.count()))
+  assert((reciennacido.authorizedRouteIds ?? []).length === 0, 'Pedro no debe heredar ninguna ruta')
+
+  // Se le asigna SOLO la ruta de Río, desde el panel de esa Oficina.
+  await setUserOfficeRoutes({
+    userId: 'u-pedro', tenantId: 't-1', officeRouteIds: [puerto.id], selectedRouteIds: [puerto.id],
+  }, SU)
+  const pedro = (await db.users.get('u-pedro'))!
+  metric('rutas tras asignar', JSON.stringify(pedro.authorizedRouteIds))
+  assert((pedro.authorizedRouteIds ?? []).length === 1, 'solo debe tener la ruta asignada')
+  assert((pedro.authorizedRouteIds ?? [])[0] === puerto.id, 'debe tener exactamente Ruta Puerto')
+  db.close()
+})
+
+await spec('SMOKE-ADMIN-E', 'Smoke multi-admin', 'Carlos crea una ruta: queda asignado él y solo él', async () => {
+  const { db } = await empresaDosAdmins()
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+
+  const carlos = (await db.users.get('u-carlos'))!
+  const nueva = await createRouteWithAdmins(
+    datosRutaSmoke({ nombre: 'Ruta Nueva', codigo: 'RT-050' }), carlos,
+  )
+  const users = await db.users.toArray()
+  const tiene = (id: string) => (users.find(u => u.id === id)?.authorizedRouteIds ?? []).includes(nueva.id)
+
+  metric('Carlos (actor)', tiene('u-carlos'))
+  metric('Juan', tiene('u-juan'))
+  const { canAccessRoute } = await import('../src/lib/permissions')
+  metric('Carlos opera la ruta', canAccessRoute(users.find(u => u.id === 'u-carlos')!, nueva.id))
+  assert(tiene('u-carlos'), 'el Administrador creador debe quedar asignado (anti auto-bloqueo)')
+  assert(!tiene('u-juan'), 'ningún otro Administrador puede recibir la ruta automáticamente')
+  db.close()
+})
+
 // ############################################################
 // INFORME
 // ############################################################

@@ -62,6 +62,12 @@ export function RouteAssignedUsers({ users, routeId, tenantId, responsibleCobrad
                 {shown.map((u, i) => (
                   <span key={u.id}>
                     {u.nombre}
+                    {/* Un usuario inactivo no sostiene responsabilidad operativa: se
+                        marca para que la tarjeta no aparente un responsable efectivo
+                        que las advertencias no cuentan. */}
+                    {u.status !== 'activo' && (
+                      <span className="text-[10px] font-medium text-gray-400"> (inactivo)</span>
+                    )}
                     {g.rol === 'cobrador' && u.id === responsibleCobradorId && (
                       <span className="text-[10px] font-medium text-primary-600"> (responsable)</span>
                     )}

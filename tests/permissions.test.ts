@@ -8,6 +8,7 @@
 // ============================================================
 import {
   can, canManageRole, canManageUser, canAccessRoute, authorizedRouteIdsOf, homePathForRole, ROLE_LABELS,
+  assignableRoles,
   hasOperationalRoutes, isRouteUnrestricted, filterByAccessibleRoute, filterAccessibleRoutes,
   isCapabilityCompatible, sanitizeGrantedCapabilities, delegableCapabilitiesFor,
   isPartnerInScope, isTransferInScope, type Capability,
@@ -24,6 +25,9 @@ import {
   ALL_OFFICES, NO_OFFICE, NO_OFFICE_LABEL,
 } from '../src/lib/officeGrouping'
 import { validateOfficeIdentity, isRouteOperationBlocked } from '../src/services/officeService'
+import {
+  routeAdmins, effectiveAdminIdsAfterSave, shouldConfirmRouteWithoutAdmin, routeAdminsLabel,
+} from '../src/lib/routeAdmins'
 import {
   routeOperationalState, officeKpis, officeStateSummary, officeScope, officeAlerts,
   relatedUsersOfOffice, applyOfficeRouteSelection, officeRoutesOf, unassignedRoutesOf,
@@ -951,6 +955,223 @@ const RUTAS_DE_LETICIA = ['r-L1', 'r-L2']
   // El único vistazo fuera del alcance es un CONTEO estructural.
   check('OFFICE-DASH-008c — el total de la Oficina es solo un conteo',
     /const totalRoutesInOffice = allRoutes\.filter\(r => r\.officeId === officeId\)\.length/.test(cuerpo))
+}
+
+
+// ============================================================
+// MÚLTIPLES ADMINISTRADORES POR EMPRESA Y POR RUTA
+// ------------------------------------------------------------
+// Una empresa puede tener varios Administradores y una misma ruta puede tener más
+// de uno. Son usuarios GENERALES de la empresa: no pertenecen a ninguna Oficina y
+// su acceso nace solo de `authorizedRouteIds`.
+// ============================================================
+const mkAdmin = (id: string, nombre: string, rutas: string[], over: Partial<User> = {}): User =>
+  mkUser('admin', { id, nombre, authorizedRouteIds: rutas.length ? rutas : undefined, ...over })
+
+const CARLOS = mkAdmin('u-carlos', 'Carlos', ['r-centro', 'r-sur'])
+const JUAN = mkAdmin('u-juan', 'Juan', ['r-centro'])
+const PEDRO = mkAdmin('u-pedro', 'Pedro', [])
+const COB = mkUser('cobrador', { id: 'u-cob', nombre: 'Luis', authorizedRouteIds: ['r-centro'] })
+const EMPRESA = [CARLOS, JUAN, PEDRO, COB]
+
+// ROUTE-ADMIN-001 — varios Administradores en la misma empresa es válido.
+check('ROUTE-ADMIN-001 — una empresa admite varios Administradores',
+  EMPRESA.filter(u => u.rol === 'admin').length === 3)
+check('ROUTE-ADMIN-001b — ninguno pertenece a una Oficina',
+  EMPRESA.every(u => !('officeId' in (u as unknown as Record<string, unknown>))))
+
+// ROUTE-ADMIN-002 — una misma ruta puede tener DOS Administradores.
+{
+  const enCentro = routeAdmins(EMPRESA, 'r-centro', 't1')
+  check('ROUTE-ADMIN-002 — una ruta puede tener dos Administradores',
+    enCentro.length === 2 && enCentro.map(a => a.nombre).sort().join(',') === 'Carlos,Juan')
+  check('ROUTE-ADMIN-002b — los cobradores no se cuentan como Administradores',
+    !enCentro.some(a => a.id === COB.id))
+  check('ROUTE-ADMIN-002c — una ruta de un solo Admin se resuelve igual',
+    routeAdmins(EMPRESA, 'r-sur', 't1').length === 1)
+  check('ROUTE-ADMIN-002d — una ruta sin Admin devuelve lista vacía',
+    routeAdmins(EMPRESA, 'r-nueva', 't1').length === 0)
+}
+
+// ============================================================
+// REGRESIÓN DEL BUG: la advertencia falsa al editar una ruta CON Administrador
+// ------------------------------------------------------------
+// Escenario exacto de la captura: ruta activa, Admin asignado, se abre Editar, no
+// se cambia nada y se pulsa Actualizar.
+//
+// El actor es un ADMINISTRADOR, y `MANAGEABLE_ROLES.admin` no incluye 'admin': el
+// borrador de usuarios asignables NUNCA contiene administradores. La lógica
+// anterior comparaba ese borrador contra los admins previos y concluía que la
+// ruta iba a quedarse sin ninguno.
+// ============================================================
+{
+  const actorAdmin = CARLOS
+  // Usuarios que el actor PUEDE togglear: ningún admin entra aquí.
+  const asignables = EMPRESA
+    .filter(u => u.rol !== 'superadmin' && assignableRoles(actorAdmin).includes(u.rol) && canManageUser(actorAdmin, u))
+    .map(u => u.id)
+  check('ROUTE-ADMIN-REG-000 — un Administrador no puede gestionar a otros Administradores',
+    !asignables.includes(JUAN.id) && !asignables.includes(CARLOS.id) && asignables.includes(COB.id))
+
+  // Borrador tal y como lo hidrata la pantalla: solo asignables ya asignados.
+  const borrador = EMPRESA
+    .filter(u => asignables.includes(u.id) && (u.authorizedRouteIds ?? []).includes('r-centro'))
+    .map(u => u.id)
+
+  // --- LÓGICA ANTERIOR (reproduce el fallo) ---
+  const draftAdminsAntiguo = borrador.filter(id => EMPRESA.find(u => u.id === id)?.rol === 'admin')
+  const prevAdminsAntiguo = EMPRESA.filter(a => a.rol === 'admin' && (a.authorizedRouteIds ?? []).includes('r-centro'))
+  const advertenciaAntigua = draftAdminsAntiguo.length === 0 && prevAdminsAntiguo.length > 0
+  check('ROUTE-ADMIN-REG-001 — la lógica anterior producía la advertencia FALSA',
+    advertenciaAntigua === true)
+
+  // --- LÓGICA NUEVA (corregida) ---
+  const efectivos = effectiveAdminIdsAfterSave({
+    routeId: 'r-centro', users: EMPRESA,
+    assignableUserIds: asignables, draftAssignedUserIds: borrador, tenantId: 't1',
+  })
+  const advertenciaNueva = shouldConfirmRouteWithoutAdmin({
+    routeStatus: 'activa',
+    adminIdsBefore: routeAdmins(EMPRESA, 'r-centro', 't1').map(a => a.id),
+    effectiveAdminIdsAfterSave: efectivos,
+  })
+  check('ROUTE-ADMIN-REG-002 — los administradores efectivos conservan a Carlos y Juan',
+    efectivos.length === 2 && efectivos.includes(CARLOS.id) && efectivos.includes(JUAN.id))
+  check('ROUTE-ADMIN-003 — editar sin tocar Administradores NO muestra advertencia',
+    advertenciaNueva === false)
+}
+
+// ROUTE-ADMIN-004 — el editor hidrata correctamente cuando el actor SÍ gestiona admins.
+{
+  const asignablesSuper = EMPRESA
+    .filter(u => u.rol !== 'superadmin' && assignableRoles(superadmin).includes(u.rol) && canManageUser(superadmin, u))
+    .map(u => u.id)
+  check('ROUTE-ADMIN-004a — el Super Admin sí puede gestionar Administradores',
+    asignablesSuper.includes(CARLOS.id) && asignablesSuper.includes(JUAN.id))
+  const borradorSuper = EMPRESA
+    .filter(u => asignablesSuper.includes(u.id) && (u.authorizedRouteIds ?? []).includes('r-centro'))
+    .map(u => u.id)
+  check('ROUTE-ADMIN-004 — el borrador del Super Admin hidrata los dos Administradores',
+    borradorSuper.includes(CARLOS.id) && borradorSuper.includes(JUAN.id))
+  check('ROUTE-ADMIN-004b — y no muestra advertencia al guardar sin cambios',
+    shouldConfirmRouteWithoutAdmin({
+      routeStatus: 'activa',
+      adminIdsBefore: routeAdmins(EMPRESA, 'r-centro', 't1').map(a => a.id),
+      effectiveAdminIdsAfterSave: effectiveAdminIdsAfterSave({
+        routeId: 'r-centro', users: EMPRESA,
+        assignableUserIds: asignablesSuper, draftAssignedUserIds: borradorSuper, tenantId: 't1',
+      }),
+    }) === false)
+}
+
+// ROUTE-ADMIN-005 / 006 — quitar todos vs dejar al menos uno.
+{
+  const asignablesSuper = [CARLOS.id, JUAN.id, PEDRO.id, COB.id]
+  const efectivosTras = (borrador: string[]) => effectiveAdminIdsAfterSave({
+    routeId: 'r-centro', users: EMPRESA,
+    assignableUserIds: asignablesSuper, draftAssignedUserIds: borrador, tenantId: 't1',
+  })
+  const antes = routeAdmins(EMPRESA, 'r-centro', 't1').map(a => a.id)
+
+  check('ROUTE-ADMIN-005 — quitar TODOS los Administradores sí advierte',
+    shouldConfirmRouteWithoutAdmin({
+      routeStatus: 'activa', adminIdsBefore: antes, effectiveAdminIdsAfterSave: efectivosTras([COB.id]),
+    }) === true)
+  check('ROUTE-ADMIN-006 — dejar al menos uno NO advierte',
+    shouldConfirmRouteWithoutAdmin({
+      routeStatus: 'activa', adminIdsBefore: antes, effectiveAdminIdsAfterSave: efectivosTras([CARLOS.id, COB.id]),
+    }) === false)
+  check('ROUTE-ADMIN-006b — una ruta que YA estaba sin Admin no vuelve a preguntar',
+    shouldConfirmRouteWithoutAdmin({
+      routeStatus: 'activa', adminIdsBefore: [], effectiveAdminIdsAfterSave: [],
+    }) === false)
+  check('ROUTE-ADMIN-006c — una ruta inactiva no pide confirmación',
+    shouldConfirmRouteWithoutAdmin({
+      routeStatus: 'inactiva', adminIdsBefore: antes, effectiveAdminIdsAfterSave: [],
+    }) === false)
+}
+
+// ROUTE-ADMIN-012 — desasignar de una ruta conserva las demás rutas del Admin.
+{
+  // Carlos tiene r-centro y r-sur. Se edita r-centro y se le desasigna.
+  const resultado = applyOfficeRouteSelection(['r-centro', 'r-sur'], ['r-centro'], [])
+  check('ROUTE-ADMIN-012 — desasignar de una ruta no borra las otras del Administrador',
+    resultado.length === 1 && resultado[0] === 'r-sur')
+  // Y el diff de la pantalla de rutas solo retira dentro del alcance del actor.
+  const diff = computeRouteAssignmentDiff({
+    routeId: 'r-centro',
+    assignableUserIds: [CARLOS.id],
+    assignedUserIds: [],
+    membershipOf: (id) => id === CARLOS.id ? ['r-centro', 'r-sur'] : [],
+  })
+  check('ROUTE-ADMIN-012b — el diff retira solo de la ruta editada',
+    diff.removed.length === 1 && diff.removed[0] === CARLOS.id && diff.added.length === 0)
+}
+
+// ROUTE-ADMIN-011 — un admin fuera del alcance del actor NUNCA se retira.
+{
+  const diff = computeRouteAssignmentDiff({
+    routeId: 'r-centro',
+    assignableUserIds: [COB.id],          // el actor Admin solo gestiona al cobrador
+    assignedUserIds: [COB.id],
+    membershipOf: (id) => id === JUAN.id ? ['r-centro'] : id === COB.id ? ['r-centro'] : [],
+  })
+  check('ROUTE-ADMIN-011 — guardar como Administrador no retira a otros Administradores',
+    !diff.removed.includes(JUAN.id) && !diff.added.includes(JUAN.id))
+}
+
+// ROUTE-ADMIN-014 — Administrador INACTIVO: no cuenta como responsable efectivo.
+{
+  const inactivo = mkAdmin('u-inact', 'Inactivo', ['r-sola'], { status: 'inactivo' })
+  check('ROUTE-ADMIN-014a — un Admin inactivo no cuenta como Administrador de la ruta',
+    routeAdmins([inactivo], 'r-sola', 't1').length === 0)
+  check('ROUTE-ADMIN-014b — tampoco entra en los efectivos tras guardar',
+    effectiveAdminIdsAfterSave({
+      routeId: 'r-sola', users: [inactivo], assignableUserIds: [], draftAssignedUserIds: [], tenantId: 't1',
+    }).length === 0)
+  check('ROUTE-ADMIN-014c — y por eso la ruta no vuelve a pedir confirmación',
+    shouldConfirmRouteWithoutAdmin({ routeStatus: 'activa', adminIdsBefore: [], effectiveAdminIdsAfterSave: [] }) === false)
+}
+
+// Aislamiento por empresa.
+check('ROUTE-ADMIN-017 — un Admin de otra empresa no cuenta en la ruta',
+  routeAdmins([mkAdmin('u-otro', 'Otro', ['r-centro'], { tenantId: 't2' })], 'r-centro', 't1').length === 0)
+
+// ROUTE-ADMIN-013 — etiqueta correcta en tarjeta/vista (nunca singular en plural).
+check('ROUTE-ADMIN-013a — 0 administradores', routeAdminsLabel([]) === 'Sin Administrador asignado')
+check('ROUTE-ADMIN-013b — 1 administrador', routeAdminsLabel(['Carlos']) === 'Administrador: Carlos')
+check('ROUTE-ADMIN-013c — 2+ administradores en plural',
+  routeAdminsLabel(['Carlos', 'Juan']) === 'Administradores: Carlos, Juan')
+
+// ROUTE-ADMIN-015 / 016 — la Oficina y el catálogo siguen sin conceder rutas.
+{
+  const carlosGestor = mkAdmin('u-c2', 'Carlos', ['r-centro'])
+  check('ROUTE-ADMIN-015 — gestionar Oficinas no concede ninguna ruta',
+    can(carlosGestor, 'office.edit') && can(carlosGestor, 'office.create') &&
+    canAccessRoute(carlosGestor, 'r-centro') && !canAccessRoute(carlosGestor, 'r-sur'))
+  const sinRutas = mkAdmin('u-vacio', 'Vacío', [])
+  check('ROUTE-ADMIN-016 — un Admin sin authorizedRouteIds sigue fail-closed',
+    !hasOperationalRoutes(sinRutas) && !canAccessRoute(sinRutas, 'r-centro') &&
+    filterAccessibleRoutes(sinRutas, [{ id: 'r-centro' } as never]).length === 0)
+}
+
+// ROUTE-ADMIN-007 — un Admin nuevo no hereda ninguna ruta.
+check('ROUTE-ADMIN-007 — un Administrador recién creado no recibe rutas automáticamente',
+  (PEDRO.authorizedRouteIds ?? []).length === 0 && !hasOperationalRoutes(PEDRO))
+
+// --- La pantalla usa el cálculo corregido (contrato sobre el código) ---
+{
+  const page = readSourceFile('src/pages/admin/RoutesPage.tsx')
+  check('ROUTE-ADMIN-REG-003 — la pantalla decide con los administradores efectivos',
+    page.includes('effectiveAdminIdsAfterSave({') && page.includes('shouldConfirmRouteWithoutAdmin({'))
+  check('ROUTE-ADMIN-REG-004 — ya no se compara el borrador crudo contra los previos',
+    !page.includes("const draftAdmins = form.assignedUserIds.filter"))
+  check('ROUTE-ADMIN-REG-005 — la advertencia ámbar usa la misma fuente',
+    page.includes('hasAdmin: effectiveAdminIds.length > 0'))
+  // Fuente única: no aparecen campos de admin en la Ruta.
+  const types = readSourceFile('src/models/types.ts')
+  check('ROUTE-ADMIN-018 — no existe Route.adminId ni Route.adminIds',
+    !/adminIds?\??:/.test(types))
 }
 
 // ============================================================

@@ -507,3 +507,106 @@ Quedan fuera **a propósito**, para la Entrega 2 en adelante:
 5. Desglose por Oficina en el Dashboard de empresa.
 6. OfficeDetail para Cobrador: mantiene solo la agrupación en el selector de rutas,
    sin KPIs ni usuarios relacionados, como se pidió.
+
+---
+
+# Nota — Modelo de múltiples Administradores
+
+Formalizado al corregir una advertencia falsa al editar rutas. La regla ya estaba
+implícita en el modelo; ahora está documentada y probada.
+
+## El bug corregido
+
+Una ruta con Administrador asignado mostraba correctamente *"Administrador: Admin
+Credirutas"* en la tarjeta, pero al pulsar **Actualizar** saltaba:
+
+> «Esta ruta ACTIVA quedará sin ningún Administrador responsable. ¿Deseas guardar
+> de todos modos?»
+
+**Causa raíz** — `RoutesPage.handleSave` decidía la advertencia comparando el
+BORRADOR de usuarios asignados contra los administradores previos:
+
+```ts
+const draftAdmins = form.assignedUserIds.filter(id => …rol === 'admin')   // ← siempre vacío
+const prevAdmins  = allUsers.filter(a => a.rol === 'admin' && …)
+if (draftAdmins.length === 0 && prevAdmins.length > 0) → advertencia
+```
+
+El borrador se hidrata solo con usuarios que el actor puede gestionar
+(`isAssignable` → `assignableRoles`), y **`MANAGEABLE_ROLES.admin` no incluye
+`'admin'`**: un Administrador no gestiona a otros Administradores. Así que para un
+actor Admin el borrador **nunca** contiene administradores, `draftAdmins` daba 0 y
+la advertencia saltaba aunque nadie hubiera tocado nada.
+
+Lo curioso es que el guardado siempre fue correcto:
+`computeRouteAssignmentDiff` solo retira usuarios dentro de `assignableUserIds`, de
+modo que esos administradores jamás se iban a desasignar. El fallo era únicamente
+de cálculo de la advertencia — pero llevaba al usuario a creer que estaba a punto
+de romper algo.
+
+## La corrección
+
+Nuevo módulo puro [`src/lib/routeAdmins.ts`](../src/lib/routeAdmins.ts), que calcula
+los administradores **efectivos después de guardar**:
+
+```
+efectivos = (admins asignables que quedan marcados en el borrador)
+          ∪ (admins NO asignables que ya estaban y que el guardado no toca)
+```
+
+El segundo conjunto no es una concesión: es lo que realmente ocurre, porque el
+diff no puede retirar fuera del alcance del actor. La advertencia ámbar del
+formulario y la confirmación al guardar usan ahora esa misma cifra.
+
+La lógica antigua quedó **congelada como prueba** (`ROUTE-ADMIN-REG-001`): el caso
+verifica que producía el falso positivo, para que nadie la reintroduzca por
+descuido.
+
+## Reglas del modelo
+
+- Una **empresa** puede tener tantos Administradores como necesite.
+- Una **ruta** puede tener **más de un** Administrador.
+- Los Administradores son **usuarios generales de la empresa**: no pertenecen a
+  ninguna Oficina, no existe `user.officeId` ni `user.officeIds`.
+- Su acceso operativo nace **solo** de `authorizedRouteIds`, y pueden tener rutas
+  de Oficinas distintas.
+- **Fuente única** de la relación Admin ↔ Ruta: `User.authorizedRouteIds`. No
+  existe `Route.adminId` ni `Route.adminIds`, y hay una prueba que falla si
+  aparecen.
+- Un **Administrador nuevo no hereda ninguna ruta**: nace con
+  `authorizedRouteIds` vacío.
+- **Crear una ruta desde Super Admin no la reparte** entre los Administradores
+  existentes: recibe la ruta solo quien se haya seleccionado.
+- **Crear una ruta desde un Administrador** mantiene su autoasignación, que es una
+  protección interna contra el auto-bloqueo (su acceso es fail-closed por rutas).
+  No arrastra a ningún otro Administrador ni convierte el campo en obligatorio.
+- Una **ruta sin Administrador sigue siendo válida**: advertencia, nunca bloqueo.
+  Al confirmar se guarda y no hay rollback.
+- **Desasignar** a un Administrador de una ruta conserva intactas sus demás rutas.
+
+## Administradores inactivos
+
+Un Administrador **inactivo no cuenta** como responsable efectivo de la ruta. Es
+coherente con el resto del sistema: `createRouteWithAdmins` rechaza administradores
+inactivos y el invariante de cobradores exige responsable activo.
+
+No se desasigna ni se toca a nadie por estar inactivo: simplemente no se cuenta. La
+tarjeta de ruta lo marca ahora como `(inactivo)` para que no aparente sostener una
+responsabilidad que las advertencias no le reconocen.
+
+## Interfaz
+
+- **0 admins** → "Sin Administrador asignado"
+- **1 admin** → "Administrador: Carlos"
+- **2 o más** → "Administradores: Carlos, Juan" (nunca el singular)
+
+La tarjeta muestra hasta dos por rol con "+N más" y un "Ver todos" para expandir,
+de modo que nunca parece que solo existe uno.
+
+## Tests
+
+Grupo `ROUTE-ADMIN-*` (34 comprobaciones puras + 10 de servicio) y smoke
+`SMOKE-ADMIN-A..E` sobre Dexie real. Cubren empresa multi-admin, ruta multi-admin,
+hidratación del editor, la regresión del falso positivo, quitar todos vs dejar uno,
+admin nuevo sin rutas, creación desde Super Admin y desde Admin, conservación de
+rutas al desasignar, admin inactivo, y que gestionar Oficinas no concede rutas.

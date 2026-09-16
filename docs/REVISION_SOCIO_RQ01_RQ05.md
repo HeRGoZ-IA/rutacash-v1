@@ -27,8 +27,12 @@ válidos:
 |---|---|---|
 | ninguno | ninguno | permitido |
 | ninguno | 1 | permitido |
-| 1 | ninguno | permitido |
-| 1 | 1 o más | permitido |
+| 1 o varios | ninguno | permitido |
+| 1 o varios | 1 o más | permitido |
+
+Una ruta admite **más de un Administrador**, y una empresa puede tener tantos como
+necesite: ver el modelo de múltiples Administradores en
+[IMPLEMENTACION_OFICINAS_2026-09.md](IMPLEMENTACION_OFICINAS_2026-09.md).
 
 Crear una ruta requiere únicamente sus **datos básicos** (nombre y parámetros).
 Administrador y Cobrador son **opcionales** y pueden asignarse en cualquier momento
@@ -61,7 +65,7 @@ editarla, ni asignarle responsables después. En cuanto se le asigna un Cobrador
 queda operativa.
 
 **Asignación posterior**
-Asignar el Cobrador o el Administrador más tarde funciona igual que siempre, con la
+Asignar el Cobrador o los Administradores más tarde funciona igual que siempre, con la
 misma fuente única de asignaciones. También se puede retirar al último Cobrador de
 una ruta: la ruta queda "Sin Cobrador asignado" en vez de bloquear la operación. Lo
 único que sigue pidiéndose es elegir un reemplazo cuando se retira al Cobrador
@@ -306,19 +310,20 @@ dentro de sus rutas autorizadas.
 
 | Concepto | Antes | Después |
 |---|---|---|
-| Pruebas automáticas | 353 | **629** |
-| Resultado | PASS | **629 PASS · 0 FAIL** |
+| Pruebas automáticas | 353 | **678** |
+| Resultado | PASS | **678 PASS · 0 FAIL** |
 | Verificación de tipos (aplicación) | Sin errores | **Sin errores** |
 | Verificación de tipos (pruebas) | Sin errores | **Sin errores** |
 | Build de producción | OK | **OK** |
 
-Detalle de las 629 pruebas:
+Detalle de las 678 pruebas:
 
-- **315** de permisos, reglas de acceso, agrupación y gestión por oficina
+- **349** de permisos, reglas de acceso, agrupación por oficina y modelo de
+  múltiples Administradores
 - **151** financieras (pagos, caja, liquidación, reportes, historial, caja del
   cobrador, registro de abonos de la App Cobrador)
-- **145** de arranque, instalación y gestión de oficinas
-- **18** de migración de base de datos y recorridos completos (smoke), ejecutadas
+- **155** de arranque, instalación, gestión de oficinas y administradores
+- **23** de migración de base de datos y recorridos completos (smoke), ejecutadas
   sobre el motor real de la base, no simulado
 
 Entre las pruebas nuevas se verifica que: una ruta puede crearse **sin

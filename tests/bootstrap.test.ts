@@ -32,6 +32,7 @@ import {
   type RouteDatabase, type RouteAuditSink,
 } from '../src/services/routeService'
 import { getRouteAssignmentsByRole, hasAnyAssignment } from '../src/lib/routeAssignments'
+import { routeAdmins, routeAdminsLabel } from '../src/lib/routeAdmins'
 import {
   createOffice, updateOffice, setOfficeStatus, deleteOffice, moveRouteToOffice,
   assertRouteOperationalContext, isRouteOperational,
@@ -2110,6 +2111,185 @@ await spec('OFFICE-NAV-003', 'Gestión Oficina', 'los breadcrumbs no alteran el 
   metric('rutas accesible sin parámetros', rutas.includes("if (!nueva && !editar) return"))
   assert(rutas.includes('if (!nueva && !editar) return'),
     'entrar a /admin/routes directamente debe seguir funcionando igual')
+})
+
+// ############################################################
+// GRUPO — MÚLTIPLES ADMINISTRADORES (servicio real)
+// ------------------------------------------------------------
+// Una empresa puede tener varios Administradores y una ruta puede tener más de
+// uno. Crear un Administrador no le regala rutas, y crear una ruta no reparte esa
+// ruta entre todos los Administradores existentes.
+// ############################################################
+
+/** Empresa con TRES Administradores (Carlos, Juan, Pedro) y ninguna ruta. */
+async function empresaTresAdmins() {
+  const { db, su, sink } = await empresaParaOficinas()
+  const admins = [
+    { id: 'u-carlos', nombre: 'Carlos' },
+    { id: 'u-juan', nombre: 'Juan' },
+    { id: 'u-pedro', nombre: 'Pedro' },
+  ]
+  for (const a of admins) {
+    await db.users.add({
+      id: a.id, tenantId: 't-1', nombre: a.nombre, email: `${a.id}@c.com`, password: 'x',
+      rol: 'admin', status: 'activo', createdAt: '', updatedAt: '',
+    })
+  }
+  const traer = async (id: string) => (await db.users.toArray() as User[]).find(u => u.id === id)!
+  return { db, su, sink, carlos: await traer('u-carlos'), juan: await traer('u-juan'), pedro: await traer('u-pedro') }
+}
+
+await spec('ROUTE-ADMIN-001S', 'Multi-Admin', 'una empresa sostiene varios Administradores a la vez', async () => {
+  const { db } = await empresaTresAdmins()
+  const admins = (await db.users.toArray() as User[]).filter(u => u.rol === 'admin')
+  metric('administradores', admins.map(a => a.nombre).join(', '))
+  metric('alguno con officeId', admins.some(a => 'officeId' in (a as unknown as Record<string, unknown>)))
+  assert(admins.length === 4, 'deben convivir los tres nuevos más el Admin inicial de la empresa')
+  assert(!admins.some(a => 'officeId' in (a as unknown as Record<string, unknown>)),
+    'ningún Administrador puede pertenecer a una Oficina')
+})
+
+await spec('ROUTE-ADMIN-007S', 'Multi-Admin', 'un Administrador recién creado NO hereda ninguna ruta', async () => {
+  const { db, su, sink } = await empresaTresAdmins()
+  // La empresa ya tiene rutas cuando aparece el nuevo Administrador.
+  await createRouteWithAdmins(datosRuta({ nombre: 'Ruta A', codigo: 'RT-001' }), su, asRouteDb(db), sink)
+  await createRouteWithAdmins(datosRuta({ nombre: 'Ruta B', codigo: 'RT-002' }), su, asRouteDb(db), sink)
+
+  await db.users.add({
+    id: 'u-nuevo', tenantId: 't-1', nombre: 'Nuevo', email: 'nuevo@c.com', password: 'x',
+    rol: 'admin', status: 'activo', createdAt: '', updatedAt: '',
+  })
+  const nuevo = (await db.users.toArray() as User[]).find(u => u.id === 'u-nuevo')!
+  metric('rutas de la empresa', (await db.routes.toArray()).length)
+  metric('authorizedRouteIds', JSON.stringify(nuevo.authorizedRouteIds))
+  metric('operativo', hasOperationalRoutes(nuevo))
+  assert((nuevo.authorizedRouteIds ?? []).length === 0, 'un Admin nuevo no debe heredar rutas')
+  assert(!hasOperationalRoutes(nuevo), 'debe quedar sin acceso operativo hasta que se le asigne una ruta')
+})
+
+await spec('ROUTE-ADMIN-008S', 'Multi-Admin', 'el Super Admin crea una ruta SIN Administrador y sigue siendo válida', async () => {
+  const { db, su, sink } = await empresaTresAdmins()
+  const ruta = await createRouteWithAdmins(datosRuta(), su, asRouteDb(db), sink)
+  const conLaRuta = (await db.users.toArray() as User[]).filter(u => (u.authorizedRouteIds ?? []).includes(ruta.id))
+  metric('usuarios con la ruta', conLaRuta.length)
+  metric('estado', ruta.status)
+  assert(conLaRuta.length === 0, 'no debe repartirse la ruta a ningún Administrador')
+  assert(ruta.status === 'activa', 'una ruta sin Administrador sigue siendo válida')
+})
+
+await spec('ROUTE-ADMIN-009S', 'Multi-Admin', 'crear con Carlos y Pedro NO concede la ruta a Juan', async () => {
+  const { db, su, carlos, pedro, juan, sink } = await empresaTresAdmins()
+  const ruta = await createRouteWithAdmins(
+    datosRuta({ adminIds: [carlos.id, pedro.id] }), su, asRouteDb(db), sink,
+  )
+  const users = await db.users.toArray() as User[]
+  const tiene = (id: string) => (users.find(u => u.id === id)?.authorizedRouteIds ?? []).includes(ruta.id)
+
+  metric('Carlos', tiene(carlos.id))
+  metric('Pedro', tiene(pedro.id))
+  metric('Juan', tiene(juan.id))
+  assert(tiene(carlos.id) && tiene(pedro.id), 'los Administradores elegidos deben recibir la ruta')
+  assert(!tiene(juan.id), 'un Administrador NO elegido no puede recibir la ruta')
+  assert(!canAccessRoute(users.find(u => u.id === juan.id)!, ruta.id), 'Juan no debe acceder a esa ruta')
+})
+
+await spec('ROUTE-ADMIN-010S', 'Multi-Admin', 'un Admin que crea una ruta queda autoasignado (protección anti auto-bloqueo)', async () => {
+  const { db, carlos, sink } = await empresaTresAdmins()
+  const ruta = await createRouteWithAdmins(datosRuta(), carlos, asRouteDb(db), sink)
+  const actualizado = (await db.users.toArray() as User[]).find(u => u.id === carlos.id)!
+  metric('adminIds enviados', '(vacío)')
+  metric('Carlos asignado', (actualizado.authorizedRouteIds ?? []).includes(ruta.id))
+  metric('operativo', hasOperationalRoutes(actualizado))
+  assert((actualizado.authorizedRouteIds ?? []).includes(ruta.id), 'el Administrador creador quedaría auto-bloqueado')
+  assert(hasOperationalRoutes(actualizado), 'debe conservar acceso a la ruta que acaba de crear')
+})
+
+await spec('ROUTE-ADMIN-011S', 'Multi-Admin', 'la autoasignación del actor NO arrastra a los demás Administradores', async () => {
+  const { db, carlos, juan, pedro, sink } = await empresaTresAdmins()
+  const ruta = await createRouteWithAdmins(datosRuta(), carlos, asRouteDb(db), sink)
+  const users = await db.users.toArray() as User[]
+  const tiene = (id: string) => (users.find(u => u.id === id)?.authorizedRouteIds ?? []).includes(ruta.id)
+
+  metric('Carlos (actor)', tiene(carlos.id))
+  metric('Juan', tiene(juan.id))
+  metric('Pedro', tiene(pedro.id))
+  assert(tiene(carlos.id), 'el actor debe quedar asignado')
+  assert(!tiene(juan.id) && !tiene(pedro.id), 'la autoasignación no puede arrastrar a otros Administradores')
+
+  // Y el formulario sigue sin exigir seleccionar Administrador.
+  const page = readSource('src/pages/admin/RoutesPage.tsx')
+  assert(!page.includes('Selecciona al menos un Administrador responsable.'),
+    'la autoasignación debe ser protección interna, no una atadura del formulario')
+})
+
+await spec('ROUTE-ADMIN-002S', 'Multi-Admin', 'una misma ruta sostiene DOS Administradores', async () => {
+  const { db, su, carlos, juan, sink } = await empresaTresAdmins()
+  const ruta = await createRouteWithAdmins(datosRuta({ adminIds: [carlos.id, juan.id] }), su, asRouteDb(db), sink)
+  const users = await db.users.toArray() as User[]
+  const admins = routeAdmins(users, ruta.id, 't-1')
+
+  metric('administradores de la ruta', admins.map(a => a.nombre).sort().join(', '))
+  metric('etiqueta', routeAdminsLabel(admins.map(a => a.nombre).sort()))
+  assert(admins.length === 2, 'la ruta debe admitir dos Administradores')
+  assert(routeAdminsLabel(admins.map(a => a.nombre).sort()).startsWith('Administradores:'),
+    'con varios no puede usarse el singular')
+})
+
+await spec('ROUTE-ADMIN-012S', 'Multi-Admin', 'desasignar de una ruta conserva las demás rutas del Administrador', async () => {
+  const { db, su, carlos, juan, sink } = await empresaTresAdmins()
+  const rA = await createRouteWithAdmins(datosRuta({ adminIds: [carlos.id], nombre: 'Ruta A', codigo: 'RT-001' }), su, asRouteDb(db), sink)
+  const rB = await createRouteWithAdmins(datosRuta({ adminIds: [carlos.id], nombre: 'Ruta B', codigo: 'RT-002' }), su, asRouteDb(db), sink)
+  const rX = await createRouteWithAdmins(datosRuta({ adminIds: [carlos.id, juan.id], nombre: 'Ruta X', codigo: 'RT-003' }), su, asRouteDb(db), sink)
+
+  // Se edita Ruta X y se desasigna a Carlos (Juan sigue): el guardado real.
+  await updateRouteWithAssignments({
+    routeId: rX.id, tenantId: 't-1', nombre: 'Ruta X', ciudad: undefined,
+    tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000,
+    cobradorId: undefined,
+    assignedUserIds: [juan.id],
+    assignableUserIds: [carlos.id, juan.id],
+  }, su, asRouteDb(db), sink)
+
+  const users = await db.users.toArray() as User[]
+  const carlosFinal = users.find(u => u.id === carlos.id)!
+  const rutasDeCarlos = carlosFinal.authorizedRouteIds ?? []
+
+  metric('rutas de Carlos', rutasDeCarlos.length)
+  metric('conserva A y B', rutasDeCarlos.includes(rA.id) && rutasDeCarlos.includes(rB.id))
+  metric('Juan sigue en X', routeAdmins(users, rX.id, 't-1').map(a => a.id).includes(juan.id))
+  assert(!rutasDeCarlos.includes(rX.id), 'Carlos debía salir de Ruta X')
+  assert(rutasDeCarlos.includes(rA.id) && rutasDeCarlos.includes(rB.id), 'SE PERDIERON las otras rutas de Carlos')
+  assert(routeAdmins(users, rX.id, 't-1').length === 1, 'Juan debe seguir siendo Administrador de Ruta X')
+})
+
+await spec('ROUTE-ADMIN-014S', 'Multi-Admin', 'el panel de Oficina muestra los DOS Administradores de una ruta', async () => {
+  const { db, su, carlos, juan, sink } = await empresaTresAdmins()
+  const office = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const ruta = await createRouteWithAdmins(
+    datosRuta({ officeId: office.id, adminIds: [carlos.id, juan.id] }), su, asRouteDb(db), sink,
+  )
+  const resumen = await getOfficeManagementSummary({ user: su, tenantId: 't-1', officeId: office.id }, asSummaryDb(db))
+  const relacionados = resumen!.relatedUsers.filter(u => u.routes.some(r => r.id === ruta.id))
+
+  metric('relacionados con la ruta', relacionados.map(u => u.nombre).sort().join(', '))
+  assert(relacionados.length === 2, 'el panel debe mostrar ambos Administradores')
+  assert(relacionados.every(u => u.rol === 'admin'), 'ambos deben figurar con su rol')
+})
+
+await spec('ROUTE-ADMIN-015S', 'Multi-Admin', 'gestionar Oficinas no concede rutas a ningún Administrador', async () => {
+  const { db, su, carlos, juan, sink } = await empresaTresAdmins()
+  const office = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, su, asOfficeDb(db), sink)
+  const ruta = await createRouteWithAdmins(datosRuta({ officeId: office.id, adminIds: [carlos.id] }), su, asRouteDb(db), sink)
+
+  const juanFinal = (await db.users.toArray() as User[]).find(u => u.id === juan.id)!
+  const resumenDeJuan = await getOfficeManagementSummary({ user: juanFinal, tenantId: 't-1', officeId: office.id }, asSummaryDb(db))
+
+  metric('Juan gestiona Oficinas', can(juanFinal, 'office.edit', { tenantId: 't-1' }))
+  metric('rutas que ve Juan en Leticia', resumenDeJuan!.accessibleOfficeRoutes.length)
+  metric('accede a la ruta', canAccessRoute(juanFinal, ruta.id))
+  assert(can(juanFinal, 'office.edit', { tenantId: 't-1' }), 'un Admin debe poder gestionar el catálogo')
+  assert(resumenDeJuan!.accessibleOfficeRoutes.length === 0, 'gestionar la Oficina no puede mostrarle rutas ajenas')
+  assert(!canAccessRoute(juanFinal, ruta.id), 'gestionar la Oficina no puede concederle la ruta')
 })
 
 // ############################################################
