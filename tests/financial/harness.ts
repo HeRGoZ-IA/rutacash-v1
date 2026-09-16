@@ -129,12 +129,14 @@ export class MemoryDb {
   capitalMovements = new FakeTable<any>(this, 'capitalMovements')
   transfers = new FakeTable<any>(this, 'transfers')
   withdrawals = new FakeTable<any>(this, 'withdrawals')
+  // Liquidaciones semanales PERSISTENTES (cierre y reapertura de periodo).
+  weeklySettlements = new FakeTable<any>(this, 'weeklySettlements')
 
   /** Nombres de todas las tablas, para conteos exhaustivos en las pruebas. */
   static readonly TABLES = [
     'users', 'tenants', 'offices', 'routes', 'clients', 'sales', 'installments',
     'payments', 'expenses', 'expenseCategories', 'noPaymentVisits',
-    'capitalMovements', 'transfers', 'withdrawals',
+    'capitalMovements', 'transfers', 'withdrawals', 'weeklySettlements',
   ] as const
 
   /**

@@ -21,12 +21,13 @@ import { officeFileTag } from '@/components/ui/OfficeSelector'
 import { downloadCSV } from '@/lib/utils'
 import { formatDateTime } from '@/lib/formatters'
 import { ROUTE_STATE_LABEL, applyOfficeRouteSelection, officeStateSummary } from '@/lib/officeManagement'
+import { periodBadge, settlementHistory } from '@/lib/settlementPeriods'
 import {
   getOfficeManagementSummary, moveRouteToOffice, setUserOfficeRoutes,
   type OfficeManagementSummary,
 } from '@/services/officeService'
 import { db } from '@/lib/db'
-import type { Office, Route, User } from '@/models/types'
+import type { Office, Route, User, WeeklySettlement } from '@/models/types'
 
 /**
  * OFICINA COMO UNIDAD DE GESTIÓN — panel de una Oficina concreta.
@@ -47,6 +48,11 @@ export default function OfficeDetailPage() {
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [offices, setOffices] = useState<Office[]>([])
+  /**
+   * Liquidaciones de las rutas VISIBLES de esta Oficina. Se recortan por las rutas
+   * que el usuario ya tiene autorizadas: la Oficina agrupa, no concede.
+   */
+  const [settlements, setSettlements] = useState<WeeklySettlement[]>([])
 
   // Mover ruta de Oficina
   const [moveTarget, setMoveTarget] = useState<Route | null>(null)
@@ -66,6 +72,11 @@ export default function OfficeDetailPage() {
     if (!summary) { setNotFound(true); setLoading(false); return }
     setData(summary)
     setOffices(await db.offices.where('tenantId').equals(tenantId).toArray())
+    // Recorte por RUTA autorizada, no por Oficina: `accessibleOfficeRoutes` ya es el
+    // subconjunto permitido, así que una ruta hermana no autorizada no entra aquí.
+    const visibles = new Set(summary.accessibleOfficeRoutes.map(r => r.id))
+    const todas = await db.weeklySettlements.where('tenantId').equals(tenantId).toArray()
+    setSettlements(todas.filter(w => visibles.has(w.routeId)))
     setLoading(false)
   }, [user, tenantId, officeId])
 
@@ -394,6 +405,54 @@ export default function OfficeDetailPage() {
               <p className={`text-xs ${a.severity === 'error' ? 'text-red-700' : 'text-amber-800'}`}>{a.mensaje}</p>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* LIQUIDACIONES — vista compacta: las 6 más recientes de las rutas visibles.
+          La Oficina que se muestra es la HISTÓRICA del documento (snapshot al
+          cierre), no la Oficina actual de la ruta: una ruta que se movió de Oficina
+          no reescribe sus cierres pasados. */}
+      {settlements.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-gray-700">Liquidaciones</h2>
+            <Link to="/admin/liquidacion" className="text-xs text-primary-600 hover:underline">Ver liquidación semanal</Link>
+          </div>
+          <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs text-gray-500">
+                <tr>
+                  <th className="text-left font-medium px-4 py-2.5">Ruta</th>
+                  <th className="text-left font-medium px-4 py-2.5">Semana</th>
+                  <th className="text-left font-medium px-4 py-2.5">Oficina al cierre</th>
+                  <th className="text-left font-medium px-4 py-2.5">Estado</th>
+                  <th className="text-right font-medium px-4 py-2.5">Saldo final</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {settlementHistory(settlements, accessibleOfficeRoutes, offices).slice(0, 6).map(fila => {
+                  const badge = periodBadge(fila.settlement)
+                  const tono = badge.tone === 'reopened' ? 'bg-amber-100 text-amber-700'
+                    : badge.tone === 'open' ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-gray-100 text-gray-700'
+                  return (
+                    <tr key={fila.settlement.id} className={fila.superseded ? 'text-gray-400' : ''}>
+                      <td className="px-4 py-2.5">{fila.routeName}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        {fila.settlement.semanaInicio} – {fila.settlement.semanaFin}
+                        <span className="ml-2 text-xs text-gray-400">v{fila.version}</span>
+                      </td>
+                      <td className="px-4 py-2.5">{fila.officeLabel}</td>
+                      <td className="px-4 py-2.5">
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${tono}`}>{badge.label}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-semibold">{formatCurrency(fila.settlement.saldoFinal, currency)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

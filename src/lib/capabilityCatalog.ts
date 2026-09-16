@@ -113,6 +113,10 @@ export const CAPABILITY_METADATA: Record<Capability, CapabilityMeta> = {
   'partnerCash.registerMovement': { key: 'partnerCash.registerMovement', label: 'Registrar en caja de socios', description: 'Registrar movimientos en la caja de socios.', category: 'Pagos y caja', risk: 'alto' },
   'transfer.create': { key: 'transfer.create', label: 'Realizar transferencias', description: 'Crear transferencias entre rutas y socios.', category: 'Pagos y caja', risk: 'alto' },
 
+  // Liquidaciones
+  'settlement.close': { key: 'settlement.close', label: 'Cerrar semana', description: 'Archivar la liquidacion de una semana y congelar sus cifras.', category: 'Pagos y caja', risk: 'alto' },
+  'settlement.reopen': { key: 'settlement.reopen', label: 'Reabrir periodo', description: 'Levantar el cierre de una semana indicando el motivo.', category: 'Pagos y caja', risk: 'alto' },
+
   // Reportes
   'report.view': { key: 'report.view', label: 'Ver reportes', description: 'Consultar reportes.', category: 'Reportes' },
   'report.export': { key: 'report.export', label: 'Exportar reportes', description: 'Exportar reportes a CSV.', category: 'Reportes', risk: 'medio' },

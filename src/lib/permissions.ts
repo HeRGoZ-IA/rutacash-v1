@@ -91,6 +91,13 @@ export type Capability =
   | 'partnerCash.viewAll'
   | 'partnerCash.registerMovement'
   | 'transfer.create'
+  // Liquidaciones / cierre de periodo
+  // CERRAR una semana congela sus cifras y hace que los pagos de esas fechas dejen
+  // de ser corregibles directamente (pasan por Solicitud de ajuste). REABRIR levanta
+  // esa protección. Ambas son decisiones de gestión, no de operación diaria: por eso
+  // solo Super Admin y Administrador, y siempre sobre una ruta autorizada.
+  | 'settlement.close'
+  | 'settlement.reopen'
   // Reportes / indicadores
   | 'report.view'
   | 'report.export'
@@ -119,6 +126,7 @@ const SUPERADMIN_CAPS: Capability[] = [
   'expense.register', 'expense.correct',
   'cashbox.viewRoute', 'cashbox.viewOwnCollection', 'cashbox.viewConsolidated', 'cashbox.dailyClose',
   'partnerCash.viewOwn', 'partnerCash.viewAll', 'partnerCash.registerMovement', 'transfer.create',
+  'settlement.close', 'settlement.reopen',
   'report.view', 'report.export', 'report.viewPortfolio', 'report.viewConsolidated',
   'audit.view',
 ]
@@ -140,6 +148,8 @@ const ADMIN_CAPS: Capability[] = [
   'expense.register', 'expense.correct',
   'cashbox.viewRoute', 'cashbox.viewOwnCollection', 'cashbox.viewConsolidated', 'cashbox.dailyClose',
   'partnerCash.viewAll', 'partnerCash.registerMovement', 'transfer.create',
+  // Cierre de semana: el Administrador liquida SUS rutas autorizadas.
+  'settlement.close', 'settlement.reopen',
   'report.view', 'report.export', 'report.viewPortfolio', 'report.viewConsolidated',
   'audit.view',
 ]
@@ -232,6 +242,7 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     'cashbox.viewOwnCollection', 'cashbox.dailyClose',
     'authorization.approve', 'authorization.reject', 'authorization.modifyConditions', 'authorization.phoneConfirm',
     'transfer.create', 'partnerCash.registerMovement', 'partnerCash.viewAll',
+    'settlement.close', 'settlement.reopen',
     'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
     'user.create', 'user.edit', 'user.block', 'user.setRole', 'user.grantCapabilities', 'user.resetPassword',
     'platform.access', 'company.create', 'company.edit', 'company.suspend',
@@ -243,6 +254,8 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     'expense.correct',
     'transfer.create', 'partnerCash.viewAll', 'partnerCash.registerMovement',
     'cashbox.viewConsolidated', 'report.viewConsolidated',
+    // El Supervisor opera la semana; no la cierra ni la reabre.
+    'settlement.close', 'settlement.reopen',
     'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
     'user.create', 'user.edit', 'user.block', 'user.setRole', 'user.grantCapabilities', 'user.resetPassword',
     'platform.access', 'company.create', 'company.edit', 'company.suspend', 'settings.access', 'capital.manage',
@@ -256,6 +269,7 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     // El Cobrador NO accede a información financiera de la ruta ni de la empresa:
     // su caja es el efectivo que él ha recaudado, sin capital inicial ni consolidados.
     'cashbox.viewRoute', 'cashbox.viewConsolidated', 'report.viewConsolidated', 'report.export',
+    'settlement.close', 'settlement.reopen',
     'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
     'user.create', 'user.edit', 'user.block', 'user.setRole', 'user.grantCapabilities', 'user.resetPassword',
     'platform.access', 'company.create', 'company.edit', 'company.suspend', 'settings.access', 'capital.manage',
@@ -266,6 +280,8 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     'expense.register', 'expense.correct',
     'cashbox.viewRoute', 'cashbox.viewOwnCollection', 'cashbox.viewConsolidated', 'cashbox.dailyClose',
     'transfer.create', 'partnerCash.viewOwn', 'partnerCash.viewAll', 'partnerCash.registerMovement',
+    // El cierre es justamente lo que limita al Secretario: no puede levantarlo.
+    'settlement.close', 'settlement.reopen',
     'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
     'user.create', 'user.edit', 'user.block', 'user.setRole', 'user.grantCapabilities', 'user.resetPassword',
     'platform.access', 'company.create', 'company.edit', 'company.suspend',
@@ -452,6 +468,9 @@ const ROUTE_SCOPED: ReadonlySet<Capability> = new Set<Capability>([
   'payment.register', 'payment.correct', 'payment.reverse', 'payment.viewHistory', 'payment.approveAdjustment',
   'expense.register', 'expense.correct',
   'cashbox.viewRoute', 'cashbox.viewOwnCollection', 'cashbox.dailyClose',
+  // Cerrar y reabrir SIEMPRE se validan contra la ruta autorizada: tener el rol no
+  // basta para cerrar una ruta que no se tiene asignada.
+  'settlement.close', 'settlement.reopen',
 ])
 
 /**

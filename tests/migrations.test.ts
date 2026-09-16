@@ -9,7 +9,7 @@
 //
 //   1. ¿Se puede RECREAR la tabla `offices` que la v3 borró (`offices: null`)?
 //      Es la pregunta que la auditoría dejó explícitamente sin responder. Aquí se
-//      migra una base v1 COMPLETA hasta v11, pasando por ese borrado.
+//      migra una base v1 COMPLETA hasta la versión actual, pasando por ese borrado.
 //   2. ¿La migración v11 sanea de verdad el `officeId` legado?
 //
 // Semántica convencional: cualquier caso fallido → exit 1.
@@ -100,7 +100,14 @@ async function crearBaseV1(): Promise<void> {
   vieja.close()
 }
 
-/** Abre la base con el esquema ACTUAL de producción (dispara v2 → v11). */
+/**
+ * Versión de esquema VIGENTE. Se centraliza aquí para que añadir una migración
+ * nueva no obligue a perseguir números sueltos por todo el archivo: lo que estos
+ * casos comprueban es que la base llega al esquema actual, no que sea la 11.
+ */
+const VERSION_ACTUAL = 12
+
+/** Abre la base con el esquema ACTUAL de producción (dispara v2 → actual). */
 async function abrirActual() {
   // Import diferido: instanciar `RutaCashDB` antes de fabricar la base v1 no abriría
   // nada (Dexie es perezoso), pero cargarlo aquí deja el orden explícito.
@@ -114,7 +121,7 @@ async function abrirActual() {
 // GRUPO — RECREACIÓN DE LA TABLA `offices` (borrada en la v3)
 // ############################################################
 
-await spec('OFFICE-MIG-001', 'Migración', 'v11 recrea la tabla offices que la v3 había borrado', async () => {
+await spec('OFFICE-MIG-001', 'Migración', 'la migración recrea la tabla offices que la v3 había borrado', async () => {
   await crearBaseV1()
   const actual = await abrirActual()
 
@@ -131,7 +138,7 @@ await spec('OFFICE-MIG-001', 'Migración', 'v11 recrea la tabla offices que la v
   metric('escritura/lectura', leida?.nombre)
   metric('índice tenantId operativo', porTenant.length)
 
-  assert(actual.verno === 11, `la base debía quedar en v11, quedó en v${actual.verno}`)
+  assert(actual.verno === VERSION_ACTUAL, `la base debía quedar en v${VERSION_ACTUAL}, quedó en v${actual.verno}`)
   assert(actual.tables.some(t => t.name === 'offices'), 'la tabla offices no se recreó')
   assert(leida?.nombre === 'Oficina Nueva', 'no se puede escribir/leer en la tabla recreada')
   assert(porTenant.length === 1, 'el índice tenantId de offices no funciona')
@@ -216,13 +223,13 @@ await spec('OFFICE-MIG-006', 'Migración', 'las asignaciones de usuarios sobrevi
   actual.close()
 })
 
-await spec('OFFICE-MIG-007', 'Migración', 'una instalación NUEVA nace directamente en v11 con offices vacía', async () => {
+await spec('OFFICE-MIG-007', 'Migración', 'una instalación NUEVA nace directamente en el esquema actual con offices vacía', async () => {
   await Dexie.delete(DB_NAME)
   const actual = await abrirActual()
   metric('versión', actual.verno)
   metric('oficinas', await actual.offices.count())
   metric('rutas', await actual.routes.count())
-  assert(actual.verno === 11, 'una base nueva debe abrir en v11')
+  assert(actual.verno === VERSION_ACTUAL, `una base nueva debe abrir en v${VERSION_ACTUAL}`)
   assert((await actual.offices.count()) === 0, 'una instalación nueva no debe traer Oficinas')
   assert((await actual.routes.count()) === 0, 'una instalación nueva no debe traer rutas')
   actual.close()
@@ -261,7 +268,7 @@ const SU: User = {
   rol: 'superadmin', status: 'activo', createdAt: '', updatedAt: '',
 }
 
-/** Base limpia, abierta en v11, con una empresa y un cobrador. */
+/** Base limpia, abierta en el esquema actual, con una empresa y un cobrador. */
 async function baseLimpia() {
   await Dexie.delete(DB_NAME)
   const { db } = await import('../src/lib/db')
@@ -1503,6 +1510,210 @@ await spec('SMOKE-E4-6', 'Smoke ejecutivo', 'el CSV exportado coincide con lo qu
 
 // ############################################################
 // INFORME
+
+// ############################################################
+// GRUPO — SMOKE ENTREGA 5 (Dexie real)
+// ------------------------------------------------------------
+// Cierre y reapertura de periodo de extremo a extremo. Lo que se demuestra aquí
+// es que la protección de correcciones sobre periodos cerrados —que ya existía
+// escrita— SOLO empieza a funcionar cuando hay un cierre archivado, y que el
+// histórico de Oficina sobrevive a una reorganización del catálogo.
+// ############################################################
+
+const SEM_INI = '2026-09-14'
+const SEM_FIN = '2026-09-19'
+
+/** Empresa con una Oficina, una ruta dentro y un pago real de la semana. */
+async function escenarioCierre() {
+  const db = await baseLimpia()
+  const { createOffice } = await import('../src/services/officeService')
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+  const { registerPayment } = await import('../src/services/paymentService')
+
+  const oficina = await createOffice({ tenantId: 't-1', nombre: 'Leticia', codigo: 'LET' }, SU)
+  const ruta = await createRouteWithAdmins(
+    datosRutaSmoke({ officeId: oficina.id, nombre: 'Centro', codigo: 'RT-001' }), SU,
+  )
+  await db.users.add({
+    id: 'u-adm', tenantId: 't-1', nombre: 'Ada', email: 'ada@c.com', password: 'x',
+    rol: 'admin', status: 'activo', authorizedRouteIds: [ruta.id], createdAt: '', updatedAt: '',
+  } as never)
+  await db.users.add({
+    id: 'u-sec', tenantId: 't-1', nombre: 'Sonia', email: 'sonia@c.com', password: 'x',
+    rol: 'secretario', status: 'activo', authorizedRouteIds: [ruta.id], createdAt: '', updatedAt: '',
+  } as never)
+  await db.users.add({
+    id: 'u-cob', tenantId: 't-1', nombre: 'Luis', email: 'luis@c.com', password: 'x',
+    rol: 'cobrador', status: 'activo', authorizedRouteIds: [ruta.id], createdAt: '', updatedAt: '',
+  } as never)
+  const cob = (await db.users.get('u-cob'))!
+  const adm = (await db.users.get('u-adm'))!
+  const sec = (await db.users.get('u-sec'))!
+
+  await ventaLista(db, ruta.id, 'c-1', 's-1')
+  // Pago con fecha contable DENTRO de la semana que se va a cerrar.
+  const pago = await registerPayment({ saleId: 's-1', requestedAmount: 4_000, actor: cob, fecha: '2026-09-16' })
+  assert(pago.ok, 'precondición: el pago de la semana debe registrarse')
+
+  return { db, oficina, ruta, adm, sec, cob }
+}
+
+await spec('SMOKE-E5-1', 'Smoke cierre', 'cerrar la semana archiva el documento con su Oficina', async () => {
+  const { db, ruta } = await escenarioCierre()
+  const { closeSettlement } = await import('../src/services/settlementService')
+  const adm = (await db.users.get('u-adm'))!
+
+  const antes = await db.weeklySettlements.count()
+  const doc = await closeSettlement({ actor: adm, tenantId: 't-1', routeId: ruta.id, semanaInicio: SEM_INI, semanaFin: SEM_FIN })
+  const despues = await db.weeklySettlements.count()
+
+  metric('liquidaciones antes / después', `${antes} → ${despues}`)
+  metric('cobros archivados', doc.cobros)
+  metric('oficina al cierre', doc.officeNameAtClose)
+  assert(antes === 0 && despues === 1, 'antes no había nada archivado; ahora hay un documento')
+  assert(doc.cobros === 4_000, `el cierre archiva el cobro real de la semana (fue ${doc.cobros})`)
+  assert(doc.officeNameAtClose === 'Leticia', 'el documento congela la Oficina del momento')
+  assert(doc.version === 1, 'primer cierre = versión 1')
+  db.close()
+})
+
+await spec('SMOKE-E5-2', 'Smoke cierre', 'no se puede volver a cerrar la misma semana sin reabrirla', async () => {
+  const { db, ruta } = await escenarioCierre()
+  const { closeSettlement } = await import('../src/services/settlementService')
+  const adm = (await db.users.get('u-adm'))!
+
+  await closeSettlement({ actor: adm, tenantId: 't-1', routeId: ruta.id, semanaInicio: SEM_INI, semanaFin: SEM_FIN })
+  let error = ''
+  try {
+    await closeSettlement({ actor: adm, tenantId: 't-1', routeId: ruta.id, semanaInicio: SEM_INI, semanaFin: SEM_FIN })
+  } catch (e) { error = e instanceof Error ? e.message : String(e) }
+
+  metric('mensaje', error)
+  metric('documentos', await db.weeklySettlements.count())
+  assert(error.includes('ya está cerrada'), 'el segundo cierre se rechaza pidiendo reabrir')
+  assert((await db.weeklySettlements.count()) === 1, 'un cierre rechazado no deja rastro')
+  db.close()
+})
+
+await spec('SMOKE-E5-3', 'Smoke cierre', 'con la semana cerrada, el Secretario ya no corrige: debe solicitar ajuste', async () => {
+  const { db, ruta } = await escenarioCierre()
+  const { closeSettlement } = await import('../src/services/settlementService')
+  const { correctPayment, isPaymentInClosedPeriod, requestPaymentAdjustment } =
+    await import('../src/services/paymentCorrectionService')
+  const adm = (await db.users.get('u-adm'))!
+  const sec = (await db.users.get('u-sec'))!
+  const pago = (await db.payments.where('routeId').equals(ruta.id).toArray())[0]
+
+  // ANTES de cerrar: el periodo está abierto y la corrección directa funciona.
+  const protegidoAntes = await isPaymentInClosedPeriod(pago)
+
+  await closeSettlement({ actor: adm, tenantId: 't-1', routeId: ruta.id, semanaInicio: SEM_INI, semanaFin: SEM_FIN })
+  const protegidoDespues = await isPaymentInClosedPeriod(pago)
+
+  const intento = await correctPayment(sec, pago.id, { newValor: 3_000, newFecha: pago.fecha, reason: 'Cobré menos' })
+  const solicitud = await requestPaymentAdjustment(sec, pago.id, { newValor: 3_000, newFecha: pago.fecha, reason: 'Cobré menos' })
+
+  metric('protegido antes de cerrar', protegidoAntes)
+  metric('protegido después de cerrar', protegidoDespues)
+  metric('corrección directa', intento.success ? 'ACEPTADA' : intento.error)
+  metric('solicitud de ajuste', solicitud.success ? 'CREADA' : solicitud.error)
+  assert(protegidoAntes === false, 'sin cierre archivado no hay periodo cerrado')
+  assert(protegidoDespues === true, 'el cierre archivado enciende la protección')
+  assert(!intento.success, 'el Secretario no corrige directamente en periodo cerrado')
+  assert(String(intento.error).includes('solicitud de ajuste'), 'y se le indica el camino correcto')
+  assert(solicitud.success, 'la solicitud de ajuste sí debe crearse')
+  assert((await db.paymentAdjustmentRequests.count()) === 1, 'queda una solicitud pendiente')
+  db.close()
+})
+
+await spec('SMOKE-E5-4', 'Smoke cierre', 'al reabrir con motivo, la corrección directa vuelve a permitirse', async () => {
+  const { db, ruta } = await escenarioCierre()
+  const { closeSettlement, reopenSettlement } = await import('../src/services/settlementService')
+  const { correctPayment } = await import('../src/services/paymentCorrectionService')
+  const adm = (await db.users.get('u-adm'))!
+  const sec = (await db.users.get('u-sec'))!
+  const pago = (await db.payments.where('routeId').equals(ruta.id).toArray())[0]
+
+  const doc = await closeSettlement({ actor: adm, tenantId: 't-1', routeId: ruta.id, semanaInicio: SEM_INI, semanaFin: SEM_FIN })
+
+  let sinMotivo = ''
+  try {
+    await reopenSettlement({ actor: adm, settlementId: doc.id, motivo: '.' })
+  } catch (e) { sinMotivo = e instanceof Error ? e.message : String(e) }
+
+  await reopenSettlement({ actor: adm, settlementId: doc.id, motivo: 'El cobro del miércoles quedó mal digitado' })
+  const reabierto = await db.weeklySettlements.get(doc.id)
+  const corregido = await correctPayment(sec, pago.id, { newValor: 3_000, newFecha: pago.fecha, reason: 'Ajuste acordado' })
+
+  metric('reapertura sin motivo', sinMotivo)
+  metric('estado', reabierto?.status)
+  metric('motivo guardado', reabierto?.reopenReason)
+  metric('corrección directa tras reabrir', corregido.success ? 'ACEPTADA' : corregido.error)
+  assert(sinMotivo.includes('motivo'), 'sin motivo no se reabre')
+  assert(reabierto?.status === 'reabierta', 'el documento queda reabierto, no borrado')
+  assert(reabierto?.reopenReason === 'El cobro del miércoles quedó mal digitado', 'el motivo se conserva')
+  assert(corregido.success, 'con el periodo reabierto el Secretario vuelve a corregir directamente')
+  db.close()
+})
+
+await spec('SMOKE-E5-5', 'Smoke cierre', 'recerrar crea la versión 2 y conserva enlazada la versión 1', async () => {
+  const { db, ruta } = await escenarioCierre()
+  const { closeSettlement, reopenSettlement } = await import('../src/services/settlementService')
+  const { correctPayment } = await import('../src/services/paymentCorrectionService')
+  const { settlementHistory } = await import('../src/lib/settlementPeriods')
+  const adm = (await db.users.get('u-adm'))!
+  const sec = (await db.users.get('u-sec'))!
+  const pago = (await db.payments.where('routeId').equals(ruta.id).toArray())[0]
+
+  const v1 = await closeSettlement({ actor: adm, tenantId: 't-1', routeId: ruta.id, semanaInicio: SEM_INI, semanaFin: SEM_FIN })
+  await reopenSettlement({ actor: adm, settlementId: v1.id, motivo: 'Se corrige el cobro del miércoles' })
+  await correctPayment(sec, pago.id, { newValor: 9_000, newFecha: pago.fecha, reason: 'Valor real cobrado' })
+  const v2 = await closeSettlement({ actor: adm, tenantId: 't-1', routeId: ruta.id, semanaInicio: SEM_INI, semanaFin: SEM_FIN })
+
+  const guardado1 = await db.weeklySettlements.get(v1.id)
+  const todas = await db.weeklySettlements.where('routeId').equals(ruta.id).toArray()
+  const filas = settlementHistory(todas, await db.routes.toArray())
+
+  metric('versiones archivadas', filas.map(f => `v${f.version}:${f.settlement.cobros}`).join(' | '))
+  metric('v1 sustituida por', guardado1?.supersededBy === v2.id ? 'v2' : String(guardado1?.supersededBy))
+  assert(todas.length === 2, 'la versión anterior se conserva; no se sobrescribe')
+  assert(v1.cobros === 4_000, 'la versión 1 guarda lo que se cerró entonces')
+  assert(v2.cobros === 9_000, 'la versión 2 recoge la corrección posterior')
+  assert(guardado1?.supersededBy === v2.id, 'el recorrido cerrar → reabrir → corregir → recerrar es trazable')
+  assert(guardado1?.reopenReason === 'Se corrige el cobro del miércoles', 'el motivo de la reapertura sobrevive')
+  db.close()
+})
+
+await spec('SMOKE-E5-6', 'Smoke cierre', 'mover la ruta de Oficina no reescribe la Oficina del cierre pasado', async () => {
+  const { db, ruta } = await escenarioCierre()
+  const { closeSettlement } = await import('../src/services/settlementService')
+  const { createOffice, moveRouteToOffice } = await import('../src/services/officeService')
+  const { closedSettlementCsvRow } = await import('../src/lib/settlementPeriods')
+  const adm = (await db.users.get('u-adm'))!
+
+  const doc = await closeSettlement({ actor: adm, tenantId: 't-1', routeId: ruta.id, semanaInicio: SEM_INI, semanaFin: SEM_FIN })
+
+  // Reorganización POSTERIOR del catálogo: la ruta pasa a otra Oficina.
+  const rio = await createOffice({ tenantId: 't-1', nombre: 'Río', codigo: 'RIO' }, SU)
+  await moveRouteToOffice({ routeId: ruta.id, tenantId: 't-1', officeId: rio.id }, SU)
+
+  const rutaHoy = await db.routes.get(ruta.id)
+  const archivado = await db.weeklySettlements.get(doc.id)
+  const fila = closedSettlementCsvRow(archivado!, rutaHoy!.nombre, rutaHoy!.codigo)
+
+  metric('oficina actual de la ruta', rio.nombre)
+  metric('oficina en el documento', archivado?.officeNameAtClose)
+  metric('oficina en el CSV', fila['Oficina (al cierre)'])
+  assert(rutaHoy?.officeId === rio.id, 'precondición: la ruta se movió de Oficina')
+  assert(archivado?.officeNameAtClose === 'Leticia', 'la semana cerrada sigue diciendo dónde se cerró')
+  assert(fila['Oficina (al cierre)'] === 'Leticia', 'el CSV del cierre usa el snapshot, no la Oficina actual')
+  // Y la regla estructural se mantiene: el pago NO guarda officeId.
+  const pago = (await db.payments.where('routeId').equals(ruta.id).toArray())[0] as Record<string, unknown>
+  assert(!('officeId' in pago), 'ningún movimiento persiste officeId: la Oficina se deriva de la ruta')
+  db.close()
+})
+
+
 // ############################################################
 const PAD = 22
 function line(ch = '─') { return ch.repeat(96) }

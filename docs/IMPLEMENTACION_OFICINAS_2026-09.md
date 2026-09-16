@@ -1004,8 +1004,167 @@ Familias `OFFICE-COLLECTION-SEMANTICS-*`, `OFFICE-ROLE-SUP-*`, `OFFICE-ROLE-SEC-
 `OFFICE-ROLE-PARTNER-*`, `OFFICE-EXEC-*`, `OFFICE-COMPARE-*`, `OFFICE-ACTIVITY-*`,
 `OFFICE-EXPORT-*`, `OFFICE-ACTIONBAR-003..006`, y los smoke `SMOKE-E4-1..6`.
 
+---
+
+# Entrega 5 — Liquidaciones persistentes y cierre de período
+
+## El hallazgo que cambió el alcance
+
+La investigación previa encontró que **casi toda la protección de períodos cerrados
+ya estaba escrita**:
+
+- `WeeklySettlement` ya tenía `status?: 'abierta' | 'cerrada'` y el bloque financiero completo.
+- `isPaymentInClosedPeriod` ya existía y ya comparaba `payment.fecha` (la **fecha
+  contable**), no `updatedAt`. La duda del enunciado sobre qué fecha usar ya estaba
+  resuelta en el código.
+- La cadena de ajuste estaba completa: `requestPaymentAdjustment`,
+  `approvePaymentAdjustment`, `rejectPaymentAdjustment`, la tabla
+  `paymentAdjustmentRequests` (Dexie v5), `PaymentAdjustmentsPage` y el aviso al
+  Secretario en `SecretarioPaymentCorrectionPage`.
+- `permissions.ts` ya condicionaba `payment.correct` a `periodClosed` y lo derivaba
+  a `payment.approveAdjustment`.
+
+**Faltaba una sola pieza**: `WeeklySettlementPage` calculaba la liquidación en
+estado de React y exportaba el CSV desde ahí. No existía ninguna llamada a
+`db.weeklySettlements.add`. Nada se archivaba, así que **ningún período estaba
+cerrado nunca** y toda esa cadena permanecía dormida.
+
+Por eso esta entrega no reescribe la protección: **la enciende**.
+
+## Modelo (`WeeklySettlement`)
+
+Se reutilizó el `status` existente añadiendo `'reabierta'`, y se añadieron campos
+opcionales. No se creó ninguna entidad nueva.
+
+| Campo | Para qué |
+|---|---|
+| `status: 'abierta' \| 'cerrada' \| 'reabierta'` | `reabierta` = cierre anulado de forma controlada; deja de proteger pero se conserva |
+| `closedAt` / `closedByUserId` | quién cerró y cuándo |
+| `reopenedAt` / `reopenedByUserId` / `reopenReason` | quién reabrió, cuándo y **por qué** (obligatorio) |
+| `version` / `supersededBy` | cerrar → reabrir → corregir → recerrar genera v1, v2…; el anterior queda enlazado, nunca sobrescrito |
+| `officeIdAtClose` / `officeNameAtClose` / `officeCodeAtClose` | snapshot histórico de Oficina |
+
+## El snapshot de Oficina no reintroduce `officeId` operativo
+
+Es la **única excepción** permitida y está acotada:
+
+- Vive **solo** dentro de `WeeklySettlement`, en ninguna otra entidad.
+- Se llama distinto a propósito (`officeIdAtClose`, no `officeId`) para que nadie lo
+  confunda con `Route.officeId`.
+- **No participa en ningún filtro de acceso ni de alcance.** `listSettlementsForUser`
+  recorta por `filterAccessibleRoutes` y no menciona `AtClose`.
+- Una ruta Sin Oficina se archiva como `officeIdAtClose: undefined` +
+  `officeNameAtClose: 'Sin Oficina'`. No se inventa ninguna Oficina.
+- Una Oficina borrada del catálogo conserva el id y se rotula `'Oficina eliminada'`,
+  para no disfrazarla de "Sin Oficina".
+
+Existe porque una ruta puede cambiar de Oficina, y una semana ya cerrada no debe
+cambiar de Oficina retroactivamente. Congelado por `OFFICE-ARCH-003a..e`.
+
+## Migración v12
+
+Aditiva. Los campos nuevos son opcionales y no necesitan índices. La v12 solo
+**normaliza** las liquidaciones que ya existieran: `status` ausente → `'cerrada'`,
+`version` ausente → `1`, `closedAt` ausente → `createdAt`.
+
+**No se deduce el snapshot de Oficina de los cierres heredados**: se desconoce en qué
+Oficina estaba la ruta entonces, y deducirlo de la Oficina actual falsearía el
+histórico. Esos cierres se muestran con `—`.
+
+## Servicios
+
+`src/lib/settlementPeriods.ts` — módulo **puro** (no importa `@/lib/db`):
+`settlementStatus`, `isProtectingClosure`, `protectingClosureFor`, `periodsOverlap`,
+`validateClosePeriod`, `closureBlockedReason`, `nextClosureVersion`,
+`supersededClosures`, `officeSnapshotOf`, `settlementHistory`, `periodBadge`,
+`pendingSettlements`, `closedSettlementCsvRow`.
+
+`src/services/settlementService.ts` — base inyectable (mismo patrón que
+`paymentService` / `officeService`):
+
+- `closeSettlement` — permisos con ruta → ruta y empresa → validación del rango →
+  **cálculo del motor financiero** → snapshot → escritura atómica. Todas las lecturas
+  ocurren **antes** de la transacción, porque el cálculo lee ocho tablas y una
+  transacción de Dexie solo puede tocar las que declara.
+- `reopenSettlement` — motivo obligatorio (mínimo 10 caracteres), validado **después**
+  del permiso para no revelar la existencia del documento a quien no puede tocarlo.
+- `listSettlementsForUser` / `listSettlementsOfRoute` — recorte por ruta autorizada.
+
+La pantalla **no entrega importes**: solo ruta, empresa y rango. Las cifras las
+produce `generateWeeklySettlement` en el instante del cierre.
+
+## Una sola definición de "período cerrado"
+
+`isPaymentInClosedPeriod` pasó a ser inyectable y a delegar en `protectingClosureFor`.
+Antes la condición estaba escrita a mano en ese servicio; ahora vive en el módulo puro
+y la aplican por igual la corrección, el historial y la pantalla. Congelado por
+`SETTLEMENT-PURE-002`.
+
+Efecto de reabrir: un documento `'reabierta'` deja de proteger, así que los pagos de
+esa semana vuelven a ser corregibles directamente hasta que se cierre de nuevo.
+
+## Permisos
+
+Capacidades nuevas `settlement.close` y `settlement.reopen`:
+
+- **Super Admin y Administrador**: sí.
+- **Socio, Supervisor, Cobrador, Secretario**: incompatibles de forma explícita.
+  El Secretario en particular no puede levantar el cierre que le restringe.
+- Ambas están en `ROUTE_SCOPED`: tener el rol no basta; la ruta debe estar
+  autorizada. `SETTLEMENT-SCOPE-001` lo demuestra con un Administrador que sí tiene
+  el rol pero no la ruta.
+
+## Interfaz
+
+- **Liquidación semanal**: "Generar" sigue siendo una vista previa; **"Cerrar semana"**
+  archiva. El botón se deshabilita con el motivo explicado (rango inválido, semana ya
+  cerrada, solapamiento). Historial de liquidaciones archivadas con semana, versión,
+  **Oficina al cierre**, estado, saldo final, CSV y "Reabrir". Modal de reapertura con
+  motivo obligatorio.
+- **Detalle de Oficina**: sección compacta "Liquidaciones" con las 6 más recientes de
+  las rutas visibles. Sin textos pedagógicos.
+- **Dashboard de empresa**: aviso de semanas sin cerrar; se oculta por completo si no
+  hay ninguna pendiente.
+- La barra de acciones anclada de la Entrega 4 sigue verificada por
+  `OFFICE-ACTIONBAR-003..006`: `sticky bottom-0`, sin `fixed`, sin `left-0 right-0`,
+  sin desplazamientos del sidebar escritos a mano.
+
+## CSV del cierre
+
+`closedSettlementCsvRow` construye la fila **íntegramente desde el documento
+archivado**, incluidos estado, versión, motivo de reapertura y Oficina histórica.
+No se recalcula nada: si se recalculara, un pago corregido después del cierre
+cambiaría el CSV de una semana ya cerrada y el documento dejaría de probar nada.
+Demostrado por `SETTLEMENT-SNAPSHOT-005` y `SMOKE-E5-6`.
+
+## Tests (Entrega 5)
+
+| Suite | Antes | Después |
+|---|---|---|
+| Permisos | 521 | **538** |
+| Financiera | 151 | **151** |
+| Arranque | 155 | **155** |
+| Liquidaciones (nueva) | — | **40** |
+| Migraciones y smoke | 42 | **48** |
+| **Total** | **869** | **932 PASS · 0 FAIL** |
+
+Familias nuevas: `SETTLEMENT-PERSIST-*`, `SETTLEMENT-CLOSE-*`, `SETTLEMENT-REOPEN-*`,
+`SETTLEMENT-CORRECTION-*`, `SETTLEMENT-SNAPSHOT-*`, `SETTLEMENT-HISTORY-*`,
+`SETTLEMENT-SCOPE-*`, `SETTLEMENT-PENDING-*`, `SETTLEMENT-PURE-*`,
+`OFFICE-ARCH-003a..e`, `OFFICE-SETTLE-101..112`, y los smoke `SMOKE-E5-1..6`
+sobre Dexie real.
+
+`SMOKE-E5-3` es el que demuestra el objetivo de la entrega: el mismo pago,
+**no protegido** antes de cerrar y **protegido** después, con el Secretario derivado
+a Solicitud de ajuste.
+
+Dos casos de migración (`OFFICE-MIG-001`, `OFFICE-MIG-007`) fijaban la versión de
+esquema en `11`. Se actualizaron a una constante `VERSION_ACTUAL`, porque lo que
+comprueban es que la base llega al esquema vigente, no que sea la 11.
+
 ## Pendientes estructurales
 
-Fuera de alcance por diseño: persistencia real de liquidaciones semanales, cierre y
-reapertura de períodos, snapshot histórico de Oficina en liquidación, backend,
-sincronización remota, PWA/offline robusto y PDF de Oficina.
+Fuera de alcance por diseño: backend, sincronización remota, PWA/offline robusto y
+PDF de Oficina. `npm run lint` no se puede ejecutar en este entorno porque `eslint`
+no está instalado (no es una regresión de esta entrega); la verificación estática se
+apoya en `tsc --noEmit`, que pasa limpio.

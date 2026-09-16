@@ -778,6 +778,107 @@ check('OFFICE-CRUD-008 — el nombre es obligatorio',
     !grouping.includes("from '@/lib/db'"))
 }
 
+// ============================================================
+// OFFICE-ARCH-003 — LA ÚNICA EXCEPCIÓN PERMITIDA: EL SNAPSHOT DE CIERRE
+// ------------------------------------------------------------
+// La Entrega 5 introduce `officeIdAtClose` / `officeNameAtClose` /
+// `officeCodeAtClose` dentro de `WeeklySettlement`. Es METADATA HISTÓRICA de un
+// documento de cierre, no una reintroducción del `officeId` operativo:
+//
+//   · Vive SOLO en `WeeklySettlement`, en ninguna otra entidad.
+//   · Se llama distinto a propósito, para que nadie lo confunda con `Route.officeId`.
+//   · No participa en ningún filtro de acceso ni de alcance.
+//
+// Estas comprobaciones existen para que la excepción siga siendo una excepción.
+// ============================================================
+{
+  const tipos = readSourceFile('src/models/types.ts')
+
+  // (a) `officeId` a secas se declara UNA sola vez en todo el modelo: en Route.
+  const declaraciones = (tipos.match(/^\s*officeId\??:/gm) ?? []).length
+  check('OFFICE-ARCH-003a — officeId sigue declarándose una sola vez (Route)',
+    declaraciones === 1)
+
+  // (b) Los campos de snapshot SOLO existen dentro de WeeklySettlement.
+  const iniLiq = tipos.indexOf('export interface WeeklySettlement {')
+  const finLiq = tipos.indexOf('\n}', iniLiq)
+  const bloqueLiq = tipos.slice(iniLiq, finLiq)
+  const fueraDeLiquidacion = tipos.slice(0, iniLiq) + tipos.slice(finLiq)
+  check('OFFICE-ARCH-003b — el snapshot vive dentro de WeeklySettlement',
+    /^\s*officeIdAtClose\??:/m.test(bloqueLiq) &&
+    /^\s*officeNameAtClose\??:/m.test(bloqueLiq))
+  check('OFFICE-ARCH-003c — ninguna otra entidad declara campos de snapshot de Oficina',
+    !/^\s*office(Id|Name|Code)AtClose\??:/m.test(fueraDeLiquidacion))
+
+  // (c) El snapshot NO se usa para decidir acceso ni para filtrar filas.
+  const perms = readSourceFile('src/lib/permissions.ts')
+  const scope = readSourceFile('src/lib/scope.ts')
+  check('OFFICE-ARCH-003d — el snapshot no aparece en la resolución de permisos',
+    !perms.includes('AtClose') && !scope.includes('AtClose'))
+
+  // (d) El servicio de liquidaciones recorta por RUTA, nunca por la Oficina del
+  //     documento: el alcance sigue naciendo de authorizedRouteIds.
+  const settle = readSourceFile('src/services/settlementService.ts')
+  const cuerpoListado = settle.slice(settle.indexOf('export async function listSettlementsForUser'))
+  check('OFFICE-ARCH-003e — el listado de liquidaciones filtra por ruta autorizada',
+    cuerpoListado.includes('filterAccessibleRoutes') &&
+    !/AtClose/.test(cuerpoListado))
+}
+
+// ============================================================
+// OFFICE-SETTLE — CIERRE DE PERIODO PERSISTENTE (ENTREGA 5)
+// ------------------------------------------------------------
+// Antes de la Entrega 5 la liquidación se calculaba y se descartaba: nada se
+// archivaba, así que ningún periodo estaba cerrado y la protección de
+// correcciones nunca se activaba. Estas comprobaciones congelan lo contrario.
+// ============================================================
+{
+  const pagina = readSourceFile('src/pages/admin/WeeklySettlementPage.tsx')
+  const servicio = readSourceFile('src/services/settlementService.ts')
+  const puro = readSourceFile('src/lib/settlementPeriods.ts')
+
+  check('OFFICE-SETTLE-101 — la pantalla ya no solo calcula: archiva el cierre',
+    pagina.includes('closeSettlement'))
+  check('OFFICE-SETTLE-102 — la pantalla NO entrega importes al servicio',
+    // Solo viajan ruta, empresa y rango: las cifras las produce el motor.
+    /closeSettlement\(\{\s*actor: user, tenantId, routeId, semanaInicio, semanaFin\s*\}\)/.test(pagina))
+  check('OFFICE-SETTLE-103 — los importes archivados los calcula el motor financiero',
+    servicio.includes('generateWeeklySettlement('))
+  check('OFFICE-SETTLE-104 — el CSV de un cierre sale del documento archivado',
+    pagina.includes('closedSettlementCsvRow') &&
+    puro.includes('No se recalcula nada'))
+  check('OFFICE-SETTLE-105 — reabrir exige motivo',
+    servicio.includes('MIN_REOPEN_REASON') && servicio.includes('reopenReason'))
+  check('OFFICE-SETTLE-106 — un cierre nunca se sobrescribe: se versiona',
+    servicio.includes('nextClosureVersion') && servicio.includes('supersededBy'))
+  check('OFFICE-SETTLE-107 — el módulo de periodos es puro (no importa la base)',
+    !puro.includes("from '@/lib/db'"))
+  check('OFFICE-SETTLE-108 — cerrar y reabrir se validan con la RUTA, no solo con el rol',
+    servicio.includes("assertCan(actor, 'settlement.close', { routeId, tenantId })") &&
+    servicio.includes("assertCan(actor, 'settlement.reopen', { routeId: documento.routeId"))
+  check('OFFICE-SETTLE-109 — la corrección de pagos usa la fecha CONTABLE del pago',
+    (() => {
+      const corr = readSourceFile('src/services/paymentCorrectionService.ts')
+      // Solo el CUERPO de la función: más allá hay usos legítimos de `updatedAt`.
+      const ini = corr.indexOf('export async function isPaymentInClosedPeriod')
+      const cuerpo = corr.slice(ini, corr.indexOf('\n}', ini))
+      const limpio = cuerpo.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+      return limpio.includes('payment.fecha') && !limpio.includes('updatedAt')
+    })())
+  check('OFFICE-SETTLE-110 — cerrar/reabrir dejan rastro en auditoría',
+    servicio.includes("action: 'SETTLEMENT_CLOSED'") &&
+    servicio.includes("action: 'SETTLEMENT_REOPENED'"))
+
+  // --- UI: sin textos pedagógicos de vuelta ---
+  const detalle = readSourceFile('src/pages/admin/OfficeDetailPage.tsx')
+  check('OFFICE-SETTLE-111 — la sección de Liquidaciones del detalle es compacta, sin explicación',
+    detalle.includes('Liquidaciones') &&
+    !detalle.includes('Aquí se muestran las liquidaciones') &&
+    !detalle.includes('Las liquidaciones cerradas'))
+  check('OFFICE-SETTLE-112 — el detalle muestra la Oficina HISTÓRICA del cierre',
+    detalle.includes('Oficina al cierre'))
+}
+
 
 // ============================================================
 // OFICINA COMO UNIDAD DE GESTIÓN — lógica pura

@@ -70,6 +70,9 @@ export type AuditAction =
   | 'CREATE_TENANT'
   | 'SUSPEND_TENANT'
   // --- Oficinas (Empresa → Oficina → Ruta) ---
+  // --- Liquidaciones y cierre de periodo ---
+  | 'SETTLEMENT_CLOSED'
+  | 'SETTLEMENT_REOPENED'
   | 'CREATE_OFFICE'
   | 'UPDATE_OFFICE'
   | 'DELETE_OFFICE'
@@ -648,8 +651,45 @@ export interface WeeklySettlement {
    * (compatibilidad con liquidaciones existentes). Los pagos con fecha dentro del
    * rango [semanaInicio, semanaFin] de una liquidación 'cerrada' NO son corregibles
    * directamente por el Secretario: requieren Solicitud de ajuste de pago.
+   *
+   * `reabierta` es un cierre que se anuló de forma controlada: deja de proteger el
+   * periodo, PERO el documento se conserva íntegro como histórico.
    */
-  status?: 'abierta' | 'cerrada'
+  status?: 'abierta' | 'cerrada' | 'reabierta'
+
+  // --- TRAZABILIDAD DEL CIERRE ---
+  /** Quién generó el cálculo. */
+  createdByUserId?: string
+  closedAt?: string
+  closedByUserId?: string
+  reopenedAt?: string
+  reopenedByUserId?: string
+  /** Motivo OBLIGATORIO al reabrir. Se conserva para siempre. */
+  reopenReason?: string
+
+  /**
+   * VERSIONADO. Un periodo puede cerrarse, reabrirse, corregirse y volver a
+   * cerrarse. Cada cierre es un documento NUEVO con `version` incremental; el
+   * anterior se conserva intacto y apunta al que lo sustituye con `supersededBy`.
+   * Nunca se sobrescribe un cierre histórico.
+   */
+  version?: number
+  supersededBy?: string
+
+  /**
+   * SNAPSHOT HISTÓRICO DE LA OFICINA al momento del cierre.
+   *
+   * `Route.officeId` sigue siendo la ÚNICA fuente operativa: estos campos son
+   * metadata del documento de cierre, no una vía de acceso ni un criterio de
+   * scoping. Existen porque una ruta puede cambiar de Oficina después, y la
+   * liquidación cerrada debe seguir diciendo en qué Oficina se cerró.
+   *
+   * Una ruta que estaba Sin Oficina guarda `officeIdAtClose: undefined` y
+   * `officeNameAtClose: 'Sin Oficina'`; no se inventa ninguna Oficina real.
+   */
+  officeIdAtClose?: string
+  officeNameAtClose?: string
+  officeCodeAtClose?: string
 }
 
 export interface AuditLog {

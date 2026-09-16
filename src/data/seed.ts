@@ -572,6 +572,15 @@ export async function seedDatabase() {
       saldoAnterior: 0, ingresoCapital: 0, cobros: 0, prestamosEntregados: 0,
       gastos: 0, transferenciasEntradas: 0, transferenciasSalidas: 0, retiros: 0,
       saldoFinal: 0, status: 'cerrada', createdAt: subDays(now, 7).toISOString(),
+      // Trazabilidad y snapshot histórico de Oficina del cierre (Entrega 5). El
+      // documento dice en qué Oficina se cerró esa semana; si la ruta cambia de
+      // Oficina después, esto NO se reescribe.
+      version: 1,
+      closedAt: subDays(now, 7).toISOString(),
+      closedByUserId: USER_ADMIN_ID,
+      officeIdAtClose: OFFICE1_ID,
+      officeNameAtClose: 'Oficina Barranquilla',
+      officeCodeAtClose: 'BAQ',
     },
   ]
 

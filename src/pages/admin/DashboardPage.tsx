@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/Badge'
 import { LoadingState } from '@/components/ui/EmptyState'
 import { SetupChecklist } from '@/components/ui/SetupChecklist'
 import { OfficesExecutivePanel } from '@/components/ui/OfficesExecutivePanel'
+import { PendingSettlementsNotice } from '@/components/ui/PendingSettlementsNotice'
 import { db } from '@/lib/db'
 import { getRouteFinancialSummary } from '@/services/cashboxEngine'
 import { getAccessibleRouteIdSet } from '@/lib/scope'
@@ -179,6 +180,9 @@ export default function DashboardPage() {
       {/* Onboarding "Primeros pasos": aparece mientras existan pasos esenciales
           pendientes (empresa nueva); se auto-oculta al completarse. */}
       <SetupChecklist />
+
+      {/* Semanas sin cerrar de las rutas autorizadas. Se oculta si no hay ninguna. */}
+      <PendingSettlementsNotice />
 
       {/* Resumen ejecutivo por Oficina: tarjetas + comparativo objetivo, siempre
           sobre las rutas autorizadas del usuario. Se oculta solo si no hay ninguna. */}

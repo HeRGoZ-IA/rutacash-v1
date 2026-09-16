@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
-import { CalendarRange, Download, RefreshCw } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { CalendarRange, Download, RefreshCw, Lock, LockOpen, History } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 import { LoadingState } from '@/components/ui/EmptyState'
 import { RouteSelector, routeFileTag } from '@/components/ui/RouteSelector'
 import { OfficeSelector } from '@/components/ui/OfficeSelector'
@@ -13,7 +14,21 @@ import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { generateWeeklySettlementForUser } from '@/services/weeklySettlementEngine'
-import { filterAccessibleRoutes, canAccessRoute } from '@/lib/permissions'
+import {
+  closeSettlement,
+  reopenSettlement,
+  listSettlementsOfRoute,
+  MIN_REOPEN_REASON,
+} from '@/services/settlementService'
+import {
+  closedSettlementCsvRow,
+  closureBlockedReason,
+  isProtectingClosure,
+  periodBadge,
+  settlementHistory,
+  type SettlementHistoryRow,
+} from '@/lib/settlementPeriods'
+import { filterAccessibleRoutes, canAccessRoute, can } from '@/lib/permissions'
 import { formatCurrency, formatDate, getWeekStart, getWeekEnd } from '@/lib/formatters'
 import { downloadCSV } from '@/lib/utils'
 import type { WeeklySettlement, Route } from '@/models/types'
@@ -24,6 +39,13 @@ import type { WeeklySettlement, Route } from '@/models/types'
  * consolidada mezclaría cajas independientes. El orden de filtrado es
  * rutas permitidas → ruta seleccionada → cálculo, y el servicio revalida el
  * alcance (fail-closed) antes de leer un solo movimiento.
+ *
+ * DOS COSAS DISTINTAS EN ESTA PANTALLA:
+ *  · GENERAR es una vista previa. Se recalcula cada vez y no queda archivada.
+ *  · CERRAR SEMANA archiva el documento. A partir de ese momento las cifras quedan
+ *    congeladas y los pagos de esas fechas dejan de ser corregibles directamente:
+ *    pasan por Solicitud de ajuste. El CSV de una semana cerrada sale del documento
+ *    archivado, nunca de un recálculo.
  */
 export default function WeeklySettlementPage() {
   const { tenantId, currency } = useTenant()
@@ -63,8 +85,26 @@ export default function WeeklySettlementPage() {
   /** Ruta con la que se generó la liquidación mostrada (para encabezado y CSV). */
   const [generatedRoute, setGeneratedRoute] = useState<Route | null>(null)
   const [loading, setLoading] = useState(false)
+  const [closing, setClosing] = useState(false)
+
+  /** Liquidaciones ARCHIVADAS de la ruta seleccionada (historial y protección). */
+  const [archivadas, setArchivadas] = useState<WeeklySettlement[]>([])
+  const [reabrir, setReabrir] = useState<WeeklySettlement | null>(null)
+  const [motivo, setMotivo] = useState('')
+  const [reabriendo, setReabriendo] = useState(false)
+
+  const puedeCerrar = can(user, 'settlement.close', { routeId: routeId || undefined, tenantId })
+  const puedeReabrir = can(user, 'settlement.reopen', { routeId: routeId || undefined, tenantId })
 
   useEffect(() => { loadMeta() }, [tenantId, user])
+
+  /** Historial de la ruta. Se recarga tras cada cierre o reapertura. */
+  const loadHistorial = useCallback(async () => {
+    if (!routeId || !canAccessRoute(user, routeId)) { setArchivadas([]); return }
+    setArchivadas(await listSettlementsOfRoute(routeId))
+  }, [routeId, user])
+
+  useEffect(() => { loadHistorial() }, [loadHistorial])
 
   // Rutas ofrecidas: las accesibles, recortadas por la Oficina elegida.
   const routesInOffice = filterRoutesByOffice(routes, officeId)
@@ -105,6 +145,39 @@ export default function WeeklySettlementPage() {
     } catch { toast.error('Error al generar liquidación') } finally { setLoading(false) }
   }
 
+  /**
+   * CIERRE. El servicio vuelve a calcular con el motor financiero y archiva: esta
+   * pantalla no le entrega importes, solo la ruta y el rango.
+   */
+  async function cerrarSemana() {
+    if (!routeId) { toast.error('Selecciona la ruta que deseas cerrar.'); return }
+    setClosing(true)
+    try {
+      const doc = await closeSettlement({ actor: user, tenantId, routeId, semanaInicio, semanaFin })
+      toast.success(`Semana cerrada (versión ${doc.version ?? 1}). Las cifras quedan congeladas.`)
+      setSettlement(doc)
+      setGeneratedRoute(routes.find(r => r.id === routeId) ?? null)
+      await loadHistorial()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo cerrar la semana.')
+    } finally { setClosing(false) }
+  }
+
+  async function confirmarReapertura() {
+    if (!reabrir) return
+    setReabriendo(true)
+    try {
+      await reopenSettlement({ actor: user, settlementId: reabrir.id, motivo })
+      toast.success('Período reabierto. Los pagos de esas fechas vuelven a ser corregibles.')
+      setReabrir(null)
+      setMotivo('')
+      await loadHistorial()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo reabrir el período.')
+    } finally { setReabriendo(false) }
+  }
+
+  /** Vista previa: se advierte que NO es un documento archivado. */
   function exportCSV() {
     if (!settlement) { toast.warning('Genera primero'); return }
     // Una sola fila: la de la ruta liquidada. Imposible que contenga otra ruta.
@@ -127,12 +200,44 @@ export default function WeeklySettlementPage() {
     toast.success('CSV descargado')
   }
 
+  /**
+   * CSV DE UNA SEMANA CERRADA: sale ÍNTEGRO del documento archivado.
+   * Si se recalculase, un pago corregido después del cierre cambiaría el CSV de una
+   * semana ya cerrada y el documento dejaría de probar nada.
+   */
+  function exportCierre(fila: SettlementHistoryRow) {
+    const s = fila.settlement
+    downloadCSV(
+      [closedSettlementCsvRow(s, fila.routeName, fila.routeCode)],
+      `cierre_${routeFileTag(routes, s.routeId)}_${s.semanaInicio}_${s.semanaFin}_v${s.version ?? 1}.csv`,
+    )
+    toast.success('CSV del cierre descargado')
+  }
+
+  // Motivo del bloqueo del botón Cerrar (rango inválido o semana ya cerrada).
+  const bloqueoCierre = routeId ? closureBlockedReason(archivadas, routeId, semanaInicio, semanaFin) : null
+  const historial = settlementHistory(archivadas, routes, allOffices)
+
   const Row = ({ label, value, tone = 'text-gray-700' }: { label: string; value: number; tone?: string }) => (
     <div className="flex items-center justify-between px-4 py-3">
       <span className="text-sm text-gray-600">{label}</span>
       <span className={`text-sm font-semibold ${tone}`}>{formatCurrency(value, currency)}</span>
     </div>
   )
+
+  const StatusPill = ({ s }: { s: WeeklySettlement }) => {
+    const badge = periodBadge(s)
+    const tonos = {
+      closed: 'bg-gray-100 text-gray-700',
+      reopened: 'bg-amber-100 text-amber-700',
+      open: 'bg-emerald-100 text-emerald-700',
+    } as const
+    return (
+      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${tonos[badge.tone]}`}>
+        {badge.label}
+      </span>
+    )
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -141,6 +246,17 @@ export default function WeeklySettlementPage() {
         <div className="flex gap-2">
           {settlement && <Button variant="secondary" onClick={exportCSV} icon={<Download className="w-4 h-4" />}>CSV</Button>}
           <Button onClick={generate} loading={loading} disabled={!routeId} icon={<RefreshCw className="w-4 h-4" />}>Generar</Button>
+          {puedeCerrar && (
+            <Button
+              onClick={cerrarSemana}
+              loading={closing}
+              disabled={!routeId || Boolean(bloqueoCierre)}
+              title={bloqueoCierre ?? 'Archiva la semana y congela sus cifras'}
+              icon={<Lock className="w-4 h-4" />}
+            >
+              Cerrar semana
+            </Button>
+          )}
         </div>
       </div>
 
@@ -165,14 +281,21 @@ export default function WeeklySettlementPage() {
         <p className="text-sm text-amber-600">No tienes rutas autorizadas: no hay nada que liquidar.</p>
       )}
 
+      {routeId && bloqueoCierre && puedeCerrar && (
+        <p className="text-sm text-amber-600">{bloqueoCierre}</p>
+      )}
+
       {loading ? (
         <LoadingState message="Calculando liquidación..." />
       ) : settlement ? (
         <div className="space-y-4">
-          <h2 className="text-sm font-semibold text-gray-600">
-            Ruta: {generatedRoute?.nombre ?? settlement.routeId}
-            {generatedRoute?.codigo ? ` · ${generatedRoute.codigo}` : ''}
-            {' · '}{formatDate(settlement.semanaInicio)} – {formatDate(settlement.semanaFin)}
+          <h2 className="text-sm font-semibold text-gray-600 flex flex-wrap items-center gap-2">
+            <span>
+              Ruta: {generatedRoute?.nombre ?? settlement.routeId}
+              {generatedRoute?.codigo ? ` · ${generatedRoute.codigo}` : ''}
+              {' · '}{formatDate(settlement.semanaInicio)} – {formatDate(settlement.semanaFin)}
+            </span>
+            {settlement.closedAt && <StatusPill s={settlement} />}
           </h2>
 
           {/* KPI de ESTA ruta */}
@@ -217,6 +340,107 @@ export default function WeeklySettlementPage() {
           <p className="text-sm">Selecciona la ruta y el rango de la semana, luego haz clic en Generar</p>
         </div>
       )}
+
+      {/* ---------------- HISTORIAL DE CIERRES DE LA RUTA ---------------- */}
+      {routeId && historial.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <History className="w-4 h-4 text-gray-400" /> Liquidaciones archivadas
+          </h2>
+          <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs text-gray-500">
+                <tr>
+                  <th className="text-left font-medium px-4 py-2.5">Semana</th>
+                  <th className="text-left font-medium px-4 py-2.5">Oficina al cierre</th>
+                  <th className="text-left font-medium px-4 py-2.5">Estado</th>
+                  <th className="text-right font-medium px-4 py-2.5">Saldo final</th>
+                  <th className="px-4 py-2.5" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {historial.map(fila => (
+                  <tr key={fila.settlement.id} className={fila.superseded ? 'text-gray-400' : ''}>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      {formatDate(fila.settlement.semanaInicio)} – {formatDate(fila.settlement.semanaFin)}
+                      <span className="ml-2 text-xs text-gray-400">v{fila.version}</span>
+                    </td>
+                    {/* Oficina HISTÓRICA del documento, no la actual de la ruta. */}
+                    <td className="px-4 py-2.5">{fila.officeLabel}</td>
+                    <td className="px-4 py-2.5">
+                      <StatusPill s={fila.settlement} />
+                      {fila.superseded && <span className="ml-2 text-xs">sustituida</span>}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-semibold">
+                      {formatCurrency(fila.settlement.saldoFinal, currency)}
+                    </td>
+                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                      <button onClick={() => exportCierre(fila)}
+                        className="text-xs text-primary-600 hover:underline">CSV</button>
+                      {puedeReabrir && isProtectingClosure(fila.settlement) && !fila.superseded && (
+                        <button onClick={() => { setReabrir(fila.settlement); setMotivo('') }}
+                          className="ml-3 text-xs text-amber-600 hover:underline">Reabrir</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {historial.some(f => f.settlement.reopenReason) && (
+            <div className="text-xs text-gray-500 space-y-1">
+              {historial.filter(f => f.settlement.reopenReason).map(f => (
+                <p key={f.settlement.id}>
+                  Reapertura {formatDate(f.settlement.semanaInicio)}–{formatDate(f.settlement.semanaFin)} v{f.version}:
+                  {' '}«{f.settlement.reopenReason}»
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---------------- REAPERTURA CONTROLADA ---------------- */}
+      <Modal
+        open={Boolean(reabrir)}
+        onClose={() => { setReabrir(null); setMotivo('') }}
+        title="Reabrir período"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => { setReabrir(null); setMotivo('') }}>Cancelar</Button>
+            <Button
+              onClick={confirmarReapertura}
+              loading={reabriendo}
+              disabled={motivo.trim().length < MIN_REOPEN_REASON}
+              icon={<LockOpen className="w-4 h-4" />}
+            >
+              Reabrir
+            </Button>
+          </div>
+        }
+      >
+        {reabrir && (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">
+              Semana {formatDate(reabrir.semanaInicio)} – {formatDate(reabrir.semanaFin)}.
+              Los pagos de esas fechas volverán a ser corregibles directamente.
+            </p>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1.5">Motivo (obligatorio)</label>
+              <textarea
+                value={motivo}
+                onChange={e => setMotivo(e.target.value)}
+                rows={3}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                placeholder="Ej.: pago mal registrado el jueves, se corrige y se vuelve a cerrar."
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                Mínimo {MIN_REOPEN_REASON} caracteres. Queda guardado de forma permanente.
+              </p>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

@@ -362,6 +362,38 @@ export class RutaCashDB extends Dexie {
         `Ninguna Oficina se creó automáticamente.`,
       )
     })
+
+    // ============================================================
+    // v12 (LIQUIDACIONES PERSISTENTES): aditiva y segura.
+    //
+    // Los campos nuevos de `WeeklySettlement` (trazabilidad del cierre, versionado
+    // y snapshot histórico de Oficina) son OPCIONALES y no requieren índices. Esta
+    // migración solo NORMALIZA las liquidaciones que ya existieran para que el
+    // historial las muestre de forma coherente:
+    //   · `status` ausente → 'cerrada' (ya era la interpretación vigente).
+    //   · `version` ausente → 1.
+    //   · `closedAt` ausente → `createdAt` (la única fecha disponible).
+    //
+    // NO se inventa el snapshot de Oficina de los cierres heredados: no se sabe en
+    // qué Oficina estaba la ruta entonces, y deducirlo de la Oficina ACTUAL sería
+    // falsear el histórico. Esos cierres se muestran sin Oficina histórica.
+    // No se borra nada y no se toca ningún importe.
+    // ============================================================
+    this.version(12).upgrade(async (tx) => {
+      let normalizadas = 0
+      await tx.table('weeklySettlements').toCollection().modify((w: WeeklySettlement) => {
+        let tocada = false
+        if (!w.status) { w.status = 'cerrada'; tocada = true }
+        if (w.version === undefined) { w.version = 1; tocada = true }
+        if (!w.closedAt && w.status === 'cerrada') { w.closedAt = w.createdAt; tocada = true }
+        if (tocada) normalizadas++
+      })
+      console.log(
+        `[RutaCash][migración v12] Liquidaciones normalizadas: ${normalizadas}. ` +
+        `El snapshot de Oficina NO se deduce para cierres heredados: se desconoce la ` +
+        `Oficina del momento y deducirla de la actual falsearía el histórico.`,
+      )
+    })
   }
 }
 

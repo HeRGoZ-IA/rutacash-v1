@@ -20,14 +20,36 @@ import { can } from '@/lib/permissions'
 import { recalculateSaleFromPayments, calculateSaleBalance } from '@/services/installmentEngine'
 import { effectivePayments as onlyEffective, lastEffectivePaymentDate } from '@/lib/paymentState'
 import { resolveSealedCompletionDate } from '@/lib/creditHistory'
-import type { Payment, PaymentAdjustmentRequest, Sale, User } from '@/models/types'
+import { protectingClosureFor } from '@/lib/settlementPeriods'
+import type { Payment, PaymentAdjustmentRequest, Sale, User, WeeklySettlement } from '@/models/types'
 
-/** ¿El pago cae dentro de una liquidación/periodo CERRADO de su ruta? */
-export async function isPaymentInClosedPeriod(payment: Payment): Promise<boolean> {
-  const settlements = await db.weeklySettlements.where('routeId').equals(payment.routeId).toArray()
-  return settlements.some(
-    s => (s.status ?? 'cerrada') === 'cerrada' && payment.fecha >= s.semanaInicio && payment.fecha <= s.semanaFin
-  )
+/** Lectura mínima de liquidaciones que necesita la comprobación de periodo. */
+export interface ClosedPeriodDatabase {
+  weeklySettlements: {
+    where(index: string): { equals(key: string): { toArray(): Promise<WeeklySettlement[]> } }
+  }
+}
+
+/**
+ * ¿El pago cae dentro de una liquidación/periodo CERRADO de su ruta?
+ *
+ * FECHA CONTABLE: se compara `payment.fecha` —el día al que pertenece el dinero—
+ * y NO `createdAt`/`updatedAt`. Un pago registrado tarde pertenece a la semana en
+ * que se cobró, así que debe quedar protegido por el cierre de ESA semana.
+ *
+ * La condición de "cierre que protege" vive en `@/lib/settlementPeriods`
+ * (`protectingClosureFor`), de modo que una sola definición decide aquí, en el
+ * historial y en la pantalla. Un periodo REABIERTO deja de proteger: ese es el
+ * efecto que se busca al reabrirlo.
+ *
+ * La base es inyectable para poder probar la protección sin IndexedDB.
+ */
+export async function isPaymentInClosedPeriod(
+  payment: Payment,
+  database: ClosedPeriodDatabase = db,
+): Promise<boolean> {
+  const settlements = await database.weeklySettlements.where('routeId').equals(payment.routeId).toArray()
+  return protectingClosureFor(settlements, payment.routeId, payment.fecha) !== null
 }
 
 /**
