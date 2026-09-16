@@ -306,19 +306,19 @@ dentro de sus rutas autorizadas.
 
 | Concepto | Antes | Después |
 |---|---|---|
-| Pruebas automáticas | 353 | **568** |
-| Resultado | PASS | **568 PASS · 0 FAIL** |
+| Pruebas automáticas | 353 | **629** |
+| Resultado | PASS | **629 PASS · 0 FAIL** |
 | Verificación de tipos (aplicación) | Sin errores | **Sin errores** |
 | Verificación de tipos (pruebas) | Sin errores | **Sin errores** |
 | Build de producción | OK | **OK** |
 
-Detalle de las 568 pruebas:
+Detalle de las 629 pruebas:
 
-- **275** de permisos, reglas de acceso y agrupación por oficina
+- **315** de permisos, reglas de acceso, agrupación y gestión por oficina
 - **151** financieras (pagos, caja, liquidación, reportes, historial, caja del
   cobrador, registro de abonos de la App Cobrador)
-- **129** de arranque e instalación
-- **13** de migración de base de datos y recorridos completos (smoke), ejecutadas
+- **145** de arranque, instalación y gestión de oficinas
+- **18** de migración de base de datos y recorridos completos (smoke), ejecutadas
   sobre el motor real de la base, no simulado
 
 Entre las pruebas nuevas se verifica que: una ruta puede crearse **sin

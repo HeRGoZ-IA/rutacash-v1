@@ -20,6 +20,8 @@ import PlatformPage from '@/pages/platform/PlatformPage'
 // Admin
 import DashboardPage from '@/pages/admin/DashboardPage'
 import OfficesPage from '@/pages/admin/OfficesPage'
+import OfficeDetailPage from '@/pages/admin/OfficeDetailPage'
+import UnassignedRoutesPage from '@/pages/admin/UnassignedRoutesPage'
 import RoutesPage from '@/pages/admin/RoutesPage'
 import ClientsPage from '@/pages/admin/ClientsPage'
 import ActiveSalesPage from '@/pages/admin/ActiveSalesPage'
@@ -187,6 +189,8 @@ export default function App() {
           <Route index element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="offices" element={<OfficesPage />} />
+          <Route path="offices/sin-oficina" element={<UnassignedRoutesPage />} />
+          <Route path="offices/:officeId" element={<OfficeDetailPage />} />
           <Route path="routes" element={<RoutesPage />} />
           <Route path="clients" element={<ClientsPage />} />
           <Route path="active-sales" element={<ActiveSalesPage />} />

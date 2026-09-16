@@ -35,7 +35,8 @@ import { getRouteAssignmentsByRole, hasAnyAssignment } from '../src/lib/routeAss
 import {
   createOffice, updateOffice, setOfficeStatus, deleteOffice, moveRouteToOffice,
   assertRouteOperationalContext, isRouteOperational,
-  type OfficeDatabase,
+  getOfficeManagementSummary, assignRoutesToOffice,
+  type OfficeDatabase, type OfficeSummaryDatabase,
 } from '../src/services/officeService'
 import { MemoryDb } from './financial/harness'
 import type { Tenant, User } from '../src/models/types'
@@ -1852,6 +1853,263 @@ await spec('OFFICE-DEMO-002', 'Oficinas', 'DEMO no guarda officeId fuera de las 
   metric('fuera de Route', fuera.length === 0 ? '(ninguna)' : fuera.join(' | '))
   assert(fuera.length === 0, `DEMO guarda officeId fuera de las rutas: ${fuera.join(', ')}`)
   assert(asignaciones.length === 4, `se esperaban 4 rutas con Oficina; hay ${asignaciones.length}`)
+})
+
+// ############################################################
+// GRUPO — OFICINA COMO UNIDAD DE GESTIÓN (servicio real)
+// ------------------------------------------------------------
+// `getOfficeManagementSummary` es el punto único de carga del panel de Oficina.
+// Estos casos comprueban sobre el SERVICIO REAL que entrar a una Oficina no
+// concede ni una ruta, y que el recorte se hace ANTES de agrupar.
+// ############################################################
+const asSummaryDb = (db: MemoryDb) => db as unknown as OfficeSummaryDatabase
+
+/**
+ * Empresa con dos Oficinas: Leticia (3 rutas) y Río (1 ruta).
+ * El Admin solo tiene autorizadas 2 de las 3 de Leticia — la situación que debe
+ * mostrarse como "2 de 3 rutas visibles" sin aparentar el total.
+ */
+async function empresaConOficinas() {
+  const { db, su, admin, sink } = await empresaParaOficinas()
+  const leticia = await createOffice({ tenantId: 't-1', nombre: 'Leticia', codigo: 'LET' }, su, asOfficeDb(db), sink)
+  const rio = await createOffice({ tenantId: 't-1', nombre: 'Río' }, su, asOfficeDb(db), sink)
+
+  const rL1 = await createRouteWithAdmins(datosRuta({ officeId: leticia.id, nombre: 'Centro', codigo: 'RT-001' }), su, asRouteDb(db), sink)
+  const rL2 = await createRouteWithAdmins(datosRuta({ officeId: leticia.id, nombre: 'Mercado', codigo: 'RT-002' }), su, asRouteDb(db), sink)
+  const rL3 = await createRouteWithAdmins(datosRuta({ officeId: leticia.id, nombre: 'Norte', codigo: 'RT-003' }), su, asRouteDb(db), sink)
+  const rR1 = await createRouteWithAdmins(datosRuta({ officeId: rio.id, nombre: 'Puerto', codigo: 'RT-004' }), su, asRouteDb(db), sink)
+  const rX = await createRouteWithAdmins(datosRuta({ nombre: 'Antigua', codigo: 'RT-005' }), su, asRouteDb(db), sink)
+
+  // El Admin ve Centro y Mercado, NO Norte.
+  await db.users.update(admin.id, { authorizedRouteIds: [rL1.id, rL2.id] })
+  const adminScoped = (await db.users.toArray() as User[]).find(u => u.id === admin.id)!
+
+  return { db, su, admin: adminScoped, sink, leticia, rio, rL1, rL2, rL3, rR1, rX }
+}
+
+await spec('OFFICE-MGMT-001', 'Gestión Oficina', 'el panel carga la Oficina correcta y solo esa', async () => {
+  const { db, su, leticia } = await empresaConOficinas()
+  const resumen = await getOfficeManagementSummary({ user: su, tenantId: 't-1', officeId: leticia.id }, asSummaryDb(db))
+  metric('oficina', resumen?.office.nombre)
+  metric('código', resumen?.office.codigo)
+  metric('rutas del panel', resumen?.accessibleOfficeRoutes.map(r => r.nombre).join(', '))
+  assert(resumen?.office.id === leticia.id, 'no cargó la Oficina pedida')
+  assert(resumen!.accessibleOfficeRoutes.every(r => r.officeId === leticia.id), 'se colaron rutas de otra Oficina')
+  assert(!resumen!.accessibleOfficeRoutes.some(r => r.nombre === 'Puerto' || r.nombre === 'Antigua'),
+    'aparecieron rutas ajenas a la Oficina')
+})
+
+await spec('OFFICE-MGMT-001b', 'Gestión Oficina', 'una Oficina de otra empresa no se carga', async () => {
+  const { db, su, sink } = await empresaConOficinas()
+  const ajena = await createOffice({ tenantId: 't-2', nombre: 'Ajena' }, su, asOfficeDb(db), sink)
+  const resumen = await getOfficeManagementSummary({ user: su, tenantId: 't-1', officeId: ajena.id }, asSummaryDb(db))
+  metric('resultado', resumen === null ? 'null (correcto)' : 'CARGÓ — ERROR')
+  assert(resumen === null, 'el aislamiento por empresa se rompió')
+})
+
+await spec('OFFICE-MGMT-002', 'Gestión Oficina', 'el Admin ve SOLO sus rutas autorizadas de esa Oficina', async () => {
+  const { db, admin, leticia, rL3 } = await empresaConOficinas()
+  const resumen = await getOfficeManagementSummary({ user: admin, tenantId: 't-1', officeId: leticia.id }, asSummaryDb(db))
+  const nombres = resumen!.accessibleOfficeRoutes.map(r => r.nombre)
+  metric('rutas visibles', nombres.join(', '))
+  metric('alcance', resumen!.scope.label)
+  assert(nombres.length === 2, `el Admin debía ver 2 rutas, vio ${nombres.length}`)
+  assert(nombres.includes('Centro') && nombres.includes('Mercado'), 'faltan sus rutas')
+  assert(!nombres.includes('Norte'), 'el Admin ve una ruta de la Oficina que NO tiene autorizada')
+  assert(!resumen!.accessibleOfficeRoutes.some(r => r.id === rL3.id), 'entrar a la Oficina concedió una ruta')
+  assert(resumen!.scope.parcial && resumen!.scope.label === '2 de 3 rutas visibles — rutas autorizadas',
+    'el alcance parcial debe rotularse con honestidad')
+})
+
+await spec('OFFICE-MGMT-003', 'Gestión Oficina', 'el Super Admin ve todas las rutas de la Oficina', async () => {
+  const { db, su, leticia } = await empresaConOficinas()
+  const resumen = await getOfficeManagementSummary({ user: su, tenantId: 't-1', officeId: leticia.id }, asSummaryDb(db))
+  metric('rutas visibles', resumen!.accessibleOfficeRoutes.length)
+  metric('alcance', resumen!.scope.label)
+  assert(resumen!.accessibleOfficeRoutes.length === 3, 'el Super Admin debe ver las 3 rutas')
+  assert(!resumen!.scope.parcial, 'con cobertura completa no debe rotularse como parcial')
+})
+
+await spec('OFFICE-MGMT-004', 'Gestión Oficina', 'entrar a la Oficina NO concede ninguna ruta nueva', async () => {
+  const { db, admin, leticia, rL3 } = await empresaConOficinas()
+  const antes = JSON.stringify((await db.users.toArray() as User[]).find(u => u.id === admin.id))
+  await getOfficeManagementSummary({ user: admin, tenantId: 't-1', officeId: leticia.id }, asSummaryDb(db))
+  const despues = (await db.users.toArray() as User[]).find(u => u.id === admin.id)!
+
+  metric('usuario sin cambios', antes === JSON.stringify(despues))
+  metric('canAccessRoute(Norte)', canAccessRoute(despues, rL3.id))
+  assert(antes === JSON.stringify(despues), 'abrir el panel modificó las asignaciones del usuario')
+  assert(!canAccessRoute(despues, rL3.id), 'entrar a la Oficina concedió acceso a una ruta ajena')
+})
+
+await spec('OFFICE-MGMT-005', 'Gestión Oficina', 'crear una Ruta desde la Oficina la preselecciona y sigue siendo opcional', async () => {
+  const { db, su, leticia, sink } = await empresaConOficinas()
+  // La pantalla envía la Oficina como parámetro y el servicio la aplica.
+  const conOficina = await createRouteWithAdmins(datosRuta({ officeId: leticia.id, nombre: 'Nueva', codigo: 'RT-010' }), su, asRouteDb(db), sink)
+  // Y la Oficina NO es obligatoria: el mismo flujo sin ella también crea la ruta.
+  const sinOficina = await createRouteWithAdmins(datosRuta({ nombre: 'Libre', codigo: 'RT-011' }), su, asRouteDb(db), sink)
+
+  metric('ruta creada desde la Oficina', conOficina.officeId === leticia.id)
+  metric('ruta creada sin Oficina', sinOficina.officeId === undefined)
+  metric('sin Admin ni Cobrador', `${conOficina.cobradorId === undefined}`)
+  assert(conOficina.officeId === leticia.id, 'la Oficina preseleccionada no se aplicó')
+  assert(sinOficina.officeId === undefined, 'la Oficina dejó de ser opcional')
+  assert(conOficina.cobradorId === undefined, 'crear desde la Oficina no debe exigir Cobrador')
+
+  // La pantalla de rutas acepta el enlace profundo y no duplica el formulario.
+  const page = readSource('src/pages/admin/RoutesPage.tsx')
+  metric('acepta ?nueva&officeId', page.includes("searchParams.get('nueva')") && page.includes("searchParams.get('officeId')"))
+  assert(page.includes("openCreate(searchParams.get('officeId') ?? undefined)"),
+    'el enlace desde la Oficina debe reutilizar el formulario existente')
+})
+
+await spec('OFFICE-MGMT-006', 'Gestión Oficina', 'la Oficina sigue siendo opcional y el enlace no puede editar rutas ajenas', () => {
+  const page = readSource('src/pages/admin/RoutesPage.tsx')
+  const avisos = routeAssignmentWarnings({ hasOffice: false, hasAdmin: false, hasCobrador: false })
+  metric('advertencias sin responsables', avisos.length)
+  assert(avisos.some(a => a.includes('sin Oficina')), 'debe seguir avisándose la Oficina ausente')
+  // El enlace `?editar=` solo abre rutas que están entre las accesibles.
+  metric('el enlace valida el alcance', page.includes("const route = routes.find(r => r.id === editar)"))
+  assert(/if \(route\) openEdit\(route\)\s*\n\s*else toast\.error/.test(page),
+    'un enlace con una ruta fuera de alcance no debe abrir el editor')
+})
+
+await spec('OFFICE-MGMT-007', 'Gestión Oficina', 'mover una Ruta A → B solo cambia Route.officeId', async () => {
+  const { db, su, rL1, rio, sink } = await empresaConOficinas()
+  await db.clients.add({ id: 'c-1', tenantId: 't-1', routeId: rL1.id, nombre: 'Cliente' })
+  await db.sales.add({ id: 's-1', tenantId: 't-1', routeId: rL1.id, clientId: 'c-1', saldo: 1000, status: 'activa' } as never)
+
+  const antes = JSON.stringify([await db.clients.toArray(), await db.sales.toArray(), await db.users.toArray()])
+  db.resetLog()
+  await moveRouteToOffice({ routeId: rL1.id, tenantId: 't-1', officeId: rio.id }, su, asOfficeDb(db), sink)
+  const escrituras = db.log.filter(op => op.endsWith('.add') || op.endsWith('.update'))
+  const despues = JSON.stringify([await db.clients.toArray(), await db.sales.toArray(), await db.users.toArray()])
+
+  metric('escrituras', escrituras.join(', '))
+  metric('hijos y usuarios idénticos', antes === despues)
+  metric('nueva Oficina', (await db.routes.get(rL1.id) as { officeId?: string }).officeId === rio.id)
+  assert(escrituras.length === 1 && escrituras[0] === 'routes.update', `mover debe ser UNA escritura; hubo: ${escrituras.join(', ')}`)
+  assert(antes === despues, 'mover la ruta alteró clientes, ventas o usuarios')
+})
+
+await spec('OFFICE-MGMT-008', 'Gestión Oficina', 'mover una Ruta a "Sin Oficina" funciona y la deja operativa', async () => {
+  const { db, su, rL1, sink } = await empresaConOficinas()
+  await moveRouteToOffice({ routeId: rL1.id, tenantId: 't-1', officeId: undefined }, su, asOfficeDb(db), sink)
+  const ruta = await db.routes.get(rL1.id) as { officeId?: string; status: string }
+  metric('officeId', String(ruta.officeId))
+  metric('status', ruta.status)
+  metric('operativa', await isRouteOperational(rL1.id, asOfficeDb(db)))
+  assert(ruta.officeId === undefined, 'la ruta debía quedar Sin Oficina')
+  assert(ruta.status === 'activa', 'quitarle la Oficina no puede cambiar su estado')
+  assert(await isRouteOperational(rL1.id, asOfficeDb(db)), 'una ruta Sin Oficina debe seguir operando')
+})
+
+await spec('OFFICE-MGMT-010', 'Gestión Oficina', 'los usuarios relacionados se derivan de authorizedRouteIds', async () => {
+  const { db, su, leticia, rL1, rL2, rR1, cobradorId } = await (async () => {
+    const base = await empresaConOficinas()
+    // Fabio trabaja en Leticia/Centro y en Río/Puerto.
+    await base.db.users.update('u-cob-1', { authorizedRouteIds: [base.rL1.id, base.rR1.id] })
+    return { ...base, cobradorId: 'u-cob-1' }
+  })()
+
+  const resumen = await getOfficeManagementSummary({ user: su, tenantId: 't-1', officeId: leticia.id }, asSummaryDb(db))
+  const fabio = resumen!.relatedUsers.find(u => u.id === cobradorId)
+
+  metric('usuarios relacionados', resumen!.relatedUsers.map(u => u.nombre).join(', '))
+  metric('rutas de Fabio en Leticia', fabio?.routes.map(r => r.nombre).join(', '))
+  assert(!!fabio, 'Fabio debe aparecer relacionado con Leticia')
+  assert(fabio!.routes.length === 1 && fabio!.routes[0].id === rL1.id,
+    'de un usuario multi-Oficina aquí solo deben verse sus rutas de ESTA Oficina')
+  assert(!fabio!.routes.some(r => r.id === rR1.id), 'se filtró una ruta de otra Oficina')
+  void rL2
+})
+
+await spec('OFFICE-MGMT-011', 'Gestión Oficina', 'los indicadores y alertas se calculan solo sobre las rutas visibles', async () => {
+  const { db, admin, su, leticia, rL3 } = await empresaConOficinas()
+  // La ruta que el Admin NO ve tiene datos: no pueden aparecer en sus indicadores.
+  await db.clients.add({ id: 'c-oculto', tenantId: 't-1', routeId: rL3.id, nombre: 'Cliente oculto' })
+  await db.sales.add({ id: 's-oculto', tenantId: 't-1', routeId: rL3.id, clientId: 'c-oculto', saldo: 9999, status: 'activa', disbursementStatus: 'pendiente' } as never)
+
+  const delAdmin = await getOfficeManagementSummary({ user: admin, tenantId: 't-1', officeId: leticia.id }, asSummaryDb(db))
+  const delSuper = await getOfficeManagementSummary({ user: su, tenantId: 't-1', officeId: leticia.id }, asSummaryDb(db))
+
+  metric('rutas del Admin', delAdmin!.kpis.rutasVisibles)
+  metric('desembolsos pendientes del Admin', delAdmin!.kpis.desembolsosPendientes)
+  metric('desembolsos pendientes del Super Admin', delSuper!.kpis.desembolsosPendientes)
+  metric('alertas del Admin mencionan Norte', delAdmin!.alerts.some(a => a.mensaje.includes('Norte')))
+  assert(delAdmin!.kpis.rutasVisibles === 2, 'los indicadores del Admin deben contar solo sus rutas')
+  assert(delAdmin!.kpis.desembolsosPendientes === 0, 'un dato de una ruta no autorizada se filtró a los indicadores')
+  assert(delSuper!.kpis.desembolsosPendientes === 1, 'el Super Admin sí debe verlo')
+  assert(!delAdmin!.alerts.some(a => a.mensaje.includes('Norte')), 'una alerta reveló una ruta no autorizada')
+})
+
+await spec('OFFICE-UNASSIGNED-003', 'Gestión Oficina', 'asignar rutas desde "Sin Oficina" es transaccional y no toca hijos', async () => {
+  const { db, su, leticia, rX, sink } = await empresaConOficinas()
+  const otra = await createRouteWithAdmins(datosRuta({ nombre: 'Antigua 2', codigo: 'RT-006' }), su, asRouteDb(db), sink)
+  await db.clients.add({ id: 'c-x', tenantId: 't-1', routeId: rX.id, nombre: 'Cliente X' })
+
+  const antes = JSON.stringify(await db.clients.toArray())
+  const { moved } = await assignRoutesToOffice({ routeIds: [rX.id, otra.id], tenantId: 't-1', officeId: leticia.id }, su, asOfficeDb(db), sink)
+  const despues = JSON.stringify(await db.clients.toArray())
+
+  const rutas = await db.routes.toArray()
+  metric('rutas movidas', moved.length)
+  metric('ahora en Leticia', rutas.filter(r => r.officeId === leticia.id).length)
+  metric('clientes intactos', antes === despues)
+  assert(moved.length === 2, 'debían moverse las dos rutas')
+  assert(rutas.find(r => r.id === rX.id)?.officeId === leticia.id, 'la ruta no se asignó')
+  assert(antes === despues, 'asignar la Oficina alteró los clientes')
+})
+
+await spec('OFFICE-UNASSIGNED-004', 'Gestión Oficina', 'la asignación masiva es todo-o-nada', async () => {
+  const { db, su, leticia, rX, sink } = await empresaConOficinas()
+  let error = ''
+  try {
+    // Una ruta inexistente invalida TODA la operación.
+    await assignRoutesToOffice({ routeIds: [rX.id, 'r-inexistente'], tenantId: 't-1', officeId: leticia.id }, su, asOfficeDb(db), sink)
+  } catch (e) { error = e instanceof Error ? e.message : String(e) }
+
+  const ruta = await db.routes.get(rX.id) as { officeId?: string }
+  metric('resultado', error || 'ACEPTADO — ERROR')
+  metric('la ruta válida quedó sin mover', ruta.officeId === undefined)
+  assert(!!error, 'una ruta inválida debía abortar la operación')
+  assert(ruta.officeId === undefined, 'se movió una ruta pese a fallar la operación: no fue todo-o-nada')
+})
+
+await spec('OFFICE-NAV-001', 'Gestión Oficina', 'Oficinas enlaza al panel de cada Oficina y a "Sin Oficina"', () => {
+  const lista = readSource('src/pages/admin/OfficesPage.tsx')
+  const app = readSource('src/app/App.tsx')
+  metric('botón Entrar', lista.includes('/admin/offices/${office.id}'))
+  metric('bloque Sin Oficina', lista.includes("navigate('/admin/offices/sin-oficina')"))
+  assert(lista.includes('/admin/offices/${office.id}'), 'falta la acción Entrar')
+  assert(lista.includes("navigate('/admin/offices/sin-oficina')"), 'falta el acceso a "Sin Oficina"')
+  assert(app.includes('offices/:officeId') && app.includes('offices/sin-oficina'), 'faltan las rutas de navegación')
+  // La ruta literal debe declararse ANTES del parámetro, o "sin-oficina" se tomaría por un id.
+  metric('orden de rutas correcto', app.indexOf('offices/sin-oficina') < app.indexOf('offices/:officeId'))
+  assert(app.indexOf('offices/sin-oficina') < app.indexOf('offices/:officeId'),
+    '"sin-oficina" debe declararse antes que :officeId')
+})
+
+await spec('OFFICE-NAV-002', 'Gestión Oficina', '"Nueva ruta" desde la Oficina reutiliza el formulario existente', () => {
+  const detalle = readSource('src/pages/admin/OfficeDetailPage.tsx')
+  metric('enlace con preselección', detalle.includes('/admin/routes?nueva=1&officeId=${office.id}'))
+  assert(detalle.includes('/admin/routes?nueva=1&officeId=${office.id}'), 'falta el enlace de creación')
+  // No debe existir un segundo formulario de ruta.
+  metric('crea su propio formulario de ruta', detalle.includes('createRouteWithAdmins('))
+  assert(!detalle.includes('createRouteWithAdmins('), 'el panel de Oficina no debe duplicar la creación de rutas')
+})
+
+await spec('OFFICE-NAV-003', 'Gestión Oficina', 'los breadcrumbs no alteran el scoping ni son obligatorios', () => {
+  const detalle = readSource('src/pages/admin/OfficeDetailPage.tsx')
+  const rutas = readSource('src/pages/admin/RoutesPage.tsx')
+  metric('breadcrumb presente', detalle.includes('Oficinas</Link>'))
+  assert(detalle.includes('Empresa</Link>') && detalle.includes('Oficinas</Link>'), 'faltan los breadcrumbs')
+  // El panel carga por el servicio scoped, no por lo que diga la navegación.
+  assert(detalle.includes('getOfficeManagementSummary('), 'el panel debe cargar por el servicio con scoping')
+  // Y /admin/routes sigue funcionando sin ningún parámetro de Oficina.
+  metric('rutas accesible sin parámetros', rutas.includes("if (!nueva && !editar) return"))
+  assert(rutas.includes('if (!nueva && !editar) return'),
+    'entrar a /admin/routes directamente debe seguir funcionando igual')
 })
 
 // ############################################################

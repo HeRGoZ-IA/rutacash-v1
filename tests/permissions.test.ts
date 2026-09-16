@@ -24,6 +24,11 @@ import {
   ALL_OFFICES, NO_OFFICE, NO_OFFICE_LABEL,
 } from '../src/lib/officeGrouping'
 import { validateOfficeIdentity, isRouteOperationBlocked } from '../src/services/officeService'
+import {
+  routeOperationalState, officeKpis, officeStateSummary, officeScope, officeAlerts,
+  relatedUsersOfOffice, applyOfficeRouteSelection, officeRoutesOf, unassignedRoutesOf,
+  type OfficeRouteFacts,
+} from '../src/lib/officeManagement'
 import { readFileSync as readFileSyncForOffices } from 'node:fs'
 import { resolve as resolvePathForOffices } from 'node:path'
 import { resolveResponsibleCollector, hasPersonalCashbox } from '../src/lib/collectorAttribution'
@@ -754,6 +759,198 @@ check('OFFICE-CRUD-008 — el nombre es obligatorio',
   const grouping = readSourceFile('src/lib/officeGrouping.ts')
   check('OFFICE-ARCH-002c — officeGrouping no consulta la base de datos',
     !grouping.includes("from '@/lib/db'"))
+}
+
+
+// ============================================================
+// OFICINA COMO UNIDAD DE GESTIÓN — lógica pura
+// ------------------------------------------------------------
+// Entrar a una Oficina no puede conceder nada. Todo lo que se muestra dentro
+// (indicadores, alertas, usuarios relacionados) se calcula sobre las rutas ya
+// autorizadas; estas funciones no tienen forma de ver ninguna otra.
+// ============================================================
+
+// --- Estado operativo DERIVADO (sin persistir nada nuevo) ---
+check('OFFICE-DASH-002a — sin cobradores ni responsable → sin-cobrador',
+  routeOperationalState({ status: 'activa', assignedCobradorIds: [], cobradorId: undefined }) === 'sin-cobrador')
+check('OFFICE-DASH-002b — con cobrador asignado → operativa',
+  routeOperationalState({ status: 'activa', assignedCobradorIds: ['c1'], cobradorId: undefined }) === 'operativa')
+check('OFFICE-DASH-002c — solo con responsable legado → operativa',
+  routeOperationalState({ status: 'activa', assignedCobradorIds: [], cobradorId: 'c1' }) === 'operativa')
+check('OFFICE-DASH-003 — la ruta inactiva manda sobre la falta de cobrador',
+  routeOperationalState({ status: 'inactiva', assignedCobradorIds: [], cobradorId: undefined }) === 'inactiva')
+
+// --- Indicadores: SOLO agregan lo que se les pasa ---
+const factOf = (over: Partial<OfficeRouteFacts> & { routeId: string }): OfficeRouteFacts => ({
+  nombre: over.routeId, state: 'operativa', clientesActivos: 0, ventasActivas: 0,
+  desembolsosPendientes: 0, carteraEnCalle: 0, ...over,
+})
+
+const FACTS_VISIBLES: OfficeRouteFacts[] = [
+  factOf({ routeId: 'r-A1', nombre: 'Centro', clientesActivos: 10, ventasActivas: 8, carteraEnCalle: 500_000 }),
+  factOf({ routeId: 'r-A2', nombre: 'Mercado', state: 'sin-cobrador', clientesActivos: 4, ventasActivas: 3, desembolsosPendientes: 2, carteraEnCalle: 200_000 }),
+  factOf({ routeId: 'r-A3', nombre: 'Vieja', state: 'inactiva', clientesActivos: 1, ventasActivas: 0 }),
+]
+
+const KPIS = officeKpis(FACTS_VISIBLES)
+check('OFFICE-DASH-001a — los indicadores cuentan solo las rutas recibidas',
+  KPIS.rutasVisibles === 3 && KPIS.clientesActivos === 15 && KPIS.ventasActivas === 11)
+check('OFFICE-DASH-001b — una ruta NO incluida no puede aparecer en los indicadores',
+  officeKpis(FACTS_VISIBLES.filter(f => f.routeId !== 'r-A2')).clientesActivos === 11)
+check('OFFICE-DASH-002 — las rutas sin Cobrador se cuentan aparte',
+  KPIS.rutasSinCobrador === 1 && KPIS.rutasOperativas === 1 && KPIS.rutasInactivas === 1)
+check('OFFICE-DASH-004 — desembolsos pendientes y cartera se agregan',
+  KPIS.desembolsosPendientes === 2 && KPIS.carteraEnCalle === 700_000)
+check('OFFICE-DASH-005 — una Oficina sin rutas visibles da indicadores en cero',
+  officeKpis([]).rutasVisibles === 0 && officeKpis([]).clientesActivos === 0)
+check('OFFICE-DASH-006 — el resumen operativo es legible',
+  officeStateSummary(KPIS).includes('3 ruta(s)') && officeStateSummary(KPIS).includes('1 sin Cobrador'))
+
+// --- Alcance honesto ---
+check('OFFICE-DASH-007a — cobertura completa no se rotula como parcial',
+  officeScope(3, 3).parcial === false && !officeScope(3, 3).label.includes('de 3'))
+check('OFFICE-DASH-007b — cobertura parcial lo dice explícitamente',
+  officeScope(3, 5).parcial === true &&
+  officeScope(3, 5).label === '3 de 5 rutas visibles — rutas autorizadas')
+
+// --- Alertas DERIVADAS (sin tabla nueva) ---
+const ALERTAS = officeAlerts({ office: { nombre: 'Leticia', status: 'activa' }, facts: FACTS_VISIBLES })
+check('OFFICE-ALERT-001 — una ruta sin Cobrador genera alerta',
+  ALERTAS.some(a => a.kind === 'sin-cobrador' && a.routeId === 'r-A2'))
+check('OFFICE-ALERT-001b — la alerta nombra la ruta',
+  ALERTAS.find(a => a.kind === 'sin-cobrador')?.mensaje.includes('Mercado') === true)
+check('OFFICE-ALERT-002 — una ruta normal NO genera alerta',
+  !ALERTAS.some(a => a.routeId === 'r-A1'))
+check('OFFICE-ALERT-003 — la ruta inactiva genera su propia alerta',
+  ALERTAS.some(a => a.kind === 'ruta-inactiva' && a.routeId === 'r-A3'))
+check('OFFICE-ALERT-004 — los desembolsos pendientes generan alerta con su conteo',
+  ALERTAS.some(a => a.kind === 'desembolsos-pendientes' && a.mensaje.includes('2 desembolso')))
+check('OFFICE-ALERT-005 — la Oficina inactiva se avisa como error, no como aviso menor',
+  officeAlerts({ office: { nombre: 'Leticia', status: 'inactiva' }, facts: [] })
+    .some(a => a.kind === 'oficina-inactiva' && a.severity === 'error'))
+check('OFFICE-ALERT-006 — sin problemas no hay alertas inventadas',
+  officeAlerts({ office: { nombre: 'Leticia', status: 'activa' }, facts: [factOf({ routeId: 'r-ok' })] }).length === 0)
+
+// --- Usuarios RELACIONADOS (derivados de authorizedRouteIds) ---
+const RUTAS_LETICIA = [{ id: 'r-L1', nombre: 'Centro' }, { id: 'r-L2', nombre: 'Norte' }]
+const fabioMulti = mkUser('cobrador', { id: 'u-fabio', nombre: 'Fabio', authorizedRouteIds: ['r-L1', 'r-L2', 'r-R1'] })
+const lauraSolo = mkUser('supervisor', { id: 'u-laura', nombre: 'Laura', authorizedRouteIds: ['r-L1'] })
+const ajeno = mkUser('cobrador', { id: 'u-ajeno', nombre: 'Ajeno', authorizedRouteIds: ['r-R1'] })
+const root = mkUser('superadmin', { id: 'u-root', nombre: 'Root' })
+
+const RELACIONADOS = relatedUsersOfOffice([fabioMulti, lauraSolo, ajeno, root], RUTAS_LETICIA, 't1')
+check('OFFICE-MGMT-010a — solo aparecen usuarios con rutas EN esta Oficina',
+  RELACIONADOS.length === 2 && RELACIONADOS.every(u => u.id !== 'u-ajeno'))
+check('OFFICE-MGMT-010b — de un usuario multi-Oficina se muestran SOLO sus rutas de aquí',
+  RELACIONADOS.find(u => u.id === 'u-fabio')?.routes.length === 2 &&
+  !RELACIONADOS.find(u => u.id === 'u-fabio')?.routes.some(r => r.id === 'r-R1'))
+check('OFFICE-MGMT-010c — el Super Admin no se lista como asignado',
+  !RELACIONADOS.some(u => u.id === 'u-root'))
+check('OFFICE-MGMT-010d — se conserva el rol para mostrarlo',
+  RELACIONADOS.find(u => u.id === 'u-laura')?.rol === 'supervisor')
+check('OFFICE-MGMT-010e — usuarios de otra empresa no se relacionan',
+  relatedUsersOfOffice([{ ...fabioMulti, tenantId: 't2' }], RUTAS_LETICIA, 't1').length === 0)
+
+// --- EDICIÓN DE ASIGNACIONES DESDE UNA OFICINA (el caso más delicado) ---
+// Fabio: Leticia/Centro + Leticia/Norte + Río/Puerto.
+const ACTUALES = ['r-L1', 'r-L2', 'r-R1']
+const RUTAS_DE_LETICIA = ['r-L1', 'r-L2']
+
+{
+  // Se desmarca Centro desde Leticia. Puerto (de Río) NO puede perderse.
+  const resultado = applyOfficeRouteSelection(ACTUALES, RUTAS_DE_LETICIA, ['r-L2'])
+  check('OFFICE-MGMT-009 — editar desde una Oficina NO borra rutas de otras',
+    resultado.includes('r-R1') && resultado.includes('r-L2') && !resultado.includes('r-L1'))
+}
+{
+  // Se desmarca TODO en Leticia: el usuario conserva Río.
+  const resultado = applyOfficeRouteSelection(ACTUALES, RUTAS_DE_LETICIA, [])
+  check('OFFICE-MGMT-009b — vaciar una Oficina deja intactas las demás',
+    resultado.length === 1 && resultado[0] === 'r-R1')
+}
+{
+  // Se agrega una ruta nueva de Leticia.
+  const resultado = applyOfficeRouteSelection(['r-L1', 'r-R1'], RUTAS_DE_LETICIA, ['r-L1', 'r-L2'])
+  check('OFFICE-MGMT-003 — asignar una ruta añade su routeId y nada más',
+    resultado.length === 3 && resultado.includes('r-L2') && resultado.includes('r-R1'))
+}
+{
+  // Una ruta ajena colada en la selección no puede entrar.
+  const resultado = applyOfficeRouteSelection(ACTUALES, RUTAS_DE_LETICIA, ['r-L1', 'r-INTRUSA'])
+  check('OFFICE-MGMT-009c — una ruta fuera de la Oficina no puede colarse en la selección',
+    !resultado.includes('r-INTRUSA'))
+}
+{
+  // Idempotencia: guardar sin cambios no altera nada.
+  const resultado = applyOfficeRouteSelection(ACTUALES, RUTAS_DE_LETICIA, ['r-L1', 'r-L2'])
+  check('OFFICE-MGMT-009d — guardar sin cambios no altera las asignaciones',
+    resultado.length === 3 && ACTUALES.every(id => resultado.includes(id)))
+}
+{
+  // Un usuario sin nada previo queda solo con lo marcado aquí.
+  const resultado = applyOfficeRouteSelection([], RUTAS_DE_LETICIA, ['r-L1'])
+  check('OFFICE-MGMT-009e — un usuario sin rutas previas recibe solo lo marcado',
+    resultado.length === 1 && resultado[0] === 'r-L1')
+}
+{
+  // Rutas Sin Oficina del usuario tampoco se tocan al editar una Oficina.
+  const resultado = applyOfficeRouteSelection(['r-L1', 'r-SIN'], RUTAS_DE_LETICIA, [])
+  check('OFFICE-MGMT-009f — las rutas Sin Oficina del usuario se conservan',
+    resultado.length === 1 && resultado[0] === 'r-SIN')
+}
+
+// OFFICE-MGMT-004 — pertenecer/entrar a una Oficina no amplía el acceso.
+{
+  const rutasEmpresa = [
+    { id: 'r-L1', officeId: 'of-let' }, { id: 'r-L2', officeId: 'of-let' },
+    { id: 'r-L3', officeId: 'of-let' }, { id: 'r-R1', officeId: 'of-rio' },
+  ] as never[]
+  const admin2 = mkUser('admin', { id: 'u-adm2', authorizedRouteIds: ['r-L1'] })
+  const accesibles = filterAccessibleRoutes(admin2, rutasEmpresa)
+  const enLeticia = officeRoutesOf(accesibles as unknown as { officeId?: string; id: string }[], 'of-let')
+  check('OFFICE-MGMT-004 — entrar a una Oficina no concede sus demás rutas',
+    enLeticia.length === 1 && enLeticia[0].id === 'r-L1')
+  check('OFFICE-MGMT-004b — y el fail-closed sigue negando las hermanas',
+    !canAccessRoute(admin2, 'r-L2') && !canAccessRoute(admin2, 'r-L3'))
+}
+
+// --- "SIN OFICINA" es una agrupación derivada, no un registro ---
+{
+  const rutas = [
+    { id: 'r-1', officeId: 'of-let' }, { id: 'r-2', officeId: undefined }, { id: 'r-3', officeId: undefined },
+  ]
+  check('OFFICE-UNASSIGNED-001 — "Sin Oficina" deriva de officeId undefined',
+    unassignedRoutesOf(rutas).length === 2 &&
+    unassignedRoutesOf(rutas).every(r => !r.officeId))
+  check('OFFICE-UNASSIGNED-001b — solo puede contener rutas ya accesibles',
+    unassignedRoutesOf(filterAccessibleRoutes(
+      mkUser('admin', { id: 'u-a', authorizedRouteIds: ['r-2'] }),
+      rutas.map(r => ({ ...r, id: r.id })) as never[],
+    ) as unknown as { officeId?: string }[]).length === 1)
+
+  // No existe ningún registro Office llamado "Sin Oficina" en el código.
+  const pagina = readSourceFile('src/pages/admin/UnassignedRoutesPage.tsx')
+  const servicio = readSourceFile('src/services/officeService.ts')
+  check('OFFICE-UNASSIGNED-002 — no se crea ninguna Office "Sin Oficina"',
+    !/createOffice\(\s*\{[^}]*Sin Oficina/.test(pagina) && !/nombre:\s*['"]Sin Oficina['"]/.test(servicio))
+  check('OFFICE-UNASSIGNED-002b — la vista parte del scoping, no de la Oficina',
+    pagina.includes('unassignedRoutesOf(filterAccessibleRoutes(user, all))'))
+}
+
+// --- El resumen de gestión respeta el orden de recorte (contrato de código) ---
+{
+  const svc = readSourceFile('src/services/officeService.ts')
+  const cuerpo = svc.slice(svc.indexOf('export async function getOfficeManagementSummary'))
+  const iCarga = cuerpo.indexOf("database.routes.where('tenantId')")
+  const iRecorte = cuerpo.indexOf('filterAccessibleRoutes(user, allRoutes)')
+  const iOficina = cuerpo.indexOf("accessible.filter(r => r.officeId === officeId)")
+  check('OFFICE-DASH-008 — el resumen recorta por usuario ANTES de filtrar por Oficina',
+    iCarga > -1 && iRecorte > iCarga && iOficina > iRecorte)
+  check('OFFICE-DASH-008b — los indicadores se calculan sobre accessibleOfficeRoutes',
+    cuerpo.includes('accessibleOfficeRoutes.map(r =>'))
+  // El único vistazo fuera del alcance es un CONTEO estructural.
+  check('OFFICE-DASH-008c — el total de la Oficina es solo un conteo',
+    /const totalRoutesInOffice = allRoutes\.filter\(r => r\.officeId === officeId\)\.length/.test(cuerpo))
 }
 
 // ============================================================

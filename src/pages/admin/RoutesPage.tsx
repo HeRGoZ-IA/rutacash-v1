@@ -26,13 +26,14 @@ import { NO_OFFICE_LABEL, filterRoutesByOffice, ALL_OFFICES } from '@/lib/office
 import { OfficeSelector } from '@/components/ui/OfficeSelector'
 import { filterAccessibleRoutes, assignableRoles, canManageUser, ROLE_LABELS } from '@/lib/permissions'
 import { getAssignedRouteIds } from '@/lib/roles'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { Office, Route, User, RouteFinancialSummary } from '@/models/types'
 
 export default function RoutesPage() {
   const { user, refreshUser } = useAuth()
   const { tenantId, currency } = useTenant()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [routes, setRoutes] = useState<Route[]>([])
   const [cobradores, setCobradores] = useState<User[]>([])
   // Catálogo de Oficinas de la empresa (para el selector y las etiquetas). NO
@@ -90,6 +91,33 @@ export default function RoutesPage() {
 
   useEffect(() => { load() }, [tenantId])
 
+  /**
+   * ENLACES PROFUNDOS desde el panel de una Oficina, para REUTILIZAR este mismo
+   * formulario en vez de duplicarlo:
+   *   · `?nueva=1&officeId=<id>` → abre "Nueva ruta" con esa Oficina preseleccionada.
+   *   · `?editar=<routeId>`      → abre el editor de esa ruta.
+   * Los parámetros se consumen una sola vez (se limpian de la URL) para que un
+   * refresco no vuelva a abrir el modal. La pantalla sigue funcionando igual si se
+   * entra directamente a /admin/routes sin parámetros.
+   */
+  useEffect(() => {
+    if (loading) return
+    const nueva = searchParams.get('nueva')
+    const editar = searchParams.get('editar')
+    if (!nueva && !editar) return
+
+    if (nueva) {
+      openCreate(searchParams.get('officeId') ?? undefined)
+    } else if (editar) {
+      const route = routes.find(r => r.id === editar)
+      // Si la ruta no está entre las accesibles no se abre nada: el enlace no puede
+      // servir de atajo para editar una ruta fuera de alcance.
+      if (route) openEdit(route)
+      else toast.error('No tienes acceso a esa ruta.')
+    }
+    setSearchParams({}, { replace: true })
+  }, [loading, routes, searchParams])
+
   async function load() {
     setLoading(true)
     const all = await db.routes.where('tenantId').equals(tenantId).toArray()
@@ -108,13 +136,17 @@ export default function RoutesPage() {
     setLoading(false)
   }
 
-  function openCreate() {
+  function openCreate(officePreseleccionada?: string) {
     setEditing(null)
     // El Administrador creador queda preseleccionado (y bloqueado): se autoasigna.
     const preselect = user?.rol === 'admin' && user?.id ? [user.id] : []
     // Si el listado está filtrado por una Oficina concreta, se propone esa (sigue
     // siendo opcional: puede dejarse en "Sin Oficina").
-    const officePorDefecto = officeFilter !== ALL_OFFICES && offices.some(o => o.id === officeFilter) ? officeFilter : ''
+    // Preselección: la que llegue por parámetro (al venir desde una Oficina) o,
+    // si no, la del filtro activo del listado. Sigue siendo modificable y opcional.
+    const officePorDefecto = officePreseleccionada && offices.some(o => o.id === officePreseleccionada)
+      ? officePreseleccionada
+      : (officeFilter !== ALL_OFFICES && offices.some(o => o.id === officeFilter) ? officeFilter : '')
     const init = { nombre: '', ciudad: '', cobradorId: '', officeId: officePorDefecto, adminIds: preselect, assignedUserIds: [], tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0 }
     setForm(init)
     setOriginal({ ...init })   // snapshot para dirty-check
@@ -331,7 +363,7 @@ export default function RoutesPage() {
           <p className="text-sm text-gray-500 mt-0.5">{visibleRoutes.length} de {routes.length} ruta(s)</p>
         </div>
         {/* Crear ruta NO depende de responsables: ni Administrador ni Cobrador. */}
-        <Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Nueva ruta</Button>
+        <Button onClick={() => openCreate()} icon={<Plus className="w-4 h-4" />}>Nueva ruta</Button>
       </div>
 
       {/* Aviso INFORMATIVO (no bloquea): sin Administradores la ruta se crea igual,
@@ -365,7 +397,7 @@ export default function RoutesPage() {
           <div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" />
         </div>
       ) : routes.length === 0 ? (
-        <EmptyState icon={<MapPin className="w-8 h-8" />} title="No hay rutas" description="Crea una ruta para empezar" action={<Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Crear ruta</Button>} />
+        <EmptyState icon={<MapPin className="w-8 h-8" />} title="No hay rutas" description="Crea una ruta para empezar" action={<Button onClick={() => openCreate()} icon={<Plus className="w-4 h-4" />}>Crear ruta</Button>} />
       ) : visibleRoutes.length === 0 ? (
         <EmptyState icon={<MapPin className="w-8 h-8" />} title="Sin rutas en el rango" description="Ninguna ruta fue creada en las fechas seleccionadas." />
       ) : (

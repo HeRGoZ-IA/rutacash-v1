@@ -486,6 +486,205 @@ await spec('SMOKE-5', 'Smoke', 'Oficina inactiva: lectura intacta, operaciones n
   db.close()
 })
 
+
+// ############################################################
+// GRUPO — SMOKE DE GESTIÓN DE OFICINA (Dexie real)
+// ------------------------------------------------------------
+// Los recorridos de la Entrega 1, ejecutados de punta a punta con la base y los
+// servicios reales. El más delicado es el B: editar asignaciones desde una Oficina
+// no puede hacerle perder al usuario sus rutas de otra.
+// ############################################################
+
+await spec('SMOKE-A', 'Smoke gestión', 'Admin con acceso PARCIAL: ve 2 de 3 rutas y sus indicadores lo reflejan', async () => {
+  const db = await baseLimpia()
+  const { createOffice, getOfficeManagementSummary } = await import('../src/services/officeService')
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+
+  const leticia = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, SU)
+  const centro = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Centro', codigo: 'RT-001' }), SU)
+  const norte = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Norte', codigo: 'RT-002' }), SU)
+  const mercado = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Mercado', codigo: 'RT-003' }), SU)
+
+  await db.users.add({
+    id: 'u-adm', tenantId: 't-1', nombre: 'Ana', email: 'ana@c.com', password: 'x',
+    rol: 'admin', status: 'activo', authorizedRouteIds: [centro.id, mercado.id], createdAt: '', updatedAt: '',
+  } as never)
+  const admin = (await db.users.get('u-adm'))!
+
+  // Datos SOLO en la ruta que el Admin no ve: no pueden aparecer en sus cifras.
+  await ventaLista(db, norte.id, 'c-norte', 's-norte')
+
+  const resumen = await getOfficeManagementSummary({ user: admin, tenantId: 't-1', officeId: leticia.id })
+  const nombres = resumen!.accessibleOfficeRoutes.map(r => r.nombre).sort()
+
+  metric('rutas visibles', nombres.join(', '))
+  metric('alcance', resumen!.scope.label)
+  metric('clientes en indicadores', resumen!.kpis.clientesActivos)
+  metric('alertas mencionan Norte', resumen!.alerts.some(a => a.mensaje.includes('Norte')))
+  assert(nombres.length === 2 && nombres[0] === 'Centro' && nombres[1] === 'Mercado', 'debe ver Centro y Mercado')
+  assert(!nombres.includes('Norte'), 'NO debe ver Norte')
+  assert(resumen!.scope.label === '2 de 3 rutas visibles — rutas autorizadas', 'el alcance parcial debe rotularse')
+  assert(resumen!.kpis.clientesActivos === 0, 'un cliente de una ruta no autorizada se coló en los indicadores')
+  assert(!resumen!.alerts.some(a => a.mensaje.includes('Norte')), 'una alerta reveló una ruta no autorizada')
+  db.close()
+})
+
+await spec('SMOKE-B', 'Smoke gestión', 'usuario multi-Oficina: editar desde Leticia NO le quita su ruta de Río', async () => {
+  const db = await baseLimpia()
+  const { createOffice, getOfficeManagementSummary, setUserOfficeRoutes } = await import('../src/services/officeService')
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+
+  const leticia = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, SU)
+  const rio = await createOffice({ tenantId: 't-1', nombre: 'Río' }, SU)
+  const centro = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Centro', codigo: 'RT-001' }), SU)
+  const norte = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Norte', codigo: 'RT-002' }), SU)
+  const puerto = await createRouteWithAdmins(datosRutaSmoke({ officeId: rio.id, nombre: 'Puerto', codigo: 'RT-003' }), SU)
+
+  await db.users.add({
+    id: 'u-fabio', tenantId: 't-1', nombre: 'Fabio', email: 'fabio@c.com', password: 'x',
+    rol: 'cobrador', status: 'activo', authorizedRouteIds: [centro.id, puerto.id], createdAt: '', updatedAt: '',
+  } as never)
+
+  // 1) Entrar a Leticia: Fabio aparece, y SOLO con su ruta de Leticia.
+  const enLeticia = await getOfficeManagementSummary({ user: SU, tenantId: 't-1', officeId: leticia.id })
+  const fabioEnLeticia = enLeticia!.relatedUsers.find(u => u.id === 'u-fabio')
+  metric('Fabio aparece en Leticia', !!fabioEnLeticia)
+  metric('sus rutas mostradas aquí', fabioEnLeticia?.routes.map(r => r.nombre).join(', '))
+  assert(!!fabioEnLeticia, 'Fabio debe aparecer relacionado con Leticia')
+  assert(fabioEnLeticia!.routes.length === 1 && fabioEnLeticia!.routes[0].nombre === 'Centro',
+    'aquí solo deben verse sus rutas de Leticia')
+
+  // 2) Desde Leticia se le AGREGA Norte (se marcan Centro y Norte).
+  const { authorizedRouteIds } = await setUserOfficeRoutes({
+    userId: 'u-fabio', tenantId: 't-1',
+    officeRouteIds: [centro.id, norte.id],
+    selectedRouteIds: [centro.id, norte.id],
+  }, SU)
+
+  const fabio = (await db.users.get('u-fabio'))!
+  const finales = fabio.authorizedRouteIds ?? []
+  metric('rutas resultantes', finales.length)
+  metric('conserva Puerto (Río)', finales.includes(puerto.id))
+  assert(finales.length === 3, `debían quedar 3 rutas, quedaron ${finales.length}`)
+  assert(finales.includes(centro.id) && finales.includes(norte.id), 'faltan las rutas de Leticia')
+  assert(finales.includes(puerto.id), 'SE PERDIÓ la ruta de Río al editar desde Leticia')
+  assert(authorizedRouteIds.includes(puerto.id), 'el servicio debe devolver también las rutas de otras Oficinas')
+
+  // 3) Y al quitarle TODO en Leticia, sigue conservando Río.
+  await setUserOfficeRoutes({
+    userId: 'u-fabio', tenantId: 't-1',
+    officeRouteIds: [centro.id, norte.id], selectedRouteIds: [],
+  }, SU)
+  const trasVaciar = (await db.users.get('u-fabio'))!
+  metric('tras vaciar Leticia', JSON.stringify(trasVaciar.authorizedRouteIds))
+  assert((trasVaciar.authorizedRouteIds ?? []).length === 1, 'solo debía quedar la ruta de Río')
+  assert((trasVaciar.authorizedRouteIds ?? [])[0] === puerto.id, 'la ruta conservada debe ser Puerto')
+
+  // Y deja de aparecer relacionado con Leticia, sin dejar de existir.
+  const leticiaFinal = await getOfficeManagementSummary({ user: SU, tenantId: 't-1', officeId: leticia.id })
+  metric('sigue relacionado con Leticia', leticiaFinal!.relatedUsers.some(u => u.id === 'u-fabio'))
+  metric('sigue existiendo el usuario', !!(await db.users.get('u-fabio')))
+  assert(!leticiaFinal!.relatedUsers.some(u => u.id === 'u-fabio'), 'ya no debe aparecer relacionado con Leticia')
+  assert(!!(await db.users.get('u-fabio')), 'el usuario no puede desaparecer de la empresa')
+  db.close()
+})
+
+await spec('SMOKE-C', 'Smoke gestión', 'Sin Oficina: una ruta suelta se organiza y sus datos quedan intactos', async () => {
+  const db = await baseLimpia()
+  const { createOffice, assignRoutesToOffice, getOfficeManagementSummary } = await import('../src/services/officeService')
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+  const { unassignedRoutesOf } = await import('../src/lib/officeManagement')
+
+  const leticia = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, SU)
+  const antigua = await createRouteWithAdmins(datosRutaSmoke({ nombre: 'Antigua', codigo: 'RT-009' }), SU)
+  await ventaLista(db, antigua.id, 'c-1', 's-1')
+
+  const sueltasAntes = unassignedRoutesOf(await db.routes.toArray())
+  const hijosAntes = JSON.stringify([await db.clients.toArray(), await db.sales.toArray(), await db.installments.toArray()])
+
+  await assignRoutesToOffice({ routeIds: [antigua.id], tenantId: 't-1', officeId: leticia.id }, SU)
+
+  const sueltasDespues = unassignedRoutesOf(await db.routes.toArray())
+  const hijosDespues = JSON.stringify([await db.clients.toArray(), await db.sales.toArray(), await db.installments.toArray()])
+  const enLeticia = await getOfficeManagementSummary({ user: SU, tenantId: 't-1', officeId: leticia.id })
+
+  metric('sueltas antes → después', `${sueltasAntes.length} → ${sueltasDespues.length}`)
+  metric('aparece en Leticia', enLeticia!.accessibleOfficeRoutes.some(r => r.id === antigua.id))
+  metric('hijos intactos', hijosAntes === hijosDespues)
+  assert(sueltasAntes.length === 1 && sueltasDespues.length === 0, 'la ruta debía salir de "Sin Oficina"')
+  assert(enLeticia!.accessibleOfficeRoutes.some(r => r.id === antigua.id), 'la ruta debía aparecer en Leticia')
+  assert(hijosAntes === hijosDespues, 'organizar la ruta alteró sus clientes, ventas o parcelas')
+  db.close()
+})
+
+await spec('SMOKE-D', 'Smoke gestión', 'nueva ruta desde una Oficina: preseleccionada, sin Admin ni Cobrador', async () => {
+  const db = await baseLimpia()
+  const { createOffice, getOfficeManagementSummary } = await import('../src/services/officeService')
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+
+  const rio = await createOffice({ tenantId: 't-1', nombre: 'Río' }, SU)
+  // Exactamente lo que envía el formulario al llegar con ?nueva=1&officeId=<rio>.
+  const nueva = await createRouteWithAdmins(
+    datosRutaSmoke({ officeId: rio.id, nombre: 'Ruta Puerto', codigo: 'RT-001' }), SU,
+  )
+  const resumen = await getOfficeManagementSummary({ user: SU, tenantId: 't-1', officeId: rio.id })
+
+  metric('officeId preseleccionada', nueva.officeId === rio.id)
+  metric('sin Cobrador', nueva.cobradorId === undefined)
+  metric('aparece en el panel de Río', resumen!.accessibleOfficeRoutes.length)
+  metric('alerta de ruta sin Cobrador', resumen!.alerts.some(a => a.kind === 'sin-cobrador'))
+  assert(nueva.officeId === rio.id, 'la Oficina no quedó preseleccionada')
+  assert(nueva.cobradorId === undefined, 'no debe exigirse Cobrador')
+  assert(resumen!.accessibleOfficeRoutes.length === 1, 'la ruta debe aparecer en el panel de su Oficina')
+  assert(resumen!.alerts.some(a => a.kind === 'sin-cobrador'), 'debe avisarse que la ruta aún no puede cobrar')
+  db.close()
+})
+
+await spec('SMOKE-E', 'Smoke gestión', 'Oficina inactiva: el panel se consulta, las operaciones siguen bloqueadas', async () => {
+  const db = await baseLimpia()
+  const { createOffice, setOfficeStatus, getOfficeManagementSummary, updateOffice } = await import('../src/services/officeService')
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+  const { registerPayment } = await import('../src/services/paymentService')
+
+  const leticia = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, SU)
+  const ruta = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id }), SU)
+  await db.users.add({
+    id: 'u-cob', tenantId: 't-1', nombre: 'Luis', email: 'luis@c.com', password: 'x',
+    rol: 'cobrador', status: 'activo', authorizedRouteIds: [ruta.id], createdAt: '', updatedAt: '',
+  } as never)
+  const cob = (await db.users.get('u-cob'))!
+  await ventaLista(db, ruta.id, 'c-1', 's-1')
+  await registerPayment({ saleId: 's-1', requestedAmount: 2_000, actor: cob, fecha: '2026-09-15' })
+
+  await setOfficeStatus({ officeId: leticia.id, tenantId: 't-1', status: 'inactiva' }, SU)
+
+  // CONSULTA: el panel sigue abriéndose y avisa del estado.
+  const resumen = await getOfficeManagementSummary({ user: SU, tenantId: 't-1', officeId: leticia.id })
+  metric('panel accesible', !!resumen)
+  metric('estado', resumen?.office.status)
+  metric('rutas visibles', resumen?.accessibleOfficeRoutes.length)
+  metric('alerta de Oficina inactiva', resumen!.alerts.some(a => a.kind === 'oficina-inactiva'))
+  assert(!!resumen, 'una Oficina inactiva debe poder consultarse')
+  assert(resumen!.office.status === 'inactiva' && resumen!.accessibleOfficeRoutes.length === 1, 'el panel debe mostrar sus rutas')
+  assert(resumen!.alerts.some(a => a.kind === 'oficina-inactiva' && a.severity === 'error'), 'debe avisarse el estado')
+
+  // OPERACIÓN: sigue bloqueada.
+  const pago = await registerPayment({ saleId: 's-1', requestedAmount: 2_000, actor: cob, fecha: '2026-09-15' })
+  metric('pago nuevo', pago.ok ? 'ACEPTADO — ERROR' : pago.code)
+  assert(!pago.ok && pago.code === 'OFFICE_INACTIVE', 'las operaciones nuevas deben seguir bloqueadas')
+
+  // CRUD ADMINISTRATIVO: sigue disponible según permisos (se puede renombrar y reactivar).
+  await updateOffice({ officeId: leticia.id, tenantId: 't-1', nombre: 'Leticia Centro' }, SU)
+  await setOfficeStatus({ officeId: leticia.id, tenantId: 't-1', status: 'activa' }, SU)
+  const tras = await getOfficeManagementSummary({ user: SU, tenantId: 't-1', officeId: leticia.id })
+  const pagoFinal = await registerPayment({ saleId: 's-1', requestedAmount: 2_000, actor: cob, fecha: '2026-09-15' })
+  metric('renombrada y reactivada', `${tras?.office.nombre} · ${tras?.office.status}`)
+  metric('pago tras reactivar', pagoFinal.ok ? 'ACEPTADO' : pagoFinal.code)
+  assert(tras?.office.nombre === 'Leticia Centro', 'el CRUD administrativo debe seguir disponible')
+  assert(pagoFinal.ok, 'reactivar debe restablecer la operación')
+  db.close()
+})
+
 // ############################################################
 // INFORME
 // ############################################################

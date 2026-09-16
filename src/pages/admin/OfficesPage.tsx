@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Building2, MapPin, Edit, ToggleLeft, ToggleRight, Trash2, AlertTriangle } from 'lucide-react'
+import { Plus, Building2, MapPin, Edit, ToggleLeft, ToggleRight, Trash2, AlertTriangle, LogIn, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -9,7 +9,9 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { ConfirmDiscardModal } from '@/components/ui/ConfirmDiscardModal'
 import { useDirtyForm } from '@/hooks/useDirtyForm'
 import { toast } from '@/components/ui/Toast'
+import { useNavigate } from 'react-router-dom'
 import { db } from '@/lib/db'
+import { NO_OFFICE_LABEL } from '@/lib/officeGrouping'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { can } from '@/lib/permissions'
@@ -30,6 +32,7 @@ import type { Office, Route } from '@/models/types'
  *  · Eliminar una Oficina NUNCA elimina rutas: quedan "Sin Oficina".
  */
 export default function OfficesPage() {
+  const navigate = useNavigate()
   const { user } = useAuth()
   const { tenantId } = useTenant()
   const [offices, setOffices] = useState<Office[]>([])
@@ -161,6 +164,38 @@ export default function OfficesPage() {
         </p>
       </div>
 
+      {/* SIN OFICINA — agrupación DERIVADA (route.officeId === undefined).
+          No existe ningún registro Office llamado así: es donde quedaron las rutas
+          que ya existían cuando se introdujeron las Oficinas. */}
+      {!loading && sinOficina > 0 && (
+        <Card className="border-dashed">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
+                <MapPin className="w-5 h-5 text-gray-400" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="font-semibold text-gray-800 text-sm">{NO_OFFICE_LABEL}</p>
+                  <Badge variant="gray">Agrupación</Badge>
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {sinOficina} ruta(s) pendiente(s) de organizar ·{' '}
+                  <span className="text-gray-400">
+                    {routes.filter(r => !r.officeId).slice(0, 3).map(r => r.nombre).join(', ')}
+                    {sinOficina > 3 ? ` +${sinOficina - 3} más` : ''}
+                  </span>
+                </p>
+              </div>
+            </div>
+            <Button variant="secondary" size="sm" icon={<ChevronRight className="w-3.5 h-3.5" />}
+              onClick={() => navigate('/admin/offices/sin-oficina')}>
+              Organizar rutas
+            </Button>
+          </div>
+        </Card>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" />
@@ -225,6 +260,13 @@ export default function OfficesPage() {
                     </p>
                   </div>
                 )}
+
+                {/* ENTRAR: la Oficina deja de ser un registro de catálogo y pasa a ser
+                    una unidad de gestión con su propio panel. */}
+                <Button size="sm" className="w-full" icon={<LogIn className="w-3.5 h-3.5" />}
+                  onClick={() => navigate(`/admin/offices/${office.id}`)}>
+                  Entrar
+                </Button>
 
                 <div className="flex gap-2 pt-1">
                   {puedeEditar && (

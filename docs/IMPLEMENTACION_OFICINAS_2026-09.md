@@ -345,3 +345,165 @@ No forman parte de este paquete.
    momento en una liquidación archivada, debe diseñarse aparte y a propósito.
 5. Siguen abiertos los hallazgos previos: persistencia de liquidaciones semanales y
    la discrepancia `createdAt` vs `fechaInicio`.
+
+---
+
+# Evolución 1 — Oficina como unidad de gestión
+
+La entrega anterior dejó las Oficinas funcionando, pero como un CRUD: crear,
+editar, activar, eliminar. Esta evolución las convierte en una **unidad de
+gestión**: se entra a una Oficina y se trabaja desde ella.
+
+Nada de la arquitectura cambió. El principio sigue siendo el mismo y ahora está
+protegido en un sitio más: **entrar a una Oficina no concede ni una sola ruta.**
+
+## OfficeDetail
+
+Nueva página `/admin/offices/:officeId` ([OfficeDetailPage.tsx](../src/pages/admin/OfficeDetailPage.tsx)),
+con botón **Entrar** en cada tarjeta de `OfficesPage`. No es un modal.
+
+Todo lo que muestra sale de un punto único de carga,
+`getOfficeManagementSummary`, cuyo orden es obligatorio y está verificado por
+prueba sobre el propio código (`OFFICE-DASH-008`):
+
+```
+rutas de la EMPRESA
+  ↓ filterAccessibleRoutes(user)      ← se RECORTA aquí
+  ↓ filtrar por officeId              ← accessibleOfficeRoutes
+  ↓ indicadores, alertas, usuarios    ← solo sobre ese conjunto
+```
+
+Nunca al revés. La única cifra que mira más allá es `totalRoutesInOffice`, un
+**conteo estructural** que existe precisamente para no mentir sobre el alcance.
+
+## KPIs
+
+Rutas visibles, operativas, sin Cobrador, clientes activos, ventas activas y
+desembolsos pendientes. La cartera activa se muestra cuando el motor de caja la
+devuelve.
+
+**No se construyó ningún motor financiero nuevo ni se tocó el existente.** Se
+reutiliza `getRoutesFinancialSummary(routeIds)`, que ya existía, y si no responde
+se cae a un conteo directo con el mismo criterio. `git diff` sobre `cashboxEngine`,
+`installmentEngine`, `weeklySettlementEngine` y `paymentService` está **vacío**.
+
+El estado operativo de cada ruta es **derivado**, no persistido: `inactiva` →
+`sin-cobrador` → `operativa`, todo a partir de reglas que ya existían.
+
+## Rutas
+
+Tarjetas con nombre, código, estado operativo, clientes, ventas, desembolsos
+pendientes y el equipo asignado. Acciones **Editar** y **Mover**, ambas sujetas a
+las capacidades actuales. No se creó ningún acceso nuevo por Oficina.
+
+## Nueva ruta desde la Oficina
+
+`[+ Nueva ruta]` navega a `/admin/routes?nueva=1&officeId=<id>` y **reutiliza el
+formulario existente** con la Oficina preseleccionada. No hay un segundo
+formulario — hay una prueba que falla si aparece (`OFFICE-NAV-002`).
+
+La Oficina sigue siendo modificable y opcional; Administrador y Cobrador siguen
+siendo opcionales; todas las advertencias ámbar se conservan.
+
+`?editar=<routeId>` abre el editor de una ruta, pero **solo si está entre las
+accesibles**: el enlace no sirve de atajo para editar una ruta fuera de alcance.
+Los parámetros se consumen una vez y se limpian de la URL.
+
+## Movimiento de rutas
+
+Desde el panel, con vista previa explícita (*"Oficina actual: Leticia → Nueva
+oficina: Río"*) y la opción de dejarla **Sin Oficina**. Sigue siendo **una sola
+escritura** sobre `Route.officeId`: `OFFICE-MGMT-007` cuenta las escrituras reales
+contra la base y falla si hay más de una.
+
+## Usuarios relacionados
+
+La sección se llama **"Usuarios con rutas asignadas en esta oficina"**, no
+"usuarios de la oficina" — porque los usuarios pertenecen a la empresa.
+
+Se derivan de `authorizedRouteIds ∩ rutas de la Oficina`. De un usuario que
+también trabaja en otra Oficina se muestran aquí **solo sus rutas de esta**; no se
+le oculta, simplemente no se mezclan alcances. El Super Admin no se lista: su
+acceso es global y no representa una asignación.
+
+## Gestión de asignaciones
+
+"Gestionar asignaciones" permite marcar y desmarcar **solo rutas de esta Oficina**
+para un usuario general de la empresa.
+
+Esta es la parte más delicada de la entrega, y la lógica vive en una función pura
+(`applyOfficeRouteSelection`) con siete casos dedicados. La regla:
+
+> Fabio tiene Leticia/Centro y Río/Puerto. Si desde Leticia se desmarca Centro,
+> **Puerto no se pierde.**
+
+Se conserva todo lo que no pertenece a la Oficina editada, incluidas las rutas Sin
+Oficina. Se guarda `authorizedRouteIds` y nada más: sin `officeIds`, sin
+`user.officeId`, sin duplicar usuarios. Para cobradores se delega en
+`setCobradorRoutes`, que ya mantenía coherente el responsable de la ruta.
+
+El modal avisa en texto cuántas rutas de otras oficinas conserva el usuario.
+
+## Alertas
+
+Derivadas al abrir la pantalla, sin ninguna tabla ni estado nuevo: Oficina
+inactiva (error), ruta sin Cobrador, ruta inactiva y desembolsos pendientes con su
+conteo. Una ruta sana no genera ninguna alerta falsa (`OFFICE-ALERT-002`).
+
+Las alertas se calculan sobre las rutas visibles: `OFFICE-MGMT-011` comprueba que
+una alerta no puede revelar la existencia de una ruta no autorizada.
+
+## Sin Oficina
+
+Bloque propio en `OfficesPage` y página `/admin/offices/sin-oficina`
+([UnassignedRoutesPage.tsx](../src/pages/admin/UnassignedRoutesPage.tsx)).
+
+**No es una Oficina y no se crea ningún registro llamado así**: es la agrupación
+derivada de `route.officeId === undefined`, donde la migración v11 dejó las rutas
+que ya existían. Hay una prueba que falla si alguien crea esa Office
+(`OFFICE-UNASSIGNED-002`).
+
+Permite asignación **individual y masiva**. La masiva es **todo-o-nada**: valida
+todas las rutas antes de escribir ninguna, y `OFFICE-UNASSIGNED-004` comprueba que
+una ruta inválida deja el resto sin mover. Cada ruta se audita por separado.
+
+## Navegación
+
+Breadcrumbs `Empresa > Oficinas > Oficina Leticia` y cabecera adhesiva con nombre,
+código, estado y alcance, para no perder contexto al hacer scroll.
+
+Los breadcrumbs son orientación, no una dependencia funcional: `/admin/routes`
+sigue funcionando exactamente igual sin ningún parámetro
+(`OFFICE-NAV-003`). Accesos rápidos a Clientes, Reportes, Liquidación y Rutas, sin
+prefiltrado inventado — la integración real de filtros llega en la Entrega 2.
+
+## Tests
+
+| Suite | Antes | Después |
+|---|---|---|
+| Permisos | 275 | **315** |
+| Financiera | 151 | **151** |
+| Arranque | 129 | **145** |
+| Migraciones y smoke | 13 | **18** |
+| **Total** | **568** | **629 PASS · 0 FAIL** |
+
+Familias nuevas: `OFFICE-MGMT-*` (16), `OFFICE-DASH-*`, `OFFICE-ALERT-*`,
+`OFFICE-UNASSIGNED-*`, `OFFICE-NAV-*`, y los smoke `SMOKE-A..E` ejecutados sobre
+Dexie real con los servicios reales.
+
+`npx tsc --noEmit` ✅ · `npx tsc --noEmit -p tests` ✅ · `npm run build` ✅
+
+## Limitaciones deliberadas
+
+Quedan fuera **a propósito**, para la Entrega 2 en adelante:
+
+1. Filtro de Oficina en todas las pantallas (Clientes, Caja, Gastos, Retiros,
+   Capital). Los accesos rápidos navegan sin prefiltrar en vez de inventar
+   parámetros que la pantalla destino aún no entiende.
+2. Caja consolidada avanzada, recaudo analítico y cartera avanzada por Oficina.
+3. Comparación ejecutiva entre Oficinas y exportación CSV del resumen de Oficina.
+4. Integración profunda de Secretario y Socio (Entrega 4). Los servicios ya quedan
+   reutilizables para ello.
+5. Desglose por Oficina en el Dashboard de empresa.
+6. OfficeDetail para Cobrador: mantiene solo la agrupación en el selector de rutas,
+   sin KPIs ni usuarios relacionados, como se pidió.

@@ -22,7 +22,10 @@ import { generateId } from '@/lib/utils'
 import { nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { assertCan, AuthzError } from '@/services/authz'
-import type { Office, Route, User } from '@/models/types'
+import { canManageUser } from '@/lib/permissions'
+import { setCobradorRoutes } from '@/services/routeAssignment'
+import { applyOfficeRouteSelection } from '@/lib/officeManagement'
+import type { Client, Office, Route, Sale, User } from '@/models/types'
 
 // ------------------------------------------------------------
 // Contrato de base de datos
@@ -41,6 +44,16 @@ export interface OfficeDatabase {
     where(index: string): { equals(key: string): { toArray(): Promise<Route[]> } }
   }
   transaction<U>(mode: 'rw', tables: unknown, scope: () => PromiseLike<U>): Promise<U>
+}
+
+/**
+ * Lecturas adicionales que necesita el RESUMEN DE GESTIÓN de una Oficina. Se
+ * separa de `OfficeDatabase` para que el CRUD no arrastre tablas que no usa.
+ */
+export interface OfficeSummaryDatabase extends OfficeDatabase {
+  users: { where(index: string): { equals(key: string): { toArray(): Promise<User[]> } } }
+  clients: { where(index: string): { equals(key: string): { toArray(): Promise<Client[]> } } }
+  sales: { where(index: string): { equals(key: string): { toArray(): Promise<Sale[]> } } }
 }
 
 export type OfficeAuditSink = (params: Parameters<typeof logAction>[0]) => Promise<void>
@@ -354,4 +367,230 @@ export async function isRouteOperational(
   } catch {
     return false
   }
+}
+
+// ============================================================
+// RESUMEN DE GESTIÓN DE UNA OFICINA
+// ------------------------------------------------------------
+// Punto ÚNICO de carga de la pantalla de Oficina, para que ninguna vista invente
+// su propia consulta y se salte el recorte.
+//
+// ORDEN OBLIGATORIO, y la razón por la que existe esta función:
+//   1. rutas de la EMPRESA            → se cargan
+//   2. filterAccessibleRoutes(user)   → se RECORTAN a las autorizadas
+//   3. se filtran por la Oficina      → accessibleOfficeRoutes
+//   4. TODO lo demás (indicadores, alertas, usuarios, clientes, ventas) se calcula
+//      exclusivamente sobre ese conjunto.
+//
+// Jamás al revés: nunca se parte de la Oficina para descubrir rutas. Entrar a una
+// Oficina no concede ni una sola ruta que el usuario no tuviera ya.
+//
+// La ÚNICA cifra que mira más allá es `totalRoutesInOffice`, un conteo estructural
+// para poder decir "3 de 5 rutas visibles" en vez de aparentar que el consolidado
+// parcial es el total. Es un número: no expone clientes, ventas ni dinero de las
+// rutas que el usuario no tiene.
+// ============================================================
+import { filterAccessibleRoutes } from '@/lib/permissions'
+import { getAssignedRouteIds } from '@/lib/roles'
+import { getRoutesFinancialSummary } from '@/services/cashboxEngine'
+import {
+  officeKpis, officeAlerts, officeScope, relatedUsersOfOffice, routeOperationalState,
+  type OfficeAlert, type OfficeKpis, type OfficeRouteFacts, type OfficeScope, type RelatedUser,
+} from '@/lib/officeManagement'
+
+export interface OfficeManagementSummary {
+  office: Office
+  /** Rutas de la Oficina que el usuario TIENE AUTORIZADAS. Nunca más que eso. */
+  accessibleOfficeRoutes: Route[]
+  /** Hechos por ruta (base de indicadores y alertas). */
+  facts: OfficeRouteFacts[]
+  kpis: OfficeKpis
+  alerts: OfficeAlert[]
+  /** Cobertura del usuario sobre la Oficina (para el rótulo honesto). */
+  scope: OfficeScope
+  /** Usuarios con rutas asignadas en esta Oficina (derivado de authorizedRouteIds). */
+  relatedUsers: RelatedUser[]
+  /** Usuarios de la empresa que el actor podría asignar (para el gestor de asignaciones). */
+  assignableUsers: User[]
+}
+
+export async function getOfficeManagementSummary(
+  params: { user: User | null | undefined; tenantId: string; officeId: string },
+  database: OfficeSummaryDatabase = db,
+): Promise<OfficeManagementSummary | null> {
+  const { user, tenantId, officeId } = params
+  if (!user || !tenantId || !officeId) return null
+
+  const office = await database.offices.get(officeId)
+  if (!office || office.tenantId !== tenantId) return null
+
+  // --- 1 y 2: rutas de la empresa, RECORTADAS al alcance del usuario ---
+  const allRoutes = await database.routes.where('tenantId').equals(tenantId).toArray()
+  const accessible = filterAccessibleRoutes(user, allRoutes)
+
+  // --- 3: solo las de esta Oficina ---
+  const accessibleOfficeRoutes = accessible.filter(r => r.officeId === officeId)
+  const routeIds = new Set(accessibleOfficeRoutes.map(r => r.id))
+
+  // Conteo ESTRUCTURAL (no da acceso): cuántas rutas tiene la Oficina en la empresa.
+  const totalRoutesInOffice = allRoutes.filter(r => r.officeId === officeId).length
+
+  // --- 4: todo lo demás, solo sobre las rutas accesibles ---
+  const [users, clients, sales, resumenes] = await Promise.all([
+    database.users.where('tenantId').equals(tenantId).toArray(),
+    database.clients.where('tenantId').equals(tenantId).toArray(),
+    database.sales.where('tenantId').equals(tenantId).toArray(),
+    getRoutesFinancialSummary([...routeIds]).catch(() => ({})),
+  ])
+
+  const clientesDeRuta = (routeId: string) =>
+    clients.filter(c => c.routeId === routeId && c.status !== 'inactivo').length
+  const ventasDeRuta = (routeId: string) =>
+    sales.filter(s => s.routeId === routeId && s.status === 'activa' && s.disbursementStatus !== 'pendiente').length
+  const desembolsosPendientesDeRuta = (routeId: string) =>
+    sales.filter(s => s.routeId === routeId && s.status === 'activa' && s.disbursementStatus === 'pendiente').length
+
+  const facts: OfficeRouteFacts[] = accessibleOfficeRoutes.map(r => {
+    const cobradores = users
+      .filter(u => u.rol === 'cobrador' && getAssignedRouteIds(u).includes(r.id))
+      .map(u => u.id)
+    const fin = (resumenes as Record<string, { carteraEnCalle?: number; clientesActivos?: number; ventasActivas?: number }>)[r.id]
+    return {
+      routeId: r.id,
+      nombre: r.nombre,
+      state: routeOperationalState({ status: r.status, assignedCobradorIds: cobradores, cobradorId: r.cobradorId }),
+      // Se prefiere el motor de caja (fuente única); si no respondiera, se cae al
+      // conteo directo, que usa exactamente el mismo criterio.
+      clientesActivos: fin?.clientesActivos ?? clientesDeRuta(r.id),
+      ventasActivas: fin?.ventasActivas ?? ventasDeRuta(r.id),
+      desembolsosPendientes: desembolsosPendientesDeRuta(r.id),
+      carteraEnCalle: fin?.carteraEnCalle ?? 0,
+    }
+  })
+
+  const kpis = officeKpis(facts)
+
+  return {
+    office,
+    accessibleOfficeRoutes,
+    facts,
+    kpis,
+    alerts: officeAlerts({ office, facts }),
+    scope: officeScope(accessibleOfficeRoutes.length, totalRoutesInOffice),
+    relatedUsers: relatedUsersOfOffice(users, accessibleOfficeRoutes, tenantId),
+    // Candidatos del gestor de asignaciones: usuarios operativos de la empresa.
+    // Que aparezcan aquí no les concede nada; solo permite marcar rutas de ESTA
+    // Oficina, y la escritura conserva sus rutas de las demás.
+    assignableUsers: users.filter(u => u.rol !== 'superadmin'),
+  }
+}
+
+/**
+ * Guarda las asignaciones de un usuario decididas DESDE una Oficina.
+ *
+ * Solo se tocan las rutas de esa Oficina: las que el usuario tenga en otras
+ * Oficinas (o Sin Oficina) se conservan intactas. Se delega en el mecanismo de
+ * asignación existente (`setCobradorRoutes` para cobradores, que además sincroniza
+ * el responsable de la ruta) para no duplicar lógica.
+ */
+export async function setUserOfficeRoutes(
+  params: {
+    userId: string
+    tenantId: string
+    /** Rutas de ESTA Oficina sobre las que se decide. */
+    officeRouteIds: string[]
+    /** Subconjunto que queda marcado. */
+    selectedRouteIds: string[]
+  },
+  actor: User,
+  auditSink: OfficeAuditSink = logAction,
+): Promise<{ authorizedRouteIds: string[] }> {
+  assertCan(actor, 'route.assign', { tenantId: params.tenantId })
+
+  const target = await db.users.get(params.userId)
+  if (!target) throw new AuthzError('El usuario no existe o fue eliminado.')
+  if (target.tenantId !== params.tenantId) throw new AuthzError('Ese usuario pertenece a otra empresa.')
+  if (!canManageUser(actor, target)) throw new AuthzError('No puedes gestionar las asignaciones de ese usuario.')
+
+  const antes = getAssignedRouteIds(target)
+  const despues = applyOfficeRouteSelection(antes, params.officeRouteIds, params.selectedRouteIds)
+
+  if (target.rol === 'cobrador') {
+    // Reutiliza el mecanismo existente: mantiene coherente `route.cobradorId`.
+    await setCobradorRoutes(params.userId, despues)
+  } else {
+    await db.users.update(params.userId, {
+      authorizedRouteIds: despues.length ? despues : undefined,
+      routeId: despues[0],
+      updatedAt: nowISO(),
+    })
+  }
+
+  const agregadas = despues.filter(id => !antes.includes(id))
+  const retiradas = antes.filter(id => !despues.includes(id))
+  await auditSink({
+    tenantId: params.tenantId, userId: actor.id, userRole: actor.rol,
+    action: 'ASSIGN_ROUTE', entityType: 'User', entityId: params.userId,
+    descripcion: `Asignaciones de ${target.nombre} actualizadas desde una Oficina`,
+    before: { authorizedRouteIds: antes },
+    after: { authorizedRouteIds: despues },
+    metadata: { agregadas, retiradas, alcance: 'oficina', rutasDeLaOficina: params.officeRouteIds },
+  })
+  return { authorizedRouteIds: despues }
+}
+
+/**
+ * Asigna VARIAS rutas a una Oficina (o las deja Sin Oficina) en UNA transacción.
+ *
+ * Pensado para organizar de golpe las rutas que la migración v11 dejó Sin Oficina.
+ * Igual que el movimiento individual: solo cambia `Route.officeId`. Ninguna entidad
+ * hija se toca, porque todas derivan la Oficina por `routeId`.
+ *
+ * Es todo-o-nada: si una ruta falla la validación, no se mueve ninguna. Cada ruta
+ * se audita por separado para que el rastro siga siendo por ruta, como el resto
+ * del sistema.
+ */
+export async function assignRoutesToOffice(
+  params: { routeIds: string[]; tenantId: string; officeId?: string },
+  actor: User,
+  database: OfficeDatabase = db,
+  auditSink: OfficeAuditSink = logAction,
+): Promise<{ moved: string[] }> {
+  assertCan(actor, 'route.edit', { tenantId: params.tenantId })
+  if (params.routeIds.length === 0) return { moved: [] }
+
+  let destino: Office | undefined
+  if (params.officeId) {
+    destino = await database.offices.get(params.officeId)
+    if (!destino || destino.tenantId !== params.tenantId) throw new AuthzError(OFFICE_MESSAGES.notFound)
+  }
+
+  // VALIDACIÓN COMPLETA ANTES DE ESCRIBIR: si alguna ruta no es válida, no se
+  // mueve ninguna (evita dejar la organización a medias).
+  const rutas: Route[] = []
+  for (const id of params.routeIds) {
+    const r = await database.routes.get(id)
+    if (!r) throw new AuthzError(OFFICE_MESSAGES.routeNotFound)
+    if (r.tenantId !== params.tenantId) throw new AuthzError(OFFICE_MESSAGES.routeOtherTenant)
+    rutas.push(r)
+  }
+
+  await database.transaction('rw', [database.routes, database.offices], async () => {
+    for (const r of rutas) {
+      await database.routes.update(r.id, { officeId: params.officeId, updatedAt: nowISO() })
+    }
+  })
+
+  for (const r of rutas) {
+    await auditSink({
+      tenantId: params.tenantId, userId: actor.id, userRole: actor.rol, routeId: r.id,
+      action: 'UPDATE_ROUTE', entityType: 'Route', entityId: r.id,
+      descripcion: destino
+        ? `Ruta ${r.nombre} asignada a la Oficina ${destino.nombre} (organización masiva)`
+        : `Ruta ${r.nombre} quedó Sin Oficina (organización masiva)`,
+      before: { officeId: r.officeId ?? null },
+      after: { officeId: params.officeId ?? null },
+    })
+  }
+  return { moved: rutas.map(r => r.id) }
 }
