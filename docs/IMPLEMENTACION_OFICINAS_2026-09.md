@@ -610,3 +610,133 @@ Grupo `ROUTE-ADMIN-*` (34 comprobaciones puras + 10 de servicio) y smoke
 hidratación del editor, la regresión del falso positivo, quitar todos vs dejar uno,
 admin nuevo sin rutas, creación desde Super Admin y desde Admin, conservación de
 rutas al desasignar, admin inactivo, y que gestionar Oficinas no concede rutas.
+
+---
+
+# Evolución 2 — Integración transversal Oficina → Ruta
+
+La Entrega 1 convirtió la Oficina en unidad de gestión, pero sus accesos rápidos
+llevaban al módulo general sin contexto. Esta entrega los conecta de verdad y
+extiende el filtro a los ocho módulos administrativos.
+
+## Patrón Office → Route
+
+Un solo patrón, implementado una vez y reutilizado en todas partes:
+
+```
+Oficina seleccionada
+  ↓ rutas YA autorizadas del usuario (filterAccessibleRoutes)
+  ↓ filtradas por officeId
+  ↓ ruta elegida (opcional)
+  ↓ datos
+```
+
+Piezas nuevas:
+
+- [`src/lib/officeRouteFilter.ts`](../src/lib/officeRouteFilter.ts) — **puro**, sin
+  base de datos: `resolveOfficeParam`, `visibleRouteIds`, `routeStillInFilter`,
+  `filterRowsByVisibleRoutes`, etiquetas e índices.
+- [`src/hooks/useOfficeRouteFilter.ts`](../src/hooks/useOfficeRouteFilter.ts) — el
+  hook compartido. Parte de `useAccessibleRoutes`, lee `?officeId=`, limpia la ruta
+  al cambiar de Oficina y no persiste ninguna "Oficina activa".
+- [`OfficeRouteFilterBar`](../src/components/ui/OfficeRouteFilterBar.tsx) — la barra
+  Oficina + Ruta + contexto, para que las ocho pantallas se comporten igual.
+
+**"Todas las oficinas" son todas las rutas AUTORIZADAS**, no todas las del tenant
+(para el Super Admin, que no está limitado por rutas, coinciden).
+
+## Accesos rápidos desde OfficeDetail
+
+Los seis destinos llevan ahora `?officeId=<id>`: **Clientes, Ventas, Caja,
+Reportes, Liquidación y Rutas**. Hay una prueba que falla si alguno vuelve a
+navegar al módulo general sin contexto (`OFFICE-CONTEXT-007`).
+
+Si el panel mostraba un alcance parcial ("2 de 3 rutas visibles"), el destino
+hereda exactamente ese alcance: el filtro se aplica sobre las rutas autorizadas,
+no sobre las de la Oficina.
+
+## Módulos integrados
+
+| Módulo | Qué cambió |
+|---|---|
+| **Clientes** | Barra Oficina→Ruta; la fila muestra "Leticia / Centro" derivado de `routeId`; se eliminó su selector de ruta propio |
+| **Ventas activas** | Barra Oficina→Ruta; recorte antes de los filtros de la pantalla; selector propio eliminado |
+| **Caja** | Su selector suelto se sustituyó por Oficina + Ruta; el motor `cashboxEngine` **no se tocó** |
+| **Gastos** | Barra compartida; `<select>` de ruta propio eliminado |
+| **Capital** | Solo se agrupan las rutas visibles del filtro; con filtro activo desaparece el grupo "Sin ruta", que lo contradecía |
+| **Retiros** | Barra compartida |
+| **Transferencias** | Cada extremo de tipo ruta muestra "Oficina / Ruta" derivadas; una transferencia entra si **alguno** de sus extremos está en el filtro |
+| **Reportes** | Ya tenía Oficina; ahora acepta y valida `?officeId=` |
+| **Liquidación** | Oficina preseleccionada desde la URL; la ruta sigue siendo obligatoria y el motor no cambia |
+| **Rutas** | Acepta `?officeId=` además de `?nueva` y `?editar` |
+
+## Query params y degradación segura
+
+`?officeId=` se **valida contra el catálogo de la empresa** antes de aplicarse. Un
+id de otra empresa, inventado o de una Oficina borrada se **ignora** y se cae a
+"todas las oficinas".
+
+Y aunque se aceptara, no habría filtración: el filtro se aplica siempre sobre
+`accessibleRoutes`, así que un id ajeno produce un conjunto vacío
+(`OFFICE-FILTER-006f`). El parámetro se consume una sola vez y se limpia de la URL,
+para que un refresco no reimponga un filtro que el usuario ya cambió.
+
+## Sin Oficina
+
+Transversal en todos los módulos con filtro: `Route.officeId === undefined`. No se
+creó ninguna Office falsa con ese nombre.
+
+## Scoping y seguridad
+
+`permissions.ts` no cambió. El módulo puro del filtro **no importa la base de
+datos**, y todas sus funciones parten de rutas ya recortadas: la Oficina solo puede
+estrechar. Verificado tras el cambio: `officeId?: string` sigue apareciendo **una
+sola vez** en el modelo (Route), ninguna de las once entidades operativas lo
+declara, y no existe `user.officeId` ni `officeIds`.
+
+## Rendimiento
+
+Sin consultas N+1: `buildLookups` construye `Map<routeId, Route>` y
+`Map<officeId, Office>` una vez por pantalla y todo el etiquetado se resuelve en
+memoria.
+
+## Ajustes absorbidos de Entrega 1
+
+Resueltos dentro de este mismo paquete, sin abrir mini-parches:
+
+1. **Accesos rápidos sin contexto** — navegaban al módulo general. Ahora los seis
+   llevan `?officeId=`.
+2. **Faltaba "Ver Caja"** en el panel de Oficina. Añadido, junto con "Ver Ventas".
+3. **"Ver todas las rutas"** dentro del panel ignoraba la Oficina; ahora es "Ver
+   estas rutas" y conserva el filtro.
+4. **Selectores de ruta duplicados** en Clientes, Ventas, Gastos y Caja —
+   sustituidos por el par compartido, que era la limpieza pendiente que la
+   auditoría había señalado.
+5. **`OFFICE-NAV-003`** comprobaba una línea exacta del efecto de `RoutesPage`; al
+   añadir el contexto de Oficina se reescribió para verificar la conducta (entrar
+   sin parámetros sigue funcionando) en vez de la forma del código.
+6. **Grupo "Sin ruta" de Capital** aparecía incluso con un filtro activo,
+   contradiciendo el recorte. Ahora solo se muestra sin filtro.
+
+## Tests
+
+| Suite | Antes | Después |
+|---|---|---|
+| Permisos | 349 | **402** |
+| Financiera | 151 | **151** |
+| Arranque | 155 | **155** |
+| Migraciones y smoke | 23 | **30** |
+| **Total** | **678** | **738 PASS · 0 FAIL** |
+
+Familias `OFFICE-FILTER-*`, `OFFICE-CONTEXT-*`, `OFFICE-CLIENT-*`,
+`OFFICE-SALES-*`, `OFFICE-CASH-FILTER-*`, `OFFICE-EXPENSE-FILTER-*`,
+`OFFICE-CAPITAL-FILTER-*`, `OFFICE-WITHDRAW-FILTER-*`,
+`OFFICE-TRANSFER-FILTER-*`, `OFFICE-DERIVE-STRICT-*` y los smoke `SMOKE-E2-1..7`
+sobre Dexie real.
+
+## Pendientes para Entrega 3
+
+Recaudo analítico por Oficina; cartera avanzada; dashboard ejecutivo comparativo y
+ranking entre Oficinas; integración profunda de Secretario y Socio; exportaciones
+del resumen de Oficina; auditoría ejecutiva; persistencia y cierre de liquidaciones;
+snapshot histórico de Oficina.

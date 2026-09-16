@@ -12,6 +12,8 @@ import { useAccessibleRoutes } from '@/hooks/useAccessibleRoutes'
 import { useAccessibleOffices } from '@/hooks/useAccessibleOffices'
 import { OfficeSelector, officeFileTag } from '@/components/ui/OfficeSelector'
 import { ALL_OFFICES, NO_OFFICE, filterRoutesByOffice, narrowRouteIdsByOffice, officeNameByRouteId, officeCoverage, officeScopeLabel } from '@/lib/officeGrouping'
+import { resolveOfficeParam } from '@/lib/officeRouteFilter'
+import { useSearchParams } from 'react-router-dom'
 import { getAccessibleRouteIdSet } from '@/lib/scope'
 import {
   buildReport, resolveReportRouteIds, REPORT_OPTIONS,
@@ -27,9 +29,32 @@ export default function ReportsPage() {
   // sus rutas autorizadas; el Super Admin, todas las de la empresa seleccionada.
   const { routes } = useAccessibleRoutes()
   // Oficinas DERIVADAS de las rutas accesibles: ver una Oficina no concede ninguna ruta.
-  const { offices, hasUnassigned } = useAccessibleOffices()
+  const { offices, allOffices, hasUnassigned } = useAccessibleOffices()
   // '' = "Todas las oficinas" → todas las OFICINAS PERMITIDAS, nunca más.
   const [officeId, setOfficeId] = useState<string>(ALL_OFFICES)
+  /**
+   * CONTEXTO DESDE EL PANEL DE OFICINA (`?officeId=`). Se valida contra el catálogo
+   * de la empresa: un id ajeno o inventado se ignora y se cae a "todas las
+   * oficinas" — nunca amplía el alcance, porque el filtro se aplica sobre rutas ya
+   * autorizadas. Se consume una sola vez para que un refresco no reimponga un
+   * filtro que el usuario ya cambió.
+   */
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [officeParamAplicado, setOfficeParamAplicado] = useState(false)
+  useEffect(() => {
+    if (officeParamAplicado) return
+    const crudo = searchParams.get('officeId')
+    if (crudo && allOffices.length > 0) {
+      setOfficeId(resolveOfficeParam(crudo, allOffices))
+      const limpios = new URLSearchParams(searchParams)
+      limpios.delete('officeId')
+      setSearchParams(limpios, { replace: true })
+      setOfficeParamAplicado(true)
+    } else if (!crudo) {
+      setOfficeParamAplicado(true)
+    }
+  }, [officeParamAplicado, searchParams, allOffices, setSearchParams])
+
   const [reportType, setReportType] = useState<ReportType>('pagos')
   // '' = "Todas las rutas" → significa TODAS LAS PERMITIDAS, nunca todas las del sistema.
   const [routeId, setRouteId] = useState<string>(ALL_ROUTES)

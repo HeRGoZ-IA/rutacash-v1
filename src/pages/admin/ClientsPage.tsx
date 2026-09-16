@@ -19,6 +19,8 @@ import { generateId } from '@/lib/utils'
 import { nowISO, formatDate, today, formatCurrency, normalizeDoc } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
+import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
+import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import {
   calculateTotalWithInterest, calculateInstallmentValue,
   estimateFinalDate, generateInstallments,
@@ -53,11 +55,13 @@ const EMPTY_SALE_FORM = {
 export default function ClientsPage() {
   const { user } = useAuth()
   const { tenantId, currency } = useTenant()
+  // FILTRO OFICINA → RUTA: la Oficina estrecha las rutas ya autorizadas. El
+  // contexto puede llegar por `?officeId=` desde el panel de una Oficina.
+  const officeFilter = useOfficeRouteFilter()
   const [clients, setClients] = useState<Client[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
-  const [filterRoute, setFilterRoute] = useState('')
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
@@ -132,11 +136,14 @@ export default function ClientsPage() {
     setLoading(false)
   }
 
-  const filtered = clients.filter(c => {
+  // Recorte por Oficina/Ruta ANTES de cualquier otro filtro de la pantalla.
+  const clientsEnAlcance = officeFilter.filterRows(clients)
+  const filtered = clientsEnAlcance.filter(c => {
     const q = search.toLowerCase()
     const matchSearch = !q || c.nombre.toLowerCase().includes(q) || c.documento.includes(q) || c.telefonoPrincipal.includes(q)
     const matchStatus = !filterStatus || c.status === filterStatus
-    const matchRoute = !filterRoute || c.routeId === filterRoute
+    // La ruta la aplica el filtro Oficina → Ruta compartido (arriba).
+    const matchRoute = true
     return matchSearch && matchStatus && matchRoute
   })
 
@@ -298,14 +305,24 @@ export default function ClientsPage() {
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
         <div className="flex-1 min-w-48">
+          {/* FILTRO OFICINA → RUTA. La Oficina solo estrecha las rutas autorizadas;
+              el contexto activo queda a la vista cuando se llega desde una Oficina. */}
+          <OfficeRouteFilterBar
+            offices={officeFilter.offices}
+            officeId={officeFilter.officeId}
+            onOfficeChange={officeFilter.setOfficeId}
+            routesInOffice={officeFilter.routesInOffice}
+            routeId={officeFilter.routeId}
+            onRouteChange={officeFilter.setRouteId}
+            hasUnassigned={officeFilter.hasUnassigned}
+            contextLabel={officeFilter.contextLabel}
+            showContext={officeFilter.hasOfficeFilter}
+          />
           <Input placeholder="Buscar nombre, doc, teléfono..." value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />
         </div>
         <Select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
           options={[{ value: 'activo', label: 'Activo' }, { value: 'inactivo', label: 'Inactivo' }, { value: 'moroso', label: 'Moroso' }, { value: 'perdido', label: 'Perdido' }]}
           placeholder="Todos los estados" className="w-44" />
-        <Select value={filterRoute} onChange={e => setFilterRoute(e.target.value)}
-          options={routes.map(r => ({ value: r.id, label: r.nombre }))}
-          placeholder="Todas las rutas" className="w-44" />
       </div>
 
       {/* Table */}
@@ -342,7 +359,7 @@ export default function ClientsPage() {
                       <span className="text-sm text-gray-600">{c.documento}</span>
                     </td>
                     <td className="px-4 py-3 hidden md:table-cell">
-                      <span className="text-sm text-gray-600">{getRouteName(c.routeId)}</span>
+                      <span className="text-sm text-gray-600">{officeFilter.labelFor(c.routeId)}</span>
                     </td>
                     <td className="px-4 py-3 hidden lg:table-cell">
                       <span className="text-sm text-gray-600">{c.telefonoPrincipal}</span>

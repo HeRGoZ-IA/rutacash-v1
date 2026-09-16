@@ -13,6 +13,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
+import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
+import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import type { Withdrawal, Route, User } from '@/models/types'
 import { assertRouteOperationalContext } from '@/services/officeService'
 
@@ -31,6 +33,7 @@ interface WithdrawalGroup {
 
 export default function WithdrawalsPage() {
   const { tenantId, currency } = useTenant()
+  const officeFilter = useOfficeRouteFilter()
   const { user } = useAuth()
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
@@ -91,7 +94,8 @@ export default function WithdrawalsPage() {
 
   // Retiros dentro del rango de fecha (los totales agrupados lo respetan;
   // Base actual es un saldo a la fecha y no depende del filtro).
-  const visibleWithdrawals = withdrawals.filter(w =>
+  const withdrawalsEnAlcance = officeFilter.filterRows(withdrawals)
+  const visibleWithdrawals = withdrawalsEnAlcance.filter(w =>
     (!desde || w.fecha >= desde) && (!hasta || w.fecha <= hasta)
   )
 
@@ -134,6 +138,20 @@ export default function WithdrawalsPage() {
       </div>
 
       {/* Filtro por fecha (compacto) */}
+      {/* FILTRO OFICINA → RUTA. La Oficina solo estrecha las rutas autorizadas;
+          el contexto activo queda a la vista cuando se llega desde una Oficina. */}
+      <OfficeRouteFilterBar
+        offices={officeFilter.offices}
+        officeId={officeFilter.officeId}
+        onOfficeChange={officeFilter.setOfficeId}
+        routesInOffice={officeFilter.routesInOffice}
+        routeId={officeFilter.routeId}
+        onRouteChange={officeFilter.setRouteId}
+        hasUnassigned={officeFilter.hasUnassigned}
+        contextLabel={officeFilter.contextLabel}
+        showContext={officeFilter.hasOfficeFilter}
+      />
+
       <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta}
         onClear={() => { setDesde(''); setHasta('') }} />
 

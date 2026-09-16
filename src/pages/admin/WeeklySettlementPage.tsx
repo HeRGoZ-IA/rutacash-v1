@@ -6,6 +6,8 @@ import { RouteSelector, routeFileTag } from '@/components/ui/RouteSelector'
 import { OfficeSelector } from '@/components/ui/OfficeSelector'
 import { useAccessibleOffices } from '@/hooks/useAccessibleOffices'
 import { ALL_OFFICES, filterRoutesByOffice } from '@/lib/officeGrouping'
+import { resolveOfficeParam } from '@/lib/officeRouteFilter'
+import { useSearchParams } from 'react-router-dom'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
@@ -30,8 +32,31 @@ export default function WeeklySettlementPage() {
   const [routeId, setRouteId] = useState('')
   // Oficinas derivadas de las rutas accesibles. Filtro PREVIO: la liquidación sigue
   // siendo de UNA ruta; no existe liquidación consolidada por Oficina.
-  const { offices, hasUnassigned } = useAccessibleOffices()
+  const { offices, allOffices, hasUnassigned } = useAccessibleOffices()
   const [officeId, setOfficeId] = useState(ALL_OFFICES)
+  /**
+   * CONTEXTO DESDE EL PANEL DE OFICINA (`?officeId=`). Se valida contra el catálogo
+   * de la empresa: un id ajeno o inventado se ignora y se cae a "todas las
+   * oficinas" — nunca amplía el alcance, porque el filtro se aplica sobre rutas ya
+   * autorizadas. Se consume una sola vez para que un refresco no reimponga un
+   * filtro que el usuario ya cambió.
+   */
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [officeParamAplicado, setOfficeParamAplicado] = useState(false)
+  useEffect(() => {
+    if (officeParamAplicado) return
+    const crudo = searchParams.get('officeId')
+    if (crudo && allOffices.length > 0) {
+      setOfficeId(resolveOfficeParam(crudo, allOffices))
+      const limpios = new URLSearchParams(searchParams)
+      limpios.delete('officeId')
+      setSearchParams(limpios, { replace: true })
+      setOfficeParamAplicado(true)
+    } else if (!crudo) {
+      setOfficeParamAplicado(true)
+    }
+  }, [officeParamAplicado, searchParams, allOffices, setSearchParams])
+
   const [semanaInicio, setSemanaInicio] = useState(getWeekStart())
   const [semanaFin, setSemanaFin] = useState(getWeekEnd())
   const [settlement, setSettlement] = useState<WeeklySettlement | null>(null)

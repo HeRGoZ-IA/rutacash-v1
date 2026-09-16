@@ -24,6 +24,7 @@ import { cobradorRemovalBlock, validateCobradorInvariant, COBRADOR_REMOVAL_MESSA
 import { ASSIGNMENT_ROLE_ORDER } from '@/lib/routeAssignments'
 import { effectiveAdminIdsAfterSave, routeAdmins, shouldConfirmRouteWithoutAdmin } from '@/lib/routeAdmins'
 import { NO_OFFICE_LABEL, filterRoutesByOffice, ALL_OFFICES } from '@/lib/officeGrouping'
+import { resolveOfficeParam } from '@/lib/officeRouteFilter'
 import { OfficeSelector } from '@/components/ui/OfficeSelector'
 import { filterAccessibleRoutes, assignableRoles, canManageUser, ROLE_LABELS } from '@/lib/permissions'
 import { getAssignedRouteIds } from '@/lib/roles'
@@ -105,7 +106,16 @@ export default function RoutesPage() {
     if (loading) return
     const nueva = searchParams.get('nueva')
     const editar = searchParams.get('editar')
-    if (!nueva && !editar) return
+    const office = searchParams.get('officeId')
+
+    // Contexto de Oficina desde su panel: preselecciona el filtro del listado.
+    // Se valida contra el catálogo; un id inválido se ignora sin ampliar nada.
+    if (office) setOfficeFilter(resolveOfficeParam(office, offices))
+
+    if (!nueva && !editar) {
+      if (office) setSearchParams({}, { replace: true })
+      return
+    }
 
     if (nueva) {
       openCreate(searchParams.get('officeId') ?? undefined)
@@ -117,7 +127,7 @@ export default function RoutesPage() {
       else toast.error('No tienes acceso a esa ruta.')
     }
     setSearchParams({}, { replace: true })
-  }, [loading, routes, searchParams])
+  }, [loading, routes, offices, searchParams])
 
   async function load() {
     setLoading(true)

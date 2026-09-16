@@ -15,6 +15,8 @@ import { createPartnerMovement } from '@/services/partnerCashService'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import { filterAccessibleRoutes, authorizedRouteIdsOf, isPartnerInScope, isTransferInScope } from '@/lib/permissions'
+import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
+import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import type { Transfer, Route, User, TransferEntityType } from '@/models/types'
 import { assertRouteOperationalContext } from '@/services/officeService'
 
@@ -42,6 +44,7 @@ function decodeEndpoint(v: string): { type: TransferEntityType; id: string } | n
 
 export default function TransfersPage() {
   const { tenantId, currency } = useTenant()
+  const officeFilter = useOfficeRouteFilter()
   const { user } = useAuth()
   const [transfers, setTransfers] = useState<Transfer[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
@@ -89,14 +92,16 @@ export default function TransfersPage() {
   const userName = (id?: string) => id ? (users.find(u => u.id === id)?.nombre ?? '') : ''
 
   // Etiqueta de un endpoint de la transferencia (origen/destino).
+  // La Oficina de cada extremo se DERIVA de su `routeId`; la transferencia no
+  // guarda officeId (y no debe guardarlo: una ruta puede cambiar de Oficina).
   function originLabel(t: Transfer): string {
     if (t.socioOrigenId) return `Socio: ${partnerName(t.socioOrigenId)}`
-    if (t.routeOrigenId) return `Ruta: ${routeName(t.routeOrigenId)}`
+    if (t.routeOrigenId) return `Ruta: ${officeFilter.labelFor(t.routeOrigenId)}`
     return 'Externo'
   }
   function destinoLabel(t: Transfer): string {
     if (t.socioDestinoId) return `Socio: ${partnerName(t.socioDestinoId)}`
-    if (t.routeDestinoId) return `Ruta: ${routeName(t.routeDestinoId)}`
+    if (t.routeDestinoId) return `Ruta: ${officeFilter.labelFor(t.routeDestinoId)}`
     return 'Externo/Socio'
   }
 
@@ -163,8 +168,19 @@ export default function TransfersPage() {
   }
 
   // Transferencias dentro del rango de fecha (para totales y detalle).
+  /**
+   * Una transferencia entra en el filtro si ALGUNO de sus extremos de tipo ruta
+   * está dentro. Las de socio a socio no tienen ruta: solo aparecen sin filtro de
+   * Oficina, porque no pueden atribuirse a ninguna.
+   */
+  const enFiltroDeOficina = (t: Transfer): boolean => {
+    if (!officeFilter.hasOfficeFilter && !officeFilter.routeId) return true
+    const extremos = [t.routeOrigenId, t.routeDestinoId].filter(Boolean) as string[]
+    return extremos.some(id => officeFilter.visibleRouteIds.has(id))
+  }
+
   const visibleTransfers = transfers.filter(t =>
-    (!desde || t.fecha >= desde) && (!hasta || t.fecha <= hasta)
+    enFiltroDeOficina(t) && (!desde || t.fecha >= desde) && (!hasta || t.fecha <= hasta)
   )
 
   // ---- Agrupación por entidad (rutas + socios) ----
@@ -203,6 +219,19 @@ export default function TransfersPage() {
       </div>
 
       {/* Filtros (compacto, una sola fila en desktop) */}
+      {/* FILTRO OFICINA → RUTA (patrón compartido). Solo estrecha lo autorizado. */}
+      <OfficeRouteFilterBar
+        offices={officeFilter.offices}
+        officeId={officeFilter.officeId}
+        onOfficeChange={officeFilter.setOfficeId}
+        routesInOffice={officeFilter.routesInOffice}
+        routeId={officeFilter.routeId}
+        onRouteChange={officeFilter.setRouteId}
+        hasUnassigned={officeFilter.hasUnassigned}
+        contextLabel={officeFilter.contextLabel}
+        showContext={officeFilter.hasOfficeFilter}
+      />
+
       <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta}
         onClear={() => { setDesde(''); setHasta('') }}>
         <div>

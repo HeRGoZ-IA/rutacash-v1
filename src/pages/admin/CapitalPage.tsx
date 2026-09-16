@@ -12,6 +12,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
+import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
+import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import type { CapitalMovement, Route, Withdrawal, RouteFinancialSummary } from '@/models/types'
 import { assertRouteOperationalContext } from '@/services/officeService'
 
@@ -33,6 +35,7 @@ interface CapitalGroup {
 
 export default function CapitalPage() {
   const { tenantId, currency } = useTenant()
+  const officeFilter = useOfficeRouteFilter()
   const { user } = useAuth()
   const [movements, setMovements] = useState<CapitalMovement[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
@@ -112,11 +115,18 @@ export default function CapitalPage() {
       }
     }
 
-    const list = routesView.map(r => buildGroup(r.id, r.nombre, r.codigo, r.capitalInicial, summaryByRoute[r.id]))
+    // Recorte por Oficina/Ruta: solo se agrupan las rutas visibles del filtro.
+    const list = routesView
+      .filter(r => officeFilter.visibleRouteIds.has(r.id))
+      .map(r => buildGroup(r.id, r.nombre, r.codigo, r.capitalInicial, summaryByRoute[r.id]))
 
     // Movimientos cuya ruta ya no existe (o sin routeId) → grupo "Sin ruta".
     const knownRouteIds = new Set(routesView.map(r => r.id))
-    const orphan = movementsView.filter(m => !m.routeId || !knownRouteIds.has(m.routeId))
+    // Con un filtro de Oficina/Ruta activo, los movimientos huérfanos no pertenecen
+    // a ninguna ruta del filtro: mostrarlos contradiría el recorte.
+    const orphan = officeFilter.hasOfficeFilter || officeFilter.routeId
+      ? []
+      : movementsView.filter(m => !m.routeId || !knownRouteIds.has(m.routeId))
     if (orphan.length > 0) {
       list.push({
         routeId: '__none__', nombre: 'Sin ruta', codigo: '—',
@@ -135,6 +145,19 @@ export default function CapitalPage() {
         <div><h1 className="text-xl font-bold text-gray-900">Capital / Base</h1><p className="text-sm text-gray-500 mt-0.5">{movements.length} movimiento(s) · {routes.length} ruta(s)</p></div>
         <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>Inyectar capital</Button>
       </div>
+
+      {/* FILTRO OFICINA → RUTA (patrón compartido). Solo estrecha lo autorizado. */}
+      <OfficeRouteFilterBar
+        offices={officeFilter.offices}
+        officeId={officeFilter.officeId}
+        onOfficeChange={officeFilter.setOfficeId}
+        routesInOffice={officeFilter.routesInOffice}
+        routeId={officeFilter.routeId}
+        onRouteChange={officeFilter.setRouteId}
+        hasUnassigned={officeFilter.hasUnassigned}
+        contextLabel={officeFilter.contextLabel}
+        showContext={officeFilter.hasOfficeFilter}
+      />
 
       {/* Historial agrupado por ruta: una tarjeta por ruta */}
       {loading ? (

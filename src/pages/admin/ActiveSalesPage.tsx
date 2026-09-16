@@ -23,6 +23,8 @@ import { registerPayment, quickAmounts } from '@/services/paymentService'
 import { CollectorPicker } from '@/components/ui/CollectorPicker'
 import { findActiveSaleForClient } from '@/services/saleRequestService'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
+import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
+import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import type { Sale, Client, Route, Installment } from '@/models/types'
 
 // Días de pago (1=lunes ... 6=sábado, 0=domingo)
@@ -40,6 +42,7 @@ const TASA_OPTIONS = [
 
 export default function ActiveSalesPage() {
   const { tenantId, currency } = useTenant()
+  const officeFilter = useOfficeRouteFilter()
   const { user } = useAuth()
   const [sales, setSales] = useState<Sale[]>([])
   const [clients, setClients] = useState<Client[]>([])
@@ -47,7 +50,6 @@ export default function ActiveSalesPage() {
   // Última parcela pagada por venta (para la columna Parcelas).
   const [paidBySale, setPaidBySale] = useState<Record<string, number>>({})
   const [search, setSearch] = useState('')
-  const [filterRoute, setFilterRoute] = useState('')
   const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [detailSale, setDetailSale] = useState<Sale | null>(null)
@@ -148,10 +150,13 @@ export default function ActiveSalesPage() {
   // (la última parcela absorbe el redondeo y puede valer menos que el nominal).
   const paymentQuick = paymentSale ? quickAmounts(paymentSale, detailInstallments) : null
 
-  const filtered = sales.filter(s => {
+  // Recorte por Oficina/Ruta ANTES de los filtros propios de la pantalla.
+  const salesEnAlcance = officeFilter.filterRows(sales)
+  const filtered = salesEnAlcance.filter(s => {
     const client = clientMap.get(s.clientId)
     const matchSearch = !search || client?.nombre.toLowerCase().includes(search.toLowerCase()) || client?.documento.includes(search)
-    const matchRoute = !filterRoute || s.routeId === filterRoute
+    // La ruta la aplica el filtro Oficina → Ruta compartido (arriba).
+    const matchRoute = true
     return matchSearch && matchRoute
   })
 
@@ -279,10 +284,21 @@ export default function ActiveSalesPage() {
 
       <div className="flex flex-wrap gap-3">
         <div className="flex-1 min-w-48">
+          {/* FILTRO OFICINA → RUTA. La Oficina solo estrecha las rutas autorizadas;
+              el contexto activo queda a la vista cuando se llega desde una Oficina. */}
+          <OfficeRouteFilterBar
+            offices={officeFilter.offices}
+            officeId={officeFilter.officeId}
+            onOfficeChange={officeFilter.setOfficeId}
+            routesInOffice={officeFilter.routesInOffice}
+            routeId={officeFilter.routeId}
+            onRouteChange={officeFilter.setRouteId}
+            hasUnassigned={officeFilter.hasUnassigned}
+            contextLabel={officeFilter.contextLabel}
+            showContext={officeFilter.hasOfficeFilter}
+          />
           <Input placeholder="Buscar cliente..." value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />
         </div>
-        <Select value={filterRoute} onChange={e => setFilterRoute(e.target.value)}
-          options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Todas las rutas" className="w-44" />
       </div>
 
       {loading ? (

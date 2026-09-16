@@ -883,6 +883,202 @@ await spec('SMOKE-ADMIN-E', 'Smoke multi-admin', 'Carlos crea una ruta: queda as
   db.close()
 })
 
+
+// ############################################################
+// GRUPO — SMOKE INTEGRACIÓN TRANSVERSAL (Dexie real)
+// ------------------------------------------------------------
+// El patrón Oficina → Ruta aplicado a datos reales: lo que vería el usuario al
+// llegar a cada módulo desde el panel de una Oficina.
+// ############################################################
+
+/**
+ * Empresa real: Leticia con 3 rutas, Río con 1, y una ruta Sin Oficina.
+ * El Admin tiene Centro y Mercado (de Leticia), Puerto (de Río) y la Sin Oficina.
+ * NO tiene Norte, aunque sea de Leticia: es la prueba del alcance parcial.
+ */
+async function empresaTransversal() {
+  const db = await baseLimpia()
+  const { createOffice } = await import('../src/services/officeService')
+  const { createRouteWithAdmins } = await import('../src/services/routeService')
+
+  const leticia = await createOffice({ tenantId: 't-1', nombre: 'Leticia' }, SU)
+  const rio = await createOffice({ tenantId: 't-1', nombre: 'Río' }, SU)
+
+  const centro = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Centro', codigo: 'RT-001' }), SU)
+  const mercado = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Mercado', codigo: 'RT-002' }), SU)
+  const norte = await createRouteWithAdmins(datosRutaSmoke({ officeId: leticia.id, nombre: 'Norte', codigo: 'RT-003' }), SU)
+  const puerto = await createRouteWithAdmins(datosRutaSmoke({ officeId: rio.id, nombre: 'Puerto', codigo: 'RT-004' }), SU)
+  const antigua = await createRouteWithAdmins(datosRutaSmoke({ nombre: 'Antigua', codigo: 'RT-005' }), SU)
+
+  await db.users.add({
+    id: 'u-adm', tenantId: 't-1', nombre: 'Carlos', email: 'carlos@c.com', password: 'x',
+    rol: 'admin', status: 'activo',
+    authorizedRouteIds: [centro.id, mercado.id, puerto.id, antigua.id],
+    createdAt: '', updatedAt: '',
+  } as never)
+
+  // Un cliente y una venta por ruta, para poder comprobar el recorte de datos.
+  let n = 0
+  for (const r of [centro, mercado, norte, puerto, antigua]) {
+    n++
+    await ventaLista(db, r.id, `c-${n}`, `s-${n}`)
+    await db.expenses.add({
+      id: `e-${n}`, tenantId: 't-1', routeId: r.id, categoryId: 'cat', userId: 'u-adm',
+      valor: 1000 * n, fecha: '2026-09-15', syncStatus: 'synced', createdAt: '',
+    } as never)
+    await db.withdrawals.add({
+      id: `w-${n}`, tenantId: 't-1', routeId: r.id, valor: 500 * n,
+      fecha: '2026-09-15', userId: 'u-adm', createdAt: '',
+    } as never)
+  }
+
+  const admin = (await db.users.get('u-adm'))!
+  return { db, admin, leticia, rio, centro, mercado, norte, puerto, antigua }
+}
+
+/** Reproduce lo que hace `useOfficeRouteFilter` al llegar con `?officeId=`. */
+async function filtroDesde(db: Awaited<ReturnType<typeof baseLimpia>>, actor: User, officeParam: string | null) {
+  const { filterAccessibleRoutes } = await import('../src/lib/permissions')
+  const { resolveOfficeParam, visibleRouteIds, routesInOfficeFilter, filterRowsByVisibleRoutes } =
+    await import('../src/lib/officeRouteFilter')
+  const offices = await db.offices.where('tenantId').equals('t-1').toArray()
+  const accesibles = filterAccessibleRoutes(actor, await db.routes.where('tenantId').equals('t-1').toArray())
+  const officeId = resolveOfficeParam(officeParam, offices)
+  return {
+    officeId,
+    routesInOffice: routesInOfficeFilter(accesibles, officeId),
+    visibles: visibleRouteIds({ accessibleRoutes: accesibles, officeId }),
+    filtrar: <T extends { routeId: string }>(rows: T[]) =>
+      filterRowsByVisibleRoutes(rows, visibleRouteIds({ accessibleRoutes: accesibles, officeId })),
+  }
+}
+
+await spec('SMOKE-E2-1', 'Smoke transversal', 'Oficina → Clientes: llega filtrado y solo con las rutas autorizadas', async () => {
+  const { db, admin, leticia, norte } = await empresaTransversal()
+  const f = await filtroDesde(db, admin, leticia.id)
+  const clientes = f.filtrar(await db.clients.toArray())
+
+  metric('oficina aplicada', f.officeId === leticia.id)
+  metric('rutas del filtro', f.routesInOffice.map(r => r.nombre).sort().join(', '))
+  metric('clientes visibles', clientes.length)
+  assert(f.officeId === leticia.id, 'el contexto de la Oficina debe aplicarse')
+  assert(f.routesInOffice.length === 2, 'solo las 2 rutas autorizadas de Leticia')
+  assert(clientes.length === 2, 'solo los clientes de esas 2 rutas')
+  assert(!clientes.some(c => c.routeId === norte.id), 'se coló un cliente de una ruta no autorizada')
+  db.close()
+})
+
+await spec('SMOKE-E2-2', 'Smoke transversal', 'Oficina → Caja: solo se ofrecen las rutas autorizadas de esa Oficina', async () => {
+  const { db, admin, leticia, norte, puerto } = await empresaTransversal()
+  const f = await filtroDesde(db, admin, leticia.id)
+
+  metric('rutas ofrecidas en caja', f.routesInOffice.map(r => r.nombre).sort().join(', '))
+  assert(f.routesInOffice.length === 2, 'la caja solo puede ofrecer rutas del filtro')
+  assert(!f.routesInOffice.some(r => r.id === norte.id), 'no puede ofrecerse una ruta no autorizada')
+  assert(!f.routesInOffice.some(r => r.id === puerto.id), 'no puede ofrecerse una ruta de otra Oficina')
+
+  // Y la caja de una de ellas se calcula con el motor de siempre, sin cambios.
+  const { getCashboxSummary } = await import('../src/services/cashboxEngine')
+  const resumen = await getCashboxSummary(f.routesInOffice[0].id)
+  metric('caja calculada', typeof resumen.saldoActual === 'number')
+  assert(typeof resumen.saldoActual === 'number', 'el motor de caja debe seguir respondiendo por ruta')
+  db.close()
+})
+
+await spec('SMOKE-E2-3', 'Smoke transversal', 'cambiar de Oficina dentro del módulo limpia la ruta que queda fuera', async () => {
+  const { db, admin, leticia, rio, centro } = await empresaTransversal()
+  const { filterAccessibleRoutes } = await import('../src/lib/permissions')
+  const { routeStillInFilter, routesInOfficeFilter } = await import('../src/lib/officeRouteFilter')
+  const accesibles = filterAccessibleRoutes(admin, await db.routes.where('tenantId').equals('t-1').toArray())
+
+  const siguesiendoValida = routeStillInFilter(accesibles, rio.id, centro.id)
+  const rutasDeRio = routesInOfficeFilter(accesibles, rio.id)
+
+  metric('ruta Centro sigue válida en Río', siguesiendoValida)
+  metric('rutas de Río visibles', rutasDeRio.map(r => r.nombre).join(', '))
+  assert(routeStillInFilter(accesibles, leticia.id, centro.id), 'Centro es válida dentro de Leticia')
+  assert(!siguesiendoValida, 'al pasar a Río, Centro debe dejar de ser válida y limpiarse')
+  assert(rutasDeRio.length === 1 && rutasDeRio[0].nombre === 'Puerto', 'deben ofrecerse solo las rutas de Río')
+  db.close()
+})
+
+await spec('SMOKE-E2-4', 'Smoke transversal', '"Sin Oficina" funciona transversalmente en clientes, gastos y retiros', async () => {
+  const { db, admin, antigua } = await empresaTransversal()
+  const { NO_OFFICE } = await import('../src/lib/officeGrouping')
+  const f = await filtroDesde(db, admin, NO_OFFICE)
+
+  const clientes = f.filtrar(await db.clients.toArray())
+  const gastos = f.filtrar(await db.expenses.toArray())
+  const retiros = f.filtrar(await db.withdrawals.toArray())
+
+  metric('rutas Sin Oficina', f.routesInOffice.map(r => r.nombre).join(', '))
+  metric('clientes / gastos / retiros', `${clientes.length} / ${gastos.length} / ${retiros.length}`)
+  assert(f.routesInOffice.length === 1 && f.routesInOffice[0].id === antigua.id, 'solo la ruta sin Oficina')
+  assert(clientes.length === 1 && clientes[0].routeId === antigua.id, 'clientes recortados a la ruta sin Oficina')
+  assert(gastos.length === 1 && retiros.length === 1, 'gastos y retiros siguen el mismo patrón')
+  db.close()
+})
+
+await spec('SMOKE-E2-5', 'Smoke transversal', 'Admin parcial: mismos 2 resultados en clientes, ventas, gastos y retiros', async () => {
+  const { db, admin, leticia, norte } = await empresaTransversal()
+  const f = await filtroDesde(db, admin, leticia.id)
+
+  const clientes = f.filtrar(await db.clients.toArray())
+  const ventas = f.filtrar(await db.sales.toArray())
+  const gastos = f.filtrar(await db.expenses.toArray())
+  const retiros = f.filtrar(await db.withdrawals.toArray())
+
+  metric('clientes/ventas/gastos/retiros', `${clientes.length}/${ventas.length}/${gastos.length}/${retiros.length}`)
+  metric('alguno de la ruta no autorizada', [...clientes, ...ventas, ...gastos, ...retiros].some(r => r.routeId === norte.id))
+  assert([clientes, ventas, gastos, retiros].every(l => l.length === 2),
+    'los cuatro módulos deben coincidir en las mismas 2 rutas autorizadas')
+  assert(![...clientes, ...ventas, ...gastos, ...retiros].some(r => r.routeId === norte.id),
+    'ningún módulo puede mostrar datos de una ruta no autorizada')
+  db.close()
+})
+
+await spec('SMOKE-E2-6', 'Smoke transversal', 'Oficina inactiva: el histórico se consulta y la escritura sigue bloqueada', async () => {
+  const { db, admin, leticia, centro } = await empresaTransversal()
+  const { setOfficeStatus } = await import('../src/services/officeService')
+  const { registerPayment } = await import('../src/services/paymentService')
+
+  await setOfficeStatus({ officeId: leticia.id, tenantId: 't-1', status: 'inactiva' }, SU)
+
+  // LECTURA: el filtro sigue devolviendo sus datos históricos.
+  const f = await filtroDesde(db, admin, leticia.id)
+  const clientes = f.filtrar(await db.clients.toArray())
+  metric('oficina inactiva filtrable', f.officeId === leticia.id)
+  metric('clientes históricos visibles', clientes.length)
+  assert(f.officeId === leticia.id, 'una Oficina inactiva no debe esconderse de los filtros')
+  assert(clientes.length === 2, 'el histórico debe seguir consultándose')
+
+  // ESCRITURA: bloqueada por la guarda existente, sin duplicarla en cada pantalla.
+  const venta = (await db.sales.toArray()).find(s => s.routeId === centro.id)!
+  const pago = await registerPayment({ saleId: venta.id, requestedAmount: 1_000, actor: admin, fecha: '2026-09-15' })
+  metric('pago nuevo', pago.ok ? 'ACEPTADO — ERROR' : pago.code)
+  assert(!pago.ok && pago.code === 'OFFICE_INACTIVE', 'la escritura debe seguir bloqueada por la guarda operativa')
+  db.close()
+})
+
+await spec('SMOKE-E2-7', 'Smoke transversal', 'un officeId ajeno no amplía el alcance en ningún módulo', async () => {
+  const { db, admin } = await empresaTransversal()
+  const { createOffice } = await import('../src/services/officeService')
+  const ajena = await createOffice({ tenantId: 't-2', nombre: 'Ajena' }, SU)
+
+  const f = await filtroDesde(db, admin, ajena.id)
+  const clientes = f.filtrar(await db.clients.toArray())
+  const sinFiltro = await filtroDesde(db, admin, null)
+
+  metric('officeId resuelto', f.officeId === '' ? 'todas (ignorado)' : f.officeId)
+  metric('clientes con el id ajeno', clientes.length)
+  metric('clientes sin filtro', sinFiltro.filtrar(await db.clients.toArray()).length)
+  assert(f.officeId === '', 'una Oficina de otra empresa debe ignorarse')
+  assert(clientes.length === 4, 'debe caer a "todas las oficinas" dentro de lo AUTORIZADO (4 rutas)')
+  assert(clientes.length === sinFiltro.filtrar(await db.clients.toArray()).length,
+    'ignorar el parámetro no puede dar más ni menos que no enviarlo')
+  db.close()
+})
+
 // ############################################################
 // INFORME
 // ############################################################

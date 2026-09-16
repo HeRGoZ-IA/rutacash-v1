@@ -2107,10 +2107,15 @@ await spec('OFFICE-NAV-003', 'Gestión Oficina', 'los breadcrumbs no alteran el 
   assert(detalle.includes('Empresa</Link>') && detalle.includes('Oficinas</Link>'), 'faltan los breadcrumbs')
   // El panel carga por el servicio scoped, no por lo que diga la navegación.
   assert(detalle.includes('getOfficeManagementSummary('), 'el panel debe cargar por el servicio con scoping')
-  // Y /admin/routes sigue funcionando sin ningún parámetro de Oficina.
-  metric('rutas accesible sin parámetros', rutas.includes("if (!nueva && !editar) return"))
-  assert(rutas.includes('if (!nueva && !editar) return'),
-    'entrar a /admin/routes directamente debe seguir funcionando igual')
+  // Y /admin/routes sigue funcionando sin ningún parámetro: sin `nueva` ni `editar`
+  // el efecto sale sin abrir nada (ahora además puede consumir `officeId`).
+  const sinParametros = /if \(!nueva && !editar\) \{/.test(rutas) || rutas.includes('if (!nueva && !editar) return')
+  metric('rutas accesible sin parámetros', sinParametros)
+  assert(sinParametros, 'entrar a /admin/routes directamente debe seguir funcionando igual')
+  // El contexto de Oficina se valida antes de aplicarse.
+  metric('valida el officeId recibido', rutas.includes('resolveOfficeParam(office, offices)'))
+  assert(rutas.includes('setOfficeFilter(resolveOfficeParam(office, offices))'),
+    'el officeId de la URL debe validarse contra el catálogo antes de aplicarse')
 })
 
 // ############################################################

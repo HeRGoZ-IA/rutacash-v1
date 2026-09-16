@@ -9,12 +9,16 @@ import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { getCashboxSummary } from '@/services/cashboxEngine'
 import { filterAccessibleRoutes, canAccessRoute } from '@/lib/permissions'
+import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
+import { OfficeSelector } from '@/components/ui/OfficeSelector'
 import { formatCurrency, getWeekStart, getWeekEnd, formatDate } from '@/lib/formatters'
 import type { Route, CashboxSummary } from '@/models/types'
 
 export default function CashboxPage() {
   const { tenantId } = useTenant()
   const { user } = useAuth()
+  // Selector propio sustituido por el patrón compartido Oficina → Ruta.
+  const officeFilter = useOfficeRouteFilter()
   const [routes, setRoutes] = useState<Route[]>([])
   const [selectedRoute, setSelectedRoute] = useState('')
   const [summary, setSummary] = useState<CashboxSummary | null>(null)
@@ -29,8 +33,22 @@ export default function CashboxPage() {
     // RESTRICCIÓN POR RUTAS: solo rutas autorizadas en el selector de caja.
     const rts = filterAccessibleRoutes(user, await db.routes.where('tenantId').equals(tenantId).toArray())
     setRoutes(rts)
-    if (rts.length > 0) setSelectedRoute(rts[0].id)
   }
+
+  /**
+   * La caja se calcula SIEMPRE sobre una ruta concreta (el motor no cambia). El
+   * filtro de Oficina decide qué rutas se ofrecen; si la seleccionada queda fuera
+   * —o aún no hay ninguna— se toma la primera del filtro en vez de dejar la
+   * pantalla mostrando una ruta que ya no pertenece al contexto.
+   */
+  useEffect(() => {
+    if (officeFilter.loading) return
+    const dentro = officeFilter.routesInOffice
+    if (officeFilter.routeId) { setSelectedRoute(officeFilter.routeId); return }
+    if (!selectedRoute || !dentro.some(r => r.id === selectedRoute)) {
+      setSelectedRoute(dentro[0]?.id ?? '')
+    }
+  }, [officeFilter.loading, officeFilter.routesInOffice, officeFilter.routeId, selectedRoute])
 
   async function loadSummary() {
     if (!selectedRoute) return
@@ -53,8 +71,12 @@ export default function CashboxPage() {
       </div>
 
       <div className="flex flex-wrap gap-3 items-end">
-        <Select value={selectedRoute} onChange={e => setSelectedRoute(e.target.value)}
-          options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" className="w-48" />
+        {/* Oficina → Ruta compartido. La caja sigue siendo por ruta. */}
+        <OfficeSelector offices={officeFilter.offices} value={officeFilter.officeId}
+          onChange={officeFilter.setOfficeId} includeUnassigned={officeFilter.hasUnassigned} className="w-48" />
+        <Select label="Ruta" value={selectedRoute} onChange={e => setSelectedRoute(e.target.value)}
+          options={officeFilter.routesInOffice.map(r => ({ value: r.id, label: r.nombre }))}
+          placeholder="Seleccionar ruta" className="w-48" />
         <div>
           <label className="block text-xs text-gray-500 mb-1">Desde</label>
           <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)}

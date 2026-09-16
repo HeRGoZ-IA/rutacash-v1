@@ -29,6 +29,10 @@ import {
   routeAdmins, effectiveAdminIdsAfterSave, shouldConfirmRouteWithoutAdmin, routeAdminsLabel,
 } from '../src/lib/routeAdmins'
 import {
+  resolveOfficeParam, routesInOfficeFilter, visibleRouteIds, routeStillInFilter,
+  filterRowsByVisibleRoutes, filterContextLabel, buildLookups, routeOfficeLabel, officeLabelOf,
+} from '../src/lib/officeRouteFilter'
+import {
   routeOperationalState, officeKpis, officeStateSummary, officeScope, officeAlerts,
   relatedUsersOfOffice, applyOfficeRouteSelection, officeRoutesOf, unassignedRoutesOf,
   type OfficeRouteFacts,
@@ -1172,6 +1176,245 @@ check('ROUTE-ADMIN-007 — un Administrador recién creado no recibe rutas autom
   const types = readSourceFile('src/models/types.ts')
   check('ROUTE-ADMIN-018 — no existe Route.adminId ni Route.adminIds',
     !/adminIds?\??:/.test(types))
+}
+
+
+// ============================================================
+// ENTREGA 2 — FILTRO TRANSVERSAL OFICINA → RUTA
+// ------------------------------------------------------------
+// Un solo patrón para ocho módulos. La Oficina SIEMPRE estrecha el alcance ya
+// autorizado; ninguna función de este módulo puede devolver una ruta que el
+// usuario no tuviera. "Todas las oficinas" = todas las rutas AUTORIZADAS.
+// ============================================================
+const OFI_LET = 'of-let'
+const OFI_RIO = 'of-rio'
+
+const mkRutaE2 = (id: string, officeId: string | undefined, nombre = id): Route =>
+  ({ id, tenantId: 't1', officeId, nombre, codigo: id, tasaInteres: 20, tasaLibre: false,
+     montoMaximoPrestamo: 1, capitalInicial: 0, capitalActual: 0, status: 'activa',
+     createdAt: '', updatedAt: '' }) as Route
+
+const mkOficinaE2 = (id: string, nombre: string, status: Office['status'] = 'activa'): Office =>
+  ({ id, tenantId: 't1', nombre, status, createdAt: '', updatedAt: '' })
+
+// Empresa: Leticia tiene 3 rutas, Río 1, y hay 1 ruta Sin Oficina.
+const RUTAS_EMPRESA = [
+  mkRutaE2('r-L1', OFI_LET, 'Centro'), mkRutaE2('r-L2', OFI_LET, 'Mercado'), mkRutaE2('r-L3', OFI_LET, 'Norte'),
+  mkRutaE2('r-R1', OFI_RIO, 'Puerto'),
+  mkRutaE2('r-X', undefined, 'Antigua'),
+]
+const OFICINAS_EMPRESA = [mkOficinaE2(OFI_LET, 'Leticia'), mkOficinaE2(OFI_RIO, 'Río')]
+
+// Admin PARCIAL: Centro y Mercado de Leticia, Puerto de Río, y la ruta Sin Oficina.
+// NO tiene Norte, aunque sea de Leticia.
+const ADMIN_PARCIAL = mkUser('admin', { id: 'u-parcial', authorizedRouteIds: ['r-L1', 'r-L2', 'r-R1', 'r-X'] })
+const ACCESIBLES = filterAccessibleRoutes(ADMIN_PARCIAL, RUTAS_EMPRESA)
+
+// --- OFFICE-FILTER-001: nunca aparecen rutas hermanas no autorizadas ---
+{
+  const enLeticia = visibleRouteIds({ accessibleRoutes: ACCESIBLES, officeId: OFI_LET })
+  check('OFFICE-FILTER-001 — un Admin parcial nunca recibe las rutas hermanas de la Oficina',
+    enLeticia.size === 2 && enLeticia.has('r-L1') && enLeticia.has('r-L2') && !enLeticia.has('r-L3'))
+}
+
+// --- OFFICE-FILTER-002: "Todas las oficinas" = todas las AUTORIZADAS ---
+{
+  const todas = visibleRouteIds({ accessibleRoutes: ACCESIBLES, officeId: ALL_OFFICES })
+  check('OFFICE-FILTER-002 — "Todas las oficinas" son todas las rutas autorizadas',
+    todas.size === 4 && !todas.has('r-L3'))
+  check('OFFICE-FILTER-002b — y para el Super Admin son todas las del tenant',
+    visibleRouteIds({ accessibleRoutes: filterAccessibleRoutes(superadmin, RUTAS_EMPRESA), officeId: ALL_OFFICES }).size === 5)
+}
+
+// --- OFFICE-FILTER-003: Oficina específica = intersección ---
+{
+  const rio = visibleRouteIds({ accessibleRoutes: ACCESIBLES, officeId: OFI_RIO })
+  check('OFFICE-FILTER-003 — una Oficina concreta es la intersección con lo autorizado',
+    rio.size === 1 && rio.has('r-R1'))
+}
+
+// --- OFFICE-FILTER-004: "Sin Oficina" transversal ---
+{
+  const sin = visibleRouteIds({ accessibleRoutes: ACCESIBLES, officeId: NO_OFFICE })
+  check('OFFICE-FILTER-004 — "Sin Oficina" selecciona solo las rutas sin Oficina accesibles',
+    sin.size === 1 && sin.has('r-X'))
+}
+
+// --- OFFICE-FILTER-005: cambiar de Oficina invalida la ruta que queda fuera ---
+{
+  check('OFFICE-FILTER-005a — una ruta de Leticia deja de ser válida al pasar a Río',
+    routeStillInFilter(ACCESIBLES, OFI_LET, 'r-L1') && !routeStillInFilter(ACCESIBLES, OFI_RIO, 'r-L1'))
+  check('OFFICE-FILTER-005b — "todas las oficinas" no invalida ninguna ruta accesible',
+    routeStillInFilter(ACCESIBLES, ALL_OFFICES, 'r-L1'))
+  check('OFFICE-FILTER-005c — sin ruta elegida nunca hay nada que limpiar',
+    routeStillInFilter(ACCESIBLES, OFI_RIO, ''))
+  // Y con la ruta fuera del filtro el conjunto queda VACÍO, nunca amplía.
+  check('OFFICE-FILTER-005d — una ruta fuera del filtro produce conjunto vacío',
+    visibleRouteIds({ accessibleRoutes: ACCESIBLES, officeId: OFI_RIO, routeId: 'r-L1' }).size === 0)
+}
+
+// --- OFFICE-FILTER-006: officeId inválido NUNCA amplía el alcance ---
+{
+  check('OFFICE-FILTER-006a — una Oficina de otra empresa se ignora',
+    resolveOfficeParam('of-ajena', OFICINAS_EMPRESA) === ALL_OFFICES)
+  check('OFFICE-FILTER-006b — un id inventado se ignora',
+    resolveOfficeParam('no-existe', OFICINAS_EMPRESA) === ALL_OFFICES)
+  check('OFFICE-FILTER-006c — sin parámetro se queda en "todas"',
+    resolveOfficeParam(null, OFICINAS_EMPRESA) === ALL_OFFICES)
+  check('OFFICE-FILTER-006d — una Oficina real del tenant sí se aplica',
+    resolveOfficeParam(OFI_LET, OFICINAS_EMPRESA) === OFI_LET)
+  check('OFFICE-FILTER-006e — "Sin Oficina" siempre se acepta (es derivada)',
+    resolveOfficeParam(NO_OFFICE, OFICINAS_EMPRESA) === NO_OFFICE)
+  // Aunque un id ajeno se aceptara, el filtro parte de lo accesible: jamás revela.
+  check('OFFICE-FILTER-006f — ni forzando un id ajeno se obtiene una ruta no autorizada',
+    visibleRouteIds({ accessibleRoutes: ACCESIBLES, officeId: 'of-ajena' }).size === 0)
+}
+
+// --- Recorte de filas por módulo: el mismo patrón para todos ---
+{
+  const visiblesLeticia = visibleRouteIds({ accessibleRoutes: ACCESIBLES, officeId: OFI_LET })
+
+  const clientes = [
+    { id: 'c1', routeId: 'r-L1' }, { id: 'c2', routeId: 'r-L2' },
+    { id: 'c3', routeId: 'r-L3' },   // ruta de Leticia NO autorizada
+    { id: 'c4', routeId: 'r-R1' },
+  ]
+  check('OFFICE-CLIENT-001 — los clientes se filtran por la Oficina derivada de su ruta',
+    filterRowsByVisibleRoutes(clientes, visiblesLeticia).map(c => c.id).join() === 'c1,c2')
+
+  const ventas = [{ id: 's1', routeId: 'r-L1' }, { id: 's2', routeId: 'r-L3' }, { id: 's3', routeId: 'r-R1' }]
+  check('OFFICE-SALES-001 — las ventas se filtran por la Oficina derivada de su ruta',
+    filterRowsByVisibleRoutes(ventas, visiblesLeticia).map(v => v.id).join() === 's1')
+
+  const gastos = [{ id: 'e1', routeId: 'r-L2' }, { id: 'e2', routeId: 'r-L3' }]
+  check('OFFICE-EXPENSE-FILTER-001 — los gastos respetan Oficina y ruta',
+    filterRowsByVisibleRoutes(gastos, visiblesLeticia).map(e => e.id).join() === 'e1')
+
+  const capital = [{ id: 'cm1', routeId: 'r-L1' }, { id: 'cm2', routeId: 'r-R1' }]
+  check('OFFICE-CAPITAL-FILTER-001 — el capital respeta el filtro de Oficina',
+    filterRowsByVisibleRoutes(capital, visiblesLeticia).map(c => c.id).join() === 'cm1')
+
+  const retiros = [{ id: 'w1', routeId: 'r-L1' }, { id: 'w2', routeId: 'r-L3' }]
+  check('OFFICE-WITHDRAW-FILTER-001 — los retiros respetan el filtro de Oficina',
+    filterRowsByVisibleRoutes(retiros, visiblesLeticia).map(w => w.id).join() === 'w1')
+
+  // Caja: se ofrece solo la ruta del filtro; el motor sigue siendo por ruta.
+  check('OFFICE-CASH-FILTER-001 — la caja solo ofrece rutas accesibles de la Oficina',
+    routesInOfficeFilter(ACCESIBLES, OFI_LET).map(r => r.id).join() === 'r-L1,r-L2')
+}
+
+// --- Transferencias: la Oficina de cada extremo se DERIVA de su routeId ---
+{
+  const { routeById, officeById } = buildLookups(RUTAS_EMPRESA, OFICINAS_EMPRESA)
+  check('OFFICE-TRANSFER-FILTER-001a — el origen muestra Oficina / Ruta derivadas',
+    routeOfficeLabel('r-L1', routeById, officeById) === 'Leticia / Centro')
+  check('OFFICE-TRANSFER-FILTER-001b — el destino de otra Oficina se distingue',
+    routeOfficeLabel('r-R1', routeById, officeById) === 'Río / Puerto')
+  check('OFFICE-TRANSFER-FILTER-001c — un extremo sin Oficina se etiqueta como tal',
+    routeOfficeLabel('r-X', routeById, officeById) === 'Sin Oficina / Antigua')
+  check('OFFICE-TRANSFER-FILTER-001d — una ruta desconocida no rompe la etiqueta',
+    routeOfficeLabel('r-borrada', routeById, officeById) === 'r-borrada')
+
+  // Una transferencia entra si ALGUNO de sus extremos de ruta está en el filtro.
+  const visiblesRio = visibleRouteIds({ accessibleRoutes: ACCESIBLES, officeId: OFI_RIO })
+  const enFiltro = (o?: string, d?: string) =>
+    [o, d].filter(Boolean).some(id => visiblesRio.has(id as string))
+  check('OFFICE-TRANSFER-FILTER-002 — entra si origen o destino pertenecen al filtro',
+    enFiltro('r-L1', 'r-R1') && enFiltro('r-R1', undefined) && !enFiltro('r-L1', 'r-L2'))
+}
+
+// --- Etiquetas y contexto visible ---
+{
+  const { routeById, officeById } = buildLookups(RUTAS_EMPRESA, OFICINAS_EMPRESA)
+  check('OFFICE-CONTEXT-LABEL-001 — el contexto nombra Oficina y alcance de ruta',
+    filterContextLabel({ officeId: OFI_LET, officeById, routeById }) === 'Oficina: Leticia · Todas las rutas autorizadas')
+  check('OFFICE-CONTEXT-LABEL-002 — con ruta elegida el contexto la nombra',
+    filterContextLabel({ officeId: OFI_LET, officeById, routeId: 'r-L1', routeById }) === 'Oficina: Leticia · Centro')
+  check('OFFICE-CONTEXT-LABEL-003 — "Sin Oficina" se rotula como tal',
+    filterContextLabel({ officeId: NO_OFFICE, officeById, routeById }).startsWith('Oficina: Sin Oficina'))
+  check('OFFICE-CONTEXT-LABEL-004 — sin filtro se dice "Todas las oficinas"',
+    filterContextLabel({ officeId: ALL_OFFICES, officeById, routeById }).startsWith('Oficina: Todas las oficinas'))
+  check('OFFICE-CONTEXT-LABEL-005 — la Oficina de una fila se deriva de su ruta',
+    officeLabelOf(routeById.get('r-L1'), officeById) === 'Leticia' &&
+    officeLabelOf(routeById.get('r-X'), officeById) === NO_OFFICE_LABEL)
+}
+
+// --- Oficina INACTIVA: se consulta el histórico, no se esconde ---
+{
+  const conInactiva = [mkOficinaE2(OFI_LET, 'Leticia', 'inactiva'), mkOficinaE2(OFI_RIO, 'Río')]
+  check('OFFICE-FILTER-007 — una Oficina inactiva sigue siendo filtrable (histórico)',
+    resolveOfficeParam(OFI_LET, conInactiva) === OFI_LET &&
+    visibleRouteIds({ accessibleRoutes: ACCESIBLES, officeId: OFI_LET }).size === 2)
+}
+
+// --- Rendimiento: índices en memoria, sin una consulta por fila ---
+{
+  const { routeById, officeById } = buildLookups(RUTAS_EMPRESA, OFICINAS_EMPRESA)
+  check('OFFICE-PERF-001 — los índices cubren todas las rutas y oficinas de una vez',
+    routeById.size === RUTAS_EMPRESA.length && officeById.size === OFICINAS_EMPRESA.length)
+}
+
+// ============================================================
+// CONTRATO DE CÓDIGO — contexto conservado y derivación correcta
+// ============================================================
+{
+  const detalle = readSourceFile('src/pages/admin/OfficeDetailPage.tsx')
+  const destinos: [string, string][] = [
+    ['OFFICE-CONTEXT-001', '/admin/clients?officeId=${office.id}'],
+    ['OFFICE-CONTEXT-002', '/admin/reports?officeId=${office.id}'],
+    ['OFFICE-CONTEXT-003', '/admin/weekly-settlement?officeId=${office.id}'],
+    ['OFFICE-CONTEXT-004', '/admin/routes?officeId=${office.id}'],
+    ['OFFICE-CONTEXT-005', '/admin/cashbox?officeId=${office.id}'],
+    ['OFFICE-CONTEXT-006', '/admin/active-sales?officeId=${office.id}'],
+  ]
+  for (const [id, destino] of destinos) {
+    check(`${id} — el acceso rápido conserva la Oficina (${destino.split('?')[0]})`,
+      detalle.includes(destino))
+  }
+  check('OFFICE-CONTEXT-007 — ningún acceso rápido navega al módulo general sin contexto',
+    !/navigate\('\/admin\/(clients|reports|weekly-settlement|cashbox|active-sales)'\)/.test(detalle))
+}
+
+{
+  // Cada módulo usa el patrón compartido, no una implementación propia.
+  const MODULOS = [
+    ['Clientes', 'src/pages/admin/ClientsPage.tsx'],
+    ['Ventas', 'src/pages/admin/ActiveSalesPage.tsx'],
+    ['Gastos', 'src/pages/admin/ExpensesPage.tsx'],
+    ['Retiros', 'src/pages/admin/WithdrawalsPage.tsx'],
+    ['Capital', 'src/pages/admin/CapitalPage.tsx'],
+    ['Transferencias', 'src/pages/admin/TransfersPage.tsx'],
+    ['Caja', 'src/pages/admin/CashboxPage.tsx'],
+  ] as const
+  for (const [nombre, archivo] of MODULOS) {
+    check(`OFFICE-FILTER-PATTERN — ${nombre} usa el filtro compartido`,
+      readSourceFile(archivo).includes('useOfficeRouteFilter()'))
+  }
+  // Y las pantallas con contexto por URL lo validan antes de aplicarlo.
+  for (const archivo of ['src/pages/admin/ReportsPage.tsx', 'src/pages/admin/WeeklySettlementPage.tsx', 'src/pages/admin/RoutesPage.tsx']) {
+    check(`OFFICE-CONTEXT-VALID — ${archivo.split('/').pop()} valida el officeId recibido`,
+      readSourceFile(archivo).includes('resolveOfficeParam('))
+  }
+}
+
+{
+  // REGLA ABSOLUTA: la Oficina se deriva por routeId, nunca de la fila.
+  const MODULOS = [
+    'src/pages/admin/ClientsPage.tsx', 'src/pages/admin/ActiveSalesPage.tsx',
+    'src/pages/admin/ExpensesPage.tsx', 'src/pages/admin/WithdrawalsPage.tsx',
+    'src/pages/admin/CapitalPage.tsx', 'src/pages/admin/TransfersPage.tsx',
+    'src/pages/admin/CashboxPage.tsx',
+  ]
+  const lee = /\b(client|sale|expense|withdrawal|movement|transfer|payment|row|c|s|e|w|m|t)\.officeId\b/
+  const infractores = MODULOS.filter(f => lee.test(readSourceFile(f)))
+  check('OFFICE-DERIVE-STRICT — ningún módulo lee officeId de una fila',
+    infractores.length === 0)
+  // El hook compartido tampoco decide permisos: parte del scoping central.
+  const hook = readSourceFile('src/hooks/useOfficeRouteFilter.ts')
+  check('OFFICE-DERIVE-STRICT-b — el filtro parte de useAccessibleRoutes',
+    hook.includes('useAccessibleRoutes()'))
+  check('OFFICE-DERIVE-STRICT-c — el módulo puro del filtro no toca la base de datos',
+    !readSourceFile('src/lib/officeRouteFilter.ts').includes("from '@/lib/db'"))
 }
 
 // ============================================================

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   Building2, MapPin, Users, AlertTriangle, ChevronRight, Plus, Edit,
-  ArrowRightLeft, BarChart3, CalendarRange, UserCog,
+  ArrowRightLeft, BarChart3, CalendarRange, UserCog, CreditCard, Archive,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -262,7 +262,7 @@ export default function OfficeDetailPage() {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-700">Rutas de esta oficina</h2>
-          <Link to="/admin/routes" className="text-xs text-primary-600 hover:underline">Ver todas las rutas</Link>
+          <Link to={`/admin/routes?officeId=${office.id}`} className="text-xs text-primary-600 hover:underline">Ver estas rutas</Link>
         </div>
 
         {accessibleOfficeRoutes.length === 0 ? (
@@ -388,12 +388,28 @@ export default function OfficeDetailPage() {
         )}
       </div>
 
-      {/* Accesos rápidos: solo a pantallas que YA existen, sin prefiltrado inventado. */}
-      <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
-        <Button variant="ghost" size="sm" icon={<Users className="w-3.5 h-3.5" />} onClick={() => navigate('/admin/clients')}>Ver Clientes</Button>
-        <Button variant="ghost" size="sm" icon={<BarChart3 className="w-3.5 h-3.5" />} onClick={() => navigate('/admin/reports')}>Ver Reportes</Button>
-        <Button variant="ghost" size="sm" icon={<CalendarRange className="w-3.5 h-3.5" />} onClick={() => navigate('/admin/weekly-settlement')}>Liquidación</Button>
-        <Button variant="ghost" size="sm" icon={<MapPin className="w-3.5 h-3.5" />} onClick={() => navigate('/admin/routes')}>Ver Rutas</Button>
+      {/* ACCESOS RÁPIDOS CON CONTEXTO: cada destino recibe `?officeId=` y abre ya
+          filtrado por esta Oficina, sobre las rutas que el usuario tenga autorizadas.
+          No son enlaces al módulo general. */}
+      <div className="pt-2 border-t border-gray-100 space-y-2">
+        <p className="text-xs text-gray-400">
+          Estos accesos abren cada módulo filtrado por <span className="font-medium">{office.nombre}</span>,
+          con tus rutas autorizadas de esta oficina.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="ghost" size="sm" icon={<Users className="w-3.5 h-3.5" />}
+            onClick={() => navigate(`/admin/clients?officeId=${office.id}`)}>Ver Clientes</Button>
+          <Button variant="ghost" size="sm" icon={<CreditCard className="w-3.5 h-3.5" />}
+            onClick={() => navigate(`/admin/active-sales?officeId=${office.id}`)}>Ver Ventas</Button>
+          <Button variant="ghost" size="sm" icon={<Archive className="w-3.5 h-3.5" />}
+            onClick={() => navigate(`/admin/cashbox?officeId=${office.id}`)}>Ver Caja</Button>
+          <Button variant="ghost" size="sm" icon={<BarChart3 className="w-3.5 h-3.5" />}
+            onClick={() => navigate(`/admin/reports?officeId=${office.id}`)}>Ver Reportes</Button>
+          <Button variant="ghost" size="sm" icon={<CalendarRange className="w-3.5 h-3.5" />}
+            onClick={() => navigate(`/admin/weekly-settlement?officeId=${office.id}`)}>Liquidación</Button>
+          <Button variant="ghost" size="sm" icon={<MapPin className="w-3.5 h-3.5" />}
+            onClick={() => navigate(`/admin/routes?officeId=${office.id}`)}>Ver Rutas</Button>
+        </div>
       </div>
 
       {/* Mover ruta de Oficina */}

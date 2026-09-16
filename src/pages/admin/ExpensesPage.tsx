@@ -14,16 +14,18 @@ import { useAuth } from '@/hooks/useAuth'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
+import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
+import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import type { Expense, ExpenseCategory, Route } from '@/models/types'
 import { assertRouteOperationalContext } from '@/services/officeService'
 
 export default function ExpensesPage() {
   const { tenantId, currency } = useTenant()
+  const officeFilter = useOfficeRouteFilter()
   const { user } = useAuth()
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [categories, setCategories] = useState<ExpenseCategory[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
-  const [filterRoute, setFilterRoute] = useState('')
   const [desde, setDesde] = useState('')
   const [hasta, setHasta] = useState('')
   const [loading, setLoading] = useState(true)
@@ -48,8 +50,9 @@ export default function ExpensesPage() {
   }
 
   const officeRoutes = routes
-  const filtered = expenses.filter(e =>
-    (!filterRoute || e.routeId === filterRoute) &&
+  const expensesEnAlcance = officeFilter.filterRows(expenses)
+  const filtered = expensesEnAlcance.filter(e =>
+    // La ruta la aplica el filtro Oficina → Ruta compartido.
     (!desde || e.fecha >= desde) &&
     (!hasta || e.fecha <= hasta)
   )
@@ -89,16 +92,22 @@ export default function ExpensesPage() {
         <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>Nuevo gasto</Button>
       </div>
 
+      {/* FILTRO OFICINA → RUTA. La Oficina solo estrecha las rutas autorizadas;
+          el contexto activo queda a la vista cuando se llega desde una Oficina. */}
+      <OfficeRouteFilterBar
+        offices={officeFilter.offices}
+        officeId={officeFilter.officeId}
+        onOfficeChange={officeFilter.setOfficeId}
+        routesInOffice={officeFilter.routesInOffice}
+        routeId={officeFilter.routeId}
+        onRouteChange={officeFilter.setRouteId}
+        hasUnassigned={officeFilter.hasUnassigned}
+        contextLabel={officeFilter.contextLabel}
+        showContext={officeFilter.hasOfficeFilter}
+      />
+
       <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta}
         onClear={() => { setDesde(''); setHasta('') }}>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Ruta</label>
-          <select value={filterRoute} onChange={e => setFilterRoute(e.target.value)}
-            className="h-9 rounded-lg border border-gray-300 pl-3 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
-            <option value="">Todas las rutas</option>
-            {officeRoutes.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
-          </select>
-        </div>
       </DateRangeFilter>
 
       <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
