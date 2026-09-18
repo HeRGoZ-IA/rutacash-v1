@@ -1,5 +1,12 @@
 # RutaCash — Protocolo de prueba manual con dos equipos
 
+> ⚠️ **Documento histórico.** Describe el producto cuando existían las versiones
+> **DEMO** y **CLEAN**. Ambas se retiraron en la entrega 6.1 (septiembre 2026):
+> hoy hay una sola RutaCash, sin modos, sin datos ficticios y sin banner de modo.
+> Ver [`BOOTSTRAP_RUTACASH_DESDE_CERO.md`](./BOOTSTRAP_RUTACASH_DESDE_CERO.md).
+> El resto del contenido sigue siendo válido salvo en lo que respecta a DEMO/CLEAN.
+
+
 Valida en navegador real lo que la suite financiera ya prueba de forma determinista:
 que **Admin y Cobrador/Supervisor producen el mismo resultado financiero** y que el
 antiguo *congelamiento de abonos* ya no puede ocurrir.

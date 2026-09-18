@@ -1,4 +1,9 @@
 # AUDITORÍA FUNCIONAL Y UX — RutaCash V1
+
+> ⚠️ **Documento histórico.** Las dos versiones que menciona (`rutacash-demo` y
+> `rutacash-clean`) se retiraron del código en la entrega 6.1 (septiembre 2026).
+> Hoy existe una sola RutaCash, con una sola build. Ver
+> [`docs/BOOTSTRAP_RUTACASH_DESDE_CERO.md`](./docs/BOOTSTRAP_RUTACASH_DESDE_CERO.md).
 **Fecha:** 2026-06-18  
 **Auditor:** Análisis estático de código fuente  
 **Versiones:** `rutacash-demo.vercel.app` (DEMO) · `rutacash-clean.vercel.app` (LIMPIO)  

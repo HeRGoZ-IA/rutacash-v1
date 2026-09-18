@@ -8,7 +8,6 @@ import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { cn } from '@/lib/utils'
 import { initials } from '@/lib/formatters'
-import { AppModeBanner } from '@/components/ui/AppModeBanner'
 import { CountBadge } from '@/components/ui/CountBadge'
 import { countPendingSaleRequests } from '@/services/saleRequestService'
 import { countPendingAdjustmentRequests } from '@/services/paymentCorrectionService'
@@ -207,7 +206,6 @@ export function AdminLayout() {
         </header>
 
         {/* Mode banner */}
-        <AppModeBanner />
 
         {/* Offline banner */}
         {!isOnline && (

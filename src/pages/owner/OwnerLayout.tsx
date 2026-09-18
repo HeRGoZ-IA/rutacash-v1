@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Building2, Receipt, LogOut, Info } from 'lucide-react'
+import { LayoutDashboard, Building2, Receipt, Settings, LogOut, Info } from 'lucide-react'
 import { useOwnerAuth } from '@/hooks/useOwnerAuth'
 import { CONTROL_PLANE_IS_SHARED, CONTROL_PLANE_SCOPE_NOTICE } from '@/platform/controlPlane'
 
@@ -46,6 +46,9 @@ export function OwnerLayout() {
           </NavLink>
           <NavLink to="/owner/cobros" className={link}>
             <Receipt className="w-4 h-4" /> Cobros
+          </NavLink>
+          <NavLink to="/owner/configuracion" className={link}>
+            <Settings className="w-4 h-4" /> Configuración
           </NavLink>
         </nav>
 

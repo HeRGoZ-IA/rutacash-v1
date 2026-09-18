@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Settings, RefreshCw, Download, AlertTriangle, Building2, Trash2 } from 'lucide-react'
-import { IS_CLEAN } from '@/lib/appMode'
+import { Settings, Download, Building2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
@@ -9,8 +8,6 @@ import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
-import { resetLocalAppData } from '@/lib/resetApp'
-import { FullResetDialog } from '@/components/ui/FullResetDialog'
 import { exportJSON } from '@/lib/utils'
 import { nowISO, today } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
@@ -47,10 +44,7 @@ export default function SettingsPage() {
   const { tenantId } = useTenant()
 
   const navigate = useNavigate()
-  const [resetOpen, setResetOpen] = useState(false)
-  const [resetting, setResetting] = useState(false)
   const [savingTenant, setSavingTenant] = useState(false)
-  const [cleanResetOpen, setCleanResetOpen] = useState(false)
 
   // Solo el Super Admin puede editar parámetros CORPORATIVOS (estado, vigencia).
   const canEditCompany = can(user, 'company.edit', { tenantId })
@@ -130,19 +124,10 @@ export default function SettingsPage() {
     } catch { toast.error('Error al guardar') } finally { setSavingTenant(false) }
   }
 
-  // DEMO/CLEAN: borra todos los datos locales y recarga. En DEMO la recarga
-  // vuelve a sembrar los datos de demostración; en CLEAN deja la app vacía.
-  async function handleReset() {
-    setResetting(true)
-    try {
-      await resetLocalAppData()
-      toast.success(IS_CLEAN ? 'App restablecida. Recargando…' : 'Restaurando datos demo…')
-      setTimeout(() => location.replace('/login'), 800)
-    } catch {
-      toast.error('Error al reiniciar')
-      setResetting(false)
-    }
-  }
+  // NINGÚN ROL DE EMPRESA PUEDE BORRAR LA INSTALACIÓN. El restablecimiento de
+  // fábrica es exclusivo del portal Owner y esta pantalla ni siquiera importa el
+  // módulo que lo ejecuta. Antes existía aquí un "Restaurar datos demo"/"Restablecer
+  // app" que desapareció junto con los modos DEMO y CLEAN.
 
   async function handleExport() {
     try {
@@ -231,57 +216,11 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* ZONA DE PELIGRO — solo en modo LIMPIO. Devuelve la instalación a «Usuario 0». */}
-      {IS_CLEAN && (
-        <div className="bg-white rounded-2xl shadow-card border border-red-200 p-5">
-          <h2 className="font-semibold text-red-700 flex items-center gap-2 mb-1">
-            <AlertTriangle className="w-4 h-4 text-red-600" />
-            Zona de peligro
-          </h2>
-          <p className="text-xs text-gray-500 mb-4">
-            Acciones irreversibles sobre los datos de este dispositivo.
-          </p>
-          <div className="flex items-center justify-between p-3.5 bg-red-50 rounded-xl border border-red-100">
-            <div className="min-w-0 pr-4">
-              <p className="text-sm font-medium text-red-800">Restablecer RutaCash desde cero</p>
-              <p className="text-xs text-red-600 mt-0.5">
-                Elimina todos los datos de RutaCash almacenados en este dispositivo y vuelve a la
-                configuración inicial.
-              </p>
-            </div>
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setCleanResetOpen(true)}
-              icon={<Trash2 className="w-3.5 h-3.5" />}
-              className="flex-shrink-0"
-            >
-              Restablecer
-            </Button>
-          </div>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Datos del sistema */}
         <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-5 space-y-4">
           <h2 className="font-semibold text-gray-800 flex items-center gap-2"><Settings className="w-4 h-4" /> Datos del sistema</h2>
           <div className="space-y-3">
-            {/* En CLEAN el restablecimiento vive en su tarjeta dedicada arriba. */}
-            {!IS_CLEAN && (
-              <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-xl border border-amber-100">
-                <RefreshCw className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-amber-800">Restaurar datos demo</p>
-                  <p className="text-xs text-amber-600 mt-0.5">
-                    Borra todos los datos actuales y restaura los datos de demostración originales
-                  </p>
-                  <Button variant="danger" size="sm" onClick={() => setResetOpen(true)} className="mt-2">
-                    Restaurar demo
-                  </Button>
-                </div>
-              </div>
-            )}
             <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
               <Download className="w-4 h-4 text-gray-600 mt-0.5 flex-shrink-0" />
               <div>
@@ -311,57 +250,23 @@ export default function SettingsPage() {
         {/* Usuarios de acceso */}
         <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-5 md:col-span-2">
           <h2 className="font-semibold text-gray-800 mb-3">Usuarios de acceso</h2>
-          {IS_CLEAN ? (
-            <div className="flex items-start gap-3 p-4 bg-primary-50 rounded-xl border border-primary-100">
-              <Building2 className="w-4 h-4 text-primary-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <p className="text-sm font-medium text-primary-800">Administra tus propios usuarios</p>
-                <p className="text-xs text-primary-600 mt-1">
-                  Esta es tu empresa. Crea los usuarios que necesites: cobradores, supervisores y administradores desde el módulo de Usuarios.
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Cada usuario que crees recibe una contraseña temporal generada al azar y deberá
-                  cambiarla en su primer acceso. RutaCash no crea ninguna cuenta por su cuenta.
-                </p>
-                <button onClick={() => navigate('/admin/users')} className="mt-2 text-xs font-semibold text-primary-600 hover:underline">Ir a Usuarios →</button>
-              </div>
+          <div className="flex items-start gap-3 p-4 bg-primary-50 rounded-xl border border-primary-100">
+            <Building2 className="w-4 h-4 text-primary-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-primary-800">Administra tus propios usuarios</p>
+              <p className="text-xs text-primary-600 mt-1">
+                Esta es tu empresa. Crea los usuarios que necesites —cobradores, supervisores,
+                administradores u otros Super Admin— desde el módulo de Usuarios.
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Cada usuario nace con una contraseña inicial que puedes definir tú y que la
+                persona usa tal cual. RutaCash no crea ninguna cuenta por su cuenta.
+              </p>
+              <button onClick={() => navigate('/admin/users')} className="mt-2 text-xs font-semibold text-primary-600 hover:underline">Ir a Usuarios →</button>
             </div>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {[
-                { email: 'superadmin@demo.com', rol: 'Super Admin', pass: '123456' },
-                { email: 'admin@demo.com', rol: 'Administrador', pass: '123456' },
-                { email: 'supervisor@demo.com', rol: 'Supervisor', pass: '123456' },
-                { email: 'cobrador@demo.com', rol: 'Cobrador', pass: '123456' },
-              ].map(u => (
-                <div key={u.email} className="bg-gray-50 rounded-xl p-3">
-                  <p className="text-xs font-semibold text-gray-700">{u.rol}</p>
-                  <p className="text-xs text-gray-500 mt-0.5 break-all">{u.email}</p>
-                  <p className="text-xs text-gray-400">Pass: {u.pass}</p>
-                </div>
-              ))}
-            </div>
-          )}
+          </div>
         </div>
       </div>
-
-      <Modal open={resetOpen} onClose={() => setResetOpen(false)} title={IS_CLEAN ? 'Confirmar restablecimiento' : 'Confirmar restauración'}
-        footer={<><Button variant="secondary" onClick={() => setResetOpen(false)}>Cancelar</Button><Button variant="danger" onClick={handleReset} loading={resetting} icon={<AlertTriangle className="w-4 h-4" />}>Sí, {IS_CLEAN ? 'restablecer' : 'restaurar'}</Button></>}>
-        <div className="space-y-3">
-          <div className="flex items-center gap-3 p-3 bg-red-50 rounded-xl">
-            <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
-            <p className="text-sm text-red-700">Esta acción eliminará TODOS los datos actuales y no se puede deshacer.</p>
-          </div>
-          <p className="text-sm text-gray-600">
-            {IS_CLEAN
-              ? 'La app volverá al estado inicial limpio y la página se recargará.'
-              : 'Se restaurarán los datos demo originales y la página se recargará.'}
-          </p>
-        </div>
-      </Modal>
-
-      {/* Restablecimiento total: mecanismo ÚNICO compartido con la pantalla de recuperación. */}
-      <FullResetDialog open={cleanResetOpen} onClose={() => setCleanResetOpen(false)} />
 
     </div>
   )

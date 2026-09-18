@@ -3,38 +3,38 @@ import { AlertTriangle, Loader2, Trash2 } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { toast } from '@/components/ui/Toast'
-import { resetLocalAppData } from '@/lib/resetApp'
+import { factoryResetAndRestart } from '@/lib/factoryReset'
 
 /**
- * RESTABLECIMIENTO TOTAL — «volver a Usuario 0».
+ * CONFIRMACIÓN DEL RESTABLECIMIENTO DE FÁBRICA.
  *
- * ÚNICO diálogo destructivo de la instalación CLEAN. Se comparte entre Configuración
- * y la pantalla de recuperación para que exista UN SOLO mecanismo de borrado y UNA
- * SOLA experiencia de confirmación.
+ * Vive en `components/owner/` y no en `components/ui/` a propósito: es una pieza del
+ * portal de plataforma, no un componente de uso general. Ningún archivo del portal de
+ * empresa lo importa, y hay una prueba que lo verifica.
  *
- * No implementa borrado propio: delega en `resetLocalAppData()`, que ya borra la base
- * completa, las claves locales `rutacash-*`, la Cache Storage y los Service Workers.
- * Tras recargar, el arranque CLEAN no siembra nada y `getInstallationState()` vuelve
- * a `empty`, de modo que aparece «Configurar RutaCash».
+ * La barrera es escribir la palabra, no marcar una casilla: un clic accidental no
+ * puede borrar una instalación entera. No se vuelve a pedir la contraseña — el Owner
+ * ya está autenticado y encadenar otro formulario de credenciales sería exactamente
+ * el tipo de fricción que esta entrega elimina.
  */
 
-/** Frase que la persona debe escribir para habilitar el borrado. */
-export const RESET_CONFIRM_PHRASE = 'BORRAR TODO'
+/** Palabra que la persona debe escribir para habilitar el borrado. */
+export const FACTORY_RESET_PHRASE = 'RESTABLECER'
 
 /**
- * ¿Lo escrito habilita el borrado? Se ignoran mayúsculas y los espacios sobrantes
- * (escribir bien la frase ya es la barrera; pelear con el teclado no aporta
- * seguridad), pero NUNCA basta con un clic: hay que teclearla.
+ * ¿Lo escrito habilita el borrado? Se ignoran mayúsculas y espacios sobrantes
+ * (escribir la palabra ya es la barrera; pelear con el teclado no añade seguridad),
+ * pero NUNCA basta con un clic: hay que teclearla.
  */
-export function matchesResetPhrase(input: string): boolean {
-  return input.trim().replace(/\s+/g, ' ').toUpperCase() === RESET_CONFIRM_PHRASE
+export function matchesFactoryResetPhrase(input: string): boolean {
+  return input.trim().replace(/\s+/g, ' ').toUpperCase() === FACTORY_RESET_PHRASE
 }
 
-export function FullResetDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function FactoryResetDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [frase, setFrase] = useState('')
   const [borrando, setBorrando] = useState(false)
 
-  const habilitado = matchesResetPhrase(frase) && !borrando
+  const habilitado = matchesFactoryResetPhrase(frase) && !borrando
 
   function cerrar() {
     if (borrando) return       // no se puede cancelar a mitad del borrado
@@ -46,9 +46,13 @@ export function FullResetDialog({ open, onClose }: { open: boolean; onClose: () 
     if (!habilitado) return
     setBorrando(true)          // impide el doble clic
     try {
-      await resetLocalAppData()
-      // Redirección dura: el documento se recarga y la app arranca desde cero.
-      location.replace('/login')
+      // Borra la base, ambas sesiones, cachés y service workers, y recarga en
+      // /owner/login. No vuelve de aquí si todo va bien.
+      const hecho = await factoryResetAndRestart()
+      if (!hecho) {
+        toast.error('El restablecimiento está desactivado en esta instalación.')
+        setBorrando(false)
+      }
     } catch {
       toast.error('No se pudieron eliminar los datos. Inténtalo de nuevo.')
       setBorrando(false)
@@ -59,7 +63,7 @@ export function FullResetDialog({ open, onClose }: { open: boolean; onClose: () 
     <Modal
       open={open}
       onClose={cerrar}
-      title="Restablecer RutaCash desde cero"
+      title="Restablecer RutaCash a cero"
       footer={
         <>
           <Button variant="secondary" onClick={cerrar} disabled={borrando}>Cancelar</Button>
@@ -69,7 +73,7 @@ export function FullResetDialog({ open, onClose }: { open: boolean; onClose: () 
             disabled={!habilitado}
             icon={borrando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
           >
-            {borrando ? 'Eliminando datos...' : 'Eliminar todo y empezar de cero'}
+            {borrando ? 'Eliminando datos...' : 'Eliminar todo'}
           </Button>
         </>
       }
@@ -79,28 +83,26 @@ export function FullResetDialog({ open, onClose }: { open: boolean; onClose: () 
           <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
           <div className="space-y-2 text-sm text-red-700">
             <p>
-              Se eliminarán permanentemente todos los datos de RutaCash almacenados en este
-              dispositivo, incluyendo usuarios, empresas, rutas, clientes, ventas, parcelas,
-              pagos, gastos y configuración.
+              Se eliminarán todos los datos locales de RutaCash, incluidos Owners,
+              empresas y operaciones. Esta acción no se puede deshacer.
             </p>
-            <p>
-              RutaCash volverá al estado inicial y tendrás que crear nuevamente el primer
-              Super Admin.
+            <p className="font-semibold">
+              Tu propia cuenta de Owner también se borra: al terminar tendrás que crear
+              el primer Owner de nuevo.
             </p>
-            <p className="font-semibold">Esta acción no se puede deshacer.</p>
           </div>
         </div>
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1.5">
-            Para confirmar, escribe <span className="font-mono font-semibold">{RESET_CONFIRM_PHRASE}</span>
+            Para confirmar, escribe <span className="font-mono font-semibold">{FACTORY_RESET_PHRASE}</span>
           </label>
           <input
             type="text"
             value={frase}
             onChange={e => setFrase(e.target.value)}
             disabled={borrando}
-            placeholder={RESET_CONFIRM_PHRASE}
+            placeholder={FACTORY_RESET_PHRASE}
             autoComplete="off"
             className="w-full h-11 rounded-xl border border-gray-300 px-4 text-sm font-mono tracking-wide focus:outline-none focus:ring-2 focus:ring-red-500 disabled:bg-gray-50"
           />

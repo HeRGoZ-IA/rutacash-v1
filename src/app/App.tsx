@@ -9,8 +9,7 @@ import { SecretarioLayout } from '@/components/layout/SecretarioLayout'
 import { RequireAuth, RequireOwner } from '@/components/auth/guards'
 import { useAuth } from '@/hooks/useAuth'
 import { useOwnerAuth } from '@/hooks/useOwnerAuth'
-import { seedDatabase, ensureExpenseCategories } from '@/data/seed'
-import { IS_CLEAN } from '@/lib/appMode'
+import { ensureExpenseCategories } from '@/lib/expenseCategoryDefaults'
 
 // Auth
 import AuthEntry from '@/pages/auth/AuthEntry'
@@ -22,6 +21,7 @@ import OwnerDashboardPage from '@/pages/owner/OwnerDashboardPage'
 import OwnerCompaniesPage from '@/pages/owner/OwnerCompaniesPage'
 import OwnerCompanyDetailPage from '@/pages/owner/OwnerCompanyDetailPage'
 import OwnerBillingPage from '@/pages/owner/OwnerBillingPage'
+import OwnerSettingsPage from '@/pages/owner/OwnerSettingsPage'
 
 // Admin
 import DashboardPage from '@/pages/admin/DashboardPage'
@@ -110,15 +110,14 @@ export default function App() {
   const [booting, setBooting] = useState(true)
 
   useEffect(() => {
-    // ARRANQUE.
-    //  · DEMO  → siembra su conjunto ficticio completo.
-    //  · CLEAN → NO siembra nada: una instalación limpia nace vacía y su primera
-    //            acción es que una persona cree el Super Admin (ver AuthEntry).
-    // Después se garantizan las categorías de gasto de las empresas existentes
-    // (red de seguridad para empresas creadas antes de que fueran dato de empresa)
-    // y se revalida la sesión persistida contra la base.
+    // ARRANQUE — UNA SOLA APLICACIÓN, SIN MODOS.
+    //
+    // No se siembra NADA, nunca. Una instalación nueva está vacía: 0 Owners, 0
+    // empresas, 0 usuarios, 0 rutas, 0 datos. La primera entidad la crea una persona
+    // en /owner/login. Aquí solo se garantizan las categorías de gasto de las
+    // empresas que YA existan (red de seguridad; sobre una base vacía no hace nada)
+    // y se revalidan las dos sesiones persistidas contra la base.
     const boot = async () => {
-      if (!IS_CLEAN) await seedDatabase()
       await ensureExpenseCategories()
       // Las DOS sesiones se revalidan por separado, porque son independientes: cada
       // una vive en su propio store y ninguna sabe de la otra.
@@ -161,6 +160,7 @@ export default function App() {
           <Route path="empresas" element={<OwnerCompaniesPage />} />
           <Route path="empresas/:companyId" element={<OwnerCompanyDetailPage />} />
           <Route path="cobros" element={<OwnerBillingPage />} />
+          <Route path="configuracion" element={<OwnerSettingsPage />} />
         </Route>
 
         {/* Socio (perfil de consulta / solo lectura) */}

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, ShieldCheck, LifeBuoy, Eye, EyeOff, Trash2 } from 'lucide-react'
+import { Loader2, ShieldCheck, LifeBuoy, Eye, EyeOff } from 'lucide-react'
 import { useOwnerAuth } from '@/hooks/useOwnerAuth'
 import { toast, useToastStore } from '@/components/ui/Toast'
 import { rememberLoginEmail } from '@/lib/lastLoginEmail'
@@ -8,7 +8,6 @@ import {
   createFirstOwner, MIN_BOOTSTRAP_PASSWORD_LENGTH,
   type InstallationState,
 } from '@/services/platformBootstrapService'
-import { FullResetDialog } from '@/components/ui/FullResetDialog'
 
 /**
  * CONFIGURACIÓN INICIAL DE LA PLATAFORMA.
@@ -25,6 +24,10 @@ import { FullResetDialog } from '@/components/ui/FullResetDialog'
  *
  * Aquí TERMINA el arranque de la plataforma. La primera empresa y su primer Super
  * Admin se crean después, ya dentro del portal: no hay wizard encadenado.
+ *
+ * ESTA PANTALLA NO BORRA NADA. El restablecimiento de fábrica exige un Owner
+ * autenticado y vive en el portal (Configuración → Zona de pruebas). Ofrecerlo aquí
+ * lo pondría al alcance de cualquiera que abriera la URL sin credenciales.
  */
 export function OwnerSetupPage({ state, onDone }: { state: InstallationState; onDone: () => void }) {
   const navigate = useNavigate()
@@ -33,7 +36,6 @@ export function OwnerSetupPage({ state, onDone }: { state: InstallationState; on
   const [showPass, setShowPass] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [resetOpen, setResetOpen] = useState(false)
 
   const esRecuperacion = state.status === 'orphaned'
 
@@ -98,7 +100,7 @@ export function OwnerSetupPage({ state, onDone }: { state: InstallationState; on
               ? <LifeBuoy className="w-5 h-5 text-amber-600" />
               : <ShieldCheck className="w-5 h-5 text-gray-700" />}
             <h1 className="text-2xl font-bold text-gray-900">
-              {esRecuperacion ? 'Recuperar instalación' : 'Configurar RutaCash'}
+              {esRecuperacion ? 'Recuperar instalación' : 'Crear primer Owner'}
             </h1>
           </div>
 
@@ -119,8 +121,9 @@ export function OwnerSetupPage({ state, onDone }: { state: InstallationState; on
             </div>
           ) : (
             <p className="text-gray-500 text-sm mt-2 mb-5">
-              Crea la cuenta de plataforma. Desde ella darás de alta las empresas
-              clientes y su primer Super Admin.
+              Esta instalación todavía no tiene dueño. Crea la primera cuenta de
+              plataforma: desde ella darás de alta las empresas clientes y su primer
+              Super Admin.
             </p>
           )}
 
@@ -157,30 +160,13 @@ export function OwnerSetupPage({ state, onDone }: { state: InstallationState; on
             <button type="submit" disabled={saving}
               className="w-full h-11 bg-gray-900 hover:bg-black text-white rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
               {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-              {saving ? 'Creando...' : esRecuperacion ? 'Recuperar instalación (conserva los datos)' : 'Crear cuenta de plataforma'}
+              {saving ? 'Creando...' : esRecuperacion ? 'Recuperar instalación (conserva los datos)' : 'Crear Owner'}
             </button>
           </form>
 
-          {/* SEGUNDO CAMINO — SOLO EN RECUPERACIÓN. En una instalación virgen no hay
-              nada que borrar, así que ofrecerlo sería ruido peligroso. */}
-          {esRecuperacion && (
-            <div className="mt-8 pt-5 border-t border-gray-100 text-center">
-              <p className="text-xs text-gray-400">¿Prefieres empezar de cero?</p>
-              <button type="button" onClick={() => setResetOpen(true)}
-                className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-red-600 hover:text-red-700 hover:underline">
-                <Trash2 className="w-3.5 h-3.5" />
-                Empezar desde cero (elimina los datos locales)
-              </button>
-              <p className="text-[11px] text-gray-400 mt-1.5">
-                Elimina todos los datos de RutaCash de este dispositivo.
-              </p>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Mismo diálogo destructivo que el login y Configuración. */}
-      <FullResetDialog open={resetOpen} onClose={() => setResetOpen(false)} />
     </div>
   )
 }

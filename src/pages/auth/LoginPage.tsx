@@ -1,26 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Eye, EyeOff, Loader2, TrendingUp, Shield, Smartphone, Trash2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2, TrendingUp, Shield, Smartphone } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
-import { IS_DEMO, IS_CLEAN } from '@/lib/appMode'
 import { homePathForRole } from '@/lib/permissions'
 import { getLastLoginEmail } from '@/lib/lastLoginEmail'
-import { FullResetDialog } from '@/components/ui/FullResetDialog'
 import type { UserRole } from '@/models/types'
-
-const ALL_DEMO_USERS = [
-  { email: 'superadmin@demo.com', password: '123456', label: 'Super Admin', role: 'Plataforma' },
-  { email: 'admin@demo.com', password: '123456', label: 'Administrador', role: 'Empresa' },
-  { email: 'socio1@demo.com', password: '123456', label: 'Socio', role: 'Consulta' },
-  { email: 'supervisor@demo.com', password: '123456', label: 'Supervisor', role: 'Rutas' },
-  { email: 'cobrador@demo.com', password: '123456', label: 'Cobrador', role: 'Ruta' },
-  { email: 'secretario@demo.com', password: '123456', label: 'Secretario', role: 'Autorizaciones' },
-]
-
-// En CLEAN no hay NINGUNA cuenta precreada: no existen credenciales que sugerir.
-// Los accesos rápidos son exclusivos de DEMO.
-const DEMO_USERS = IS_DEMO ? ALL_DEMO_USERS : []
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -32,7 +17,6 @@ export default function LoginPage() {
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [resetOpen, setResetOpen] = useState(false)
 
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -58,12 +42,6 @@ export default function LoginPage() {
     if (!result.success) {
       setError(result.error ?? 'Error al iniciar sesión')
     }
-  }
-
-  function fillDemo(u: typeof DEMO_USERS[0]) {
-    setEmail(u.email)
-    setPassword(u.password)
-    setError('')
   }
 
   return (
@@ -124,19 +102,7 @@ export default function LoginPage() {
             <p className="font-bold text-gray-900">RutaCash</p>
           </div>
 
-          <div className="flex items-center justify-between mb-1">
-            <h2 className="text-2xl font-bold text-gray-900">Iniciar sesión</h2>
-            {IS_DEMO && (
-              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">
-                DEMO
-              </span>
-            )}
-            {IS_CLEAN && (
-              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">
-                LIMPIO
-              </span>
-            )}
-          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-1">Iniciar sesión</h2>
           <p className="text-gray-500 text-sm mb-6">Ingresa a tu cuenta para continuar</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -189,55 +155,9 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Accesos rápidos: SOLO DEMO. En CLEAN no existe ninguna cuenta precreada. */}
-          {DEMO_USERS.length > 0 && (
-          <div className="mt-6">
-            <p className="text-xs text-gray-400 text-center mb-3">
-              — Usuarios demo (clic para llenar) —
-            </p>
-            <div className="grid gap-2 grid-cols-2">
-              {DEMO_USERS.map((u) => (
-                <button
-                  key={u.email}
-                  type="button"
-                  onClick={() => fillDemo(u)}
-                  className="text-left px-3 py-2.5 rounded-xl border border-gray-200 hover:border-primary-300 hover:bg-primary-50 transition-colors"
-                >
-                  <p className="text-xs font-semibold text-gray-700">{u.label}</p>
-                  <p className="text-xs text-gray-400">{u.role}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-          )}
-
-          {/* SALIDA DE EMERGENCIA — SOLO CLEAN.
-              Si existe un Super Admin pero nadie recuerda sus credenciales, esta es la
-              única vía para volver a empezar sin recurrir a DevTools: sin sesión no hay
-              acceso a Configuración ni al flujo de recuperación. Acción secundaria, muy
-              separada de «Ingresar», y con la confirmación fuerte que ya vive en
-              FullResetDialog (frase BORRAR TODO incluida). */}
-          {IS_CLEAN && (
-            <div className="mt-8 pt-5 border-t border-gray-100 text-center">
-              <p className="text-xs text-gray-400">¿Quieres empezar nuevamente?</p>
-              <button
-                type="button"
-                onClick={() => setResetOpen(true)}
-                className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-red-600 hover:text-red-700 hover:underline"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Restablecer RutaCash desde cero
-              </button>
-              <p className="text-[11px] text-gray-400 mt-1.5">
-                Elimina todos los datos de RutaCash de este dispositivo.
-              </p>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Mismo diálogo destructivo que Configuración y Recuperar instalación. */}
-      <FullResetDialog open={resetOpen} onClose={() => setResetOpen(false)} />
     </div>
   )
 }

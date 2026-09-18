@@ -9,7 +9,6 @@ import { getAuthorizedRouteIds } from '@/lib/roles'
 import { countPendingDisbursements } from '@/services/saleRequestService'
 import { db } from '@/lib/db'
 import { cn } from '@/lib/utils'
-import { AppModeBanner } from '@/components/ui/AppModeBanner'
 import { CountBadge } from '@/components/ui/CountBadge'
 import type { Route } from '@/models/types'
 
@@ -133,7 +132,6 @@ export function CollectorLayout() {
       </header>
 
       {/* Mode banner */}
-      <AppModeBanner />
 
       {/* Offline banner */}
       {!isOnline && (

@@ -1,8 +1,5 @@
-import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Building2, Trash2 } from 'lucide-react'
-import { IS_CLEAN } from '@/lib/appMode'
-import { FullResetDialog } from '@/components/ui/FullResetDialog'
+import { Building2 } from 'lucide-react'
 
 /**
  * INSTALACIÓN SIN EMPRESAS.
@@ -15,8 +12,6 @@ import { FullResetDialog } from '@/components/ui/FullResetDialog'
  * real del onboarding es Owner → empresa → primer Super Admin → `/login`.
  */
 export function EmptyInstallationNotice() {
-  const [resetOpen, setResetOpen] = useState(false)
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#1E3A8A] via-gray-900 to-[#1E3A8A] flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -44,19 +39,7 @@ export function EmptyInstallationNotice() {
             Ir al portal de la plataforma
           </Link>
         </div>
-
-        {IS_CLEAN && (
-          <div className="mt-6 text-center">
-            <button type="button" onClick={() => setResetOpen(true)}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-red-300 hover:text-red-200 hover:underline">
-              <Trash2 className="w-3.5 h-3.5" />
-              Restablecer RutaCash desde cero
-            </button>
-          </div>
-        )}
       </div>
-
-      <FullResetDialog open={resetOpen} onClose={() => setResetOpen(false)} />
     </div>
   )
 }

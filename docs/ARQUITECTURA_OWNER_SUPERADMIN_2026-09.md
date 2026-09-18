@@ -347,3 +347,65 @@ Intacto y protegido por sus suites: Oficinas (CRUD, Sin Oficina, OfficeDetail,
 Office → Route, indicadores, roles, actividad, exportaciones, barra sticky,
 multi-Admin), Liquidaciones (cierre, reapertura, versionado, correcciones, snapshots)
 y todo el scoping por rutas autorizadas.
+
+---
+
+## 13. Aplicación única y bootstrap desde cero
+
+> **Añadido en la entrega 6.1 (septiembre 2026).** Guía operativa completa en
+> [`BOOTSTRAP_RUTACASH_DESDE_CERO.md`](./BOOTSTRAP_RUTACASH_DESDE_CERO.md).
+
+### Se acabaron DEMO y CLEAN
+
+RutaCash era dos productos: **DEMO** (con un conjunto ficticio completo: empresa
+Credirutas Norte, seis usuarios con contraseña `123456`, oficinas, rutas, clientes,
+ventas y pagos) y **CLEAN** (vacía). Cada uno con su build, su variable de entorno, su
+banner y su lógica condicional repartida por la interfaz.
+
+Eso desapareció. Hay **una sola RutaCash**:
+
+| Antes | Ahora |
+|---|---|
+| `src/lib/appMode.ts` (`IS_DEMO`, `IS_CLEAN`) | `src/lib/featureFlags.ts` (interruptores nombrados) |
+| `src/data/seed.ts` (conjunto DEMO + `seedCleanDatabase`) | eliminado — nada se siembra, nunca |
+| `AppModeBanner` en cuatro layouts | eliminado |
+| `build:demo` / `build:clean` / `dev:demo` / `dev:clean` | `npm run build` / `npm run dev` |
+| `.env.demo` / `.env.clean` | eliminados |
+| `VITE_APP_MODE`, `VITE_SEED_DEMO` | eliminadas |
+| Credenciales sugeridas en el login | eliminadas |
+
+El arranque de `App.tsx` ya no tiene ninguna condición de modo: garantiza las
+categorías de gasto de las empresas que existan (sobre una base vacía no hace nada) y
+revalida las dos sesiones. Nada más.
+
+Una instalación sin datos **no es un modo**: es una instalación sin datos.
+
+### El estado inicial es CERO REAL
+
+0 Owners · 0 Empresas · 0 usuarios tenant · 0 Offices · 0 Routes · 0 Clients ·
+0 Sales · 0 Payments · 0 Settlements.
+
+La primera entidad la crea una persona en `/owner/login`, que sobre una base virgen
+muestra **«Crear primer Owner»** en lugar del formulario de acceso. Tras el primero,
+el registro público se cierra: los Owners siguientes se crean desde
+**Configuración → Owners**, ya autenticado.
+
+### Restablecimiento de fábrica
+
+`src/lib/factoryReset.ts`, gobernado por `ENABLE_FACTORY_RESET`. Borra la base entera
+con `db.delete()` —no tabla por tabla, para que ninguna tabla futura quede fuera por
+olvido—, ambas sesiones por prefijo `rutacash-`, cachés y service workers. Recarga en
+`/owner/login`.
+
+**Borra también los Owners**, a propósito: al terminar vuelve a pedirse la creación
+del primero. Exclusivo del Owner autenticado; el portal de empresa ni siquiera importa
+el módulo, y las pruebas `TENANT-NO-RESET-*` barren el árbol para garantizarlo.
+
+### Lo que NO se hizo, y por qué
+
+Backend, sincronización cross-device y control-plane remoto quedan **fuera a
+propósito**. Durante esta etapa Helmer y Andrés prueban en equipos independientes y no
+necesitan compartir datos. La respuesta a la pregunta cross-device del apartado 10
+sigue siendo **NO**, y el contrato del backend futuro sigue documentado en
+[`CONTROL_PLANE_BACKEND_REQUIREMENTS_2026-09.md`](./CONTROL_PLANE_BACKEND_REQUIREMENTS_2026-09.md)
+para cuando toque.

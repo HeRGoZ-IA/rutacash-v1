@@ -150,6 +150,168 @@ const usuario = (over: Partial<User> & { tenantId: string; rol: User['rol'] }): 
 })
 
 // ############################################################
+// FAMILIA — OWNER-BOOTSTRAP (el ciclo desde CERO)
+// ############################################################
+await spec('OWNER-BOOTSTRAP-001', 'Owner · Bootstrap', 'base vacía → se pide crear el primer Owner, no iniciar sesión', async () => {
+  const db = new MemoryDb()
+  const estado = await getInstallationState(asPlatformDb(db))
+  metric('status', estado.status)
+  metric('initialized', estado.initialized)
+  metric('Owners', estado.ownerCount)
+  assert(estado.status === 'empty' && !estado.initialized, 'una base vacía no está inicializada')
+  assert(estado.ownerCount === 0, 'no puede existir ningún Owner sembrado')
+
+  // Y la puerta de la plataforma monta la CREACIÓN, no el formulario de acceso.
+  const entry = readSource('src/pages/owner/OwnerAuthEntry.tsx')
+  metric('sin Owner monta', 'OwnerSetupPage')
+  metric('con Owner monta', 'OwnerLoginPage')
+  assert(entry.includes('if (!state.initialized) return <OwnerSetupPage state={state} onDone={refresh} />'),
+    'sin Owner debe mostrarse la creación del primero')
+  assert(entry.includes('return <OwnerLoginPage />'), 'con Owner debe mostrarse el login')
+
+  // El texto que ve la persona.
+  const setup = readSource('src/pages/owner/OwnerSetupPage.tsx')
+  metric('título', 'Crear primer Owner')
+  metric('botón', 'Crear Owner')
+  assert(setup.includes("'Crear primer Owner'"), 'el título debe ser «Crear primer Owner»')
+  assert(setup.includes("'Crear Owner'"), 'el botón debe ser «Crear Owner»')
+
+  // Campos mínimos exigidos por el encargo.
+  for (const campo of ['Nombre', 'Correo electrónico', 'Contraseña', 'Confirmar contraseña']) {
+    metric(`campo "${campo}"`, setup.includes(`>${campo}<`))
+    assert(setup.includes(`>${campo}<`), `falta el campo ${campo}`)
+  }
+})
+
+await spec('OWNER-BOOTSTRAP-002', 'Owner · Bootstrap', 'el primer Owner se persiste y puede entrar', async () => {
+  const db = new MemoryDb()
+  const r = await createFirstOwner(OWNER_INPUT, asPlatformDb(db))
+  assert(r.ok, `no se pudo crear: ${r.ok ? '' : r.message}`)
+
+  const guardados = await db.platformUsers.toArray() as PlatformUser[]
+  metric('Owners persistidos', guardados.length)
+  metric('correo guardado', guardados[0].email)
+  metric('rol', guardados[0].rol)
+  metric('estado', guardados[0].status)
+  assert(guardados.length === 1, 'debe quedar exactamente un Owner en la base')
+  assert(guardados[0].rol === 'owner' && guardados[0].status === 'activo', 'nace activo y de plataforma')
+
+  // Y la sesión se puede abrir de inmediato con lo que acaba de elegir.
+  const sesion = await authenticateOwner(OWNER_INPUT.email, OWNER_INPUT.password, plano(db))
+  metric('acceso inmediato', sesion.ok ? 'ACEPTADO' : sesion.code)
+  assert(sesion.ok, 'debe poder entrar en el acto con las credenciales que eligió')
+
+  const estado = await getInstallationState(asPlatformDb(db))
+  metric('estado tras crear', `${estado.status} · owners=${estado.ownerCount}`)
+  assert(estado.status === 'ready' && estado.ownerCount === 1, 'la plataforma queda inicializada')
+})
+
+await spec('OWNER-BOOTSTRAP-003', 'Owner · Bootstrap', 'con Owner existente, la puerta muestra login y no registro', async () => {
+  const db = new MemoryDb()
+  await nuevoOwner(db)
+  const estado = await getInstallationState(asPlatformDb(db))
+  metric('initialized', estado.initialized)
+  assert(estado.initialized, 'con un Owner la instalación está inicializada')
+
+  const entry = readSource('src/pages/owner/OwnerAuthEntry.tsx')
+  assert(entry.includes('return <OwnerLoginPage />'), 'debe caer en el login normal')
+
+  // Y el login del Owner NO ofrece crear cuentas.
+  const login = readSource('src/pages/owner/OwnerLoginPage.tsx')
+  for (const pr of ['createFirstOwner', 'createAdditionalOwner', 'Crear Owner', 'Registrarse', 'Crear cuenta']) {
+    metric(`OwnerLoginPage → ${pr}`, login.includes(pr) ? 'PRESENTE — ERROR' : 'ausente')
+    assert(!login.includes(pr), `el login de plataforma ofrece registro (${pr})`)
+  }
+})
+
+await spec('OWNER-BOOTSTRAP-004', 'Owner · Bootstrap', 'el segundo Owner NO puede crearse públicamente', async () => {
+  const db = new MemoryDb()
+  const owner = await nuevoOwner(db)
+
+  // Vía pública (la de la pantalla de arranque): RECHAZADA.
+  const publico = await createFirstOwner(
+    { nombre: 'Intruso', email: 'intruso@x.com', password: 'OtraClave2026', confirmPassword: 'OtraClave2026' },
+    asPlatformDb(db),
+  )
+  metric('createFirstOwner con un Owner existente', publico.ok ? 'CREADO — ERROR' : publico.code)
+  assert(!publico.ok && publico.code === 'ALREADY_INITIALIZED', 'el bootstrap público debe cerrarse tras el primero')
+  assert((await db.platformUsers.toArray()).length === 1, 'no debe haberse creado ninguna cuenta extra')
+
+  // Vía autenticada (configuración del portal): ACEPTADA.
+  const interno = await createAdditionalOwner(
+    owner,
+    { nombre: 'Segunda Persona', email: 'segunda@rutacash.com', password: 'OtraClave2026', confirmPassword: 'OtraClave2026' },
+    asPlatformDb(db),
+  )
+  metric('createAdditionalOwner por un Owner activo', interno.ok ? 'CREADO' : interno.code)
+  assert(interno.ok, 'un Owner autenticado sí debe poder crear otro')
+  assert((await db.platformUsers.toArray()).length === 2, 'deben existir dos Owners')
+
+  // Y esa vía vive EXCLUSIVAMENTE en la configuración del portal.
+  const settings = readSource('src/pages/owner/OwnerSettingsPage.tsx')
+  metric('la crea', 'OwnerSettingsPage')
+  assert(settings.includes('createAdditionalOwner'), 'la creación de Owners debe vivir en la configuración del portal')
+  const setup = readSource('src/pages/owner/OwnerSetupPage.tsx')
+  metric('OwnerSetupPage puede crear Owners adicionales', setup.includes('createAdditionalOwner') ? 'SÍ — ERROR' : 'no')
+  assert(!setup.includes('createAdditionalOwner'), 'la pantalla pública no puede crear Owners adicionales')
+})
+
+await spec('OWNER-BOOTSTRAP-005', 'Owner · Bootstrap', 'crear el Owner NO crea ninguna empresa', async () => {
+  const db = new MemoryDb()
+  const antes = await db.counts()
+  await nuevoOwner(db)
+  const despues = await db.counts()
+
+  metric('empresas antes → después', `${antes.tenants} → ${despues.tenants}`)
+  metric('categorías de gasto', despues.expenseCategories)
+  metric('fichas de control', despues.companyControl)
+  metric('offices / routes', `${despues.offices} / ${despues.routes}`)
+  assert(despues.tenants === 0, 'crear el Owner no puede crear empresas')
+  assert(despues.companyControl === 0, 'ni fichas de control')
+  assert(despues.expenseCategories === 0, 'sin empresa no hay categorías de gasto')
+  assert(despues.offices === 0 && despues.routes === 0, 'ni estructura operativa')
+})
+
+await spec('OWNER-BOOTSTRAP-006', 'Owner · Bootstrap', 'crear el Owner NO crea ningún SuperAdmin ni usuario tenant', async () => {
+  const db = new MemoryDb()
+  await nuevoOwner(db)
+  const usuarios = await db.users.toArray() as User[]
+  metric('usuarios tenant', usuarios.length)
+  metric('platformUsers', (await db.platformUsers.toArray()).length)
+  assert(usuarios.length === 0, 'la tabla de usuarios de empresa debe seguir vacía')
+
+  // Ni siquiera existe el antiguo "Super Admin global": el bootstrap escribe en
+  // `platformUsers` y en ninguna otra tabla.
+  const svc = readSource('src/services/platformBootstrapService.ts')
+  const cuerpo = svc.slice(svc.indexOf('export async function createFirstOwner'), svc.indexOf('export async function createAdditionalOwner'))
+  metric('tablas que escribe el bootstrap', 'platformUsers')
+  for (const pr of ['users.add', 'tenants.add', 'expenseCategories', 'routes.add']) {
+    metric(`bootstrap → ${pr}`, cuerpo.includes(pr) ? 'PRESENTE — ERROR' : 'ausente')
+    assert(!cuerpo.includes(pr), `el bootstrap escribe fuera de platformUsers (${pr})`)
+  }
+  assert(cuerpo.includes('database.platformUsers.add'), 'el bootstrap debe escribir en platformUsers')
+})
+
+await spec('OWNER-BOOTSTRAP-007', 'Owner · Bootstrap', 'el portal de empresa no puede arrancar la instalación', () => {
+  // El bootstrap pertenece EXCLUSIVAMENTE a /owner/login. Abrir /login en una
+  // instalación vacía no puede crear nada: no hay cuentas y no se inventan.
+  const entry = readSource('src/pages/auth/AuthEntry.tsx')
+  const login = readSource('src/pages/auth/LoginPage.tsx')
+  const vacia = readSource('src/pages/auth/EmptyInstallationNotice.tsx')
+
+  for (const [nombre, src] of [['AuthEntry', entry], ['LoginPage', login], ['EmptyInstallationNotice', vacia]] as Array<[string, string]>) {
+    for (const pr of ['createFirstOwner', 'createAdditionalOwner', 'createCompanyWithFirstSuperAdmin', 'OwnerSetupPage']) {
+      metric(`${nombre} → ${pr}`, src.includes(pr) ? 'PRESENTE — ERROR' : 'ausente')
+      assert(!src.includes(pr), `${nombre} arranca la instalación desde el portal de empresa (${pr})`)
+    }
+  }
+  metric('instalación vacía en /login muestra', 'EmptyInstallationNotice → enlace a /owner/login')
+  assert(entry.includes('if (state.userCount === 0) return <EmptyInstallationNotice />'),
+    'sin usuarios de empresa debe mostrarse el aviso, no un formulario inútil')
+  assert(vacia.includes('/owner/login'), 'el aviso debe derivar al portal de plataforma')
+})
+
+// ############################################################
 // FAMILIA — OWNER-AUTH
 // ############################################################
 await spec('OWNER-AUTH-001', 'Owner · Acceso', 'el Owner entra por el portal de plataforma', async () => {

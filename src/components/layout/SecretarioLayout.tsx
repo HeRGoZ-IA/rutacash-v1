@@ -4,7 +4,6 @@ import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { cn } from '@/lib/utils'
 import { initials } from '@/lib/formatters'
-import { AppModeBanner } from '@/components/ui/AppModeBanner'
 
 /**
  * Layout del SECRETARIO. Acceso limitado a: Clientes (edición operativa),
@@ -59,7 +58,6 @@ export function SecretarioLayout() {
         </nav>
       </header>
 
-      <AppModeBanner />
 
       <main className="flex-1 overflow-y-auto">
         <Outlet />

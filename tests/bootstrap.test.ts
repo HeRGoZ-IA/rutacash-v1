@@ -3,12 +3,13 @@
 // ------------------------------------------------------------
 //   npm run test:bootstrap
 //
-// Verifica la decisión de producto: una instalación CLEAN nace COMPLETAMENTE VACÍA
-// —sin usuarios, sin empresas, sin credenciales conocidas— y la primera acción es
-// que una persona cree su propio Super Admin.
+// Verifica la decisión de producto: RutaCash es UNA SOLA APLICACIÓN —sin modo DEMO
+// ni modo CLEAN— que nace COMPLETAMENTE VACÍA: sin Owners, sin empresas, sin
+// usuarios y sin credenciales conocidas. La primera acción es que una persona cree
+// su propio Owner en /owner/login.
 // Semántica convencional: cualquier caso fallido → exit 1.
 // ============================================================
-import { seedCleanDatabase, buildDefaultExpenseCategories } from '../src/data/seed'
+import { buildDefaultExpenseCategories } from '../src/lib/expenseCategoryDefaults'
 import {
   getInstallationState, isPlatformInitialized, createFirstOwner, createAdditionalOwner,
   PLATFORM_TENANT_ID, MIN_BOOTSTRAP_PASSWORD_LENGTH,
@@ -29,8 +30,8 @@ import {
   hasOperationalRoutes, canManageRole, canManageUser, canAccessRoute, can,
   filterAccessibleRoutes, filterByAccessibleRoute,
 } from '../src/lib/permissions'
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import { resolve, join } from 'node:path'
 import {
   validateCobradorInvariant, cobradorRemovalBlock, routeCanOperateCollection,
   routeAssignmentWarnings, ROUTE_NO_COBRADOR_LABEL,
@@ -50,7 +51,11 @@ import {
 import { MemoryDb } from './financial/harness'
 import type { Tenant, User } from '../src/models/types'
 import { readSource, containsLine, SRC } from './financial/sourceContract'
-import { RESET_CONFIRM_PHRASE, matchesResetPhrase } from '../src/components/ui/FullResetDialog'
+import {
+  FACTORY_RESET_PHRASE, matchesFactoryResetPhrase,
+} from '../src/components/owner/FactoryResetDialog'
+import { POST_RESET_PATH } from '../src/lib/factoryReset'
+import { ENABLE_FACTORY_RESET, APP_NAME } from '../src/lib/featureFlags'
 
 // ============================================================
 // Mini-runner
@@ -73,6 +78,46 @@ async function spec(id: string, group: string, desc: string, fn: () => Promise<v
 // ============================================================
 // Utilidades
 // ============================================================
+/**
+ * TODOS los archivos .ts/.tsx de `src`, recursivamente. Los barridos de esta suite
+ * (sin DEMO, sin CLEAN, sin reset en el portal cliente) se hacen sobre el árbol REAL
+ * y no sobre una lista escrita a mano: una lista se queda obsoleta en cuanto alguien
+ * añade un archivo, y justo entonces es cuando haría falta.
+ */
+function archivosDeSrc(dir = 'src'): string[] {
+  const base = resolve(process.cwd(), dir)
+  if (!existsSync(base)) return []
+  const out: string[] = []
+  for (const entrada of readdirSync(base)) {
+    const completo = join(base, entrada)
+    // La ruta lógica se compone con '/' a mano (nunca con `join`) para que el
+    // resultado sea idéntico en Windows y en Linux: estas rutas se comparan con
+    // literales como 'src/pages/owner/OwnerSettingsPage.tsx'.
+    const rel = `${dir}/${entrada}`
+    if (statSync(completo).isDirectory()) out.push(...archivosDeSrc(rel))
+    else if (/\.tsx?$/.test(entrada)) out.push(rel)
+  }
+  return out
+}
+
+/**
+ * Código de un archivo SIN sus comentarios.
+ *
+ * Los barridos de "esto ya no puede existir" tienen que mirar lo que la aplicación
+ * HACE, no lo que documenta. Un comentario que explica qué se retiró y por qué es
+ * información valiosa; una prueba que se cae por culpa de su propia documentación
+ * solo enseña a borrar comentarios.
+ */
+function sinComentarios(src: string): string {
+  return src
+    .split(/\r?\n/)
+    .filter(l => {
+      const t = l.trim()
+      return !(t.startsWith('//') || t.startsWith('*') || t.startsWith('/*'))
+    })
+    .join(' ')
+}
+
 const asPlatformDb = (db: MemoryDb) => db as unknown as PlatformDatabase
 const asAuthDb = (db: MemoryDb) => db as unknown as AuthDatabase
 const asControlPlane = (db: MemoryDb) => controlPlaneOn(db as unknown as ControlPlaneDatabase)
@@ -118,14 +163,18 @@ const OWNER = {
   confirmPassword: 'MiClaveSegura2026',
 }
 
-/** Instalación CLEAN recién abierta: base vacía + arranque (que no siembra nada). */
+/**
+ * Instalación RECIÉN ABIERTA: base vacía.
+ *
+ * Ya no hay ningún "arranque CLEAN" que invocar: el arranque de la aplicación no
+ * siembra absolutamente nada, así que una instalación nueva es, literalmente, una
+ * base sin filas.
+ */
 async function freshCleanInstall(): Promise<MemoryDb> {
-  const db = new MemoryDb()
-  await seedCleanDatabase()
-  return db
+  return new MemoryDb()
 }
 
-/** Instalación HUÉRFANA: la que dejó el seed CLEAN antiguo (Admin, sin Super Admin). */
+/** Instalación HUÉRFANA: datos de empresa heredados, sin ninguna cuenta de plataforma. */
 function orphanedInstall(): MemoryDb {
   const db = new MemoryDb()
   db.tenants._seed([{
@@ -191,21 +240,34 @@ async function reportarConteos(db: MemoryDb, etiqueta: string): Promise<Record<s
   return { ...c, superadmins, admins }
 }
 
-await spec('ZERO-STATE-001', 'Zero-state', 'arranque CLEAN nuevo: TODAS las tablas en 0', async () => {
+await spec('ZERO-STATE-001', 'Zero-state', 'instalación nueva: TODAS las tablas en 0', async () => {
   const db = new MemoryDb()
-  // Arranque CLEAN EXACTO tal y como lo ejecuta App.tsx:
-  //   if (!IS_CLEAN) await seedDatabase()   → en CLEAN no se ejecuta
-  //   await ensureExpenseCategories()       → itera tenants; con 0 tenants no hace nada
-  await seedCleanDatabase()
-  const c = await reportarConteos(db, 'CLEAN recién arrancada')
+  // Arranque EXACTO tal y como lo ejecuta App.tsx. Ya no hay condición de modo:
+  //   await ensureExpenseCategories()   → itera tenants; con 0 tenants no hace nada
+  //   await revalidateSession() / revalidateOwnerSession()
+  // No existe ninguna llamada de siembra, en ningún modo, porque no hay modos.
+  const c = await reportarConteos(db, 'RutaCash recién instalada')
   for (const [tabla, n] of Object.entries(c)) {
-    assert(n === 0, `${tabla} = ${n}: una instalación CLEAN nueva debe tener TODO en 0`)
+    assert(n === 0, `${tabla} = ${n}: una instalación nueva debe tener TODO en 0`)
   }
+
+  // CERO REAL, nombrado tabla por tabla como exige el encargo.
+  metric('Owners', c.platformUsers)
+  metric('Empresas', c.tenants)
+  metric('Usuarios tenant', c.users)
+  metric('Offices', c.offices)
+  metric('Routes', c.routes)
+  metric('Clients', c.clients)
+  metric('Sales', c.sales)
+  metric('Payments', c.payments)
+  metric('Settlements', c.weeklySettlements)
+  assert(c.platformUsers === 0 && c.tenants === 0 && c.users === 0, 'sin Owners, empresas ni usuarios')
+  assert(c.offices === 0 && c.routes === 0, 'sin estructura')
+  assert(c.clients === 0 && c.sales === 0 && c.payments === 0 && c.weeklySettlements === 0, 'sin operación')
 })
 
 await spec('ZERO-STATE-002', 'Zero-state', 'crear el primer Owner NO crea ninguna empresa', async () => {
   const db = new MemoryDb()
-  await seedCleanDatabase()
   const r = await createFirstOwner(OWNER, asPlatformDb(db))
   assert(r.ok, 'debía crearse la cuenta')
   const c = await reportarConteos(db, 'tras crear el Owner')
@@ -219,7 +281,6 @@ await spec('ZERO-STATE-002', 'Zero-state', 'crear el primer Owner NO crea ningun
 
 await spec('ZERO-STATE-003', 'Zero-state', 'el alta de empresa NO crea ningún Admin', async () => {
   const db = new MemoryDb()
-  await seedCleanDatabase()
   await crearEmpresaConSuperAdmin(db)
   const users = await db.users.toArray() as User[]
   metric('usuarios existentes', users.map(u => `${u.rol}:${u.email}`).join(', '))
@@ -232,7 +293,6 @@ await spec('ZERO-STATE-003', 'Zero-state', 'el alta de empresa NO crea ningún A
 
 await spec('ZERO-STATE-004', 'Zero-state', 'la primera empresa solo nace por acción explícita, y con sus categorías', async () => {
   const db = new MemoryDb()
-  await seedCleanDatabase()
   await crearOwner(db)
   const antes = await reportarConteos(db, 'antes de crear empresa')
   assert(antes.tenants === 0, 'precondición: sin empresas')
@@ -254,7 +314,6 @@ await spec('ZERO-STATE-004', 'Zero-state', 'la primera empresa solo nace por acc
 await spec('ZERO-STATE-005', 'Zero-state', '«Restablecer app limpia» devuelve la instalación a cero', async () => {
   // Instalación en uso: Owner + empresa + admin + ruta + cliente + venta.
   const db = new MemoryDb()
-  await seedCleanDatabase()
   await crearOwner(db)
   await db.tenants.add({ id: 't-1', nombre: 'Caribe', email: 'c@c.com', pais: 'Colombia', moneda: 'COP', plan: 'profesional', status: 'activa', createdAt: '', updatedAt: '' })
   await db.expenseCategories.bulkAdd(buildDefaultExpenseCategories('t-1'))
@@ -267,7 +326,6 @@ await spec('ZERO-STATE-005', 'Zero-state', '«Restablecer app limpia» devuelve 
   // resetLocalAppData(): borra la base entera (`db.delete()`), y al recargar la app
   // vuelve a arrancar CLEAN (que no siembra nada).
   await db.clearAll()
-  await seedCleanDatabase()
   const c = await reportarConteos(db, 'tras Restablecer app limpia + recarga')
 
   for (const [tabla, n] of Object.entries(c)) {
@@ -278,24 +336,38 @@ await spec('ZERO-STATE-005', 'Zero-state', '«Restablecer app limpia» devuelve 
   assert(estado.status === 'empty', 'tras el reset debe volver a pedirse la configuración inicial')
 })
 
-await spec('ZERO-STATE-006', 'Zero-state', 'nada en el código crea automáticamente empresa "Mi Empresa"', () => {
-  const seed = readSource('src/data/seed.ts')
-  // La cadena solo sobrevive dentro de `resetCleanDatabase`, que NO tiene llamadores.
-  const idx = seed.indexOf("nombre: 'Mi Empresa'")
-  const dentroDeResetCleanDatabase = idx > seed.indexOf('export async function resetCleanDatabase')
-  metric("'Mi Empresa' aparece en seed.ts", idx > -1)
-  metric('dentro de resetCleanDatabase (código muerto)', dentroDeResetCleanDatabase)
-  const consumidores = ['src/app/App.tsx', 'src/pages/owner/OwnerSetupPage.tsx', 'src/pages/auth/AuthEntry.tsx', 'src/services/platformBootstrapService.ts']
-  for (const f of consumidores) {
+await spec('NO-DEMO-002', 'Sin DEMO', 'no queda ningún sembrador de datos en la aplicación', () => {
+  // `src/data/seed.ts` contenía el conjunto DEMO completo (empresa Credirutas Norte,
+  // 6 usuarios con contraseña '123456', oficinas, rutas, clientes, ventas y pagos) y
+  // la empresa automática «Mi Empresa». El archivo se ELIMINÓ con esta entrega.
+  metric('src/data/seed.ts', existsSync(resolve(process.cwd(), 'src/data/seed.ts')) ? 'PRESENTE — ERROR' : 'eliminado')
+  assert(!existsSync(resolve(process.cwd(), 'src/data/seed.ts')), 'el sembrador DEMO debe haber desaparecido')
+  metric('src/data/', existsSync(resolve(process.cwd(), 'src/data')) ? 'PRESENTE' : 'eliminado')
+
+  // Y nadie más siembra: ningún archivo de producción escribe empresas ni usuarios
+  // fuera del alta que ejecuta el Owner.
+  const SEMBRADORES_PROHIBIDOS = [
+    'src/app/App.tsx',
+    'src/pages/auth/AuthEntry.tsx',
+    'src/pages/auth/LoginPage.tsx',
+    'src/pages/owner/OwnerAuthEntry.tsx',
+    'src/pages/owner/OwnerSetupPage.tsx',
+    'src/services/platformBootstrapService.ts',
+  ]
+  for (const f of SEMBRADORES_PROHIBIDOS) {
     const src = readSource(f)
-    metric(`${f} crea tenants`, /tenants\.(add|bulkAdd|put)/.test(src))
-    assert(!/tenants\.(add|bulkAdd|put)/.test(src), `${f} crea empresas automáticamente`)
+    const siembra = /tenants\.(add|bulkAdd|put)/.test(src) || /users\.(bulkAdd|put)/.test(src)
+    metric(`${f} siembra`, siembra ? 'SÍ — ERROR' : 'no')
+    assert(!siembra, `${f} crea empresas o usuarios automáticamente`)
   }
-  assert(dentroDeResetCleanDatabase, "la cadena 'Mi Empresa' escapó de resetCleanDatabase")
+  // 'Mi Empresa' no sobrevive en ninguna parte del código.
+  for (const f of SEMBRADORES_PROHIBIDOS) {
+    assert(!readSource(f).includes('Mi Empresa'), `${f} conserva la empresa automática`)
+  }
 })
 
-await spec('ZERO-STATE-007', 'Zero-state', 'resetLocalAppData borra base, claves locales, caché y service workers', () => {
-  const reset = readSource('src/lib/resetApp.ts')
+await spec('OWNER-FACTORY-RESET-006', 'Reset de fábrica', 'el borrado alcanza base, claves locales, caché y service workers', () => {
+  const reset = readSource('src/lib/factoryReset.ts')
   metric('borra la base completa', containsLine(reset, 'try { await db.delete() } catch'))
   metric('limpia localStorage por prefijo', containsLine(reset, 'clearStorageByPrefix(window.localStorage)'))
   metric('limpia sessionStorage por prefijo', containsLine(reset, 'clearStorageByPrefix(window.sessionStorage)'))
@@ -305,247 +377,368 @@ await spec('ZERO-STATE-007', 'Zero-state', 'resetLocalAppData borra base, claves
   assert(containsLine(reset, 'try { await db.delete() } catch'), 'el reset ya no borra la base completa')
   assert(containsLine(reset, "const RUTACASH_KEY_PREFIXES = ['rutacash-', 'rutacash_']"), 'cambió la limpieza por prefijo')
   assert(reset.includes('caches.delete(n)') && reset.includes('r.unregister()'), 'el reset debe limpiar caché y SW')
+  // `db.delete()` borra TODAS las tablas de una vez: ninguna tabla futura puede
+  // quedarse fuera por olvido de actualizar una lista.
+  metric('estrategia', 'db.delete() — no hay lista de tablas que mantener')
+  assert(!reset.includes('.clear()'), 'no debe borrarse tabla a tabla: una nueva quedaría viva')
 })
 
-// ############################################################
-// GRUPO — RESTABLECIMIENTO TOTAL («volver a Usuario 0»)
-// ############################################################
-await spec('RESET-CLEAN-001', 'Reset total', 'el control existe en Configuración, dentro de una Zona de peligro', () => {
-  const settings = readSource('src/pages/admin/SettingsPage.tsx')
-  metric('sección', 'Zona de peligro')
-  metric('título del control', 'Restablecer RutaCash desde cero')
-  metric('solo en CLEAN', containsLine(settings, '{IS_CLEAN && ('))
-  assert(settings.includes('Zona de peligro'), 'falta la Zona de peligro en Configuración')
-  assert(settings.includes('Restablecer RutaCash desde cero'), 'falta el control de restablecimiento total')
-  assert(settings.includes('Elimina todos los datos de RutaCash almacenados en este dispositivo'), 'falta la descripción del control')
-  assert(containsLine(settings, '<FullResetDialog open={cleanResetOpen} onClose={() => setCleanResetOpen(false)} />'), 'Configuración no usa el diálogo compartido')
-  // El control vive dentro del bloque IS_CLEAN.
-  const iClean = settings.indexOf('{IS_CLEAN && (')
-  const iZona = settings.indexOf('Zona de peligro')
-  metric('la Zona de peligro está dentro del bloque CLEAN', iClean > -1 && iZona > iClean)
-  assert(iClean > -1 && iZona > iClean, 'la Zona de peligro debe ser exclusiva de CLEAN')
+await spec('OWNER-FACTORY-RESET-007', 'Reset de fábrica', 'limpia LAS DOS sesiones, no solo la de empresa', () => {
+  const reset = readSource('src/lib/factoryReset.ts')
+  // Ambas claves de sesión caen por prefijo: `rutacash-auth` (empresa) y
+  // `rutacash-owner-auth` (plataforma). Si el prefijo cambiara, el Owner sobreviviría
+  // al reset con una sesión apuntando a una base borrada.
+  const claves = ['rutacash-auth', 'rutacash-owner-auth']
+  for (const k of claves) {
+    const cubierta = ['rutacash-', 'rutacash_'].some(pre => k.startsWith(pre))
+    metric(`${k} cae por prefijo`, cubierta)
+    assert(cubierta, `la sesión ${k} sobreviviría al reset`)
+  }
+  metric('sesión de empresa', readSource('src/hooks/useAuth.ts').includes("name: 'rutacash-auth'"))
+  metric('sesión de plataforma', readSource('src/hooks/useOwnerAuth.ts').includes("name: 'rutacash-owner-auth'"))
+  assert(readSource('src/hooks/useAuth.ts').includes("name: 'rutacash-auth'"), 'cambió la clave de la sesión de empresa')
+  assert(readSource('src/hooks/useOwnerAuth.ts').includes("name: 'rutacash-owner-auth'"), 'cambió la clave de la sesión Owner')
+  assert(containsLine(reset, 'clearStorageByPrefix(window.localStorage)'), 'no se limpia localStorage')
 })
 
-await spec('RESET-CLEAN-002', 'Reset total', 'el estado huérfano ofrece los DOS caminos', async () => {
+await spec('OWNER-FACTORY-RESET-008', 'Reset de fábrica', 'tras el reset se vuelve a /owner/login, NO a /login', () => {
+  const reset = readSource('src/lib/factoryReset.ts')
+  metric('destino', POST_RESET_PATH)
+  metric('recarga dura', containsLine(reset, 'location.replace(POST_RESET_PATH)'))
+  assert(POST_RESET_PATH === '/owner/login', `el destino debe ser /owner/login, es ${POST_RESET_PATH}`)
+  assert(containsLine(reset, "export const POST_RESET_PATH = '/owner/login'"), 'el destino debe estar centralizado')
+  assert(containsLine(reset, 'location.replace(POST_RESET_PATH)'), 'falta la recarga dura tras el borrado')
+  // Y NO al portal de empresas: tras borrarlo todo no existe ninguna cuenta con la
+  // que entrar por ahí.
+  metric('redirige a /login', reset.includes("replace('/login')") ? 'SÍ — ERROR' : 'no')
+  assert(!reset.includes("replace('/login')"), 'el reset no puede devolver al portal de empresas')
+})
+
+await spec('OWNER-FACTORY-RESET-009', 'Reset de fábrica', 'tras el reset vuelve a pedirse «Crear primer Owner»', async () => {
   const db = orphanedInstall()
-  const estado = await getInstallationState(asPlatformDb(db))
-  metric('estado detectado', estado.status)
-  assert(estado.status === 'orphaned', 'la base heredada debe detectarse como huérfana')
+  await crearOwner(db)
+  const antes = await getInstallationState(asPlatformDb(db))
+  metric('estado antes', `${antes.status} · owners=${antes.ownerCount}`)
+  assert(antes.status === 'ready' && antes.ownerCount === 1, 'precondición: instalación con dueño')
 
-  const setup = readSource('src/pages/owner/OwnerSetupPage.tsx')
-  metric('camino A', 'Recuperar instalación (conserva los datos)')
-  metric('camino B', 'Empezar desde cero (elimina los datos locales)')
-  metric('el camino B solo aparece si es recuperación', containsLine(setup, '{esRecuperacion && ('))
-  assert(setup.includes('Recuperar instalación'), 'falta el camino de recuperación')
-  assert(setup.includes('Empezar desde cero'), 'falta el camino de borrado total')
-  assert(setup.includes('¿Prefieres empezar de cero?'), 'el segundo camino debe estar explicado')
-  assert(containsLine(setup, '<FullResetDialog open={resetOpen} onClose={() => setResetOpen(false)} />'), 'la recuperación no usa el diálogo compartido')
-  // En una instalación virgen NO debe ofrecerse borrar: no hay nada que borrar.
-  const iCond = setup.indexOf('{esRecuperacion && (')
-  const iBoton = setup.indexOf('Empezar desde cero')
-  assert(iCond > -1 && iBoton > iCond, 'el botón de borrado debe estar condicionado a la recuperación')
+  // Efecto de `wipeLocalInstallation()`: db.delete() + recarga.
+  await db.clearAll()
+  const despues = await getInstallationState(asPlatformDb(db))
+  metric('estado después', despues.status)
+  metric('Owners después', despues.ownerCount)
+  metric('initialized', despues.initialized)
+  assert(despues.status === 'empty', `estado ${despues.status}: debía volver a 'empty'`)
+  assert(despues.ownerCount === 0, 'el reset debe borrar también los Owners')
+  assert(despues.initialized === false, 'OwnerAuthEntry debe volver a mostrar «Crear primer Owner»')
+
+  // Y la pantalla que se monta en ese estado es exactamente esa.
+  const entry = readSource('src/pages/owner/OwnerAuthEntry.tsx')
+  assert(containsLine(entry, 'if (!state.initialized) return <OwnerSetupPage state={state} onDone={refresh} />'),
+    'sin Owner debe mostrarse la creación del primero')
 })
 
-await spec('RESET-CLEAN-003', 'Reset total', 'el botón destructivo exige escribir BORRAR TODO', () => {
-  metric('frase exigida', RESET_CONFIRM_PHRASE)
-  // Lógica pura de habilitación.
-  const rechazadas = ['', '   ', 'borrar', 'BORRAR', 'todo', 'BORRARTODO', 'BORRAR  TOD', 'sí', 'x']
+await spec('OWNER-FACTORY-RESET-002', 'Reset de fábrica', 'el reset deja TODAS las tablas en 0, Owners incluidos', async () => {
+  const db = orphanedInstall()
+  await crearOwner(db)
+  await crearEmpresaConSuperAdmin(db, { adminEmail: 'su@x.com' })
+  await db.routes.add({ id: 'r-x', tenantId: 't-x', nombre: 'Ruta', status: 'activa' })
+  await db.offices.add({ id: 'of-x', tenantId: 't-x', nombre: 'Oficina', status: 'activa' })
+
+  const antes = await reportarConteos(db, 'instalación en uso')
+  assert(antes.platformUsers > 0, 'precondición: hay Owners')
+  assert(antes.tenants > 0 && antes.users > 0, 'precondición: hay empresas y usuarios')
+  assert(antes.routes > 0 && antes.offices > 0, 'precondición: hay estructura')
+
+  await db.clearAll()
+  const despues = await reportarConteos(db, 'tras el restablecimiento de fábrica')
+  for (const [tabla, n] of Object.entries(despues)) {
+    assert(n === 0, `${tabla} = ${n}: el restablecimiento debe dejarlo todo en 0`)
+  }
+  metric('Owners tras el reset', despues.platformUsers)
+  metric('empresas tras el reset', despues.tenants)
+  metric('usuarios tras el reset', despues.users)
+  metric('offices / routes tras el reset', `${despues.offices} / ${despues.routes}`)
+})
+
+await spec('OWNER-FACTORY-RESET-003', 'Reset de fábrica', 'la confirmación exige escribir RESTABLECER', () => {
+  metric('palabra exigida', FACTORY_RESET_PHRASE)
+  const rechazadas = ['', '   ', 'restablece', 'RESTABLECE', 'reset', 'BORRAR TODO', 'sí', 'x', 'RESTABLECERR']
   for (const t of rechazadas) {
-    metric(`"${t}"`, matchesResetPhrase(t) ? 'HABILITA — ERROR' : 'bloqueado')
-    assert(!matchesResetPhrase(t), `"${t}" no debe habilitar el borrado`)
+    metric(`"${t}"`, matchesFactoryResetPhrase(t) ? 'HABILITA — ERROR' : 'bloqueado')
+    assert(!matchesFactoryResetPhrase(t), `"${t}" no debe habilitar el borrado`)
   }
-  const aceptadas = ['BORRAR TODO', 'borrar todo', '  Borrar Todo  ', 'BORRAR   TODO']
+  const aceptadas = ['RESTABLECER', 'restablecer', '  Restablecer  ']
   for (const t of aceptadas) {
-    metric(`"${t}"`, matchesResetPhrase(t) ? 'habilita' : 'BLOQUEADO — ERROR')
-    assert(matchesResetPhrase(t), `"${t}" debía habilitar el borrado`)
+    metric(`"${t}"`, matchesFactoryResetPhrase(t) ? 'habilita' : 'BLOQUEADO — ERROR')
+    assert(matchesFactoryResetPhrase(t), `"${t}" debía habilitar el borrado`)
   }
-  // Y el diálogo ata el `disabled` del botón a esa comprobación.
-  const dlg = readSource('src/components/ui/FullResetDialog.tsx')
-  metric('habilitación', 'const habilitado = matchesResetPhrase(frase) && !borrando')
-  assert(containsLine(dlg, 'const habilitado = matchesResetPhrase(frase) && !borrando'), 'la habilitación no depende de la frase')
+
+  const dlg = readSource('src/components/owner/FactoryResetDialog.tsx')
+  metric('habilitación', 'const habilitado = matchesFactoryResetPhrase(frase) && !borrando')
+  assert(containsLine(dlg, 'const habilitado = matchesFactoryResetPhrase(frase) && !borrando'), 'la habilitación no depende de la palabra')
   assert(containsLine(dlg, 'disabled={!habilitado}'), 'el botón destructivo no está bloqueado')
-  assert(dlg.includes('<input'), 'debe pedirse la frase por teclado, no un simple checkbox')
-  assert(dlg.includes("'Eliminando datos...'"), 'falta el estado de progreso')
+  assert(dlg.includes('<input'), 'debe pedirse la palabra por teclado, no un simple checkbox')
   assert(containsLine(dlg, 'if (!habilitado) return'), 'la ejecución no revalida la habilitación')
   assert(containsLine(dlg, 'setBorrando(true)'), 'no se bloquea el doble clic')
+  assert(dlg.includes("'Eliminando datos...'"), 'falta el estado de progreso')
+  // Y avisa de lo más contraintuitivo: que borra la propia cuenta de quien lo pulsa.
+  assert(dlg.includes('Tu propia cuenta de Owner también se borra'), 'debe advertirse que el Owner también se elimina')
+  assert(dlg.includes('no se puede deshacer'), 'debe advertirse que es irreversible')
 })
 
-await spec('RESET-CLEAN-004', 'Reset total', 'el reset reutiliza resetLocalAppData: no hay borrado paralelo', () => {
-  const dlg = readSource('src/components/ui/FullResetDialog.tsx')
-  metric('mecanismo usado', 'resetLocalAppData()')
-  metric('redirección', "location.replace('/login')")
-  assert(containsLine(dlg, 'await resetLocalAppData()'), 'el diálogo no usa el mecanismo único')
-  assert(containsLine(dlg, "location.replace('/login')"), 'falta la recarga dura tras el borrado')
-  // El diálogo NO implementa borrado propio.
-  for (const prohibido of ['db.delete()', 'localStorage.clear', 'indexedDB.deleteDatabase', '.clear()']) {
+await spec('OWNER-FACTORY-RESET-010', 'Reset de fábrica', 'NO vuelve a pedir la contraseña del Owner', () => {
+  const dlg = readSource('src/components/owner/FactoryResetDialog.tsx')
+  // Apartado 14 del encargo: el Owner ya está autenticado; encadenar otro formulario
+  // de credenciales sería justo la fricción que esta entrega elimina.
+  for (const prohibido of ['type="password"', 'password', 'contraseña actual', 'authenticateOwner']) {
+    metric(`pide ${prohibido}`, dlg.includes(prohibido) ? 'SÍ — ERROR' : 'no')
+    assert(!dlg.includes(prohibido), `el diálogo vuelve a pedir credenciales (${prohibido})`)
+  }
+  metric('única barrera', `escribir ${FACTORY_RESET_PHRASE}`)
+})
+
+await spec('OWNER-FACTORY-RESET-011', 'Reset de fábrica', 'el interruptor permite retirar la herramienta sin tocar nada más', () => {
+  const flags = readSource('src/lib/featureFlags.ts')
+  const reset = readSource('src/lib/factoryReset.ts')
+  const settings = readSource('src/pages/owner/OwnerSettingsPage.tsx')
+
+  metric('interruptor', 'ENABLE_FACTORY_RESET')
+  metric('valor durante esta etapa', ENABLE_FACTORY_RESET)
+  assert(flags.includes('export const ENABLE_FACTORY_RESET'), 'debe existir un interruptor nombrado')
+  assert(ENABLE_FACTORY_RESET === true, 'durante esta etapa debe estar habilitado')
+
+  // El interruptor gobierna LAS DOS capas: la ejecución y la interfaz.
+  metric('la ejecución lo comprueba', containsLine(reset, 'if (!ENABLE_FACTORY_RESET) return false'))
+  metric('la interfaz lo comprueba', settings.includes('{ENABLE_FACTORY_RESET && ('))
+  assert(containsLine(reset, 'if (!ENABLE_FACTORY_RESET) return false'), 'apagarlo debe impedir la ejecución, no solo ocultar el botón')
+  assert(settings.includes('{ENABLE_FACTORY_RESET && ('), 'apagarlo debe retirar la opción de la interfaz')
+
+  // Y NO se apoya en DEMO/CLEAN, que es exactamente lo que se acaba de eliminar.
+  for (const prohibido of ['IS_DEMO', 'IS_CLEAN', 'APP_MODE', 'VITE_APP_MODE']) {
+    metric(`usa ${prohibido}`, flags.includes(prohibido) && !flags.includes(`\`${prohibido}\``) ? 'SÍ — ERROR' : 'no')
+  }
+  assert(!/\bexport const IS_DEMO\b|\bexport const IS_CLEAN\b/.test(flags), 'el interruptor no puede reintroducir modos')
+})
+
+await spec('OWNER-FACTORY-RESET-004', 'Reset de fábrica', 'el diálogo no implementa un borrado paralelo', () => {
+  const dlg = readSource('src/components/owner/FactoryResetDialog.tsx')
+  metric('mecanismo usado', 'factoryResetAndRestart()')
+  assert(containsLine(dlg, 'await factoryResetAndRestart()'), 'el diálogo no usa el mecanismo único')
+  for (const prohibido of ['db.delete()', 'localStorage.clear', 'indexedDB.deleteDatabase', 'location.replace']) {
     metric(`borrado propio (${prohibido})`, dlg.includes(prohibido) ? 'PRESENTE — ERROR' : 'ausente')
     assert(!dlg.includes(prohibido), `el diálogo implementa un borrado paralelo (${prohibido})`)
   }
-  // Y las tres entradas apuntan al MISMO componente.
-  const entradas = [
-    'src/pages/admin/SettingsPage.tsx',
-    'src/pages/owner/OwnerSetupPage.tsx',
-    'src/components/ui/AppModeBanner.tsx',
+  // Y EXISTE UNA SOLA ENTRADA en toda la aplicación: la configuración del Owner.
+  const todos = archivosDeSrc()
+  const montan = todos.filter(f => readSource(f).includes('<FactoryResetDialog'))
+  metric('pantallas que montan el diálogo', montan.join(', '))
+  assert(montan.length === 1 && montan[0] === 'src/pages/owner/OwnerSettingsPage.tsx',
+    `el reset debe tener UNA sola entrada; la montan: ${montan.join(', ')}`)
+})
+
+await spec('TENANT-NO-RESET-001', 'Sin reset en empresa', 'ningún rol de empresa puede borrar la instalación', () => {
+  // Barrido de TODO el portal de empresa: layouts, páginas y componentes comunes.
+  const PORTAL_EMPRESA = archivosDeSrc().filter(f =>
+    f.startsWith('src/pages/admin/') || f.startsWith('src/pages/collector/') ||
+    f.startsWith('src/pages/secretario/') || f.startsWith('src/pages/socio/') ||
+    f.startsWith('src/pages/auth/') || f.startsWith('src/components/layout/') ||
+    f.startsWith('src/components/ui/'))
+
+  const PROHIBIDOS = ['factoryReset', 'FactoryResetDialog', 'wipeLocalInstallation', 'factoryResetAndRestart', 'resetLocalAppData']
+  const culpables: string[] = []
+  for (const f of PORTAL_EMPRESA) {
+    const src = sinComentarios(readSource(f))
+    for (const pr of PROHIBIDOS) if (src.includes(pr)) culpables.push(`${f} → ${pr}`)
+  }
+  metric('archivos del portal cliente revisados', PORTAL_EMPRESA.length)
+  metric('referencias al borrado total', culpables.join(' | ') || 'ninguna')
+  assert(culpables.length === 0, `el portal cliente puede borrar la instalación: ${culpables.join(' | ')}`)
+})
+
+await spec('TENANT-NO-RESET-002', 'Sin reset en empresa', 'Configuración de empresa ya no ofrece restablecer ni restaurar', () => {
+  const settings = sinComentarios(readSource('src/pages/admin/SettingsPage.tsx'))
+  const TEXTOS_RETIRADOS = [
+    'Zona de peligro',
+    'Restablecer RutaCash desde cero',
+    'Restaurar datos demo',
+    'Restaurar demo',
+    'Confirmar restablecimiento',
+    'Confirmar restauración',
   ]
-  for (const f of entradas) {
+  for (const t of TEXTOS_RETIRADOS) {
+    metric(`"${t}"`, settings.includes(t) ? 'PRESENTE — ERROR' : 'retirado')
+    assert(!settings.includes(t), `Configuración conserva "${t}"`)
+  }
+  // Y tampoco queda el mecanismo por debajo.
+  for (const pr of ['resetLocalAppData', 'factoryReset', 'db.delete', 'location.replace']) {
+    metric(`mecanismo ${pr}`, settings.includes(pr) ? 'PRESENTE — ERROR' : 'ausente')
+    assert(!settings.includes(pr), `Configuración conserva el mecanismo ${pr}`)
+  }
+  // Lo que SÍ conserva: exportar backup, que no destruye nada.
+  metric('conserva "Exportar backup"', settings.includes('Exportar backup'))
+  assert(settings.includes('Exportar backup'), 'el backup no debía retirarse')
+})
+
+await spec('TENANT-NO-RESET-003', 'Sin reset en empresa', 'el login de empresa no ofrece ninguna salida destructiva', () => {
+  const login = readSource('src/pages/auth/LoginPage.tsx')
+  const vacia = readSource('src/pages/auth/EmptyInstallationNotice.tsx')
+  for (const [nombre, src] of [['LoginPage', login], ['EmptyInstallationNotice', vacia]] as Array<[string, string]>) {
+    for (const pr of ['resetLocalAppData', 'FullResetDialog', 'FactoryResetDialog', 'factoryReset', 'db.delete', 'Restablecer RutaCash']) {
+      metric(`${nombre} → ${pr}`, src.includes(pr) ? 'PRESENTE — ERROR' : 'ausente')
+      assert(!src.includes(pr), `${nombre} conserva una salida destructiva (${pr})`)
+    }
+  }
+  // La instalación vacía apunta al portal de plataforma, no borra nada.
+  metric('EmptyInstallationNotice apunta a', '/owner/login')
+  assert(vacia.includes('/owner/login'), 'la instalación vacía debe derivar al portal de plataforma')
+})
+
+await spec('TENANT-NO-RESET-004', 'Sin reset en empresa', 'la pantalla de creación del primer Owner tampoco borra', () => {
+  // Es pública (no exige sesión): ofrecer ahí el borrado lo pondría al alcance de
+  // cualquiera que abriera la URL. El reset exige un Owner AUTENTICADO.
+  const setup = readSource('src/pages/owner/OwnerSetupPage.tsx')
+  for (const pr of ['FullResetDialog', 'FactoryResetDialog', 'factoryReset', 'resetLocalAppData', 'db.delete']) {
+    metric(`OwnerSetupPage → ${pr}`, setup.includes(pr) ? 'PRESENTE — ERROR' : 'ausente')
+    assert(!setup.includes(pr), `la pantalla pública de arranque conserva un borrado (${pr})`)
+  }
+  metric('el reset vive tras RequireOwner', containsLine(readSource('src/app/App.tsx'), '<Route path="configuracion" element={<OwnerSettingsPage />} />'))
+  assert(containsLine(readSource('src/app/App.tsx'), '<Route path="configuracion" element={<OwnerSettingsPage />} />'),
+    'la configuración del Owner debe estar montada dentro del área protegida')
+})
+
+await spec('NO-DEMO-003', 'Sin DEMO', 'no queda ninguna restauración de datos demo en la interfaz', () => {
+  const todos = archivosDeSrc()
+  const TEXTOS = ['Restaurar datos demo', 'Restaurar demo', 'MODO DEMO', 'Datos ficticios', 'restaurará los datos demo']
+  const culpables: string[] = []
+  for (const f of todos) {
+    const src = sinComentarios(readSource(f))
+    for (const t of TEXTOS) if (src.includes(t)) culpables.push(`${f} → "${t}"`)
+  }
+  metric('archivos revisados', todos.length)
+  metric('restauraciones demo encontradas', culpables.join(' | ') || 'ninguna')
+  assert(culpables.length === 0, `queda restauración demo: ${culpables.join(' | ')}`)
+})
+
+await spec('NO-DEMO-001', 'Sin DEMO', 'no existe banner de modo en ninguna pantalla', () => {
+  const banner = 'src/components/ui/AppModeBanner.tsx'
+  metric(banner, existsSync(resolve(process.cwd(), banner)) ? 'PRESENTE — ERROR' : 'eliminado')
+  assert(!existsSync(resolve(process.cwd(), banner)), 'el banner de modo debe haber desaparecido')
+
+  const todos = archivosDeSrc()
+  const culpables = todos.filter(f => readSource(f).includes('AppModeBanner'))
+  metric('archivos que lo montan', culpables.join(', ') || 'ninguno')
+  assert(culpables.length === 0, `todavía se monta el banner: ${culpables.join(', ')}`)
+
+  // Los cuatro layouts que lo tenían siguen existiendo, sin él.
+  for (const l of ['AdminLayout', 'CollectorLayout', 'SecretarioLayout', 'SocioLayout']) {
+    const src = readSource(`src/components/layout/${l}.tsx`)
+    metric(`${l} sin banner`, !src.includes('AppModeBanner'))
+    assert(!src.includes('AppModeBanner'), `${l} conserva el banner de modo`)
+  }
+})
+
+await spec('NO-DEMO-004', 'Sin DEMO', 'no quedan credenciales demo conocidas en la aplicación', () => {
+  const todos = archivosDeSrc()
+  const culpables: string[] = []
+  for (const f of todos) {
+    const src = sinComentarios(readSource(f))
+    if (/@demo\.com/.test(src)) culpables.push(`${f} → correo demo`)
+    if (/password:\s*'123456'/.test(src)) culpables.push(`${f} → contraseña 123456`)
+  }
+  metric('archivos revisados', todos.length)
+  metric('credenciales conocidas', culpables.join(' | ') || 'ninguna')
+  assert(culpables.length === 0, `quedan credenciales conocidas: ${culpables.join(' | ')}`)
+
+  // Y el login ya no sugiere ninguna cuenta.
+  const login = readSource('src/pages/auth/LoginPage.tsx')
+  for (const t of ['DEMO_USERS', 'ALL_DEMO_USERS', 'Usuarios demo', 'fillDemo']) {
+    metric(`LoginPage → ${t}`, login.includes(t) ? 'PRESENTE — ERROR' : 'ausente')
+    assert(!login.includes(t), `el login conserva los accesos rápidos demo (${t})`)
+  }
+})
+
+await spec('NO-CLEAN-001', 'Sin CLEAN', 'CLEAN dejó de ser un modo: no queda bandera ni banner', () => {
+  const appMode = 'src/lib/appMode.ts'
+  metric(appMode, existsSync(resolve(process.cwd(), appMode)) ? 'PRESENTE — ERROR' : 'eliminado')
+  assert(!existsSync(resolve(process.cwd(), appMode)), 'el módulo de modos debe haber desaparecido')
+
+  const todos = archivosDeSrc()
+  const BANDERAS = ['IS_CLEAN', 'IS_DEMO', 'APP_MODE', '@/lib/appMode', 'VITE_APP_MODE', 'VITE_SEED_DEMO']
+  const culpables: string[] = []
+  for (const f of todos) {
     const src = readSource(f)
-    metric(f, src.includes('<FullResetDialog') ? 'usa el diálogo compartido' : 'NO lo usa')
-    assert(src.includes('<FullResetDialog'), `${f} no usa el diálogo compartido`)
+    for (const b of BANDERAS) {
+      // Se admiten menciones en comentarios que documentan la retirada; lo que no se
+      // admite es USARLAS. Se busca la bandera fuera de comentarios.
+      const usada = src.split('\n').some(l => {
+        const t = l.trim()
+        if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return false
+        return l.includes(b)
+      })
+      if (usada) culpables.push(`${f} → ${b}`)
+    }
   }
+  metric('archivos revisados', todos.length)
+  metric('banderas de modo en uso', culpables.join(' | ') || 'ninguna')
+  assert(culpables.length === 0, `todavía se usan banderas de modo: ${culpables.join(' | ')}`)
 })
 
-await spec('RESET-CLEAN-005', 'Reset total', 'tras el reset getInstallationState() vuelve a empty', async () => {
-  const db = orphanedInstall()
-  const antes = await getInstallationState(asPlatformDb(db))
-  metric('estado antes', antes.status)
-  // Efecto de resetLocalAppData(): db.delete() + recarga → arranque CLEAN sin siembra.
-  await db.clearAll()
-  await seedCleanDatabase()
-  const despues = await getInstallationState(asPlatformDb(db))
-  metric('estado después', despues.status)
-  metric('initialized', despues.initialized)
-  assert(antes.status === 'orphaned', 'precondición: instalación heredada')
-  assert(despues.status === 'empty', `estado ${despues.status}: debía volver a 'empty'`)
-  assert(despues.initialized === false, 'debe volver a pedirse la configuración inicial')
-})
+await spec('NO-CLEAN-002', 'Sin CLEAN', 'el producto se llama RutaCash, sin sufijos de modo', () => {
+  metric('nombre del producto', APP_NAME)
+  assert(APP_NAME === 'RutaCash', 'el nombre visible debe ser RutaCash')
 
-await spec('RESET-CLEAN-006', 'Reset total', 'tras el reset users = 0 y tenants = 0', async () => {
-  const db = orphanedInstall()
-  const antes = await reportarConteos(db, 'instalación heredada')
-  await db.clearAll()
-  await seedCleanDatabase()
-  const despues = await reportarConteos(db, 'tras el restablecimiento total')
-  assert(antes.users > 0 && antes.tenants > 0, 'precondición: había datos')
-  assert(despues.users === 0, `users = ${despues.users}: debía quedar en 0`)
-  assert(despues.tenants === 0, `tenants = ${despues.tenants}: debía quedar en 0`)
-  for (const [tabla, n] of Object.entries(despues)) {
-    assert(n === 0, `${tabla} = ${n}: el restablecimiento total debe dejarlo todo en 0`)
+  const todos = archivosDeSrc()
+  const SUFIJOS = ['RutaCash CLEAN', 'RutaCash DEMO', 'MODO LIMPIO', 'MODO DEMO', 'RutaCash Platform']
+  const culpables: string[] = []
+  for (const f of todos) {
+    const src = sinComentarios(readSource(f))
+    for (const t of SUFIJOS) if (src.includes(t)) culpables.push(`${f} → "${t}"`)
   }
-})
+  metric('etiquetas de modo visibles', culpables.join(' | ') || 'ninguna')
+  assert(culpables.length === 0, `quedan etiquetas de modo: ${culpables.join(' | ')}`)
 
-await spec('RESET-CLEAN-007', 'Reset total', 'DEMO conserva su flujo propio y no usa el de «Usuario 0»', () => {
-  const banner = readSource('src/components/ui/AppModeBanner.tsx')
-  const settings = readSource('src/pages/admin/SettingsPage.tsx')
-
-  // El banner DEMO conserva su control y su confirmación propia.
-  const iDemo = banner.indexOf('if (IS_DEMO)')
-  const iClean = banner.indexOf('if (IS_CLEAN)')
-  const ramaDemo = banner.slice(iDemo, iClean)
-  metric('DEMO conserva "Restaurar datos demo"', ramaDemo.includes('Restaurar datos demo'))
-  metric('DEMO no abre el diálogo de Usuario 0', !ramaDemo.includes('FullResetDialog'))
-  assert(ramaDemo.includes('Restaurar datos demo'), 'DEMO perdió su control de restauración')
-  assert(!ramaDemo.includes('setResetOpen'), 'DEMO no debe usar el diálogo de restablecimiento total')
-  assert(banner.includes('handleResetDemo'), 'DEMO perdió su manejador propio')
-
-  // En Configuración, «Restaurar demo» sigue siendo exclusivo de DEMO.
-  metric('Configuración: "Restaurar demo" bajo !IS_CLEAN', containsLine(settings, '{!IS_CLEAN && ('))
-  assert(containsLine(settings, '{!IS_CLEAN && ('), 'el restaurador demo dejó de ser exclusivo de DEMO')
-  assert(settings.includes('Restaurar datos demo'), 'Configuración perdió el restaurador demo')
-  // Y la Zona de peligro es exclusiva de CLEAN.
-  const iZona = settings.indexOf('Zona de peligro')
-  const iCleanBlock = settings.indexOf('{IS_CLEAN && (')
-  assert(iZona > iCleanBlock, 'la Zona de peligro debe ser exclusiva de CLEAN')
-})
-
-await spec('RESET-LOGIN-001', 'Reset total', 'el login CLEAN ofrece acceso al restablecimiento total', () => {
+  // Y las insignias DEMO/LIMPIO del login desaparecieron.
   const login = readSource('src/pages/auth/LoginPage.tsx')
-  metric('texto de arranque', '¿Quieres empezar nuevamente?')
-  metric('acción', 'Restablecer RutaCash desde cero')
-  metric('advertencia', 'Elimina todos los datos de RutaCash de este dispositivo.')
-  assert(login.includes('¿Quieres empezar nuevamente?'), 'falta la salida de emergencia en el login')
-  assert(login.includes('Restablecer RutaCash desde cero'), 'falta la acción de restablecimiento en el login')
-  assert(login.includes('Elimina todos los datos de RutaCash de este dispositivo.'), 'falta la advertencia de borrado')
-  // Acción SECUNDARIA: no compite con «Ingresar» (separador, texto pequeño, sin botón primario).
-  const iIngresar = login.indexOf("'Ingresar'")
-  const iReset = login.indexOf('Restablecer RutaCash desde cero')
-  metric('aparece después de «Ingresar»', iReset > iIngresar)
-  metric('separada visualmente', login.includes('border-t border-gray-100'))
-  assert(iReset > iIngresar, 'la acción debe ir después del botón principal')
-  assert(login.includes('border-t border-gray-100'), 'debe estar separada del formulario')
+  assert(!login.includes('>\n                DEMO\n') && !login.includes('LIMPIO'), 'el login conserva insignias de modo')
 })
 
-await spec('RESET-LOGIN-002', 'Reset total', 'el login DEMO NO ofrece el restablecimiento total', () => {
-  const login = readSource('src/pages/auth/LoginPage.tsx')
-  // El bloque debe estar condicionado explícitamente a IS_CLEAN.
-  const iCond = login.indexOf('{IS_CLEAN && (')
-  const iReset = login.indexOf('¿Quieres empezar nuevamente?')
-  metric('condicionado a IS_CLEAN', iCond > -1 && iReset > iCond)
-  assert(iCond > -1, 'falta la condición IS_CLEAN')
-  assert(iReset > iCond, 'la acción debe estar dentro del bloque IS_CLEAN')
-  // Y el bloque se cierra antes de que empiece cualquier otra cosa.
-  const cierre = login.indexOf(')}', iReset)
-  metric('bloque CLEAN cerrado', cierre > iReset)
-  assert(cierre > iReset, 'el bloque IS_CLEAN no está bien delimitado')
-  // DEMO conserva su propio flujo intacto.
-  metric('DEMO conserva accesos rápidos', containsLine(login, 'const DEMO_USERS = IS_DEMO ? ALL_DEMO_USERS : []'))
-  assert(containsLine(login, 'const DEMO_USERS = IS_DEMO ? ALL_DEMO_USERS : []'), 'cambió el flujo DEMO del login')
-})
+await spec('APP-SINGLE-MODE-001', 'Aplicación única', 'una sola build, sin variantes por modo', () => {
+  const pkg = JSON.parse(readSource('package.json')) as { scripts: Record<string, string> }
+  const scripts = Object.keys(pkg.scripts)
+  metric('scripts', scripts.join(', '))
+  for (const retirado of ['build:demo', 'build:clean', 'dev:demo', 'dev:clean']) {
+    metric(`script ${retirado}`, scripts.includes(retirado) ? 'PRESENTE — ERROR' : 'eliminado')
+    assert(!scripts.includes(retirado), `sobrevive el script por modo ${retirado}`)
+  }
+  metric('build único', pkg.scripts.build)
+  assert(pkg.scripts.build === 'tsc && vite build', 'la build debe ser una sola, sin --mode')
+  assert(pkg.scripts.dev === 'vite', 'el arranque de desarrollo debe ser uno solo')
 
-await spec('RESET-LOGIN-003', 'Reset total', 'el login reutiliza FullResetDialog', () => {
-  const login = readSource('src/pages/auth/LoginPage.tsx')
-  metric('monta el diálogo compartido', containsLine(login, '<FullResetDialog open={resetOpen} onClose={() => setResetOpen(false)} />'))
-  metric('importa desde', "@/components/ui/FullResetDialog")
-  assert(containsLine(login, '<FullResetDialog open={resetOpen} onClose={() => setResetOpen(false)} />'), 'el login no usa el diálogo compartido')
-  assert(login.includes("from '@/components/ui/FullResetDialog'"), 'falta el import del diálogo compartido')
-  // Y el diálogo conserva todas sus garantías.
-  const dlg = readSource('src/components/ui/FullResetDialog.tsx')
-  for (const [q, cond] of [
-    ['confirmación escrita BORRAR TODO', dlg.includes("RESET_CONFIRM_PHRASE = 'BORRAR TODO'")],
-    ['botón disabled hasta coincidir', containsLine(dlg, 'disabled={!habilitado}')],
-    ['usa resetLocalAppData', containsLine(dlg, 'await resetLocalAppData()')],
-    ['protección de doble clic', containsLine(dlg, 'setBorrando(true)')],
-    ['estado «Eliminando datos...»', dlg.includes("'Eliminando datos...'")],
-    ['recarga en /login', containsLine(dlg, "location.replace('/login')")],
-  ] as Array<[string, boolean]>) {
-    metric(q, cond)
-    assert(cond, `el diálogo perdió una garantía: ${q}`)
+  // Sin ficheros de entorno por modo.
+  for (const env of ['.env.demo', '.env.clean']) {
+    metric(env, existsSync(resolve(process.cwd(), env)) ? 'PRESENTE — ERROR' : 'eliminado')
+    assert(!existsSync(resolve(process.cwd(), env)), `sobrevive el fichero de entorno ${env}`)
+  }
+  // Y sin variables de entorno de modo declaradas.
+  const envTypes = readSource('src/vite-env.d.ts')
+  for (const v of ['VITE_APP_MODE', 'VITE_SEED_DEMO']) {
+    const declarada = envTypes.split('\n').some(l => !l.trim().startsWith('//') && l.includes(`readonly ${v}`))
+    metric(`${v} declarada`, declarada ? 'SÍ — ERROR' : 'no')
+    assert(!declarada, `sobrevive la variable de modo ${v}`)
   }
 })
 
-await spec('RESET-LOGIN-004', 'Reset total', 'el login no implementa un segundo mecanismo de borrado', () => {
-  const login = readSource('src/pages/auth/LoginPage.tsx')
-  for (const prohibido of ['resetLocalAppData', 'db.delete()', 'indexedDB.deleteDatabase', 'localStorage.clear', 'location.replace']) {
-    metric(`borrado propio (${prohibido})`, login.includes(prohibido) ? 'PRESENTE — ERROR' : 'ausente')
-    assert(!login.includes(prohibido), `LoginPage implementa lógica de borrado propia (${prohibido})`)
+await spec('APP-SINGLE-MODE-002', 'Aplicación única', 'el arranque de la app no siembra nada, en ninguna condición', () => {
+  const app = readSource('src/app/App.tsx')
+  const boot = app.slice(app.indexOf('const boot = async () => {'), app.indexOf('boot().catch'))
+  metric('cuerpo del arranque', boot.replace(/\s+/g, ' ').trim())
+  for (const pr of ['seedDatabase', 'seedCleanDatabase', 'resetToDemo', 'IS_CLEAN', 'IS_DEMO']) {
+    metric(`arranque → ${pr}`, boot.includes(pr) ? 'PRESENTE — ERROR' : 'ausente')
+    assert(!boot.includes(pr), `el arranque conserva lógica de modo o siembra (${pr})`)
   }
-  // Las CUATRO entradas comparten exactamente el mismo componente.
-  const entradas = [
-    'src/pages/auth/LoginPage.tsx',
-    'src/pages/owner/OwnerSetupPage.tsx',
-    'src/pages/admin/SettingsPage.tsx',
-    'src/components/ui/AppModeBanner.tsx',
-  ]
-  for (const f of entradas) {
-    const src = readSource(f)
-    metric(f, src.includes('<FullResetDialog') ? 'usa el diálogo compartido' : 'NO lo usa')
-    assert(src.includes('<FullResetDialog'), `${f} no usa el diálogo compartido`)
-  }
-})
-
-await spec('RESET-LOGIN-005', 'Reset total', 'desde estado ready, el reset devuelve la instalación a empty', async () => {
-  // Escenario exacto del hueco: la plataforma tiene duenio (ready) pero nadie
-  // recuerda la clave.
-  const db = new MemoryDb()
-  await seedCleanDatabase()
-  await crearOwner(db)
-  await db.tenants.add({ id: 't-1', nombre: 'Caribe', email: 'c@c.com', pais: 'Colombia', moneda: 'COP', plan: 'profesional', status: 'activa', createdAt: '', updatedAt: '' })
-  const antes = await getInstallationState(asPlatformDb(db))
-  metric('estado antes', antes.status)
-  metric('usuarios antes', antes.userCount)
-  metric('empresas antes', antes.companyCount)
-  assert(antes.status === 'ready', 'precondición: instalación con Super Admin')
-
-  // Efecto de resetLocalAppData(): db.delete() + recarga → arranque CLEAN sin siembra.
-  await db.clearAll()
-  await seedCleanDatabase()
-  const despues = await getInstallationState(asPlatformDb(db))
-  const c = await reportarConteos(db, 'tras el reset desde el login')
-  metric('estado después', despues.status)
-  assert(despues.status === 'empty', `estado ${despues.status}: debía volver a 'empty'`)
-  assert(despues.initialized === false, 'el portal Owner debe volver a mostrar «Configurar RutaCash»')
-  for (const [tabla, n] of Object.entries(c)) {
-    assert(n === 0, `${tabla} = ${n}: el reset debe dejarlo todo en 0`)
-  }
+  metric('lo único que hace', 'ensureExpenseCategories + revalidar las dos sesiones')
+  assert(boot.includes('ensureExpenseCategories()'), 'debe conservarse la red de seguridad de categorías')
+  assert(boot.includes('revalidateSession()') && boot.includes('revalidateOwnerSession()'), 'deben revalidarse ambas sesiones')
 })
 
 // ############################################################
@@ -775,13 +968,16 @@ await spec('CLEAN-COMPANY-002', 'Empresa', 'ninguna empresa se crea automáticam
 
 await spec('CLEAN-COMPANY-003', 'Empresa', 'empresa, categorías, Super Admin y ficha nacen en UNA transacción', () => {
   const svc = readSource('src/platform/companyControlService.ts')
-  const seed = readSource('src/data/seed.ts')
+  const defaults = readSource('src/lib/expenseCategoryDefaults.ts')
   metric('el alta crea las categorías', containsLine(svc, 'await database.expenseCategories.bulkAdd(buildDefaultExpenseCategories(tenantId))'))
   metric('alcance de la transacción', '[tenants, users, expenseCategories, companyControl]')
   assert(containsLine(svc, 'buildDefaultExpenseCategories(tenantId)'), 'la empresa ya no nace con sus categorías')
   assert(containsLine(svc, '[database.tenants, database.users, database.expenseCategories, database.companyControl]'),
     'empresa, Super Admin, categorías y ficha deben crearse atómicamente')
-  assert(containsLine(seed, 'export async function ensureExpenseCategories'), 'debe conservarse la red de seguridad para empresas antiguas')
+  // La red de seguridad se mudó de `data/seed.ts` (eliminado con el modo DEMO) a
+  // `lib/expenseCategoryDefaults.ts`. Sobre una instalación vacía no hace nada.
+  assert(containsLine(defaults, 'export async function ensureExpenseCategories'), 'debe conservarse la red de seguridad para empresas antiguas')
+  assert(containsLine(defaults, 'const tenants = await db.tenants.toArray()'), 'la red de seguridad debe partir de las empresas existentes')
 })
 
 // ############################################################
@@ -885,7 +1081,6 @@ await spec('CLEAN-ADMIN-005', 'Administrador', 'la primera ruta es creable (inva
  */
 async function empresaSinRutas() {
   const db = new MemoryDb()
-  await seedCleanDatabase()
   const owner = await crearOwner(db)
   await db.tenants.add({ id: 't-1', nombre: 'Caribe', email: 'c@c.com', pais: 'Colombia', moneda: 'COP', plan: 'profesional', status: 'activa', createdAt: '', updatedAt: '' })
   const su: User = {
@@ -1059,15 +1254,15 @@ await spec('ONB-ROUTE-008', 'Primera ruta', 'no se crea ninguna ruta ficticia au
     metric(`${f} crea rutas`, crea)
     assert(!crea, `${f} crea rutas automáticamente`)
   }
-  // En `seed.ts` la única siembra de rutas es la de DEMO; el arranque CLEAN no crea ninguna.
-  const seed = readSource('src/data/seed.ts')
-  const bloqueClean = seed.slice(
-    seed.indexOf('export async function seedCleanDatabase'),
-    seed.indexOf('export async function resetCleanDatabase'),
-  )
-  metric('seedDatabase (DEMO) siembra rutas', /db\.routes\.bulkAdd/.test(seed))
-  metric('seedCleanDatabase siembra rutas', /db\.routes\./.test(bloqueClean))
-  assert(!/db\.routes\./.test(bloqueClean), 'el arranque CLEAN siembra rutas')
+  // Y NINGÚN archivo de producción siembra rutas: el sembrador DEMO desapareció.
+  const conRutas = archivosDeSrc().filter(f => /db\.routes\.(add|bulkAdd|put)/.test(readSource(f)))
+  metric('archivos que escriben rutas', conRutas.join(', '))
+  // Solo las escriben el servicio de rutas (creación real) y la página que las
+  // administra. Nada las siembra al arrancar.
+  const PERMITIDOS = ['src/services/routeService.ts']
+  const inesperados = conRutas.filter(f => !PERMITIDOS.includes(f))
+  metric('sembradores inesperados', inesperados.join(', ') || 'ninguno')
+  assert(inesperados.length === 0, `hay rutas creadas fuera del servicio: ${inesperados.join(', ')}`)
 })
 
 await spec('ONB-ROUTE-009', 'Primera ruta', 'la asignación de la primera Ruta es transaccional', () => {
@@ -1960,43 +2155,24 @@ await spec('OFFICE-CLEAN-002', 'Oficinas', 'el recorrido CLEAN se completa SIN c
   assert(!/[Oo]ficina/.test(checklist), 'las Oficinas son opcionales: no deben entrar en el checklist')
 })
 
-await spec('OFFICE-CLEAN-003', 'Oficinas', 'el reset de empresa limpia también las Oficinas', () => {
-  const seed = readSource('src/data/seed.ts')
-  const bloque = seed.slice(seed.indexOf('export async function resetCleanDatabase'))
-  metric('limpia offices', bloque.includes("db.offices.where('tenantId')"))
-  assert(bloque.includes("db.offices.where('tenantId')"), 'resetCleanDatabase dejaría Oficinas huérfanas')
-  // Y el reset total borra la base completa (cubre cualquier tabla nueva).
-  const reset = readSource('src/lib/resetApp.ts')
-  assert(reset.includes('db.delete()'), 'el reset total debe seguir borrando la base entera')
+await spec('OFFICE-RESET-001', 'Oficinas', 'el restablecimiento de fábrica alcanza también las Oficinas', () => {
+  // Antes existía `resetCleanDatabase(tenantId)`, un borrado por empresa que había
+  // que ir ampliando tabla a tabla cada vez que nacía una entidad —y que olvidó las
+  // Oficinas en su día—. Desapareció con el modo CLEAN. El único borrado que queda
+  // es el de fábrica, que elimina la base ENTERA: ninguna tabla futura puede
+  // quedarse fuera por olvido.
+  const reset = readSource('src/lib/factoryReset.ts')
+  metric('mecanismo', 'db.delete() — base completa')
+  metric('borrado tabla a tabla', reset.includes('.clear()') ? 'PRESENTE — ERROR' : 'ausente')
+  assert(reset.includes('db.delete()'), 'el reset debe borrar la base entera')
+  assert(!reset.includes("offices.where('tenantId')"), 'no debe volver el borrado tabla a tabla')
+
+  // Y las Oficinas están declaradas en la base, de modo que `db.delete()` las cubre.
+  const dbSrc = readSource('src/lib/db.ts')
+  metric('offices declarada en el esquema', dbSrc.includes('offices!: Table<Office>'))
+  assert(dbSrc.includes('offices!: Table<Office>'), 'la tabla offices debe seguir declarada')
 })
 
-await spec('OFFICE-DEMO-001', 'Oficinas', 'DEMO siembra Oficinas y una ruta deliberadamente Sin Oficina', () => {
-  const seed = readSource('src/data/seed.ts')
-  metric('Oficina Barranquilla', seed.includes("nombre: 'Oficina Barranquilla'"))
-  metric('Oficina Soledad', seed.includes("nombre: 'Oficina Soledad'"))
-  metric('ruta sin Oficina', seed.includes('ROUTE5_ID'))
-  assert(seed.includes("nombre: 'Oficina Barranquilla'") && seed.includes("nombre: 'Oficina Soledad'"),
-    'DEMO debe traer las dos oficinas representativas')
-  assert(seed.includes('ROUTE5_ID'), 'DEMO debe incluir una ruta Sin Oficina para mostrar ese estado')
-
-  // La tabla DEBE estar declarada en la transacción del seed (lección del 15/09).
-  const tx = seed.slice(seed.indexOf("await db.transaction('rw', ["), seed.indexOf('await db.tenants.add(tenant)'))
-  metric('db.offices en el alcance de la transacción', tx.includes('db.offices'))
-  assert(tx.includes('db.offices'), 'toda tabla usada dentro de una transacción debe declararse en su alcance')
-  assert(seed.includes('await db.offices.bulkAdd(offices)'), 'DEMO no siembra las oficinas')
-})
-
-await spec('OFFICE-DEMO-002', 'Oficinas', 'DEMO no guarda officeId fuera de las rutas', () => {
-  const seed = readSource('src/data/seed.ts')
-  // Las únicas asignaciones admisibles son `officeId: OFFICE1_ID` / `OFFICE2_ID`
-  // dentro del array de rutas.
-  const asignaciones = seed.match(/officeId:\s*[^,\n}]+/g) ?? []
-  const fuera = asignaciones.filter(a => !/OFFICE[12]_ID/.test(a))
-  metric('asignaciones de officeId', asignaciones.length)
-  metric('fuera de Route', fuera.length === 0 ? '(ninguna)' : fuera.join(' | '))
-  assert(fuera.length === 0, `DEMO guarda officeId fuera de las rutas: ${fuera.join(', ')}`)
-  assert(asignaciones.length === 4, `se esperaban 4 rutas con Oficina; hay ${asignaciones.length}`)
-})
 
 // ############################################################
 // GRUPO — OFICINA COMO UNIDAD DE GESTIÓN (servicio real)
@@ -2505,57 +2681,44 @@ await spec('CLEAN-RECOVERY-004', 'Recuperación', 'la recuperación no borra emp
 await spec('CLEAN-RECOVERY-005', 'Recuperación', 'NUNCA se crea una cuenta raíz automáticamente', async () => {
   // El arranque, por sí solo, no debe generar ningún Super Admin sobre una base huérfana.
   const db = orphanedInstall()
-  await seedCleanDatabase()
   const state = await getInstallationState(asPlatformDb(db))
   metric('Owners tras el arranque', state.ownerCount)
   metric('estado', state.status)
   assert(state.ownerCount === 0, 'el arranque creó una cuenta raíz por su cuenta')
 
-  // Y en el código no puede quedar ninguna contraseña por defecto.
-  const seed = readSource('src/data/seed.ts')
-  const cleanBlock = seed.slice(seed.indexOf('// ---- INSTALACIÓN LIMPIA ----'))
-  for (const prohibido = '123456'; ;) {
-    metric('contraseña por defecto en el bloque CLEAN', cleanBlock.includes(prohibido) ? 'PRESENTE' : 'ausente')
-    assert(!cleanBlock.includes(prohibido), 'quedó una contraseña conocida en el arranque CLEAN')
-    break
-  }
+  // Y en NINGÚN archivo de producción puede quedar una contraseña por defecto. Antes
+  // se admitía dentro del seed DEMO; ese archivo ya no existe, así que la regla pasa
+  // a ser absoluta y se comprueba sobre todo el árbol.
+  const culpables = archivosDeSrc().filter(f => readSource(f).includes("'123456'"))
+  metric('archivos con una contraseña conocida', culpables.join(', ') || 'ninguno')
+  assert(culpables.length === 0, `quedó una contraseña conocida en: ${culpables.join(', ')}`)
 })
 
-await spec('CLEAN-RECOVERY-006', 'Recuperación', 'ninguna contraseña conocida sobrevive fuera del seed DEMO', () => {
-  // Barrido de todo `src/`: la única cadena '123456' admisible está dentro del seed
-  // DEMO (usuarios ficticios) y en la pantalla de acceso rápido, también solo DEMO.
-  const sospechosos = [
-    'src/pages/admin/UsersPage.tsx',
-    'src/services/platformBootstrapService.ts',
-    'src/services/passwordService.ts',
-  ]
-  for (const archivo of sospechosos) {
-    const src = readSource(archivo)
-    const tiene = src.includes("'123456'") || src.includes('/ 123456')
-    metric(archivo, tiene ? 'CONTIENE una contraseña conocida' : 'limpio')
-    assert(!tiene, `${archivo} propone una contraseña conocida`)
+await spec('CLEAN-RECOVERY-006', 'Recuperación', 'ninguna contraseña conocida sobrevive en el producto', () => {
+  // Antes esta prueba admitía credenciales conocidas DENTRO del seed DEMO y de la
+  // rama DEMO de Configuración. Ninguno de los dos existe ya, así que la regla se
+  // endurece: cero contraseñas conocidas en todo `src/`.
+  const culpables: string[] = []
+  for (const f of archivosDeSrc()) {
+    const src = sinComentarios(readSource(f))
+    if (src.includes("'123456'") || src.includes('/ 123456') || /@demo\.com/.test(src)) culpables.push(f)
   }
+  metric('archivos revisados', archivosDeSrc().length)
+  metric('con credenciales conocidas', culpables.join(', ') || 'ninguno')
+  assert(culpables.length === 0, `propone credenciales conocidas: ${culpables.join(', ')}`)
 
-  // SettingsPage conserva un panel de credenciales, pero SOLO en la rama DEMO del
-  // ternario `IS_CLEAN ? (…CLEAN…) : (…DEMO…)`. Se comprueba la rama CLEAN.
+  // Y Configuración ya no anuncia ningún usuario inicial.
   const settings = readSource('src/pages/admin/SettingsPage.tsx')
-  const iniCLEAN = settings.indexOf('{IS_CLEAN ? (')
-  const finCLEAN = settings.indexOf(') : (', iniCLEAN)
-  const ramaClean = settings.slice(iniCLEAN, finCLEAN)
-  const ramaDemo = settings.slice(finCLEAN)
-  metric('rama CLEAN de SettingsPage', ramaClean.includes('123456') ? 'CONTIENE credenciales' : 'limpia')
-  metric('rama DEMO (admitida)', ramaDemo.includes('123456') ? 'contiene credenciales demo' : 'sin credenciales')
-  assert(iniCLEAN > -1 && finCLEAN > iniCLEAN, 'cambió la estructura del panel de usuarios de SettingsPage')
-  assert(!ramaClean.includes('123456'), 'la rama CLEAN de SettingsPage anuncia una contraseña conocida')
-  assert(!settings.includes('admin@demo.com / 123456'), 'el aviso de restablecimiento sigue prometiendo un usuario inicial que ya no existe')
+  metric('Configuración anuncia credenciales', /Pass:|admin@demo\.com/.test(settings) ? 'SÍ — ERROR' : 'no')
+  assert(!/Pass:|admin@demo\.com/.test(settings), 'Configuración sigue anunciando credenciales')
 
-  // El aviso del restablecimiento describe el estado real (base vacía). Desde que el
-  // borrado se unificó, ese texto vive en el diálogo compartido, no en Configuración.
-  const dialogo = readSource('src/components/ui/FullResetDialog.tsx')
-  metric('el diálogo explica que la base queda vacía', dialogo.includes('volverá al estado inicial'))
-  assert(dialogo.includes('volverá al estado inicial'), 'el aviso debe explicar que la instalación vuelve al estado inicial')
-  assert(dialogo.includes('tendrás que crear nuevamente el primer'), 'el aviso debe advertir que habrá que recrear el Super Admin')
-  metric('archivos con credenciales DEMO admitidas', 'src/data/seed.ts, src/pages/auth/LoginPage.tsx, rama DEMO de SettingsPage')
+  // El aviso de borrado explica el estado real y advierte de lo importante.
+  const dialogo = readSource('src/components/owner/FactoryResetDialog.tsx')
+  metric('el diálogo advierte que borra los Owners', dialogo.includes('Tu propia cuenta de Owner también se borra'))
+  // `containsLine` normaliza espacios: el texto va partido por el ajuste del JSX.
+  metric('el diálogo advierte que habrá que crear el primer Owner', containsLine(dialogo, 'crear el primer Owner de nuevo'))
+  assert(dialogo.includes('Tu propia cuenta de Owner también se borra'), 'debe advertirse que el Owner se elimina')
+  assert(containsLine(dialogo, 'crear el primer Owner de nuevo'), 'debe advertirse que habrá que recrear el primer Owner')
 })
 
 await spec('CLEAN-RECOVERY-007', 'Recuperación', 'las contraseñas temporales se generan al azar', () => {
@@ -2752,8 +2915,8 @@ await spec('LOGIN-EMAIL-004', 'Login', 'el login se prerrellena con el último c
   assert(containsLine(login, "const [password, setPassword] = useState('')"), 'la contraseña no debe prerrellenarse')
 })
 
-await spec('LOGIN-EMAIL-005', 'Login', '«Restablecer app limpia» SÍ borra el último correo', () => {
-  const reset = readSource('src/lib/resetApp.ts')
+await spec('LOGIN-EMAIL-005', 'Login', 'el restablecimiento de fábrica SÍ borra el último correo', () => {
+  const reset = readSource('src/lib/factoryReset.ts')
   metric('prefijos que limpia', "['rutacash-', 'rutacash_']")
   metric('clave del último correo', LAST_LOGIN_EMAIL_KEY)
   assert(containsLine(reset, "const RUTACASH_KEY_PREFIXES = ['rutacash-', 'rutacash_']"), 'cambió la limpieza por prefijo')
@@ -2782,63 +2945,34 @@ await spec('SETUP-EMAIL-001', 'Login', 'crear el primer Super Admin guarda su co
 // ############################################################
 // GRUPO — REGRESIÓN DEMO
 // ############################################################
-await spec('DEMO-REG-001', 'Regresión DEMO', 'el seed DEMO conserva su guarda y su carga completa', () => {
-  const src = readSource('src/data/seed.ts')
-  assert(containsLine(src, 'export async function seedDatabase()'), 'seedDatabase ya no existe')
-  assert(containsLine(src, 'const existing = await db.tenants.count()'), 'cambió la guarda del seed DEMO')
-  assert(containsLine(src, "console.log('[RutaCash] Datos demo cargados exitosamente')"), 'cambió el cierre del seed DEMO')
-  metric('guarda DEMO', 'intacta')
+await spec('NO-DEMO-005', 'Sin DEMO', 'no queda ninguna empresa, usuario ni ruta ficticios en el código', () => {
+  // Estas cinco pruebas verificaban que el seed DEMO conservara su guarda, sus 6
+  // usuarios, sus rutas, sus oficinas y su Owner. El seed se ELIMINÓ, así que la
+  // afirmación se invierte: nada de eso puede existir ya.
+  const RASTROS_DEMO = [
+    'Credirutas Norte', 'Credirutas del Norte', 'tenant-demo-001', 'owner-demo-001',
+    'Oficina Barranquilla', 'Oficina Soledad', 'superadmin@demo.com', 'admin@demo.com',
+    'cobrador@demo.com', 'seedDatabase', 'resetToDemo', 'seedCleanDatabase',
+  ]
+  const culpables: string[] = []
+  for (const f of archivosDeSrc()) {
+    const src = sinComentarios(readSource(f))
+    for (const r of RASTROS_DEMO) if (src.includes(r)) culpables.push(`${f} → "${r}"`)
+  }
+  metric('archivos revisados', archivosDeSrc().length)
+  metric('rastros DEMO encontrados', culpables.join(' | ') || 'ninguno')
+  assert(culpables.length === 0, `quedan rastros del conjunto DEMO: ${culpables.join(' | ')}`)
 })
 
-await spec('DEMO-REG-002', 'Regresión DEMO', 'los 6 usuarios demo y sus rutas siguen sembrándose', () => {
-  const src = readSource('src/data/seed.ts')
-  const emails = ['superadmin@demo.com', 'admin@demo.com', 'socio1@demo.com', 'supervisor@demo.com', 'cobrador@demo.com', 'secretario@demo.com']
-  for (const e of emails) assert(src.includes(e), `falta el usuario demo ${e}`)
-  metric('usuarios demo presentes', emails.length)
-  assert(containsLine(src, 'authorizedRouteIds: [ROUTE1_ID, ROUTE2_ID, ROUTE3_ID, ROUTE4_ID]'), 'el Admin demo perdió sus rutas')
-  assert(src.includes('ROUTE4_ID'), 'faltan rutas demo')
-})
-
-await spec('DEMO-REG-003', 'Regresión DEMO', 'DEMO siembra Owner y Super Admin, y no exige cambio de contraseña', () => {
-  const src = readSource('src/data/seed.ts')
-  const demoBlock = src.slice(src.indexOf('export async function seedDatabase()'), src.indexOf('export async function resetToDemo'))
-  metric('mustChangePassword en el seed DEMO', demoBlock.includes('mustChangePassword') ? 'PRESENTE' : 'ausente')
-  metric('el seed DEMO crea un Super Admin de empresa', demoBlock.includes("rol: 'superadmin'"))
-  metric('el seed DEMO crea un Owner de plataforma', demoBlock.includes("rol: 'owner'"))
-  assert(!demoBlock.includes('mustChangePassword'), 'DEMO no debe bloquear con cambio de contraseña')
-  assert(demoBlock.includes("rol: 'superadmin'"), 'DEMO debe seguir sembrando el Super Admin de su empresa')
-  // Con un Owner sembrado, `getInstallationState` devuelve 'ready' y el portal de
-  // plataforma muestra su login en vez de la configuración inicial.
-  assert(demoBlock.includes("rol: 'owner'"), 'DEMO debe sembrar su Owner, o /owner/login pediría configurar la plataforma')
-  assert(demoBlock.includes('tenantId: TENANT_ID'), 'el Super Admin DEMO debe pertenecer a su empresa')
-  assert(!demoBlock.includes("tenantId: 'platform'"), 'ningún usuario DEMO puede nacer con el centinela de plataforma')
-})
-
-await spec('DEMO-REG-004', 'Regresión DEMO', 'el arranque solo siembra en DEMO', () => {
+await spec('BOOT-SRC-001', 'Arquitectura', 'el arranque de la aplicación no siembra absolutamente nada', () => {
+  // Ya no existe ninguna función de siembra que inspeccionar: se comprueba el
+  // arranque REAL de App.tsx, que es el único punto que corre al abrir la app.
   const app = readSource(SRC.app)
-  metric('condición de siembra', 'if (!IS_CLEAN) await seedDatabase()')
-  assert(containsLine(app, 'if (!IS_CLEAN) await seedDatabase()'), 'cambió la condición de siembra por modo')
-  assert(!app.includes('seedCleanDatabase'), 'el arranque no debe seguir invocando un seed para CLEAN')
-})
-
-await spec('DEMO-REG-005', 'Regresión DEMO', 'los accesos rápidos de credenciales son exclusivos de DEMO', () => {
-  const login = readSource('src/pages/auth/LoginPage.tsx')
-  metric('lista de accesos rápidos', 'const DEMO_USERS = IS_DEMO ? ALL_DEMO_USERS : []')
-  assert(containsLine(login, 'const DEMO_USERS = IS_DEMO ? ALL_DEMO_USERS : []'), 'CLEAN no debe sugerir credenciales')
-  assert(!login.includes('CLEAN_USERS'), 'quedó la lista de credenciales CLEAN')
-})
-
-// ############################################################
-// GRUPO — CONTRATO CON EL CÓDIGO FUENTE
-// ############################################################
-await spec('BOOT-SRC-001', 'Arquitectura', 'el arranque CLEAN no siembra absolutamente nada', () => {
-  const src = readSource('src/data/seed.ts')
-  const body = src.slice(src.indexOf('export async function seedCleanDatabase'))
-  const fin = body.indexOf('\n}')
-  const cuerpo = body.slice(0, fin)
-  metric('cuerpo de seedCleanDatabase', cuerpo.split('\n').slice(1).join(' ').trim() || '(vacío)')
-  for (const prohibido of ['users.add', 'tenants.add', 'bulkAdd', 'routes.add', 'password']) {
-    assert(!cuerpo.includes(prohibido), `el arranque CLEAN sigue creando datos (${prohibido})`)
+  const boot = app.slice(app.indexOf('const boot = async () => {'), app.indexOf('boot().catch'))
+  metric('arranque', boot.replace(/\s+/g, ' ').trim())
+  for (const prohibido of ['users.add', 'tenants.add', 'bulkAdd', 'routes.add', 'password', 'seed']) {
+    metric(`arranque → ${prohibido}`, boot.includes(prohibido) ? 'PRESENTE — ERROR' : 'ausente')
+    assert(!boot.includes(prohibido), `el arranque sigue creando datos (${prohibido})`)
   }
 })
 
