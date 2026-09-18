@@ -44,16 +44,15 @@ const navItems: NavItem[] = [
 ]
 
 export function AdminLayout() {
-  const { user, tenant, logout, exitTenantContext } = useAuth()
+  const { user, tenant, logout } = useAuth()
   const isOnline = useOnlineStatus()
   const navigate = useNavigate()
   const location = useLocation()
   const isSuperadmin = user?.rol === 'superadmin'
   const roleLabel = user ? ROLE_LABELS[user.rol] : ''
-  // Volver a Empresas: solo Super Admin con empresa activa. Reutiliza exitTenantContext
-  // (limpia tenant + ruta, conserva sesión) y navega a /platform. No usa posición fija.
-  const showBackToPlatform = isSuperadmin && !!tenant
-  const backToPlatform = () => { exitTenantContext(); navigate('/platform') }
+  // YA NO EXISTE «Volver a Empresas». Con la separación Plataforma/Empresa, un Super
+  // Admin pertenece a UNA empresa y no hay ninguna lista de empresas a la que volver:
+  // la gestión de empresas es del Owner y vive en otro portal, con otra sesión.
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [pendingAuth, setPendingAuth] = useState(0)
   const [pendingAdj, setPendingAdj] = useState(0)
@@ -185,18 +184,6 @@ export function AdminLayout() {
           <div className="flex-1 min-w-0 flex items-center gap-2">
             {tenant && (
               <span className="text-sm font-medium text-gray-600 truncate">{tenant.nombre}{isSuperadmin ? ' · Super Admin' : ''}</span>
-            )}
-            {/* Volver a Empresas — en el encabezado, junto al título (no flotante). */}
-            {showBackToPlatform && (
-              <button
-                onClick={backToPlatform}
-                title="Volver al listado de empresas"
-                aria-label="Volver al listado de empresas"
-                className="flex items-center gap-1.5 flex-shrink-0 rounded-lg border border-primary-200 text-primary-700 bg-primary-50 hover:bg-primary-100 transition-colors px-2.5 py-1.5 text-xs font-medium"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span className="hidden sm:inline">Volver a Empresas</span>
-              </button>
             )}
           </div>
 

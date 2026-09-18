@@ -2517,8 +2517,10 @@ await spec('PAY-COLL-REG-012', 'App Cobrador', 'CLEAN de extremo a extremo: ruta
   const audits: string[] = []
   const sink = async (p: Parameters<AuditSink>[0]) => { audits.push(p.action) }
 
+  // El Super Admin pertenece A SU EMPRESA. Antes llevaba el centinela 'platform'
+  // (modelo derogado: el nivel plataforma es ahora el Owner, en `platformUsers`).
   const su: User = {
-    id: 'u-su', tenantId: 'platform', nombre: 'Root', email: 'root@c.com', password: 'x',
+    id: 'u-su', tenantId: 't-clean', nombre: 'Root', email: 'root@c.com', password: 'x',
     rol: 'superadmin', status: 'activo', createdAt: '', updatedAt: '',
   }
   const cobrador: User = {

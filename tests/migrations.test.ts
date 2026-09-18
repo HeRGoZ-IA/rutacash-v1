@@ -105,7 +105,7 @@ async function crearBaseV1(): Promise<void> {
  * nueva no obligue a perseguir números sueltos por todo el archivo: lo que estos
  * casos comprueban es que la base llega al esquema actual, no que sea la 11.
  */
-const VERSION_ACTUAL = 12
+const VERSION_ACTUAL = 13
 
 /** Abre la base con el esquema ACTUAL de producción (dispara v2 → actual). */
 async function abrirActual() {
@@ -263,8 +263,11 @@ await spec('OFFICE-MIG-008', 'Migración', 'reabrir una base ya migrada es idemp
 // Si alguno de estos cae, la funcionalidad no sirve por muy verdes que estén las
 // pruebas unitarias.
 // ############################################################
+// El Super Admin de los recorridos pertenece A SU EMPRESA ('t-1'). El centinela
+// 'platform' desapareció del nivel empresa con la separación Plataforma/Empresa:
+// el dueño del SaaS es el Owner y vive en `platformUsers`, no en `users`.
 const SU: User = {
-  id: 'u-su', tenantId: 'platform', nombre: 'Root', email: 'root@c.com', password: 'x',
+  id: 'u-su', tenantId: 't-1', nombre: 'Root', email: 'root@c.com', password: 'x',
   rol: 'superadmin', status: 'activo', createdAt: '', updatedAt: '',
 }
 
@@ -1070,7 +1073,14 @@ await spec('SMOKE-E2-6', 'Smoke transversal', 'Oficina inactiva: el histórico s
 await spec('SMOKE-E2-7', 'Smoke transversal', 'un officeId ajeno no amplía el alcance en ningún módulo', async () => {
   const { db, admin } = await empresaTransversal()
   const { createOffice } = await import('../src/services/officeService')
-  const ajena = await createOffice({ tenantId: 't-2', nombre: 'Ajena' }, SU)
+  // La Oficina ajena la crea el Super Admin DE ESA OTRA EMPRESA: desde la separación
+  // Plataforma/Empresa nadie puede crear nada en una empresa que no es la suya, así
+  // que montar el escenario requiere un actor legítimo de 't-2'.
+  const suOtraEmpresa: User = {
+    id: 'u-su-t2', tenantId: 't-2', nombre: 'Root T2', email: 'root@t2.com', password: 'x',
+    rol: 'superadmin', status: 'activo', createdAt: '', updatedAt: '',
+  }
+  const ajena = await createOffice({ tenantId: 't-2', nombre: 'Ajena' }, suOtraEmpresa)
 
   const f = await filtroDesde(db, admin, ajena.id)
   const clientes = f.filtrar(await db.clients.toArray())
@@ -1509,6 +1519,194 @@ await spec('SMOKE-E4-6', 'Smoke ejecutivo', 'el CSV exportado coincide con lo qu
 })
 
 // ############################################################
+// GRUPO — v13: SEPARACIÓN PLATAFORMA / EMPRESA (Dexie real)
+// ------------------------------------------------------------
+// La migración más delicada de esta entrega: reubica al Super Admin heredado que
+// llevaba el centinela 'platform' y crea el plano de control. Se ejecuta sobre el
+// motor REAL porque lo que se comprueba es el resultado de un `upgrade()` de Dexie,
+// no una simulación.
+// ############################################################
+
+/** Base v1 con un Super Admin de plataforma heredado y N empresas. */
+async function crearBaseV1ConSuperAdminDePlataforma(empresas: number): Promise<void> {
+  await Dexie.delete(DB_NAME)
+  const vieja = new Dexie(DB_NAME)
+  vieja.version(1).stores(V1_STORES)
+  await vieja.open()
+
+  for (let i = 1; i <= empresas; i++) {
+    await vieja.table('tenants').add({
+      id: `t-${i}`, nombre: `Empresa ${i}`, email: `e${i}@x.com`, status: i === 2 ? 'prueba' : 'activa',
+      plan: 'profesional', pais: 'Colombia', moneda: 'COP',
+      createdAt: `2026-0${i}-01T00:00:00.000Z`, updatedAt: '',
+    })
+    // Dos rutas por empresa: una activa (facturable) y una inactiva (no facturable).
+    await vieja.table('routes').bulkAdd([
+      { id: `r-${i}-a`, tenantId: `t-${i}`, nombre: 'Activa', codigo: `A-${i}`, status: 'activa' },
+      { id: `r-${i}-b`, tenantId: `t-${i}`, nombre: 'Inactiva', codigo: `B-${i}`, status: 'inactiva' },
+    ])
+    await vieja.table('users').add({
+      id: `u-adm-${i}`, tenantId: `t-${i}`, email: `admin${i}@x.com`, password: 'clave',
+      nombre: `Admin ${i}`, rol: 'admin', status: 'activo', authorizedRouteIds: [`r-${i}-a`],
+      mustChangePassword: true, createdAt: '', updatedAt: '',
+    })
+  }
+
+  // EL USUARIO HEREDADO: Super Admin con el centinela de plataforma.
+  await vieja.table('users').add({
+    id: 'u-su-legacy', tenantId: 'platform', email: 'duenio@rutacash.com', password: 'suClaveDeSiempre',
+    nombre: 'Persona Propietaria', rol: 'superadmin', status: 'activo',
+    mustChangePassword: true, createdAt: '2025-01-01T00:00:00.000Z', updatedAt: '',
+  })
+
+  vieja.close()
+}
+
+await spec('PLATFORM-MIG-001', 'Migración v13', 'el Super Admin heredado se convierte en Owner conservando SU clave', async () => {
+  await crearBaseV1ConSuperAdminDePlataforma(1)
+  const actual = await abrirActual()
+
+  const owners = await actual.platformUsers.toArray()
+  metric('Owners tras migrar', owners.length)
+  metric('correo', owners[0]?.email)
+  metric('contraseña conservada', owners[0]?.password === 'suClaveDeSiempre')
+  metric('rol', owners[0]?.rol)
+  assert(owners.length === 1, 'el Super Admin heredado debe convertirse en Owner')
+  assert(owners[0].email === 'duenio@rutacash.com', 'conserva su correo')
+  assert(owners[0].password === 'suClaveDeSiempre', 'NO se inventa ninguna credencial: se reutiliza la suya')
+  assert(owners[0].rol === 'owner', 'queda en el nivel plataforma')
+  actual.close()
+})
+
+await spec('PLATFORM-MIG-002', 'Migración v13', 'con UNA empresa, el Super Admin se reubica en ella', async () => {
+  await crearBaseV1ConSuperAdminDePlataforma(1)
+  const actual = await abrirActual()
+
+  const su = await actual.users.get('u-su-legacy')
+  metric('sigue existiendo como usuario de empresa', !!su)
+  metric('tenantId', su?.tenantId)
+  metric('rol', su?.rol)
+  assert(!!su, 'la empresa no puede quedarse sin Super Admin')
+  assert(su!.tenantId === 't-1', `debía reubicarse en t-1, quedó en ${su!.tenantId}`)
+  assert(su!.rol === 'superadmin', 'sigue siendo el Super Admin de esa empresa')
+  // Y ya no queda NINGÚN usuario con el centinela.
+  const conCentinela = (await actual.users.toArray()).filter(u => u.tenantId === 'platform')
+  metric('usuarios con el centinela "platform"', conCentinela.length)
+  assert(conCentinela.length === 0, 'el centinela no puede sobrevivir a la migración')
+  actual.close()
+})
+
+await spec('PLATFORM-MIG-003', 'Migración v13', 'sin empresas, el Super Admin queda SOLO como Owner', async () => {
+  await crearBaseV1ConSuperAdminDePlataforma(0)
+  const actual = await abrirActual()
+
+  const owners = await actual.platformUsers.toArray()
+  const usuarios = await actual.users.toArray()
+  metric('Owners', owners.length)
+  metric('usuarios de empresa', usuarios.length)
+  assert(owners.length === 1, 'la persona conserva su acceso como Owner')
+  assert(usuarios.length === 0, 'sin empresa que administrar, no queda usuario de empresa')
+  // Nada más se ha perdido: no había nada más.
+  metric('empresas', (await actual.tenants.toArray()).length)
+  assert((await actual.tenants.toArray()).length === 0, 'no se inventa ninguna empresa')
+  actual.close()
+})
+
+await spec('PLATFORM-MIG-004', 'Migración v13', 'con VARIAS empresas se reubica en la más antigua (limitación documentada)', async () => {
+  await crearBaseV1ConSuperAdminDePlataforma(3)
+  const actual = await abrirActual()
+
+  const su = await actual.users.get('u-su-legacy')
+  metric('reubicado en', su?.tenantId)
+  assert(su!.tenantId === 't-1', 'debe asignarse a la empresa más antigua')
+
+  // Las demás quedan SIN Super Admin: es la limitación conocida, no un descuido. El
+  // correo es la clave de acceso y clonar la cuenta lo duplicaría.
+  const usuarios = await actual.users.toArray()
+  const conSuper = ['t-1', 't-2', 't-3'].filter(t => usuarios.some(u => u.tenantId === t && u.rol === 'superadmin'))
+  metric('empresas con Super Admin', conSuper.join(', '))
+  metric('empresas sin Super Admin', ['t-2', 't-3'].join(', '))
+  assert(conSuper.length === 1 && conSuper[0] === 't-1', 'solo la más antigua conserva Super Admin')
+  // Pero el Owner existe y puede crearles uno desde el portal.
+  metric('Owners disponibles para crearlos', (await actual.platformUsers.toArray()).length)
+  assert((await actual.platformUsers.toArray()).length === 1, 'el Owner queda listo para resolverlo')
+  actual.close()
+})
+
+await spec('PLATFORM-MIG-005', 'Migración v13', 'cada empresa recibe su ficha de control con las rutas bien contadas', async () => {
+  await crearBaseV1ConSuperAdminDePlataforma(2)
+  const actual = await abrirActual()
+
+  const fichas = await actual.companyControl.toArray()
+  metric('fichas creadas', fichas.length)
+  assert(fichas.length === 2, 'cada empresa real debe tener su ficha')
+
+  const t1 = fichas.find(f => f.companyId === 't-1')!
+  const t2 = fichas.find(f => f.companyId === 't-2')!
+  metric('t-1: rutas totales / facturables', `${t1.routeCount} / ${t1.billableRouteCount}`)
+  metric('t-1: estado comercial (tenant activa)', t1.status)
+  metric('t-2: estado comercial (tenant prueba)', t2.status)
+  metric('primer ingreso', t1.firstLoginAt ?? 'sin dato (correcto)')
+  // Dos rutas por empresa, pero solo UNA activa: la regla comercial se aplica ya
+  // en la migración.
+  assert(t1.routeCount === 2 && t1.billableRouteCount === 1, 'solo la ruta activa se factura')
+  assert(t1.status === 'active', 'una empresa activa entra como active')
+  assert(t2.status === 'trial', 'una empresa en prueba entra como trial')
+  assert(t1.firstLoginAt === undefined, 'no se inventan fechas de acceso que nunca ocurrieron')
+  assert(t1.billingRate === 0, 'la tarifa la fija el Owner: no se inventa un precio')
+  actual.close()
+})
+
+await spec('PLATFORM-MIG-006', 'Migración v13', 'se apaga el cambio obligatorio de contraseña en todos', async () => {
+  await crearBaseV1ConSuperAdminDePlataforma(2)
+  const actual = await abrirActual()
+
+  const usuarios = await actual.users.toArray()
+  const pendientes = usuarios.filter(u => u.mustChangePassword === true)
+  metric('usuarios migrados', usuarios.length)
+  metric('con cambio obligatorio pendiente', pendientes.length)
+  assert(pendientes.length === 0, 'nadie puede quedar con el cambio obligatorio activo')
+  // Y sus contraseñas siguen intactas: se apagó el flag, no se tocó la credencial.
+  const admin = usuarios.find(u => u.id === 'u-adm-1')!
+  metric('contraseña del Admin', admin.password)
+  assert(admin.password === 'clave', 'la migración no puede alterar ninguna contraseña')
+  actual.close()
+})
+
+await spec('PLATFORM-MIG-007', 'Migración v13', 'no se pierde ni un dato operativo', async () => {
+  await crearBaseV1()   // base v1 COMPLETA, con clientes, ventas, pagos y liquidaciones
+  const actual = await abrirActual()
+
+  const conteos = {
+    tenants: await actual.tenants.count(),
+    routes: await actual.routes.count(),
+    users: await actual.users.count(),
+    clients: await actual.clients.count(),
+    sales: await actual.sales.count(),
+    installments: await actual.installments.count(),
+    payments: await actual.payments.count(),
+    expenses: await actual.expenses.count(),
+    capitalMovements: await actual.capitalMovements.count(),
+    transfers: await actual.transfers.count(),
+    withdrawals: await actual.withdrawals.count(),
+    weeklySettlements: await actual.weeklySettlements.count(),
+  }
+  metric('conteos tras migrar a v13', JSON.stringify(conteos))
+  for (const [tabla, n] of Object.entries(conteos)) {
+    assert(n > 0, `${tabla} = ${n}: la migración v13 perdió datos`)
+  }
+  // Las tablas nuevas existen y están vacías salvo la ficha de la empresa existente.
+  metric('platformUsers', await actual.platformUsers.count())
+  metric('companyControl', await actual.companyControl.count())
+  metric('saasPayments', await actual.saasPayments.count())
+  metric('controlEvents', await actual.controlEvents.count())
+  assert(await actual.companyControl.count() === 1, 'la empresa heredada recibe su ficha')
+  assert(await actual.saasPayments.count() === 0, 'no se inventa ningún cobro')
+  assert(await actual.controlEvents.count() === 0, 'no se inventa ningún evento pasado')
+  actual.close()
+})
+
+// ############################################################
 // INFORME
 
 // ############################################################
@@ -1708,7 +1906,7 @@ await spec('SMOKE-E5-6', 'Smoke cierre', 'mover la ruta de Oficina no reescribe 
   assert(archivado?.officeNameAtClose === 'Leticia', 'la semana cerrada sigue diciendo dónde se cerró')
   assert(fila['Oficina (al cierre)'] === 'Leticia', 'el CSV del cierre usa el snapshot, no la Oficina actual')
   // Y la regla estructural se mantiene: el pago NO guarda officeId.
-  const pago = (await db.payments.where('routeId').equals(ruta.id).toArray())[0] as Record<string, unknown>
+  const pago = (await db.payments.where('routeId').equals(ruta.id).toArray())[0] as unknown as Record<string, unknown>
   assert(!('officeId' in pago), 'ningún movimiento persiste officeId: la Oficina se deriva de la ruta')
   db.close()
 })

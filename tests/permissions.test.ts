@@ -223,13 +223,19 @@ check('cobrador NO delega capacidades', !can(cobrador, 'user.grantCapabilities')
 
 // --- Empresa: fuera de tenant ---
 check('admin NO opera en otro tenant', !can(admin, 'client.view', { tenantId: 'otro', routeId: 'r1' }))
-check('superadmin opera en cualquier tenant', can(superadmin, 'client.view', { tenantId: 'otro', routeId: 'r1' }))
+// SUPERADMIN-TENANT-002 — REGLA NUEVA (separación Plataforma/Empresa). El Super Admin
+// dejó de ser global: es la máxima autoridad DENTRO de su empresa y no puede tocar
+// ninguna otra. Antes esta comprobación afirmaba lo contrario; el modelo cambió.
+check('SUPERADMIN-TENANT-002 — superadmin NO opera en otro tenant', !can(superadmin, 'client.view', { tenantId: 'otro', routeId: 'r1' }))
+check('SUPERADMIN-TENANT-001 — superadmin sí opera en SU tenant', can(superadmin, 'client.view', { tenantId: superadmin.tenantId, routeId: 'r1' }))
 
 // --- Usuario inactivo pierde permisos ---
 check('usuario inactivo no tiene permisos', !can(mkUser('admin', { status: 'inactivo' }), 'client.view'))
 
 // --- A. Redirección por rol ---
-check('home superadmin', homePathForRole('superadmin') === '/platform')
+// OWNER-ROUTING-002 — el Super Admin aterriza en el panel de SU empresa. La antigua
+// home '/platform' desapareció con el portal de plataforma del Super Admin.
+check('OWNER-ROUTING-002 — home superadmin = panel de empresa', homePathForRole('superadmin') === '/admin/dashboard')
 check('home admin', homePathForRole('admin') === '/admin/dashboard')
 check('home socio', homePathForRole('socio') === '/socio')
 check('home supervisor', homePathForRole('supervisor') === '/supervisor/home')

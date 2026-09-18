@@ -4,12 +4,14 @@
 import { v4 as uuidv4 } from 'uuid'
 import { format, subDays, subWeeks } from 'date-fns'
 import { db } from '@/lib/db'
+import { buildDefaultExpenseCategories } from '@/lib/expenseCategoryDefaults'
 import { generateInstallments, calculateTotalWithInterest, estimateFinalDate } from '@/services/installmentEngine'
 import type {
   Tenant, Route, User, Client, Sale, Payment,
   ExpenseCategory, Expense, CapitalMovement, Transfer, Withdrawal, SaleRequest, Office,
   PartnerCashMovement, WeeklySettlement,
 } from '@/models/types'
+import type { PlatformUser, CompanyControlRecord } from '@/platform/types'
 
 const d = (date: Date) => format(date, 'yyyy-MM-dd')
 const now = new Date()
@@ -169,8 +171,11 @@ export async function seedDatabase() {
   // ---- USERS ----
   const users: User[] = [
     {
+      // SUPER ADMIN DE LA EMPRESA. Ya no lleva el centinela 'platform': desde la
+      // separación Plataforma/Empresa es la máxima autoridad de Credirutas Norte y
+      // de ninguna otra. El dueño del SaaS es el OWNER, que vive en `platformUsers`.
       id: USER_SUPER_ID,
-      tenantId: 'platform',
+      tenantId: TENANT_ID,
       email: 'superadmin@demo.com',
       password: '123456',
       nombre: 'Super Admin',
@@ -597,12 +602,47 @@ export async function seedDatabase() {
     },
   ]
 
+  // ---- PLANO DE CONTROL (NIVEL PLATAFORMA) ----
+  // DEMO necesita un Owner para que el portal `/owner/login` sea explorable, y la
+  // ficha de control de la empresa sembrada para que el Dashboard muestre cifras
+  // reales. Son datos DEMO explícitos: en CLEAN no se siembra absolutamente nada y
+  // el primer Owner lo crea una persona eligiendo su propia contraseña.
+  const demoOwner: PlatformUser = {
+    id: 'owner-demo-001',
+    nombre: 'Owner RutaCash',
+    email: 'owner@demo.com',
+    password: '123456',
+    rol: 'owner',
+    status: 'activo',
+    createdAt: new Date(2024, 10, 1).toISOString(),
+    updatedAt: now.toISOString(),
+  }
+
+  const demoControl: CompanyControlRecord = {
+    companyId: TENANT_ID,
+    nombre: tenant.nombre,
+    identificacion: tenant.nit,
+    contacto: tenant.responsable,
+    contactoEmail: tenant.email,
+    createdAt: tenant.createdAt,
+    status: 'active',
+    routeCount: routes.length,
+    // Regla comercial: solo la ruta ACTIVA se factura (ver platform/billing.ts).
+    billableRouteCount: routes.filter(r => r.status === 'activa').length,
+    billingMode: 'per_route',
+    billingRate: 80000,
+    nextBillingDate: d(new Date(now.getFullYear(), now.getMonth() + 1, 5)),
+    paymentStatus: 'pending',
+    updatedAt: now.toISOString(),
+  }
+
   // ---- INSERTAR EN DB ----
   await db.transaction('rw', [
     db.tenants, db.offices, db.routes, db.users, db.clients,
     db.sales, db.installments, db.payments, db.expenseCategories,
     db.expenses, db.capitalMovements, db.transfers, db.withdrawals, db.saleRequests,
     db.partnerCashMovements, db.weeklySettlements,
+    db.platformUsers, db.companyControl,
   ], async () => {
     await db.tenants.add(tenant)
     await db.offices.bulkAdd(offices)
@@ -624,6 +664,8 @@ export async function seedDatabase() {
     await db.saleRequests.bulkAdd(saleRequests)
     await db.partnerCashMovements.bulkAdd(partnerCashMovements)
     await db.weeklySettlements.bulkAdd(settlements)
+    await db.platformUsers.add(demoOwner)
+    await db.companyControl.add(demoControl)
   })
 
   console.log('[RutaCash] Datos demo cargados exitosamente')
@@ -644,16 +686,11 @@ export async function resetToDemo() {
 // Categorías de gasto predeterminadas. Son DATO DE EMPRESA (llevan `tenantId`), así
 // que se crean AL CREAR LA EMPRESA. `ensureExpenseCategories()` queda como red de
 // seguridad para empresas creadas antes de esa regla.
-const DEFAULT_EXPENSE_CATEGORY_NAMES = [
-  'Transporte', 'Alimentación', 'Papelería', 'Combustible',
-  'Comunicación', 'Mantenimiento', 'Otros',
-]
-
-export function buildDefaultExpenseCategories(tenantId: string): ExpenseCategory[] {
-  return DEFAULT_EXPENSE_CATEGORY_NAMES.map(nombre => ({
-    id: uuidv4(), tenantId, nombre, activa: true,
-  }))
-}
+//
+// La definición vive en `lib/expenseCategoryDefaults` porque el alta de empresa la
+// ejecuta el portal Owner, que no puede importar este módulo (arrastra el conjunto
+// DEMO completo). Aquí se REEXPORTA para no romper a quien ya la importaba.
+export { buildDefaultExpenseCategories, DEFAULT_EXPENSE_CATEGORY_NAMES } from '@/lib/expenseCategoryDefaults'
 
 /**
  * Seguro de categorías (revisión socio 25-jun): garantiza que cada tenant tenga

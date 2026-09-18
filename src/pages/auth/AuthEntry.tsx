@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import LoginPage from '@/pages/auth/LoginPage'
-import { SetupPage } from '@/pages/auth/SetupPage'
+import { EmptyInstallationNotice } from '@/pages/auth/EmptyInstallationNotice'
 import { getInstallationState, type InstallationState } from '@/services/platformBootstrapService'
 
 /**
- * PUERTA DE ENTRADA. Decide qué se muestra en `/login` según el estado real de la
- * instalación, leído de la base:
+ * PUERTA DE ENTRADA DE LAS EMPRESAS (`/login`).
  *
- *   sin ningún Super Admin  →  Configuración inicial / Recuperación (NO el login)
- *   con Super Admin         →  Login normal
+ * Aquí entran SuperAdmin, Admin, Supervisor, Secretario, Socio y Cobrador. Nada más.
+ * El arranque de la instalación ya no ocurre en esta pantalla: crear la cuenta raíz
+ * es asunto de la PLATAFORMA y vive en `/owner/login`.
  *
- * Se consulta después de que App haya terminado su arranque, para que en DEMO —donde
- * el seed crea un Super Admin— nunca aparezca la pantalla de configuración.
+ * El único caso especial es la instalación completamente virgen: no hay ni una sola
+ * empresa ni un solo usuario, así que ofrecer un formulario de acceso sería ofrecer
+ * una puerta sin llave posible. En ese caso se explica en una línea dónde empieza
+ * todo, con un enlace al portal Owner. Con cualquier usuario ya creado, se muestra el
+ * login normal.
  */
 export default function AuthEntry() {
   const [state, setState] = useState<InstallationState | null>(null)
@@ -32,6 +35,7 @@ export default function AuthEntry() {
     )
   }
 
-  if (!state.initialized) return <SetupPage state={state} onDone={refresh} />
+  // Instalación sin NINGÚN usuario de empresa: no hay cuenta con la que entrar.
+  if (state.userCount === 0) return <EmptyInstallationNotice />
   return <LoginPage />
 }

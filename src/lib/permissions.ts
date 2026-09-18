@@ -108,8 +108,15 @@ export type Capability =
 
 // --- Capacidades predeterminadas por rol ---
 
+// SUPER ADMIN — MÁXIMA AUTORIDAD DE **UNA** EMPRESA, y nada por encima de eso.
+//
+// Perdió toda responsabilidad SaaS: ya no accede a la plataforma, no crea empresas y
+// no suspende empresas. Eso pertenece al OWNER, que ni siquiera es un `UserRole` (vive
+// en `platformUsers`). `company.edit` SÍ se conserva porque significa "editar la
+// configuración de MI empresa", no "administrar empresas ajenas": `can()` lo valida
+// contra su propio tenant como cualquier otra capacidad.
 const SUPERADMIN_CAPS: Capability[] = [
-  'platform.access', 'company.create', 'company.edit', 'company.suspend',
+  'company.edit',
   'company.enterPanel', 'company.viewConsolidated',
   'settings.access', 'settings.edit', 'capital.manage',
   'office.create', 'office.edit', 'office.delete', 'office.changeStatus',
@@ -226,7 +233,9 @@ export function capabilitiesForRole(rol: UserRole): Capability[] {
 // Se bloquean en tres capas: (1) `can()` las rechaza, (2) `sanitizeGrantedCapabilities`
 // las elimina antes de guardar, (3) la UI de delegación no las ofrece.
 const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
-  superadmin: [],
+  // El Super Admin es empresa, no plataforma. Estas tres capacidades son del Owner y
+  // NINGÚN rol empresarial puede tenerlas, ni por rol base ni por delegación.
+  superadmin: ['platform.access', 'company.create', 'company.suspend'],
   admin: [
     // El Administrador no es plataforma ni gestiona empresas ni borra rutas.
     'platform.access', 'company.create', 'company.edit', 'company.suspend',
@@ -325,11 +334,16 @@ export function assignableRoles(actor: User | null | undefined): UserRole[] {
 
 /**
  * ¿`actor` puede administrar (editar/bloquear/reset) al usuario `target`?
- * Reglas: no a sí mismo para bloqueo; jerarquía por rol; mismo tenant (salvo superadmin).
+ *
+ * Reglas: jerarquía por rol y MISMO TENANT, sin excepciones. El Super Admin ya no es
+ * global: administra a todo su equipo —incluidos otros Super Admin— pero jamás a un
+ * usuario de otra empresa. La protección del ÚLTIMO Super Admin activo es una regla
+ * aparte (`lib/superadminProtection.ts`): esta función dice quién MANDA sobre quién,
+ * aquella dice qué no puede quedar vacío.
  */
 export function canManageUser(actor: User | null | undefined, target: User): boolean {
   if (!actor) return false
-  if (actor.rol !== 'superadmin' && actor.tenantId !== target.tenantId) return false
+  if (actor.tenantId !== target.tenantId) return false
   return canManageRole(actor, target.rol)
 }
 
@@ -491,8 +505,11 @@ export function can(user: User | null | undefined, capability: Capability, ctx?:
   if (!isCapabilityCompatible(user.rol, capability)) return false
   if (!base.includes(capability)) return false
 
-  // Empresa: salvo superadmin, la acción debe ser dentro de su tenant.
-  if (ctx?.tenantId && user.rol !== 'superadmin' && user.tenantId !== ctx.tenantId) return false
+  // EMPRESA: la acción debe ocurrir dentro del tenant del usuario. SIN EXCEPCIONES,
+  // tampoco para el Super Admin: desde esta entrega su autoridad es máxima pero
+  // ESTRICTAMENTE dentro de su empresa. Ya no existe ningún rol de `users` que pueda
+  // operar sobre una empresa ajena.
+  if (ctx?.tenantId && user.tenantId !== ctx.tenantId) return false
 
   // Ruta autorizada.
   if (ctx?.routeId && ROUTE_SCOPED.has(capability) && !canAccessRoute(user, ctx.routeId)) return false
@@ -545,7 +562,9 @@ export function delegableCapabilitiesFor(actor: User | null | undefined, targetR
 /** Ruta de inicio (post-login) según el rol. Fuente única para redirección. */
 export function homePathForRole(rol: UserRole): string {
   switch (rol) {
-    case 'superadmin': return '/platform'
+    // El Super Admin entra al panel de SU empresa, como corresponde a la máxima
+    // autoridad de una empresa. La plataforma tiene su propia puerta: /owner/login.
+    case 'superadmin': return '/admin/dashboard'
     case 'admin': return '/admin/dashboard'
     case 'socio': return '/socio'
     case 'supervisor': return '/supervisor/home'

@@ -34,6 +34,9 @@ import { getAssignedRouteIds } from '@/lib/roles'
 import { canManageUser, authorizedRouteIdsOf } from '@/lib/permissions'
 import { computeRouteAssignmentDiff } from '@/lib/routeAssignmentDiff'
 import { validateCobradorInvariant } from '@/lib/cobradorRules'
+import { syncRouteMetrics } from '@/platform/companyControlService'
+import { controlPlane } from '@/platform/controlPlane'
+import type { ControlEventType } from '@/platform/types'
 import type { CapitalMovement, Office, Route, User } from '@/models/types'
 
 // ------------------------------------------------------------
@@ -64,6 +67,24 @@ export interface RouteDatabase {
 
 /** Sumidero de auditoría (inyectable en pruebas; en producción, `logAction`). */
 export type RouteAuditSink = (params: Parameters<typeof logAction>[0]) => Promise<void>
+
+/**
+ * Sumidero de MÉTRICAS DE PLATAFORMA. Cada alta o baja de ruta cambia la cifra que el
+ * Owner factura (`billableRouteCount`), así que la ruta y la métrica no pueden vivir
+ * desincronizadas. Se inyecta para poder verificarlo en pruebas con un plano de
+ * control en memoria.
+ *
+ * DIRECCIÓN DEL FLUJO: la empresa EMPUJA un hecho estructural hacia el plano de
+ * control. Nunca al revés. El plano de control no lee la operación del cliente.
+ *
+ * FAIL-SAFE: la implementación por defecto se traga sus propios errores (ver
+ * `syncRouteMetrics`). Si la métrica comercial falla, la empresa crea su ruta igual.
+ */
+export type RouteMetricsSink = (tenantId: string, event: ControlEventType, detail?: string) => Promise<void>
+
+/** Sumidero por defecto: recalcula las métricas contra el plano de control real. */
+export const defaultRouteMetricsSink: RouteMetricsSink = (tenantId, event, detail) =>
+  syncRouteMetrics(tenantId, controlPlane, event, detail)
 
 export interface CreateRouteInput {
   tenantId: string
@@ -111,6 +132,7 @@ export async function createRouteWithAdmins(
   actor: User,
   database: RouteDatabase = db,
   auditSink: RouteAuditSink = logAction,
+  metricsSink: RouteMetricsSink = defaultRouteMetricsSink,
 ): Promise<Route> {
   // 1) Administradores responsables: OPCIONALES. Si el actor es Administrador,
   //    queda autoasignado SIEMPRE (evita que se auto-bloquee por el fail-closed).
@@ -203,6 +225,11 @@ export async function createRouteWithAdmins(
   if (cobrador) {
     await auditSink({ tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: route.id, action: 'ASSIGN_ROUTE', entityType: 'User', entityId: cobrador.id, descripcion: `Cobrador responsable asignado a ${route.nombre}` })
   }
+
+  // 6) MÉTRICA DE PLATAFORMA: la ruta nace 'activa', así que sube `billableRouteCount`.
+  //    Se recalcula contando de nuevo, no sumando uno (ver `syncRouteMetrics`).
+  await metricsSink(input.tenantId, 'ROUTE_CREATED', `Ruta creada: ${route.nombre}`)
+
   return route
 }
 

@@ -30,6 +30,7 @@ import {
   listSettlementsForUser,
   MIN_REOPEN_REASON,
   type SettlementDatabase,
+  type SettlementAuditSink,
 } from '@/services/settlementService'
 import { isPaymentInClosedPeriod } from '@/services/paymentCorrectionService'
 import {
@@ -118,7 +119,11 @@ function nuevaBase(): { db: SettlementDatabase; audit: Array<Record<string, unkn
   return { db: mem as unknown as SettlementDatabase, audit, sink } as never
 }
 
-type Escenario = { db: SettlementDatabase; audit: Array<Record<string, unknown>>; sink: (p: never) => Promise<void> }
+// El sumidero se tipa con el contrato REAL del servicio. Antes era `(p: never)`, que
+// hacía que TypeScript rechazara pasarlo a `closeSettlement` (el parámetro nunca
+// podía satisfacerse). La suite pasaba porque esbuild borra los tipos, pero
+// `tsc -p tests` lo denunciaba con razón.
+type Escenario = { db: SettlementDatabase; audit: Array<Record<string, unknown>>; sink: SettlementAuditSink }
 
 // ============================================================
 // SETTLEMENT-PERSIST — la liquidación deja de ser solo un cálculo

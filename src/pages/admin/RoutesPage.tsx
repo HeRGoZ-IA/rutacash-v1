@@ -13,6 +13,8 @@ import { RouteAssignedUsers } from '@/components/ui/RouteAssignedUsers'
 import { useDirtyForm } from '@/hooks/useDirtyForm'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
+import { syncRouteMetrics } from '@/platform/companyControlService'
+import { controlPlane } from '@/platform/controlPlane'
 import { getRouteFinancialSummary } from '@/services/cashboxEngine'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
@@ -337,6 +339,14 @@ export default function RoutesPage() {
     const newStatus = route.status === 'activa' ? 'inactiva' : 'activa'
     await db.routes.update(route.id, { status: newStatus, updatedAt: nowISO() })
     if (user) await logAction({ tenantId, userId: user.id, userRole: user.rol, routeId: route.id, action: 'BLOCK_ROUTE', entityType: 'Route', entityId: route.id, descripcion: `Ruta ${newStatus}: ${route.nombre}`, before: { status: route.status }, after: { status: newStatus } })
+    // MÉTRICA DE PLATAFORMA: solo se factura la ruta ACTIVA, así que activar o
+    // desactivar mueve la cifra que el Owner cobra. Ver `platform/billing.ts`.
+    await syncRouteMetrics(
+      tenantId,
+      controlPlane,
+      newStatus === 'activa' ? 'ROUTE_CREATED' : 'ROUTE_DEACTIVATED',
+      `Ruta ${newStatus}: ${route.nombre}`,
+    )
     toast.success(`Ruta ${newStatus === 'activa' ? 'activada' : 'desactivada'}`)
     await load()
   }
@@ -370,6 +380,8 @@ export default function RoutesPage() {
     try {
       await db.routes.delete(deleteTarget.id)
       if (user) await logAction({ tenantId, userId: user.id, action: 'DELETE_ROUTE', entityType: 'Route', entityId: deleteTarget.id, descripcion: `Ruta eliminada: ${deleteTarget.nombre}` })
+      // MÉTRICA DE PLATAFORMA: una ruta que deja de existir deja de facturarse.
+      await syncRouteMetrics(tenantId, controlPlane, 'ROUTE_DELETED', `Ruta eliminada: ${deleteTarget.nombre}`)
       toast.success('Ruta eliminada')
       setDeleteTarget(null)
       await load()

@@ -5,6 +5,7 @@ import { nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { isCompanyBlocked } from '@/lib/company'
 import { authenticateUser } from '@/services/authService'
+import { recordTenantLogin } from '@/platform/companyControlService'
 import { rememberLoginEmail } from '@/lib/lastLoginEmail'
 import type { User, Tenant, Route } from '@/models/types'
 
@@ -20,9 +21,10 @@ interface AuthState {
   selectTenant: (tenant: Tenant) => void
   selectRoute: (route: Route) => void
   /**
-   * Sale del contexto de una empresa (Super Admin): limpia el tenant y la ruta
-   * activa asociada, CONSERVANDO usuario y sesión. La navegación a /platform la
-   * realiza el componente que la invoca.
+   * Limpia la empresa y la ruta activas conservando la sesión. Se conserva por
+   * compatibilidad de la API del store; ya no existe ningún flujo de "volver a
+   * Empresas": desde la separación Plataforma/Empresa, un usuario de `users`
+   * pertenece a UNA empresa y nunca sale de ella.
    */
   exitTenantContext: () => void
   /** Revalida la sesión persistida contra la base (usuario/empresa/rol/rutas). */
@@ -53,6 +55,11 @@ export const useAuth = create<AuthState>()(
         }
         // Solo el correo, y solo tras un acceso correcto. Cerrar sesión no lo borra.
         rememberLoginEmail(result.user.email)
+        // TELEMETRÍA COMERCIAL (plano de control): primer y último ingreso de la
+        // EMPRESA. Es lo único que el Owner llega a saber de la actividad de un
+        // cliente: dos fechas, sin historial de quién entra ni cuándo. Es fail-safe:
+        // si falla, el usuario entra igual (ver `recordTenantLogin`).
+        await recordTenantLogin(result.user.tenantId)
         set({
           user: result.user,
           tenant: result.tenant,
@@ -70,8 +77,6 @@ export const useAuth = create<AuthState>()(
       selectTenant: (tenant) => set({ tenant }),
       selectRoute: (route) => set({ route }),
 
-      // Volver a Empresas: solo limpia el tenant/ruta seleccionados; mantiene la
-      // sesión de Super Admin intacta (usuario, isAuthenticated).
       exitTenantContext: () => set({ tenant: null, route: null }),
 
       // ------------------------------------------------------------
@@ -89,19 +94,14 @@ export const useAuth = create<AuthState>()(
             set({ user: null, tenant: null, route: null, isAuthenticated: false })
             return
           }
-          let tenant: Tenant | null = null
-          if (fresh.rol !== 'superadmin') {
-            tenant = await db.tenants.get(fresh.tenantId) ?? null
-            // Revalidación: cierra sesión si la empresa está suspendida o VENCIDA.
-            if (!tenant || isCompanyBlocked(tenant)) {
-              set({ user: null, tenant: null, route: null, isAuthenticated: false })
-              return
-            }
-          } else {
-            // Super Admin: preservar la empresa que haya seleccionado para operar
-            // (si sigue existiendo y activa); no la borra al revalidar.
-            const current = get().tenant
-            if (current) tenant = (await db.tenants.get(current.id)) ?? null
+          // TODOS los usuarios de `users` pertenecen a una empresa, el Super Admin
+          // incluido: ya no existe el usuario "de plataforma" con tenant centinela.
+          // Por eso la comprobación de empresa es universal y sin excepciones.
+          const tenant = await db.tenants.get(fresh.tenantId) ?? null
+          // Revalidación: cierra sesión si la empresa está suspendida o VENCIDA.
+          if (!tenant || isCompanyBlocked(tenant)) {
+            set({ user: null, tenant: null, route: null, isAuthenticated: false })
+            return
           }
           // Ruta activa legacy: si la ruta ya no existe, se limpia.
           let route = get().route
@@ -125,9 +125,9 @@ export const useAuth = create<AuthState>()(
         if (user.password !== current) return { success: false, error: 'La contraseña actual no es correcta' }
         if (!next || next.length < 4) return { success: false, error: 'La nueva contraseña debe tener al menos 4 caracteres' }
         try {
-          // Cambiar la clave APAGA la exigencia de cambio obligatorio: es el único
-          // punto donde `mustChangePassword` pasa a false, y se persiste junto con
-          // la contraseña en la misma escritura.
+          // `mustChangePassword` se escribe en false por higiene del dato: el flag es
+          // legado y ya no tiene efecto en ningún guard (el cambio obligatorio se
+          // eliminó). Cambiar la contraseña propia es voluntario y no lo pide nadie.
           await db.users.update(user.id, { password: next, mustChangePassword: false, updatedAt: nowISO() })
           await logAction({
             tenantId: user.tenantId, userId: user.id, userRole: user.rol,

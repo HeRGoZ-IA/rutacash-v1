@@ -19,6 +19,7 @@ import { getAssignedRouteIds } from '@/lib/roles'
 import { groupRoutesByOffice } from '@/lib/officeGrouping'
 import { setCobradorRoutes, clearRouteResponsibilities } from '@/services/routeAssignment'
 import { resetUserPassword } from '@/services/passwordService'
+import { blockIfLastSuperadmin, blockIfDemotingLastSuperadmin } from '@/lib/superadminProtection'
 import {
   assignableRoles, canManageUser, filterAccessibleRoutes,
   authorizedRouteIdsOf, isRouteUnrestricted,
@@ -170,6 +171,12 @@ export default function UsersPage() {
       if (duplicado) { toast.error('Ya existe un usuario con ese correo'); setSaving(false); return }
 
       if (editing) {
+        // LAST_SUPERADMIN_PROTECTION — degradar al último Super Admin activo dejaría
+        // la empresa sin autoridad máxima, y el Owner no puede rescatarla desde fuera.
+        const bloqueoRol = blockIfDemotingLastSuperadmin(
+          editing, form.rol, todos.filter(u => u.tenantId === tenantId),
+        )
+        if (bloqueoRol) { toast.error(bloqueoRol.message); setSaving(false); return }
         await db.users.update(editing.id, {
           nombre: form.nombre, email, password: form.password, rol: form.rol,
           ...noGrants, ...legacyDirect, updatedAt: nowISO(),
@@ -177,9 +184,10 @@ export default function UsersPage() {
       } else {
         const u: User = {
           id: userId, tenantId, nombre: form.nombre, email, password: form.password, rol: form.rol,
-          // La contraseña la eligió un superior: es TEMPORAL. El usuario debe definir
-          // la suya en su primer acceso (PasswordChangeGate).
-          mustChangePassword: true,
+          // CONTRASEÑA INICIAL UTILIZABLE (apartado Q). Quien la recibe entra y
+          // trabaja: RutaCash ya no interpone ninguna pantalla ni modal de cambio
+          // obligatorio. Si hay que cambiarla, se cambia desde aquí, en Usuarios.
+          mustChangePassword: false,
           ...noGrants, ...legacyDirect, status: 'activo', createdAt: nowISO(), updatedAt: nowISO(),
         }
         await db.users.add(u)
@@ -213,6 +221,12 @@ export default function UsersPage() {
 
   async function toggleStatus(u: User) {
     if (currentUser && !canManageUser(currentUser, u)) { toast.error('No tienes permiso sobre este usuario.'); return }
+    // LAST_SUPERADMIN_PROTECTION — una empresa nunca puede quedarse con cero Super
+    // Admin activos. Con dos o más, desactivar a cualquiera es legítimo.
+    if (u.status === 'activo') {
+      const bloqueo = blockIfLastSuperadmin(u, users.filter(x => x.tenantId === tenantId))
+      if (bloqueo) { toast.error(bloqueo.message); return }
+    }
     const ns = u.status === 'activo' ? 'inactivo' : 'activo'
     await db.users.update(u.id, { status: ns, updatedAt: nowISO() })
     if (currentUser) await logAction({ tenantId, userId: currentUser.id, userRole: currentUser.rol, action: 'BLOCK_USER', entityType: 'User', entityId: u.id, descripcion: `Usuario ${ns}: ${u.nombre}`, before: { status: u.status }, after: { status: ns } })
@@ -231,6 +245,9 @@ export default function UsersPage() {
     // Solo Super Admin elimina usuarios (Administrador no elimina usuarios).
     if (currentUser?.rol !== 'superadmin') { toast.error('Solo el Super Admin puede eliminar usuarios. Puedes inactivarlo.'); return }
     if (u.id === currentUser?.id) { toast.error('No puedes eliminar tu propio usuario.'); return }
+    // LAST_SUPERADMIN_PROTECTION — eliminar es aún más definitivo que desactivar.
+    const bloqueo = blockIfLastSuperadmin(u, users.filter(x => x.tenantId === tenantId))
+    if (bloqueo) { toast.error(bloqueo.message); return }
     setCheckingId(u.id)
     try {
       const [sales, payments, expenses, transfers, withdrawals] = await Promise.all([
@@ -267,7 +284,9 @@ export default function UsersPage() {
     const out: { label: string; variant: BadgeVar }[] = []
     const roleVariant: Record<UserRole, BadgeVar> = { superadmin: 'purple', admin: 'info', socio: 'purple', supervisor: 'info', cobrador: 'success', secretario: 'warning' }
     out.push({ label: ROLE_LABELS[u.rol], variant: roleVariant[u.rol] })
-    if (u.rol === 'superadmin') { out.push({ label: 'Plataforma', variant: 'gray' }); return out }
+    // El Super Admin ya no es "Plataforma": es la máxima autoridad DE ESTA EMPRESA y
+    // accede a todas sus rutas sin necesidad de asignación explícita.
+    if (u.rol === 'superadmin') { out.push({ label: 'Todas las rutas', variant: 'gray' }); return out }
     if (u.rol === 'admin' && getAssignedRouteIds(u).length === 0) { out.push({ label: 'Sin rutas (sin acceso)', variant: 'danger' }); return out }
     const assigned = getAssignedRouteIds(u)
     if (assigned.length === 0) {
@@ -360,8 +379,8 @@ export default function UsersPage() {
         <div className="space-y-4">
           <Input label="Nombre completo" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required />
           <Input label="Email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required />
-          <Input label="Contraseña temporal" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-            hint="Generada al azar. Compártela con la persona: deberá cambiarla en su primer acceso." />
+          <Input label="Contraseña inicial" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+            hint="Generada al azar. Puedes cambiarla aquí. La persona la usa tal cual: no se le pedirá cambiarla al entrar." />
           <Select label="Rol" value={form.rol} onChange={e => setForm(f => ({ ...f, rol: e.target.value as UserRole, grantedCapabilities: [] }))} options={roleOptions} required />
 
           {showRoutes && (

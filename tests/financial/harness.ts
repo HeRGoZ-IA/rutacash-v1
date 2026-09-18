@@ -26,14 +26,31 @@ type Row = Record<string, any>
 
 export class FakeTable<T extends Row> {
   private rows = new Map<string, T>()
-  constructor(private db: MemoryDb, readonly name: string) {}
+  /**
+   * Clave primaria de la tabla. Dexie permite declararla en el esquema y no siempre
+   * es 'id': la ficha de control de empresa usa `companyId` (`companyControl:
+   * 'companyId, status'`). El harness debe respetarlo o `get()` devolvería undefined
+   * para filas que en el navegador sí existen.
+   */
+  constructor(private db: MemoryDb, readonly name: string, private readonly keyPath: string = 'id') {}
+
+  private keyOf(obj: Row): string { return String(obj[this.keyPath]) }
 
   /** Dexie: Table.add — inserta; falla si la clave ya existe. */
   async add(obj: T): Promise<string> {
     this.db.note(`${this.name}.add`)
     this.db.maybeFail(`${this.name}.add`)
-    const id = String(obj.id)
+    const id = this.keyOf(obj)
     if (this.rows.has(id)) throw new Error(`ConstraintError: ${this.name} ${id} ya existe`)
+    this.rows.set(id, structuredClone(obj))
+    return id
+  }
+
+  /** Dexie: Table.put — inserta o reemplaza. */
+  async put(obj: T): Promise<string> {
+    this.db.note(`${this.name}.put`)
+    this.db.maybeFail(`${this.name}.put`)
+    const id = this.keyOf(obj)
     this.rows.set(id, structuredClone(obj))
     return id
   }
@@ -89,7 +106,7 @@ export class FakeTable<T extends Row> {
 
   /** Solo para el harness: sembrar sin registrar la operación ni disparar fallos. */
   _seed(objs: T[]) {
-    for (const o of objs) this.rows.set(String(o.id), structuredClone(o))
+    for (const o of objs) this.rows.set(this.keyOf(o), structuredClone(o))
   }
 
   _snapshot(): Array<[string, T]> {
@@ -131,12 +148,20 @@ export class MemoryDb {
   withdrawals = new FakeTable<any>(this, 'withdrawals')
   // Liquidaciones semanales PERSISTENTES (cierre y reapertura de periodo).
   weeklySettlements = new FakeTable<any>(this, 'weeklySettlements')
+  // PLANO DE CONTROL SaaS (nivel plataforma). Están en TABLES para que el zero-state
+  // siga siendo exhaustivo: una instalación CLEAN nace con estas tablas también en 0.
+  // `companyControl` lleva `companyId` como clave primaria, igual que en el esquema.
+  platformUsers = new FakeTable<any>(this, 'platformUsers')
+  companyControl = new FakeTable<any>(this, 'companyControl', 'companyId')
+  saasPayments = new FakeTable<any>(this, 'saasPayments')
+  controlEvents = new FakeTable<any>(this, 'controlEvents')
 
   /** Nombres de todas las tablas, para conteos exhaustivos en las pruebas. */
   static readonly TABLES = [
     'users', 'tenants', 'offices', 'routes', 'clients', 'sales', 'installments',
     'payments', 'expenses', 'expenseCategories', 'noPaymentVisits',
     'capitalMovements', 'transfers', 'withdrawals', 'weeklySettlements',
+    'platformUsers', 'companyControl', 'saasPayments', 'controlEvents',
   ] as const
 
   /**

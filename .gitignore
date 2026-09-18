@@ -6,3 +6,4 @@ tests/_out.financial.mjs
 tests/_out.bootstrap.mjs
 tests/_out.migrations.mjs
 tests/_out.settlements.mjs
+tests/_out.platform.mjs

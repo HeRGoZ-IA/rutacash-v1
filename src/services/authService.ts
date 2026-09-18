@@ -7,7 +7,7 @@
 //   1) usuario por email (normalizado a minúsculas, sin espacios)
 //   2) contraseña exacta
 //   3) usuario activo
-//   4) empresa no suspendida ni vencida (no aplica al Super Admin)
+//   4) empresa no suspendida ni vencida — AHORA TAMBIÉN PARA EL SUPER ADMIN
 //
 // NOTA DE SEGURIDAD (sin cambios respecto al estado anterior): la contraseña se
 // guarda en texto plano en Dexie. Esto NO es seguridad real; la autenticación
@@ -72,16 +72,18 @@ export async function authenticateUser(
       return { ok: false, code: 'USER_INACTIVE', error: 'Usuario inactivo. Contacta al administrador.' }
     }
 
-    let tenant: Tenant | null = null
-    if (user.rol !== 'superadmin') {
-      tenant = (await database.tenants.get(user.tenantId)) ?? null
-      // Bloqueo por estado EFECTIVO: suspendida (manual) o vencida (por fecha).
-      if (tenant && isCompanyBlocked(tenant)) {
-        return {
-          ok: false,
-          code: 'COMPANY_BLOCKED',
-          error: companyBlockMessage(tenant) ?? 'Empresa no disponible.',
-        }
+    // EMPRESA — SIN EXCEPCIONES. Antes el Super Admin se saltaba esta comprobación
+    // porque era un usuario "de plataforma" con tenant centinela. Desde la separación
+    // Plataforma/Empresa, TODO usuario de `users` pertenece a una empresa real y le
+    // afecta su estado: si el Owner suspende la empresa, su Super Admin tampoco entra.
+    // Esa es exactamente la consecuencia deseada de suspender el servicio.
+    const tenant: Tenant | null = (await database.tenants.get(user.tenantId)) ?? null
+    // Bloqueo por estado EFECTIVO: suspendida (manual) o vencida (por fecha).
+    if (tenant && isCompanyBlocked(tenant)) {
+      return {
+        ok: false,
+        code: 'COMPANY_BLOCKED',
+        error: companyBlockMessage(tenant) ?? 'Empresa no disponible.',
       }
     }
 
@@ -90,6 +92,8 @@ export async function authenticateUser(
       route = (await database.routes.get(user.routeId)) ?? null
     }
 
+    // `mustChangePassword` se sigue devolviendo por compatibilidad del contrato, pero
+    // NINGÚN guard lo consume: el cambio obligatorio de contraseña se eliminó.
     return { ok: true, user, tenant, route, mustChangePassword: user.mustChangePassword === true }
   } catch {
     return { ok: false, code: 'INTERNAL', error: 'Error interno. Intenta de nuevo.' }

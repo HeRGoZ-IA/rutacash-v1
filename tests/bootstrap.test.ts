@@ -10,19 +10,27 @@
 // ============================================================
 import { seedCleanDatabase, buildDefaultExpenseCategories } from '../src/data/seed'
 import {
-  getInstallationState, isPlatformInitialized, createFirstSuperAdmin,
+  getInstallationState, isPlatformInitialized, createFirstOwner, createAdditionalOwner,
   PLATFORM_TENANT_ID, MIN_BOOTSTRAP_PASSWORD_LENGTH,
   type PlatformDatabase,
 } from '../src/services/platformBootstrapService'
+import { authenticateOwner } from '../src/platform/platformAuthService'
+import { controlPlaneOn, type ControlPlaneDatabase } from '../src/platform/controlPlane'
+import {
+  createCompanyWithFirstSuperAdmin, type CompanyProvisioningDatabase,
+} from '../src/platform/companyControlService'
+import type { PlatformUser } from '../src/platform/types'
 import { authenticateUser, type AuthDatabase } from '../src/services/authService'
 import { validateEmail, normalizeEmail, sameEmail } from '../src/lib/email'
 import {
   getLastLoginEmail, rememberLoginEmail, forgetLastLoginEmail, LAST_LOGIN_EMAIL_KEY,
 } from '../src/lib/lastLoginEmail'
 import {
-  hasOperationalRoutes, canManageRole, canAccessRoute, can,
+  hasOperationalRoutes, canManageRole, canManageUser, canAccessRoute, can,
   filterAccessibleRoutes, filterByAccessibleRoute,
 } from '../src/lib/permissions'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import {
   validateCobradorInvariant, cobradorRemovalBlock, routeCanOperateCollection,
   routeAssignmentWarnings, ROUTE_NO_COBRADOR_LABEL,
@@ -67,6 +75,41 @@ async function spec(id: string, group: string, desc: string, fn: () => Promise<v
 // ============================================================
 const asPlatformDb = (db: MemoryDb) => db as unknown as PlatformDatabase
 const asAuthDb = (db: MemoryDb) => db as unknown as AuthDatabase
+const asControlPlane = (db: MemoryDb) => controlPlaneOn(db as unknown as ControlPlaneDatabase)
+const asProvisioningDb = (db: MemoryDb) => db as unknown as CompanyProvisioningDatabase
+
+/** Owner recién creado (nivel plataforma). Atajo para montar escenarios. */
+async function crearOwner(db: MemoryDb, input = OWNER): Promise<PlatformUser> {
+  const r = await createFirstOwner(input, asPlatformDb(db))
+  if (!r.ok) throw new Error(`no se pudo crear el Owner: ${r.message}`)
+  return r.owner
+}
+
+/**
+ * Onboarding COMPLETO tal y como ocurre en producción:
+ *   Owner → Nueva empresa → primer Super Admin.
+ * Devuelve las tres piezas para que cada prueba monte su escenario sin repetir.
+ */
+async function crearEmpresaConSuperAdmin(
+  db: MemoryDb,
+  over: { nombre?: string; email?: string; adminEmail?: string; adminPassword?: string } = {},
+) {
+  // Si la instalación ya tiene dueño, se reutiliza: crear un segundo Owner por el
+  // bootstrap público está prohibido, y con razón.
+  const existentes = await db.platformUsers.toArray() as PlatformUser[]
+  const owner = existentes[0] ?? await crearOwner(db)
+  const r = await createCompanyWithFirstSuperAdmin(owner, {
+    nombre: over.nombre ?? 'Credirutas del Caribe',
+    email: over.email ?? 'contacto@caribe.com',
+    superAdmin: {
+      nombre: 'Super Admin',
+      email: over.adminEmail ?? 'su@caribe.com',
+      password: over.adminPassword ?? 'ClaveInicial1',
+    },
+  }, asProvisioningDb(db), asControlPlane(db))
+  if (!r.ok) throw new Error(`no se pudo crear la empresa: ${r.message}`)
+  return { owner, su: r.superAdmin, tenant: r.tenant, record: r.record }
+}
 
 const OWNER = {
   nombre: 'Hernán Rodríguez',
@@ -140,6 +183,11 @@ async function reportarConteos(db: MemoryDb, etiqueta: string): Promise<Record<s
   metric('expenses', c.expenses)
   metric('expenseCategories', c.expenseCategories)
   metric('noPaymentVisits', c.noPaymentVisits)
+  metric('-- plano de control SaaS --', '')
+  metric('platformUsers (Owners)', c.platformUsers)
+  metric('companyControl', c.companyControl)
+  metric('saasPayments', c.saasPayments)
+  metric('controlEvents', c.controlEvents)
   return { ...c, superadmins, admins }
 }
 
@@ -155,59 +203,59 @@ await spec('ZERO-STATE-001', 'Zero-state', 'arranque CLEAN nuevo: TODAS las tabl
   }
 })
 
-await spec('ZERO-STATE-002', 'Zero-state', 'crear el primer Super Admin NO crea ninguna empresa', async () => {
+await spec('ZERO-STATE-002', 'Zero-state', 'crear el primer Owner NO crea ninguna empresa', async () => {
   const db = new MemoryDb()
   await seedCleanDatabase()
-  const r = await createFirstSuperAdmin(OWNER, asPlatformDb(db))
+  const r = await createFirstOwner(OWNER, asPlatformDb(db))
   assert(r.ok, 'debía crearse la cuenta')
-  const c = await reportarConteos(db, 'tras crear el Super Admin')
-  assert(c.users === 1 && c.superadmins === 1, 'debe existir exactamente un usuario, y ser Super Admin')
-  assert(c.tenants === 0, `tenants = ${c.tenants}: crear el Super Admin NO debe crear empresa`)
+  const c = await reportarConteos(db, 'tras crear el Owner')
+  // El Owner NO es usuario de empresa: `users` sigue en cero. Vive en `platformUsers`.
+  assert(c.platformUsers === 1, 'debe existir exactamente un Owner')
+  assert(c.users === 0, `users = ${c.users}: el Owner no es un usuario de empresa`)
+  assert(c.tenants === 0, `tenants = ${c.tenants}: crear el Owner NO debe crear empresa`)
   assert(c.expenseCategories === 0, 'sin empresa no hay categorías de gasto')
   assert(c.routes === 0 && c.clients === 0 && c.sales === 0, 'no debe aparecer ningún dato operativo')
 })
 
-await spec('ZERO-STATE-003', 'Zero-state', 'crear el primer Super Admin NO crea ningún Admin', async () => {
+await spec('ZERO-STATE-003', 'Zero-state', 'el alta de empresa NO crea ningún Admin', async () => {
   const db = new MemoryDb()
   await seedCleanDatabase()
-  await createFirstSuperAdmin(OWNER, asPlatformDb(db))
+  await crearEmpresaConSuperAdmin(db)
   const users = await db.users.toArray() as User[]
   metric('usuarios existentes', users.map(u => `${u.rol}:${u.email}`).join(', '))
   metric('admins', users.filter(u => u.rol === 'admin').length)
+  // ONBOARDING-CLEAN-001: el Owner entrega la empresa con su Super Admin y nada más.
+  // Ni Administradores, ni Supervisores, ni Cobradores: eso lo organiza el cliente.
   assert(users.filter(u => u.rol === 'admin').length === 0, 'no debe crearse ningún Administrador')
-  assert(users.length === 1, 'solo debe existir el Super Admin creado a mano')
+  assert(users.length === 1, 'solo debe existir el primer Super Admin')
 })
 
 await spec('ZERO-STATE-004', 'Zero-state', 'la primera empresa solo nace por acción explícita, y con sus categorías', async () => {
   const db = new MemoryDb()
   await seedCleanDatabase()
-  await createFirstSuperAdmin(OWNER, asPlatformDb(db))
+  await crearOwner(db)
   const antes = await reportarConteos(db, 'antes de crear empresa')
   assert(antes.tenants === 0, 'precondición: sin empresas')
 
-  // Efecto EXACTO de PlatformPage.handleSave al crear una empresa (transaccional).
-  await db.transaction('rw', [db.tenants, db.expenseCategories], async () => {
-    await db.tenants.add({
-      id: 't-1', nombre: 'Credirutas del Caribe', email: 'contacto@caribe.com', pais: 'Colombia',
-      moneda: 'COP', plan: 'profesional', status: 'prueba', createdAt: '', updatedAt: '',
-    })
-    await db.expenseCategories.bulkAdd(buildDefaultExpenseCategories('t-1'))
-  })
+  // Alta REAL desde el portal Owner (servicio de producción, transaccional).
+  await crearEmpresaConSuperAdmin(db)
   const despues = await reportarConteos(db, 'tras crear la empresa')
 
   assert(despues.tenants === 1, 'tenants debe pasar de 0 a 1')
   assert(despues.expenseCategories > 0, 'la empresa nace con sus categorías de gasto')
-  assert(despues.users === antes.users, 'crear la empresa NO crea usuarios')
+  assert(despues.users === antes.users + 1, 'la empresa nace con su primer Super Admin y con nadie más')
+  assert(despues.companyControl === 1, 'la empresa nace con su ficha de control comercial')
   assert(despues.routes === 0, 'crear la empresa NO crea rutas')
+  assert(despues.offices === 0, 'crear la empresa NO crea Oficinas')
   assert(despues.clients === 0 && despues.sales === 0, 'crear la empresa NO crea datos operativos')
-  metric('lo ÚNICO que nace con la empresa', `1 tenant + ${despues.expenseCategories} categorías de gasto`)
+  metric('lo ÚNICO que nace con la empresa', `1 tenant + 1 Super Admin + ${despues.expenseCategories} categorías + 1 ficha de control`)
 })
 
 await spec('ZERO-STATE-005', 'Zero-state', '«Restablecer app limpia» devuelve la instalación a cero', async () => {
-  // Instalación en uso: Super Admin + empresa + admin + ruta + cliente + venta.
+  // Instalación en uso: Owner + empresa + admin + ruta + cliente + venta.
   const db = new MemoryDb()
   await seedCleanDatabase()
-  await createFirstSuperAdmin(OWNER, asPlatformDb(db))
+  await crearOwner(db)
   await db.tenants.add({ id: 't-1', nombre: 'Caribe', email: 'c@c.com', pais: 'Colombia', moneda: 'COP', plan: 'profesional', status: 'activa', createdAt: '', updatedAt: '' })
   await db.expenseCategories.bulkAdd(buildDefaultExpenseCategories('t-1'))
   await db.users.add({ id: 'u-adm', tenantId: 't-1', nombre: 'Ana', email: 'ana@c.com', password: 'x', rol: 'admin', status: 'activo', createdAt: '', updatedAt: '' })
@@ -237,7 +285,7 @@ await spec('ZERO-STATE-006', 'Zero-state', 'nada en el código crea automáticam
   const dentroDeResetCleanDatabase = idx > seed.indexOf('export async function resetCleanDatabase')
   metric("'Mi Empresa' aparece en seed.ts", idx > -1)
   metric('dentro de resetCleanDatabase (código muerto)', dentroDeResetCleanDatabase)
-  const consumidores = ['src/app/App.tsx', 'src/pages/auth/SetupPage.tsx', 'src/pages/auth/AuthEntry.tsx', 'src/services/platformBootstrapService.ts']
+  const consumidores = ['src/app/App.tsx', 'src/pages/owner/OwnerSetupPage.tsx', 'src/pages/auth/AuthEntry.tsx', 'src/services/platformBootstrapService.ts']
   for (const f of consumidores) {
     const src = readSource(f)
     metric(`${f} crea tenants`, /tenants\.(add|bulkAdd|put)/.test(src))
@@ -284,7 +332,7 @@ await spec('RESET-CLEAN-002', 'Reset total', 'el estado huérfano ofrece los DOS
   metric('estado detectado', estado.status)
   assert(estado.status === 'orphaned', 'la base heredada debe detectarse como huérfana')
 
-  const setup = readSource('src/pages/auth/SetupPage.tsx')
+  const setup = readSource('src/pages/owner/OwnerSetupPage.tsx')
   metric('camino A', 'Recuperar instalación (conserva los datos)')
   metric('camino B', 'Empezar desde cero (elimina los datos locales)')
   metric('el camino B solo aparece si es recuperación', containsLine(setup, '{esRecuperacion && ('))
@@ -336,7 +384,7 @@ await spec('RESET-CLEAN-004', 'Reset total', 'el reset reutiliza resetLocalAppDa
   // Y las tres entradas apuntan al MISMO componente.
   const entradas = [
     'src/pages/admin/SettingsPage.tsx',
-    'src/pages/auth/SetupPage.tsx',
+    'src/pages/owner/OwnerSetupPage.tsx',
     'src/components/ui/AppModeBanner.tsx',
   ]
   for (const f of entradas) {
@@ -463,7 +511,7 @@ await spec('RESET-LOGIN-004', 'Reset total', 'el login no implementa un segundo 
   // Las CUATRO entradas comparten exactamente el mismo componente.
   const entradas = [
     'src/pages/auth/LoginPage.tsx',
-    'src/pages/auth/SetupPage.tsx',
+    'src/pages/owner/OwnerSetupPage.tsx',
     'src/pages/admin/SettingsPage.tsx',
     'src/components/ui/AppModeBanner.tsx',
   ]
@@ -475,10 +523,11 @@ await spec('RESET-LOGIN-004', 'Reset total', 'el login no implementa un segundo 
 })
 
 await spec('RESET-LOGIN-005', 'Reset total', 'desde estado ready, el reset devuelve la instalación a empty', async () => {
-  // Escenario exacto del hueco: hay Super Admin (ready) pero nadie recuerda la clave.
+  // Escenario exacto del hueco: la plataforma tiene duenio (ready) pero nadie
+  // recuerda la clave.
   const db = new MemoryDb()
   await seedCleanDatabase()
-  await createFirstSuperAdmin(OWNER, asPlatformDb(db))
+  await crearOwner(db)
   await db.tenants.add({ id: 't-1', nombre: 'Caribe', email: 'c@c.com', pais: 'Colombia', moneda: 'COP', plan: 'profesional', status: 'activa', createdAt: '', updatedAt: '' })
   const antes = await getInstallationState(asPlatformDb(db))
   metric('estado antes', antes.status)
@@ -493,7 +542,7 @@ await spec('RESET-LOGIN-005', 'Reset total', 'desde estado ready, el reset devue
   const c = await reportarConteos(db, 'tras el reset desde el login')
   metric('estado después', despues.status)
   assert(despues.status === 'empty', `estado ${despues.status}: debía volver a 'empty'`)
-  assert(despues.initialized === false, 'AuthEntry debe volver a mostrar «Configurar RutaCash»')
+  assert(despues.initialized === false, 'el portal Owner debe volver a mostrar «Configurar RutaCash»')
   for (const [tabla, n] of Object.entries(c)) {
     assert(n === 0, `${tabla} = ${n}: el reset debe dejarlo todo en 0`)
   }
@@ -527,68 +576,98 @@ await spec('CLEAN-INIT-002', 'Instalación', 'una base vacía se reporta como in
   metric('isPlatformInitialized()', await isPlatformInitialized(asPlatformDb(db)))
   assert(state.status === 'empty', `estado ${state.status}: debía ser 'empty'`)
   assert(state.initialized === false, 'una base vacía no está inicializada')
+  assert(state.ownerCount === 0, 'no debe haber ningún Owner')
   assert(state.superadminCount === 0 && state.userCount === 0, 'no debe haber usuarios')
 })
 
-await spec('CLEAN-INIT-003', 'Instalación', 'crear el primer Super Admin funciona', async () => {
+await spec('CLEAN-INIT-003', 'Instalación', 'crear el primer Owner funciona', async () => {
   const db = await freshCleanInstall()
-  const r = await createFirstSuperAdmin(OWNER, asPlatformDb(db))
+  const r = await createFirstOwner(OWNER, asPlatformDb(db))
   metric('resultado', r.ok ? 'CREADO' : `${r.code} — ${r.message}`)
   assert(r.ok, `no se pudo crear: ${r.ok ? '' : r.message}`)
-  const su = (r as { user: User }).user
-  metric('rol', su.rol)
-  metric('email', su.email)
-  metric('tenantId', su.tenantId)
+  const owner = (r as { owner: PlatformUser }).owner
+  metric('rol', owner.rol)
+  metric('email', owner.email)
+  metric('tabla', 'platformUsers')
   metric('recuperación', (r as { recovered: boolean }).recovered)
-  assert(su.rol === 'superadmin', 'el usuario creado debe ser superadmin')
-  assert(su.email === normalizeEmail(OWNER.email), 'el email debe normalizarse')
-  assert(su.tenantId === PLATFORM_TENANT_ID, 'el Super Admin es de plataforma, no de empresa')
-  assert(su.status === 'activo', 'debe nacer activo')
-  assert((await db.users.toArray()).length === 1, 'debe existir exactamente un usuario')
-  assert((await db.tenants.toArray()).length === 0, 'crear el Super Admin NO debe crear ninguna empresa')
+  assert(owner.rol === 'owner', 'la cuenta creada debe ser Owner')
+  assert(owner.email === normalizeEmail(OWNER.email), 'el email debe normalizarse')
+  // El Owner NO lleva tenantId de ningún tipo: no es un usuario de empresa disfrazado.
+  assert(!('tenantId' in owner), 'el Owner no puede llevar tenantId: no pertenece a ninguna empresa')
+  assert(owner.status === 'activo', 'debe nacer activo')
+  assert((await db.platformUsers.toArray()).length === 1, 'debe existir exactamente un Owner')
+  assert((await db.users.toArray()).length === 0, 'crear el Owner NO debe crear ningún usuario de empresa')
+  assert((await db.tenants.toArray()).length === 0, 'crear el Owner NO debe crear ninguna empresa')
 })
 
-await spec('CLEAN-INIT-004', 'Instalación', 'no se puede crear un segundo Super Admin desde el bootstrap público', async () => {
+await spec('CLEAN-INIT-004', 'Instalación', 'el bootstrap público no crea un segundo Owner; un Owner sí', async () => {
   const db = await freshCleanInstall()
-  await createFirstSuperAdmin(OWNER, asPlatformDb(db))
-  const segundo = await createFirstSuperAdmin(
+  const owner = await crearOwner(db)
+  const segundo = await createFirstOwner(
     { nombre: 'Intruso', email: 'intruso@x.com', password: 'OtraClave2026', confirmPassword: 'OtraClave2026' },
     asPlatformDb(db),
   )
-  metric('segundo intento', segundo.ok ? 'CREADO — ERROR' : segundo.code)
-  metric('usuarios totales', (await db.users.toArray()).length)
-  assert(!segundo.ok && segundo.code === 'ALREADY_INITIALIZED', 'debe rechazarse el segundo Super Admin')
-  assert((await db.users.toArray()).length === 1, 'no debe haberse creado ningún usuario extra')
+  metric('segundo intento por el bootstrap público', segundo.ok ? 'CREADO — ERROR' : segundo.code)
+  metric('Owners totales', (await db.platformUsers.toArray()).length)
+  assert(!segundo.ok && segundo.code === 'ALREADY_INITIALIZED', 'el bootstrap público debe rechazar el segundo Owner')
+  assert((await db.platformUsers.toArray()).length === 1, 'no debe haberse creado ninguna cuenta extra')
+
+  // Pero un Owner AUTENTICADO sí puede dar de alta a otro: la plataforma tiene varios
+  // dueños y cada uno crea al siguiente. Nunca se cablean nombres en el código.
+  const porUnOwner = await createAdditionalOwner(
+    owner,
+    { nombre: 'Segunda Persona', email: 'segunda@rutacash.com', password: 'OtraClave2026', confirmPassword: 'OtraClave2026' },
+    asPlatformDb(db),
+  )
+  metric('alta hecha por un Owner autenticado', porUnOwner.ok ? 'CREADO' : porUnOwner.code)
+  metric('Owners tras el alta', (await db.platformUsers.toArray()).length)
+  assert(porUnOwner.ok, 'un Owner debe poder crear otro Owner')
+  assert((await db.platformUsers.toArray()).length === 2, 'deben existir dos Owners')
 })
 
 await spec('CLEAN-INIT-005', 'Instalación', 'las credenciales elegidas permiten iniciar sesión', async () => {
   const db = await freshCleanInstall()
-  await createFirstSuperAdmin(OWNER, asPlatformDb(db))
-  const ok = await authenticateUser(OWNER.email, OWNER.password, asAuthDb(db))
-  const mayus = await authenticateUser(OWNER.email.toUpperCase(), OWNER.password, asAuthDb(db))
-  const mala = await authenticateUser(OWNER.email, 'otra', asAuthDb(db))
+  await crearOwner(db)
+  const plano = asControlPlane(db)
+  const ok = await authenticateOwner(OWNER.email, OWNER.password, plano)
+  const mayus = await authenticateOwner(OWNER.email.toUpperCase(), OWNER.password, plano)
+  const mala = await authenticateOwner(OWNER.email, 'otra', plano)
   metric('login correcto', ok.ok ? 'ACEPTADO' : ok.code)
   metric('login con email en mayúsculas', mayus.ok ? 'ACEPTADO' : mayus.code)
   metric('login con clave incorrecta', mala.ok ? 'ACEPTADO — ERROR' : mala.code)
-  assert(ok.ok && ok.user.rol === 'superadmin', 'debe poder entrar con lo que eligió')
+  assert(ok.ok && ok.owner.rol === 'owner', 'debe poder entrar con lo que eligió')
   assert(mayus.ok, 'el email no debe distinguir mayúsculas')
   assert(!mala.ok && mala.code === 'INVALID_CREDENTIALS', 'una clave incorrecta debe rechazarse')
+
+  // OWNER-AUTH-002 — la puerta de las empresas NO le sirve al Owner: su cuenta no
+  // está en `users`. Los dos portales no comparten registro de autenticación.
+  const porLaPuertaDeEmpresas = await authenticateUser(OWNER.email, OWNER.password, asAuthDb(db))
+  metric('el Owner intentando entrar por /login', porLaPuertaDeEmpresas.ok ? 'ACEPTADO — ERROR' : porLaPuertaDeEmpresas.code)
+  assert(!porLaPuertaDeEmpresas.ok, 'el Owner no puede autenticarse en el portal de empresas')
 })
 
-await spec('CLEAN-INIT-006', 'Instalación', 'la contraseña elegida NO exige cambio obligatorio', async () => {
+await spec('PASSWORD-UX-001', 'Contraseñas', 'el login NUNCA fuerza un cambio de contraseña', async () => {
   const db = await freshCleanInstall()
-  const r = await createFirstSuperAdmin(OWNER, asPlatformDb(db))
-  const sesion = await authenticateUser(OWNER.email, OWNER.password, asAuthDb(db))
-  metric('mustChangePassword en la base', (r as { user: User }).user.mustChangePassword)
-  metric('mustChangePassword al entrar', sesion.ok ? sesion.mustChangePassword : '—')
-  assert((r as { user: User }).user.mustChangePassword === false, 'la clave que elige su dueño es definitiva')
-  assert(sesion.ok && sesion.mustChangePassword === false, 'no debe pedirse cambio al entrar')
+  // El Owner entra con la clave que él mismo eligió: es definitiva.
+  await crearOwner(db)
+  const sesionOwner = await authenticateOwner(OWNER.email, OWNER.password, asControlPlane(db))
+  metric('el Owner entra directo', sesionOwner.ok ? 'sí' : sesionOwner.code)
+  assert(sesionOwner.ok, 'el Owner debe entrar con lo que eligió')
+
+  // Y el primer Super Admin entra con la contraseña INICIAL que le entregó el Owner,
+  // sin pantalla ni modal intermedio: `mustChangePassword` nace en false.
+  const { su } = await crearEmpresaConSuperAdmin(db, { adminEmail: 'su@caribe.com', adminPassword: 'ClaveInicial1' })
+  const sesionSu = await authenticateUser('su@caribe.com', 'ClaveInicial1', asAuthDb(db))
+  metric('mustChangePassword en la base', su.mustChangePassword)
+  metric('mustChangePassword al entrar', sesionSu.ok ? sesionSu.mustChangePassword : '—')
+  assert(su.mustChangePassword === false, 'la contraseña inicial es utilizable tal cual')
+  assert(sesionSu.ok && sesionSu.mustChangePassword === false, 'no debe pedirse cambio al entrar')
 })
 
-await spec('CLEAN-INIT-007', 'Instalación', 'tras crear el Super Admin la instalación pasa a estado "ready"', async () => {
+await spec('CLEAN-INIT-007', 'Instalación', 'tras crear el Owner la instalación pasa a estado "ready"', async () => {
   const db = await freshCleanInstall()
   const antes = await getInstallationState(asPlatformDb(db))
-  await createFirstSuperAdmin(OWNER, asPlatformDb(db))
+  await crearOwner(db)
   const despues = await getInstallationState(asPlatformDb(db))
   metric('antes', `${antes.status} · initialized=${antes.initialized}`)
   metric('después', `${despues.status} · initialized=${despues.initialized}`)
@@ -598,28 +677,28 @@ await spec('CLEAN-INIT-007', 'Instalación', 'tras crear el Super Admin la insta
 
 await spec('CLEAN-INIT-008', 'Instalación', 'el formulario valida nombre, correo y contraseña', async () => {
   const db = await freshCleanInstall()
-  const casos: Array<[string, Parameters<typeof createFirstSuperAdmin>[0], string]> = [
+  const casos: Array<[string, Parameters<typeof createFirstOwner>[0], string]> = [
     ['nombre vacío', { ...OWNER, nombre: ' ' }, 'INVALID_NAME'],
     ['correo inválido', { ...OWNER, email: 'no-es-un-correo' }, 'INVALID_EMAIL'],
     ['contraseña corta', { ...OWNER, password: 'abc', confirmPassword: 'abc' }, 'WEAK_PASSWORD'],
     ['confirmación distinta', { ...OWNER, confirmPassword: 'otra-cosa' }, 'PASSWORD_MISMATCH'],
   ]
   for (const [nombre, input, esperado] of casos) {
-    const r = await createFirstSuperAdmin(input, asPlatformDb(db))
+    const r = await createFirstOwner(input, asPlatformDb(db))
     metric(nombre, r.ok ? 'ACEPTADO — ERROR' : r.code)
     assert(!r.ok && r.code === esperado, `[${nombre}] se esperaba ${esperado}`)
   }
   metric('longitud mínima exigida', MIN_BOOTSTRAP_PASSWORD_LENGTH)
-  metric('usuarios creados por intentos inválidos', (await db.users.toArray()).length)
-  assert((await db.users.toArray()).length === 0, 'ningún intento inválido debe escribir')
+  metric('cuentas creadas por intentos inválidos', (await db.platformUsers.toArray()).length)
+  assert((await db.platformUsers.toArray()).length === 0, 'ningún intento inválido debe escribir')
 })
 
 await spec('CLEAN-INIT-009', 'Instalación', 'la comprobación anti-carrera vive DENTRO de la transacción', () => {
   const src = readSource('src/services/platformBootstrapService.ts')
-  const body = src.slice(src.indexOf('export async function createFirstSuperAdmin'))
+  const body = src.slice(src.indexOf('export async function createFirstOwner'))
   const tx = body.indexOf('database.transaction')
-  const check = body.indexOf("u.rol === 'superadmin'", tx)
-  const write = body.indexOf('database.users.add', tx)
+  const check = body.indexOf('owners.length > 0', tx)
+  const write = body.indexOf('database.platformUsers.add', tx)
   metric('abre transacción', tx > -1)
   metric('re-comprueba dentro', check > tx)
   metric('escribe después de comprobar', write > check)
@@ -630,43 +709,78 @@ await spec('CLEAN-INIT-009', 'Instalación', 'la comprobación anti-carrera vive
 // ############################################################
 // GRUPO — EMPRESA
 // ############################################################
-await spec('CLEAN-COMPANY-001', 'Empresa', 'el Super Admin puede crear la primera empresa', async () => {
+await spec('OWNER-COMPANY-001', 'Empresa', 'el Owner crea la primera empresa', async () => {
   const db = await freshCleanInstall()
-  const r = await createFirstSuperAdmin(OWNER, asPlatformDb(db))
-  const su = (r as { user: User }).user
+  const owner = await crearOwner(db)
   metric('empresas al inicio', (await db.tenants.toArray()).length)
 
-  // Efecto de PlatformPage.handleSave (crear empresa + categorías, transaccional).
-  const empresa: Tenant = {
-    id: 't-1', nombre: 'Credirutas del Caribe', email: 'contacto@caribe.com', pais: 'Colombia',
-    moneda: 'COP', plan: 'profesional', status: 'prueba', createdAt: '', updatedAt: '',
-  }
-  await db.tenants.add(empresa)
-  await db.expenseCategories.bulkAdd([{ id: 'ec-1', tenantId: 't-1', nombre: 'Transporte', activa: true }])
+  const r = await createCompanyWithFirstSuperAdmin(owner, {
+    nombre: 'Credirutas del Caribe', email: 'contacto@caribe.com',
+    superAdmin: { nombre: 'Super Admin', email: 'su@caribe.com', password: 'ClaveInicial1' },
+  }, asProvisioningDb(db), asControlPlane(db))
+  assert(r.ok, `no se pudo crear la empresa: ${r.ok ? '' : r.message}`)
 
   const state = await getInstallationState(asPlatformDb(db))
   metric('empresas tras crear', state.companyCount)
   metric('categorías de la empresa', (await db.expenseCategories.toArray()).length)
-  assert(su.rol === 'superadmin', 'quien la crea debe ser el Super Admin')
+  metric('ficha de control', (await db.companyControl.toArray()).length)
   assert(state.companyCount === 1, 'debe existir la empresa creada')
   assert((await db.expenseCategories.toArray()).length > 0, 'la empresa nace con sus categorías de gasto')
+  assert((await db.companyControl.toArray()).length === 1, 'la empresa nace con su ficha de control comercial')
+
+  // Un usuario de EMPRESA no puede dar de alta empresas, por muy Super Admin que sea:
+  // el alta exige un actor de plataforma y el suyo no lo es.
+  const suplantando = await createCompanyWithFirstSuperAdmin(
+    (r as { superAdmin: User }).superAdmin as unknown as PlatformUser,
+    {
+      nombre: 'Empresa Pirata', email: 'pirata@x.com',
+      superAdmin: { nombre: 'X', email: 'x@x.com', password: 'ClaveInicial1' },
+    }, asProvisioningDb(db), asControlPlane(db),
+  )
+  metric('un Super Admin intentando crear empresa', suplantando.ok ? 'ACEPTADO — ERROR' : suplantando.code)
+  assert(!suplantando.ok && suplantando.code === 'NOT_OWNER', 'solo un Owner puede dar de alta empresas')
+  assert((await db.tenants.toArray()).length === 1, 'no debe haberse creado ninguna empresa extra')
+})
+
+await spec('OWNER-COMPANY-002', 'Empresa', 'el alta crea el primer Super Admin, atado a SU empresa', async () => {
+  const db = await freshCleanInstall()
+  const { su, tenant } = await crearEmpresaConSuperAdmin(db, { adminEmail: 'su@caribe.com', adminPassword: 'ClaveInicial1' })
+  metric('rol', su.rol)
+  metric('tenantId del Super Admin', su.tenantId)
+  metric('id de la empresa', tenant.id)
+  metric('mustChangePassword', su.mustChangePassword)
+  assert(su.rol === 'superadmin', 'el primer usuario de la empresa es su Super Admin')
+  assert(su.tenantId === tenant.id, 'el Super Admin pertenece a SU empresa')
+  assert(su.tenantId !== PLATFORM_TENANT_ID, 'nunca puede nacer con el centinela de plataforma')
+  assert(su.mustChangePassword === false, 'la contraseña inicial es utilizable tal cual')
+
+  // Y entra por la puerta de las EMPRESAS con esas credenciales.
+  const sesion = await authenticateUser('su@caribe.com', 'ClaveInicial1', asAuthDb(db))
+  metric('login por /login', sesion.ok ? 'ACEPTADO' : sesion.code)
+  assert(sesion.ok, 'el primer Super Admin debe poder entrar por el portal de empresas')
+
+  // OWNER-AUTH-002 — pero NO por la puerta de la plataforma: no está en `platformUsers`.
+  const porOwner = await authenticateOwner('su@caribe.com', 'ClaveInicial1', asControlPlane(db))
+  metric('el Super Admin intentando entrar por /owner/login', porOwner.ok ? 'ACEPTADO — ERROR' : porOwner.code)
+  assert(!porOwner.ok, 'un Super Admin no puede autenticarse en el portal Owner')
 })
 
 await spec('CLEAN-COMPANY-002', 'Empresa', 'ninguna empresa se crea automáticamente', async () => {
   const db = await freshCleanInstall()
   metric('empresas tras el arranque', (await db.tenants.toArray()).length)
-  await createFirstSuperAdmin(OWNER, asPlatformDb(db))
-  metric('empresas tras crear el Super Admin', (await db.tenants.toArray()).length)
+  await crearOwner(db)
+  metric('empresas tras crear el Owner', (await db.tenants.toArray()).length)
   assert((await db.tenants.toArray()).length === 0, 'no debe aparecer ninguna "Mi Empresa" automática')
 })
 
-await spec('CLEAN-COMPANY-003', 'Empresa', 'las categorías de gasto se crean con la empresa, no al arrancar', () => {
-  const platform = readSource('src/pages/platform/PlatformPage.tsx')
+await spec('CLEAN-COMPANY-003', 'Empresa', 'empresa, categorías, Super Admin y ficha nacen en UNA transacción', () => {
+  const svc = readSource('src/platform/companyControlService.ts')
   const seed = readSource('src/data/seed.ts')
-  metric('PlatformPage crea categorías', containsLine(platform, 'await db.expenseCategories.bulkAdd(buildDefaultExpenseCategories(t.id))'))
-  metric('lo hace en una transacción', containsLine(platform, "await db.transaction('rw', [db.tenants, db.expenseCategories], async () => {"))
-  assert(containsLine(platform, 'buildDefaultExpenseCategories(t.id)'), 'la empresa ya no nace con sus categorías')
-  assert(containsLine(platform, "db.transaction('rw', [db.tenants, db.expenseCategories]"), 'empresa y categorías deben crearse atómicamente')
+  metric('el alta crea las categorías', containsLine(svc, 'await database.expenseCategories.bulkAdd(buildDefaultExpenseCategories(tenantId))'))
+  metric('alcance de la transacción', '[tenants, users, expenseCategories, companyControl]')
+  assert(containsLine(svc, 'buildDefaultExpenseCategories(tenantId)'), 'la empresa ya no nace con sus categorías')
+  assert(containsLine(svc, '[database.tenants, database.users, database.expenseCategories, database.companyControl]'),
+    'empresa, Super Admin, categorías y ficha deben crearse atómicamente')
   assert(containsLine(seed, 'export async function ensureExpenseCategories'), 'debe conservarse la red de seguridad para empresas antiguas')
 })
 
@@ -675,24 +789,23 @@ await spec('CLEAN-COMPANY-003', 'Empresa', 'las categorías de gasto se crean co
 // ############################################################
 await spec('CLEAN-ADMIN-001', 'Administrador', 'no existe ningún Admin precreado', async () => {
   const db = await freshCleanInstall()
-  await createFirstSuperAdmin(OWNER, asPlatformDb(db))
+  const { su } = await crearEmpresaConSuperAdmin(db)
   const users = await db.users.toArray() as User[]
   metric('usuarios', users.map(u => `${u.rol}:${u.email}`).join(', '))
   assert(users.filter(u => u.rol === 'admin').length === 0, 'no debe haber ningún Administrador sembrado')
-  assert(users.length === 1, 'solo debe existir el Super Admin que se creó a mano')
+  assert(users.length === 1 && users[0].id === su.id, 'solo debe existir el primer Super Admin de la empresa')
 })
 
 await spec('CLEAN-ADMIN-002', 'Administrador', 'el Super Admin crea el Administrador', async () => {
   const db = await freshCleanInstall()
-  const r = await createFirstSuperAdmin(OWNER, asPlatformDb(db))
-  const su = (r as { user: User }).user
+  const { su } = await crearEmpresaConSuperAdmin(db)
   metric('canManageRole(superadmin, admin)', canManageRole(su, 'admin'))
   assert(canManageRole(su, 'admin'), 'el Super Admin debe poder crear Administradores')
 
-  // Efecto de UsersPage: alta con contraseña TEMPORAL.
+  // Efecto de UsersPage: alta con contraseña INICIAL utilizable (ya no temporal).
   await db.users.add({
-    id: 'u-admin-1', tenantId: 't-1', nombre: 'Ana Administradora', email: 'ana@caribe.com',
-    password: 'temporal123', rol: 'admin', status: 'activo', mustChangePassword: true,
+    id: 'u-admin-1', tenantId: su.tenantId, nombre: 'Ana Administradora', email: 'ana@caribe.com',
+    password: 'ClaveInicial1', rol: 'admin', status: 'activo', mustChangePassword: false,
     createdAt: '', updatedAt: '',
   })
   const admin = (await getUser(db, 'ana@caribe.com'))!
@@ -701,20 +814,29 @@ await spec('CLEAN-ADMIN-002', 'Administrador', 'el Super Admin crea el Administr
   assert(admin.rol === 'admin', 'debe crearse como Administrador')
 })
 
-await spec('CLEAN-ADMIN-003', 'Administrador', 'un usuario creado por un superior recibe mustChangePassword', async () => {
+await spec('PASSWORD-UX-002', 'Contraseñas', 'un usuario creado por un superior NO recibe cambio obligatorio', async () => {
+  // REGLA NUEVA (apartado Q). Antes esta prueba exigía justo lo contrario: que toda
+  // cuenta creada por un superior naciera con `mustChangePassword`. Ese flujo se
+  // eliminó por molesto y repetitivo; la contraseña inicial se usa tal cual.
   const usersPage = readSource('src/pages/admin/UsersPage.tsx')
-  metric('UsersPage marca la clave como temporal', containsLine(usersPage, 'mustChangePassword: true,'))
-  assert(containsLine(usersPage, 'mustChangePassword: true,'), 'los usuarios creados por un superior deben exigir cambio')
+  const guards = readSource('src/components/auth/guards.tsx')
+  metric('UsersPage crea con clave utilizable', containsLine(usersPage, 'mustChangePassword: false,'))
+  metric('UsersPage ya no marca clave temporal', !containsLine(usersPage, 'mustChangePassword: true,'))
+  metric('el guard ya no interpone ninguna pantalla', !guards.includes('PasswordChangeGate'))
+  assert(containsLine(usersPage, 'mustChangePassword: false,'), 'el alta debe entregar una contraseña utilizable')
+  assert(!containsLine(usersPage, 'mustChangePassword: true,'), 'el alta no puede volver a exigir cambio')
+  assert(!guards.includes('PasswordChangeGate'), 'el guard no puede interponer un cambio obligatorio')
 
   const db = await freshCleanInstall()
   await db.users.add({
-    id: 'u-admin-1', tenantId: 't-1', nombre: 'Ana', email: 'ana@caribe.com', password: 'temporal123',
-    rol: 'admin', status: 'activo', mustChangePassword: true, createdAt: '', updatedAt: '',
+    id: 'u-admin-1', tenantId: 't-1', nombre: 'Ana', email: 'ana@caribe.com', password: 'ClaveInicial1',
+    rol: 'admin', status: 'activo', mustChangePassword: false, createdAt: '', updatedAt: '',
   })
   db.tenants._seed([{ id: 't-1', nombre: 'Caribe', email: 'x@y.com', plan: 'profesional', status: 'activa', pais: 'Colombia', moneda: 'COP', createdAt: '', updatedAt: '' }])
-  const sesion = await authenticateUser('ana@caribe.com', 'temporal123', asAuthDb(db))
+  const sesion = await authenticateUser('ana@caribe.com', 'ClaveInicial1', asAuthDb(db))
   metric('al entrar exige cambio', sesion.ok ? sesion.mustChangePassword : '—')
-  assert(sesion.ok && sesion.mustChangePassword === true, 'al entrar debe pedirse el cambio de contraseña')
+  assert(sesion.ok, 'debe poder entrar con la contraseña inicial')
+  assert(sesion.ok && sesion.mustChangePassword === false, 'no debe pedirse ningún cambio al entrar')
 })
 
 await spec('CLEAN-ADMIN-004', 'Administrador', 'un Admin sin ruta sigue fail-closed', async () => {
@@ -736,15 +858,15 @@ await spec('CLEAN-ADMIN-004', 'Administrador', 'un Admin sin ruta sigue fail-clo
 
 await spec('CLEAN-ADMIN-005', 'Administrador', 'la primera ruta es creable (invariante de cobradores satisfacible)', async () => {
   const db = await freshCleanInstall()
-  const r = await createFirstSuperAdmin(OWNER, asPlatformDb(db))
-  const su = (r as { user: User }).user
-  const admin: User = { id: 'u-admin-1', tenantId: 't-1', nombre: 'Ana', email: 'ana@c.com', password: 'x', rol: 'admin', status: 'activo', createdAt: '', updatedAt: '' }
-  const cobrador: User = { id: 'u-cob-1', tenantId: 't-1', nombre: 'Luis', email: 'luis@c.com', password: 'x', rol: 'cobrador', status: 'activo', createdAt: '', updatedAt: '' }
+  const { su } = await crearEmpresaConSuperAdmin(db)
+  const t = su.tenantId
+  const admin: User = { id: 'u-admin-1', tenantId: t, nombre: 'Ana', email: 'ana@c.com', password: 'x', rol: 'admin', status: 'activo', createdAt: '', updatedAt: '' }
+  const cobrador: User = { id: 'u-cob-1', tenantId: t, nombre: 'Luis', email: 'luis@c.com', password: 'x', rol: 'cobrador', status: 'activo', createdAt: '', updatedAt: '' }
   await db.users.add(admin)
   await db.users.add(cobrador)
   assert(canManageRole(su, 'cobrador'), 'el Super Admin debe poder crear Cobradores')
   const inv = validateCobradorInvariant({
-    routeTenantId: 't-1', assignedUserIds: [admin.id, cobrador.id], cobradorId: cobrador.id,
+    routeTenantId: t, assignedUserIds: [admin.id, cobrador.id], cobradorId: cobrador.id,
     userById: (id) => [admin, cobrador, su].find(u => u.id === id),
   })
   metric('invariante', inv.ok ? 'satisfecho' : inv.message)
@@ -754,25 +876,35 @@ await spec('CLEAN-ADMIN-005', 'Administrador', 'la primera ruta es creable (inva
 // ############################################################
 // GRUPO — PRIMERA RUTA / PRIMER COBRADOR (deadlock del onboarding)
 // ############################################################
-/** Empresa recién creada por el Super Admin, con un Admin y SIN ninguna ruta. */
+/**
+ * Empresa recién dada de alta por el Owner, con su Super Admin, un Admin y SIN
+ * ninguna ruta. Es el estado REAL en el que el cliente recibe su empresa.
+ *
+ * El tenant se fija en 't-1' para que el resto del grupo siga siendo legible; lo
+ * relevante es que el Super Admin y el Admin comparten empresa y que no hay rutas.
+ */
 async function empresaSinRutas() {
   const db = new MemoryDb()
   await seedCleanDatabase()
-  const r = await createFirstSuperAdmin(OWNER, asPlatformDb(db))
-  const su = (r as { user: User }).user
+  const owner = await crearOwner(db)
   await db.tenants.add({ id: 't-1', nombre: 'Caribe', email: 'c@c.com', pais: 'Colombia', moneda: 'COP', plan: 'profesional', status: 'activa', createdAt: '', updatedAt: '' })
+  const su: User = {
+    id: 'u-su-1', tenantId: 't-1', nombre: 'Root', email: 'root@c.com', password: 'ClaveInicial1',
+    rol: 'superadmin', status: 'activo', mustChangePassword: false, createdAt: '', updatedAt: '',
+  }
+  await db.users.add(su)
   const admin: User = {
-    id: 'u-admin-1', tenantId: 't-1', nombre: 'Ana', email: 'ana@c.com', password: 'tmp',
-    rol: 'admin', status: 'activo', mustChangePassword: true, createdAt: '', updatedAt: '',
+    id: 'u-admin-1', tenantId: 't-1', nombre: 'Ana', email: 'ana@c.com', password: 'ClaveInicial1',
+    rol: 'admin', status: 'activo', mustChangePassword: false, createdAt: '', updatedAt: '',
   }
   await db.users.add(admin)
-  return { db, su, admin }
+  return { db, su, admin, owner }
 }
 
 /** Alta de usuario tal y como la hace UsersPage tras la corrección. */
 const nuevoUsuario = (over: Partial<User>): User => ({
-  id: 'u-x', tenantId: 't-1', nombre: 'X', email: 'x@c.com', password: 'tmp',
-  rol: 'cobrador', status: 'activo', mustChangePassword: true, createdAt: '', updatedAt: '',
+  id: 'u-x', tenantId: 't-1', nombre: 'X', email: 'x@c.com', password: 'ClaveInicial1',
+  rol: 'cobrador', status: 'activo', mustChangePassword: false, createdAt: '', updatedAt: '',
   ...over,
 })
 
@@ -921,7 +1053,7 @@ await spec('ONB-ROUTE-008', 'Primera ruta', 'no se crea ninguna ruta ficticia au
   assert((await db.routes.toArray()).length === 0, 'no debe aparecer ninguna ruta automática')
 
   // Ni el alta de usuarios ni el arranque CLEAN crean rutas.
-  for (const f of ['src/pages/admin/UsersPage.tsx', 'src/services/platformBootstrapService.ts', 'src/pages/auth/SetupPage.tsx']) {
+  for (const f of ['src/pages/admin/UsersPage.tsx', 'src/services/platformBootstrapService.ts', 'src/pages/owner/OwnerSetupPage.tsx']) {
     const src = readSource(f)
     const crea = /db\.routes\.(add|bulkAdd|put)/.test(src)
     metric(`${f} crea rutas`, crea)
@@ -1405,6 +1537,16 @@ async function empresaParaOficinas() {
   return { db, su, admin, cobrador, audits, sink }
 }
 
+/**
+ * Super Admin de OTRA empresa ('t-2'). Necesario desde la separación
+ * Plataforma/Empresa: nadie puede crear nada en una empresa que no es la suya, así
+ * que montar el escenario "Oficina ajena" exige un actor legítimo de esa empresa.
+ */
+const SU_T2: User = {
+  id: 'u-su-t2', tenantId: 't-2', nombre: 'Root T2', email: 'root@t2.com', password: 'x',
+  rol: 'superadmin', status: 'activo', createdAt: '', updatedAt: '',
+}
+
 const datosRuta = (over: Record<string, unknown> = {}) => ({
   tenantId: 't-1', nombre: 'Ruta Norte', ciudad: 'Barranquilla',
   tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000,
@@ -1446,7 +1588,7 @@ await spec('OFFICE-CRUD-002', 'Oficinas', 'el nombre duplicado en la empresa se 
 await spec('OFFICE-CRUD-003', 'Oficinas', 'el mismo nombre en OTRA empresa sí se permite', async () => {
   const { db, su, sink } = await empresaParaOficinas()
   await createOffice({ tenantId: 't-1', nombre: 'Oficina Leticia' }, su, asOfficeDb(db), sink)
-  await createOffice({ tenantId: 't-2', nombre: 'Oficina Leticia' }, su, asOfficeDb(db), sink)
+  await createOffice({ tenantId: 't-2', nombre: 'Oficina Leticia' }, SU_T2, asOfficeDb(db), sink)
   const todas = await db.offices.toArray()
   metric('oficinas totales', todas.length)
   metric('empresas', [...new Set(todas.map(o => o.tenantId))].join(', '))
@@ -1541,7 +1683,7 @@ await spec('OFFICE-ROUTE-002', 'Oficinas', 'se crea una Ruta CON Oficina', async
 
 await spec('OFFICE-ROUTE-002b', 'Oficinas', 'una Oficina de OTRA empresa se rechaza (aislamiento por tenant)', async () => {
   const { db, su, sink } = await empresaParaOficinas()
-  const ajena = await createOffice({ tenantId: 't-2', nombre: 'Ajena' }, su, asOfficeDb(db), sink)
+  const ajena = await createOffice({ tenantId: 't-2', nombre: 'Ajena' }, SU_T2, asOfficeDb(db), sink)
   let error = ''
   try {
     await createRouteWithAdmins(datosRuta({ officeId: ajena.id }), su, asRouteDb(db), sink)
@@ -1902,7 +2044,7 @@ await spec('OFFICE-MGMT-001', 'Gestión Oficina', 'el panel carga la Oficina cor
 
 await spec('OFFICE-MGMT-001b', 'Gestión Oficina', 'una Oficina de otra empresa no se carga', async () => {
   const { db, su, sink } = await empresaConOficinas()
-  const ajena = await createOffice({ tenantId: 't-2', nombre: 'Ajena' }, su, asOfficeDb(db), sink)
+  const ajena = await createOffice({ tenantId: 't-2', nombre: 'Ajena' }, SU_T2, asOfficeDb(db), sink)
   const resumen = await getOfficeManagementSummary({ user: su, tenantId: 't-1', officeId: ajena.id }, asSummaryDb(db))
   metric('resultado', resumen === null ? 'null (correcto)' : 'CARGÓ — ERROR')
   assert(resumen === null, 'el aislamiento por empresa se rompió')
@@ -2300,7 +2442,7 @@ await spec('ROUTE-ADMIN-015S', 'Multi-Admin', 'gestionar Oficinas no concede rut
 // ############################################################
 // GRUPO — RECUPERACIÓN DE INSTALACIONES HEREDADAS
 // ############################################################
-await spec('CLEAN-RECOVERY-001', 'Recuperación', 'una base heredada sin Super Admin se detecta como huérfana', async () => {
+await spec('CLEAN-RECOVERY-001', 'Recuperación', 'una base heredada sin Owner se detecta como huérfana', async () => {
   const db = orphanedInstall()
   const state = await getInstallationState(asPlatformDb(db))
   metric('status', state.status)
@@ -2309,29 +2451,30 @@ await spec('CLEAN-RECOVERY-001', 'Recuperación', 'una base heredada sin Super A
   metric('empresas', state.companyCount)
   metric('admins existentes', state.existingAdminEmails.join(', '))
   assert(state.status === 'orphaned', `estado ${state.status}: debía ser 'orphaned'`)
-  assert(state.initialized === false, 'sin Super Admin no está inicializada')
+  assert(state.initialized === false, 'sin Owner la plataforma no está inicializada')
+  assert(state.ownerCount === 0, 'una base heredada no tiene ningún Owner')
   assert(state.userCount === 1 && state.companyCount === 1, 'debe reportar lo que ya existe')
 })
 
-await spec('CLEAN-RECOVERY-002', 'Recuperación', 'la recuperación permite crear el Super Admin manualmente', async () => {
+await spec('CLEAN-RECOVERY-002', 'Recuperación', 'la recuperación permite crear el Owner manualmente', async () => {
   const db = orphanedInstall()
-  const antes = await authenticateUser(OWNER.email, OWNER.password, asAuthDb(db))
-  const r = await createFirstSuperAdmin(OWNER, asPlatformDb(db))
-  const despues = await authenticateUser(OWNER.email, OWNER.password, asAuthDb(db))
+  const plano = asControlPlane(db)
+  const antes = await authenticateOwner(OWNER.email, OWNER.password, plano)
+  const r = await createFirstOwner(OWNER, asPlatformDb(db))
+  const despues = await authenticateOwner(OWNER.email, OWNER.password, plano)
   metric('login antes', antes.ok ? 'ACEPTADO' : antes.code)
   metric('creación', r.ok ? 'CREADO' : r.code)
-  metric('marcada como recuperación', r.ok ? r.recovered : '—')
   metric('login después', despues.ok ? 'ACEPTADO' : despues.code)
   assert(!antes.ok, 'antes de recuperar no debía existir esa cuenta')
-  assert(r.ok && r.recovered === true, 'debe reportarse como recuperación de una instalación con datos')
-  assert(despues.ok, 'tras recuperar, el Super Admin debe poder entrar')
+  assert(r.ok, 'debe poder recuperarse una instalación con datos pero sin Owner')
+  assert(despues.ok, 'tras recuperar, el Owner debe poder entrar')
   assert((await getInstallationState(asPlatformDb(db))).status === 'ready', 'la instalación debe quedar lista')
 })
 
 await spec('CLEAN-RECOVERY-003', 'Recuperación', 'la recuperación NO modifica el Admin existente', async () => {
   const db = orphanedInstall()
   const antes = (await getUser(db, 'admin@demo.com'))!
-  await createFirstSuperAdmin(OWNER, asPlatformDb(db))
+  await createFirstOwner(OWNER, asPlatformDb(db))
   const despues = (await getUser(db, 'admin@demo.com'))!
   metric('contraseña antes → después', `${antes.password} → ${despues.password}`)
   metric('rutas antes → después', `${JSON.stringify(antes.authorizedRouteIds)} → ${JSON.stringify(despues.authorizedRouteIds)}`)
@@ -2349,7 +2492,7 @@ await spec('CLEAN-RECOVERY-004', 'Recuperación', 'la recuperación no borra emp
   const antes = JSON.stringify([
     await db.tenants.toArray(), await db.routes.toArray(), await db.clients.toArray(),
   ])
-  await createFirstSuperAdmin(OWNER, asPlatformDb(db))
+  await createFirstOwner(OWNER, asPlatformDb(db))
   const despues = JSON.stringify([
     await db.tenants.toArray(), await db.routes.toArray(), await db.clients.toArray(),
   ])
@@ -2364,9 +2507,9 @@ await spec('CLEAN-RECOVERY-005', 'Recuperación', 'NUNCA se crea una cuenta raí
   const db = orphanedInstall()
   await seedCleanDatabase()
   const state = await getInstallationState(asPlatformDb(db))
-  metric('superadmins tras el arranque', state.superadminCount)
+  metric('Owners tras el arranque', state.ownerCount)
   metric('estado', state.status)
-  assert(state.superadminCount === 0, 'el arranque creó una cuenta raíz por su cuenta')
+  assert(state.ownerCount === 0, 'el arranque creó una cuenta raíz por su cuenta')
 
   // Y en el código no puede quedar ninguna contraseña por defecto.
   const seed = readSource('src/data/seed.ts')
@@ -2495,12 +2638,29 @@ await spec('EMAIL-012', 'Correo', 'los duplicados se comparan sin distinguir may
   assert(!sameEmail('a@b.com', 'otro@b.com'), 'correos distintos no deben coincidir')
   assert(!sameEmail('', ''), 'dos vacíos no son "el mismo correo"')
 
-  // Y el bootstrap lo aplica: no admite un segundo usuario con el mismo correo en otra caja.
+  // Y el bootstrap lo aplica: el correo del Owner se guarda en su forma canónica.
   const db = await freshCleanInstall()
-  await createFirstSuperAdmin({ ...OWNER, email: 'Duenio@Empresa.com' }, asPlatformDb(db))
-  const guardado = (await db.users.toArray() as User[])[0]
+  await createFirstOwner({ ...OWNER, email: 'Duenio@Empresa.com' }, asPlatformDb(db))
+  const guardado = (await db.platformUsers.toArray() as PlatformUser[])[0]
   metric('guardado como', guardado.email)
   assert(guardado.email === 'duenio@empresa.com', 'el bootstrap debe guardar el correo normalizado')
+
+  // Y el alta de empresa rechaza un Super Admin cuyo correo ya exista: el correo es
+  // la clave de acceso y no puede repetirse en toda la instalación.
+  const owner = guardado
+  const primera = await createCompanyWithFirstSuperAdmin(owner, {
+    nombre: 'Uno', email: 'uno@x.com',
+    superAdmin: { nombre: 'Ana', email: 'Repetido@Empresa.com', password: 'ClaveInicial1' },
+  }, asProvisioningDb(db), asControlPlane(db))
+  const repetida = await createCompanyWithFirstSuperAdmin(owner, {
+    nombre: 'Dos', email: 'dos@x.com',
+    superAdmin: { nombre: 'Beto', email: 'repetido@empresa.com', password: 'ClaveInicial1' },
+  }, asProvisioningDb(db), asControlPlane(db))
+  metric('primera alta', primera.ok ? 'CREADA' : primera.code)
+  metric('segunda alta con el mismo correo en otra caja', repetida.ok ? 'CREADA — ERROR' : repetida.code)
+  assert(primera.ok, 'la primera alta debía funcionar')
+  assert(!repetida.ok && repetida.code === 'EMAIL_TAKEN', 'el correo duplicado debe rechazarse sin distinguir mayúsculas')
+  assert((await db.tenants.toArray()).length === 1, 'el alta rechazada no puede dejar una empresa a medias')
 })
 
 await spec('EMAIL-013', 'Correo', 'la validación está centralizada: sin regex propios por pantalla', () => {
@@ -2514,7 +2674,7 @@ await spec('EMAIL-013', 'Correo', 'la validación está centralizada: sin regex 
   const consumidores = [
     'src/services/platformBootstrapService.ts',
     'src/pages/admin/UsersPage.tsx',
-    'src/pages/platform/PlatformPage.tsx',
+    'src/platform/companyControlService.ts',
     'src/services/authService.ts',
   ]
   for (const archivo of consumidores) {
@@ -2532,17 +2692,23 @@ await spec('EMAIL-013', 'Correo', 'la validación está centralizada: sin regex 
 // ############################################################
 await spec('LOGIN-EMAIL-001', 'Login', 'el acceso admite diferencias de mayúsculas y espacios', async () => {
   const db = await freshCleanInstall()
-  await createFirstSuperAdmin({ ...OWNER, email: 'persona@empresa.com' }, asPlatformDb(db))
+  const CLAVE = 'ClaveInicial1'
+  await crearEmpresaConSuperAdmin(db, { adminEmail: 'persona@empresa.com', adminPassword: CLAVE })
   const variantes = ['persona@empresa.com', 'Persona@Empresa.COM', '  PERSONA@EMPRESA.com  ']
   for (const v of variantes) {
-    const r = await authenticateUser(v, OWNER.password, asAuthDb(db))
+    const r = await authenticateUser(v, CLAVE, asAuthDb(db))
     metric(JSON.stringify(v), r.ok ? 'ACEPTADO' : r.code)
     assert(r.ok, `debía autenticar con "${v}"`)
   }
   // La contraseña NO se normaliza: sigue distinguiendo mayúsculas.
-  const claveDistintaCaja = await authenticateUser('persona@empresa.com', OWNER.password.toUpperCase(), asAuthDb(db))
+  const claveDistintaCaja = await authenticateUser('persona@empresa.com', CLAVE.toUpperCase(), asAuthDb(db))
   metric('contraseña en mayúsculas', claveDistintaCaja.ok ? 'ACEPTADA — ERROR' : claveDistintaCaja.code)
   assert(!claveDistintaCaja.ok, 'la contraseña no debe normalizarse')
+
+  // Y el portal Owner aplica la MISMA normalización sobre su propia tabla.
+  const owner = await authenticateOwner('  ' + OWNER.email.toUpperCase() + '  ', OWNER.password, asControlPlane(db))
+  metric('Owner con correo en otra caja', owner.ok ? 'ACEPTADO' : owner.code)
+  assert(owner.ok, 'el portal Owner debe normalizar igual que el de empresas')
 })
 
 await spec('LOGIN-EMAIL-002', 'Login', 'un acceso correcto guarda el último correo', () => {
@@ -2598,19 +2764,19 @@ await spec('SETUP-EMAIL-001', 'Login', 'crear el primer Super Admin guarda su co
   fakeLocalStorage()
   forgetLastLoginEmail()
   const db = await freshCleanInstall()
-  const r = await createFirstSuperAdmin({ ...OWNER, email: 'Duenio@Empresa.com' }, asPlatformDb(db))
+  const r = await createFirstOwner({ ...OWNER, email: 'Duenio@Empresa.com' }, asPlatformDb(db))
   assert(r.ok, 'debía crearse la cuenta')
-  // Réplica del efecto de SetupPage tras la creación.
-  rememberLoginEmail((r as { user: User }).user.email)
-  metric('correo creado', (r as { user: User }).user.email)
+  // Réplica del efecto de OwnerSetupPage tras la creación.
+  rememberLoginEmail((r as { owner: PlatformUser }).owner.email)
+  metric('correo creado', (r as { owner: PlatformUser }).owner.email)
   metric('último correo recordado', getLastLoginEmail())
   assert(getLastLoginEmail() === 'duenio@empresa.com', 'el correo creado debe quedar recordado')
 
-  const setup = readSource('src/pages/auth/SetupPage.tsx')
-  metric('SetupPage lo registra', containsLine(setup, 'rememberLoginEmail(correo)'))
-  metric('SetupPage confirma el correo creado', setup.includes('Cuenta principal creada · Super Admin:'))
-  assert(containsLine(setup, 'rememberLoginEmail(correo)'), 'SetupPage no registra el correo creado')
-  assert(setup.includes('Cuenta principal creada · Super Admin:'), 'falta la confirmación visual del correo creado')
+  const setup = readSource('src/pages/owner/OwnerSetupPage.tsx')
+  metric('OwnerSetupPage lo registra', containsLine(setup, 'rememberLoginEmail(correo)'))
+  metric('OwnerSetupPage confirma el correo creado', setup.includes('Cuenta de plataforma creada · Owner:'))
+  assert(containsLine(setup, 'rememberLoginEmail(correo)'), 'OwnerSetupPage no registra el correo creado')
+  assert(setup.includes('Cuenta de plataforma creada · Owner:'), 'falta la confirmación visual del correo creado')
 })
 
 // ############################################################
@@ -2633,14 +2799,19 @@ await spec('DEMO-REG-002', 'Regresión DEMO', 'los 6 usuarios demo y sus rutas s
   assert(src.includes('ROUTE4_ID'), 'faltan rutas demo')
 })
 
-await spec('DEMO-REG-003', 'Regresión DEMO', 'DEMO no exige cambio de contraseña ni pasa por configuración inicial', () => {
+await spec('DEMO-REG-003', 'Regresión DEMO', 'DEMO siembra Owner y Super Admin, y no exige cambio de contraseña', () => {
   const src = readSource('src/data/seed.ts')
   const demoBlock = src.slice(src.indexOf('export async function seedDatabase()'), src.indexOf('export async function resetToDemo'))
   metric('mustChangePassword en el seed DEMO', demoBlock.includes('mustChangePassword') ? 'PRESENTE' : 'ausente')
-  metric('el seed DEMO crea un superadmin', demoBlock.includes("rol: 'superadmin'"))
+  metric('el seed DEMO crea un Super Admin de empresa', demoBlock.includes("rol: 'superadmin'"))
+  metric('el seed DEMO crea un Owner de plataforma', demoBlock.includes("rol: 'owner'"))
   assert(!demoBlock.includes('mustChangePassword'), 'DEMO no debe bloquear con cambio de contraseña')
-  // Al crear un superadmin, `getInstallationState` devuelve 'ready' → nunca aparece SetupPage.
-  assert(demoBlock.includes("rol: 'superadmin'"), 'DEMO debe seguir sembrando su Super Admin, o mostraría la configuración inicial')
+  assert(demoBlock.includes("rol: 'superadmin'"), 'DEMO debe seguir sembrando el Super Admin de su empresa')
+  // Con un Owner sembrado, `getInstallationState` devuelve 'ready' y el portal de
+  // plataforma muestra su login en vez de la configuración inicial.
+  assert(demoBlock.includes("rol: 'owner'"), 'DEMO debe sembrar su Owner, o /owner/login pediría configurar la plataforma')
+  assert(demoBlock.includes('tenantId: TENANT_ID'), 'el Super Admin DEMO debe pertenecer a su empresa')
+  assert(!demoBlock.includes("tenantId: 'platform'"), 'ningún usuario DEMO puede nacer con el centinela de plataforma')
 })
 
 await spec('DEMO-REG-004', 'Regresión DEMO', 'el arranque solo siembra en DEMO', () => {
@@ -2671,13 +2842,45 @@ await spec('BOOT-SRC-001', 'Arquitectura', 'el arranque CLEAN no siembra absolut
   }
 })
 
-await spec('BOOT-SRC-002', 'Arquitectura', 'la puerta de entrada decide login vs configuración inicial', () => {
+await spec('OWNER-ROUTING-001', 'Arquitectura', 'DOS puertas separadas: /login para empresas, /owner/login para la plataforma', () => {
   const entry = readSource('src/pages/auth/AuthEntry.tsx')
+  const ownerEntry = readSource('src/pages/owner/OwnerAuthEntry.tsx')
   const app = readSource(SRC.app)
-  metric('AuthEntry monta SetupPage si no está inicializada', containsLine(entry, 'if (!state.initialized) return <SetupPage state={state} onDone={refresh} />'))
+
   metric('/login usa AuthEntry', containsLine(app, '<Route path="/login" element={<AuthEntry />} />'))
-  assert(containsLine(entry, 'if (!state.initialized) return <SetupPage state={state} onDone={refresh} />'), 'AuthEntry ya no protege la entrada')
+  metric('/owner/login usa OwnerAuthEntry', containsLine(app, '<Route path="/owner/login" element={<OwnerAuthEntry />} />'))
+  metric('el arranque de la plataforma vive en el portal Owner',
+    containsLine(ownerEntry, 'if (!state.initialized) return <OwnerSetupPage state={state} onDone={refresh} />'))
+  metric('/owner/* está tras RequireOwner', containsLine(app, '<RequireOwner>'))
+
   assert(containsLine(app, '<Route path="/login" element={<AuthEntry />} />'), '/login debe pasar por AuthEntry')
+  assert(containsLine(app, '<Route path="/owner/login" element={<OwnerAuthEntry />} />'), '/owner/login debe pasar por OwnerAuthEntry')
+  assert(containsLine(ownerEntry, 'if (!state.initialized) return <OwnerSetupPage state={state} onDone={refresh} />'),
+    'la configuración inicial debe vivir en el portal Owner')
+  assert(containsLine(app, '<RequireOwner>'), '/owner/* debe estar protegido por su propio guard')
+  // La puerta de las empresas NO puede crear cuentas de plataforma.
+  assert(!entry.includes('createFirstOwner'), '/login no puede crear la cuenta raíz de la plataforma')
+})
+
+await spec('OWNER-ROUTING-003', 'Arquitectura', 'los dos guards leen sesiones distintas: aislamiento real', () => {
+  const guards = readSource('src/components/auth/guards.tsx')
+  const requireAuth = guards.slice(guards.indexOf('export function RequireAuth'), guards.indexOf('export function RequireOwner'))
+  const requireOwner = guards.slice(guards.indexOf('export function RequireOwner'))
+
+  metric('RequireAuth lee', 'useAuth (empresas)')
+  metric('RequireOwner lee', 'useOwnerAuth (plataforma)')
+  assert(requireAuth.includes('useAuth()') && !requireAuth.includes('useOwnerAuth()'),
+    'el guard de empresa no puede mirar la sesión de plataforma')
+  assert(requireOwner.includes('useOwnerAuth()') && !requireOwner.includes('useAuth()'),
+    'el guard de plataforma no puede mirar la sesión de empresa')
+  assert(requireOwner.includes("<Navigate to=\"/owner/login\" replace />"), 'sin sesión Owner debe volver a su propio login')
+  // Y las dos sesiones se persisten con claves distintas: no se pisan ni se heredan.
+  const ownerStore = readSource('src/hooks/useOwnerAuth.ts')
+  const tenantStore = readSource('src/hooks/useAuth.ts')
+  metric('clave de sesión Owner', "rutacash-owner-auth")
+  metric('clave de sesión empresa', "rutacash-auth")
+  assert(ownerStore.includes("name: 'rutacash-owner-auth'"), 'la sesión Owner debe tener su propia clave')
+  assert(tenantStore.includes("name: 'rutacash-auth'"), 'la sesión de empresa conserva su clave')
 })
 
 await spec('BOOT-SRC-003', 'Arquitectura', 'el fail-closed del Administrador sigue intacto', () => {
@@ -2689,23 +2892,54 @@ await spec('BOOT-SRC-003', 'Arquitectura', 'el fail-closed del Administrador sig
   metric('fail-closed', 'intacto')
 })
 
-await spec('BOOT-SRC-004', 'Arquitectura', 'el gate de contraseña temporal precede al guard de roles', () => {
+await spec('PASSWORD-UX-003', 'Contraseñas', 'no existe ninguna pantalla ni modal de cambio obligatorio', () => {
+  // REGLA NUEVA (apartado Q). Antes esta prueba EXIGÍA que el gate se interpusiera
+  // antes del guard de roles. El componente ya no existe y el guard no lo monta.
   const guards = readSource('src/components/auth/guards.tsx')
-  const idxGate = guards.indexOf('mustChangePassword')
-  const idxRoles = guards.indexOf('if (roles &&')
-  metric('gate presente', idxGate > -1)
-  metric('antes que el guard de roles', idxGate < idxRoles)
-  assert(containsLine(guards, 'if (user.mustChangePassword === true) return <PasswordChangeGate />'), 'el guard ya no aplica el cambio obligatorio')
-  assert(idxGate < idxRoles, 'debe evaluarse antes que el guard de roles')
+  const existeGate = existsSync(resolve(process.cwd(), 'src/components/auth/PasswordChangeGate.tsx'))
+  metric('PasswordChangeGate.tsx en el proyecto', existeGate ? 'PRESENTE — ERROR' : 'eliminado')
+  metric('el guard lo menciona', guards.includes('PasswordChangeGate') ? 'SÍ — ERROR' : 'no')
+  metric('el guard consulta mustChangePassword', guards.includes('mustChangePassword') ? 'SÍ — ERROR' : 'no')
+  assert(!existeGate, 'el componente de cambio obligatorio debe haber desaparecido')
+  assert(!guards.includes('PasswordChangeGate'), 'el guard no puede montar ninguna pantalla de cambio obligatorio')
+  assert(!guards.includes('mustChangePassword'), 'el guard no puede volver a consultar el flag legado')
 })
 
-await spec('BOOT-SRC-005', 'Arquitectura', 'el Super Admin es de plataforma: el centinela está centralizado', () => {
+await spec('PASSWORD-USERS-002', 'Contraseñas', 'el Administrador NO gestiona la contraseña de un Super Admin', () => {
+  const su: User = { id: 'u-su', tenantId: 't-1', nombre: 'Root', email: 'root@c.com', password: 'x', rol: 'superadmin', status: 'activo', createdAt: '', updatedAt: '' }
+  const admin: User = { id: 'u-adm', tenantId: 't-1', nombre: 'Ana', email: 'ana@c.com', password: 'x', rol: 'admin', status: 'activo', createdAt: '', updatedAt: '' }
+  const cobrador: User = { id: 'u-cob', tenantId: 't-1', nombre: 'Luis', email: 'luis@c.com', password: 'x', rol: 'cobrador', status: 'activo', createdAt: '', updatedAt: '' }
+  const ajeno: User = { id: 'u-aj', tenantId: 't-2', nombre: 'Otro', email: 'otro@c.com', password: 'x', rol: 'cobrador', status: 'activo', createdAt: '', updatedAt: '' }
+
+  metric('Admin → Super Admin', canManageUser(admin, su))
+  metric('Admin → Cobrador', canManageUser(admin, cobrador))
+  metric('Super Admin → Super Admin', canManageUser(su, su))
+  metric('Super Admin → usuario de OTRA empresa', canManageUser(su, ajeno))
+  assert(!canManageUser(admin, su), 'un Administrador nunca gestiona a un Super Admin')
+  assert(canManageUser(admin, cobrador), 'un Administrador sí gestiona a sus subordinados')
+  assert(canManageUser(su, su), 'un Super Admin gestiona a los Super Admin de su empresa')
+  assert(!canManageUser(su, ajeno), 'ni el Super Admin puede tocar usuarios de otra empresa')
+
+  // Y el servicio de restablecimiento se apoya EXACTAMENTE en esa regla.
+  const svc = readSource('src/services/passwordService.ts')
+  metric('resetUserPassword valida la jerarquía', containsLine(svc, 'if (!canManageUser(actor, target))'))
+  metric('el reset ya no exige cambio al entrar', containsLine(svc, 'mustChangePassword: false'))
+  assert(containsLine(svc, 'if (!canManageUser(actor, target))'), 'el reset debe validar la jerarquía')
+  assert(containsLine(svc, 'mustChangePassword: false'), 'el reset no puede volver a forzar el cambio')
+})
+
+await spec('BOOT-SRC-005', 'Arquitectura', 'el centinela de plataforma queda como LEGADO, no como modelo vigente', () => {
   const svc = readSource('src/services/platformBootstrapService.ts')
   metric('constante', "export const PLATFORM_TENANT_ID = 'platform'")
   metric('valor', PLATFORM_TENANT_ID)
-  metric('deuda de modelo documentada', svc.includes('DEUDA DE MODELO'))
+  metric('documentado como deuda heredada', svc.includes('DEUDA DE MODELO HEREDADA'))
   assert(containsLine(svc, "export const PLATFORM_TENANT_ID = 'platform'"), 'el centinela debe estar centralizado')
-  assert(svc.includes('DEUDA DE MODELO'), 'la deuda de modelo debe quedar documentada en el código')
+  assert(svc.includes('DEUDA DE MODELO HEREDADA'), 'debe quedar documentado que el centinela es legado')
+  // Lo importante: el bootstrap ya NO crea usuarios de empresa con el centinela.
+  const bootstrap = svc.slice(svc.indexOf('export async function createFirstOwner'))
+  metric('el bootstrap crea en', 'platformUsers')
+  assert(bootstrap.includes('database.platformUsers.add'), 'el primer dueño debe nacer en la tabla de plataforma')
+  assert(!bootstrap.includes('tenantId: PLATFORM_TENANT_ID'), 'ningún usuario nuevo puede nacer con el centinela')
 })
 
 // ############################################################

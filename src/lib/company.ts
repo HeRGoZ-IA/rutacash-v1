@@ -37,8 +37,12 @@ export function isCompanyExpired(tenant: Pick<Tenant, 'status' | 'fechaVencimien
 }
 
 /**
- * ¿La empresa BLOQUEA el acceso a los usuarios NO superadmin?
+ * ¿La empresa BLOQUEA el acceso a sus usuarios?
  * Bloquea si está suspendida (manual) o vencida (por fecha).
+ *
+ * Aplica a TODOS los usuarios de la empresa, Super Admin incluido: desde la
+ * separación Plataforma/Empresa no hay ningún rol de `users` por encima del estado
+ * de su propia empresa. Reactivar es competencia exclusiva del Owner.
  */
 export function isCompanyBlocked(tenant: Pick<Tenant, 'status' | 'fechaVencimiento'>, nowStr?: string): boolean {
   const eff = getEffectiveCompanyStatus(tenant, nowStr)
@@ -49,7 +53,10 @@ export function isCompanyBlocked(tenant: Pick<Tenant, 'status' | 'fechaVencimien
 export function companyBlockMessage(tenant: Pick<Tenant, 'status' | 'fechaVencimiento'>, nowStr?: string): string | null {
   const eff = getEffectiveCompanyStatus(tenant, nowStr)
   if (eff === 'vencida') return 'El servicio de esta empresa se encuentra vencido. Comunícate con el responsable para renovar.'
-  if (eff === 'suspendida') return 'Tu empresa está suspendida. Contacta al soporte.'
+  // Mensaje CORTO y sin detalles comerciales (apartado W): el usuario de la empresa
+  // no tiene por qué enterarse de la relación comercial entre su empresa y RutaCash.
+  // No se borra ni un dato: la empresa simplemente deja de poder operar.
+  if (eff === 'suspendida') return 'Servicio suspendido. Contacte al proveedor.'
   return null
 }
 

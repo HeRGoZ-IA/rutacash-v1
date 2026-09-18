@@ -1,12 +1,20 @@
 // ============================================================
-// Restablecimiento de contraseñas por jerarquía (SESIONES, BLOQUEOS Y CONTRASEÑAS)
+// RESTABLECIMIENTO DE CONTRASEÑAS — TODO OCURRE EN «USUARIOS»
 // ------------------------------------------------------------
-// - Super Admin: puede restablecer cualquier usuario de la empresa.
-// - Administrador: solo perfiles subordinados (nunca Super Admin ni otro Admin).
-// - Cambio de contraseña propia: en `useAuth.changeOwnPassword` (todos los perfiles).
+// Punto único de gestión administrativa de contraseñas (apartado R):
+//   · Super Admin   → cualquier usuario de SU empresa, incluidos otros Super Admin.
+//   · Administrador → solo los perfiles subordinados. NUNCA un Super Admin: no puede
+//                     restablecer la contraseña de quien está por encima de él, que
+//                     sería la forma más directa de suplantarlo.
+//   · Cambio propio → `useAuth.changeOwnPassword`, voluntario, desde Mi Perfil.
 //
-// Mecanismo local existente (contraseña en texto en Dexie). Se centraliza su uso
-// aquí; la autenticación segura deberá migrar a un backend en la versión SaaS real.
+// LO QUE ESTE SERVICIO YA NO HACE: marcar `mustChangePassword`. El cambio obligatorio
+// de contraseña se eliminó (apartado Q). Quien recibe una contraseña nueva la usa con
+// normalidad; nadie le interrumpe el acceso con un modal ni con una pantalla previa.
+//
+// NUNCA se muestra la contraseña actual: no se lee ni se devuelve en ningún punto,
+// solo se sobrescribe. La contraseña sigue guardándose en texto plano en la base
+// local — auditado y documentado; la protección real exige backend.
 // ============================================================
 import { db } from '@/lib/db'
 import { nowISO } from '@/lib/formatters'
@@ -21,8 +29,9 @@ export async function resetUserPassword(actor: User, targetUserId: string, newPa
   if (!canManageUser(actor, target)) return { success: false, error: 'No tienes permiso para restablecer la contraseña de este usuario.' }
   if (!newPassword || newPassword.length < 4) return { success: false, error: 'La contraseña debe tener al menos 4 caracteres.' }
 
-  // La clave la eligió un tercero: el usuario debe definir la suya al entrar.
-  await db.users.update(targetUserId, { password: newPassword, mustChangePassword: true, updatedAt: nowISO() })
+  // Se escribe la contraseña y NADA más. `mustChangePassword` se fija explícitamente
+  // en false para no reactivar un flag legado sobre cuentas antiguas.
+  await db.users.update(targetUserId, { password: newPassword, mustChangePassword: false, updatedAt: nowISO() })
   await logAction({
     tenantId: actor.tenantId, userId: actor.id, userRole: actor.rol,
     action: 'RESET_PASSWORD', entityType: 'User', entityId: targetUserId,

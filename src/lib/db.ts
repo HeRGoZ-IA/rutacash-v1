@@ -6,6 +6,9 @@ import type {
   Withdrawal, CashboxMovement, WeeklySettlement, AuditLog, SaleRequest,
   PartnerCashMovement, PaymentAdjustmentRequest,
 } from '@/models/types'
+import type {
+  PlatformUser, CompanyControlRecord, SaaSPayment, ControlEvent,
+} from '@/platform/types'
 
 export class RutaCashDB extends Dexie {
   tenants!: Table<Tenant>
@@ -28,6 +31,18 @@ export class RutaCashDB extends Dexie {
   saleRequests!: Table<SaleRequest>
   partnerCashMovements!: Table<PartnerCashMovement>
   paymentAdjustmentRequests!: Table<PaymentAdjustmentRequest>
+
+  // ------------------------------------------------------------
+  // PLANO DE CONTROL SaaS (NIVEL PLATAFORMA — v13)
+  // ------------------------------------------------------------
+  // Tablas del Owner. Están en la misma base local porque HOY NO HAY BACKEND, pero
+  // son conceptualmente otra base: ninguna entidad operativa las referencia y ellas
+  // no referencian ninguna entidad operativa. Cuando exista servidor compartido, se
+  // van enteras al servidor sin arrastrar nada de la operación.
+  platformUsers!: Table<PlatformUser>
+  companyControl!: Table<CompanyControlRecord>
+  saasPayments!: Table<SaaSPayment>
+  controlEvents!: Table<ControlEvent>
 
   constructor() {
     super('RutaCashDB')
@@ -392,6 +407,146 @@ export class RutaCashDB extends Dexie {
         `[RutaCash][migración v12] Liquidaciones normalizadas: ${normalizadas}. ` +
         `El snapshot de Oficina NO se deduce para cierres heredados: se desconoce la ` +
         `Oficina del momento y deducirla de la actual falsearía el histórico.`,
+      )
+    })
+
+    // ============================================================
+    // v13 (SEPARACIÓN PLATAFORMA / EMPRESA): estructural y NO destructiva.
+    //
+    // Corrige la confusión de niveles que arrastraba el modelo: el Super Admin
+    // mezclaba "dueño de RutaCash" con "máxima autoridad de una empresa". A partir
+    // de aquí son dos cosas distintas y viven en tablas distintas:
+    //
+    //   · OWNER      → `platformUsers`. Dueño del SaaS. Sin tenantId, sin rutas.
+    //   · SUPERADMIN → `users`, SIEMPRE con el tenantId de SU empresa.
+    //
+    // QUÉ HACE CON LOS SUPER ADMIN HEREDADOS (los que llevan tenantId 'platform'):
+    //
+    //   1) Se COPIA su cuenta a `platformUsers` como Owner, conservando nombre,
+    //      correo y contraseña. Es deliberado: esa persona es, de hecho, el dueño de
+    //      la instalación, y así conserva su acceso por `/owner/login` sin que nadie
+    //      le invente credenciales nuevas. NO se crea ninguna cuenta con contraseña
+    //      conocida: se reutiliza exactamente la que esa persona ya eligió.
+    //
+    //   2) Su fila en `users` se REUBICA en una empresa real, para que esa empresa
+    //      conserve un Super Admin:
+    //        · 1 empresa    → se le asigna esa empresa.
+    //        · 0 empresas   → no hay empresa que administrar: la fila se elimina de
+    //                         `users`. La persona sigue existiendo como Owner y desde
+    //                         el portal creará su primera empresa con su Super Admin.
+    //        · >1 empresas  → se asigna a la MÁS ANTIGUA y se deja constancia en
+    //                         consola. Las demás quedan sin Super Admin y el Owner
+    //                         debe crearles uno: no se puede clonar la cuenta a
+    //                         varias empresas porque el correo es la clave de acceso
+    //                         y se duplicaría. Documentado, no disimulado.
+    //
+    //   3) Se crea la FICHA DE CONTROL (`companyControl`) de cada empresa existente,
+    //      derivando su estado comercial del `Tenant.status` actual y contando sus
+    //      rutas reales. Sin fecha de primer/último ingreso: no existían y no se
+    //      inventan (quedan vacías hasta el primer acceso real).
+    //
+    //   4) Se apaga `mustChangePassword` en todos los usuarios: RutaCash ya no fuerza
+    //      cambios de contraseña al entrar (la gestión vive en Usuarios). El campo se
+    //      conserva en el esquema por compatibilidad, pero deja de tener efecto.
+    //
+    // No se borra ninguna empresa, ruta, cliente, venta, pago ni liquidación.
+    // ============================================================
+    this.version(13).stores({
+      platformUsers: 'id, email, status',
+      companyControl: 'companyId, status',
+      saasPayments: 'id, companyId, periodo, status',
+      controlEvents: 'id, companyId, type, at',
+    }).upgrade(async (tx) => {
+      const PLATFORM_SENTINEL = 'platform'
+      const ahora = new Date().toISOString()
+
+      const [users, tenants, routes] = await Promise.all([
+        tx.table('users').toArray() as Promise<User[]>,
+        tx.table('tenants').toArray() as Promise<Tenant[]>,
+        tx.table('routes').toArray() as Promise<Route[]>,
+      ])
+
+      // --- 1) Empresas reales (el centinela nunca fue una empresa). ---
+      const empresas = tenants
+        .filter(t => t.id !== PLATFORM_SENTINEL)
+        .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+
+      // --- 2) Ficha de control de cada empresa existente. ---
+      const rutasPorEmpresa = new Map<string, Route[]>()
+      for (const r of routes) {
+        const arr = rutasPorEmpresa.get(r.tenantId) ?? []
+        arr.push(r)
+        rutasPorEmpresa.set(r.tenantId, arr)
+      }
+      const estadoComercial = (s: string) =>
+        s === 'prueba' ? 'trial' : s === 'suspendida' ? 'suspended' : 'active'
+
+      for (const t of empresas) {
+        const suyas = rutasPorEmpresa.get(t.id) ?? []
+        await tx.table('companyControl').put({
+          companyId: t.id,
+          nombre: t.nombre,
+          identificacion: t.nit,
+          contacto: t.responsable,
+          contactoEmail: t.email,
+          createdAt: t.createdAt || ahora,
+          status: estadoComercial(t.status),
+          routeCount: suyas.length,
+          // Regla comercial: se factura la ruta ACTIVA (ver platform/billing.ts).
+          billableRouteCount: suyas.filter(r => r.status === 'activa').length,
+          billingMode: 'per_route',
+          billingRate: 0,
+          paymentStatus: 'pending',
+          updatedAt: ahora,
+        })
+      }
+
+      // --- 3) Super Admin heredados de plataforma → Owner + reubicación. ---
+      const heredados = users.filter(u => u.rol === 'superadmin' && u.tenantId === PLATFORM_SENTINEL)
+      const destino = empresas[0]
+      let promovidos = 0
+      let reubicados = 0
+      let eliminados = 0
+
+      for (const u of heredados) {
+        await tx.table('platformUsers').put({
+          id: `owner-${u.id}`,
+          nombre: u.nombre,
+          email: u.email,
+          password: u.password,     // la MISMA que esa persona ya eligió
+          rol: 'owner',
+          status: u.status === 'inactivo' ? 'inactivo' : 'activo',
+          createdAt: u.createdAt || ahora,
+          updatedAt: ahora,
+        })
+        promovidos++
+
+        if (destino) {
+          await tx.table('users').update(u.id, { tenantId: destino.id, updatedAt: ahora })
+          reubicados++
+        } else {
+          await tx.table('users').delete(u.id)
+          eliminados++
+        }
+      }
+
+      // --- 4) Se acabó el cambio obligatorio de contraseña. ---
+      let desbloqueados = 0
+      await tx.table('users').toCollection().modify((u: User) => {
+        if (u.mustChangePassword === true) { u.mustChangePassword = false; desbloqueados++ }
+      })
+
+      console.log(
+        `[RutaCash][migración v13] Plataforma y empresa separadas. ` +
+        `Owners creados desde Super Admin heredados: ${promovidos}. ` +
+        `Super Admin reubicados en una empresa: ${reubicados}. ` +
+        `Super Admin sin empresa que administrar (eliminados de users, conservados como Owner): ${eliminados}. ` +
+        `Fichas de control creadas: ${empresas.length}. ` +
+        `Cambio obligatorio de contraseña apagado en ${desbloqueados} usuario(s).` +
+        (empresas.length > 1 && heredados.length > 0
+          ? ` AVISO: hay ${empresas.length} empresas y el Super Admin heredado solo pudo asignarse a "${destino?.nombre}". ` +
+            `Las demás quedan sin Super Admin: créalos desde el portal Owner.`
+          : ''),
       )
     })
   }

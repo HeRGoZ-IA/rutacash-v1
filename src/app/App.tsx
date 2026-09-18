@@ -6,16 +6,22 @@ import { CollectorLayout } from '@/components/layout/CollectorLayout'
 import { SupervisorLayout } from '@/components/layout/SupervisorLayout'
 import { SocioLayout } from '@/components/layout/SocioLayout'
 import { SecretarioLayout } from '@/components/layout/SecretarioLayout'
-import { RequireAuth } from '@/components/auth/guards'
+import { RequireAuth, RequireOwner } from '@/components/auth/guards'
 import { useAuth } from '@/hooks/useAuth'
+import { useOwnerAuth } from '@/hooks/useOwnerAuth'
 import { seedDatabase, ensureExpenseCategories } from '@/data/seed'
 import { IS_CLEAN } from '@/lib/appMode'
 
 // Auth
 import AuthEntry from '@/pages/auth/AuthEntry'
 
-// Platform
-import PlatformPage from '@/pages/platform/PlatformPage'
+// Owner (NIVEL PLATAFORMA) — portal separado, con su propia puerta y su propio marco.
+import OwnerAuthEntry from '@/pages/owner/OwnerAuthEntry'
+import { OwnerLayout } from '@/pages/owner/OwnerLayout'
+import OwnerDashboardPage from '@/pages/owner/OwnerDashboardPage'
+import OwnerCompaniesPage from '@/pages/owner/OwnerCompaniesPage'
+import OwnerCompanyDetailPage from '@/pages/owner/OwnerCompanyDetailPage'
+import OwnerBillingPage from '@/pages/owner/OwnerBillingPage'
 
 // Admin
 import DashboardPage from '@/pages/admin/DashboardPage'
@@ -100,6 +106,7 @@ function operationalRoutes() {
 
 export default function App() {
   const revalidateSession = useAuth((s) => s.revalidateSession)
+  const revalidateOwnerSession = useOwnerAuth((s) => s.revalidate)
   const [booting, setBooting] = useState(true)
 
   useEffect(() => {
@@ -113,10 +120,13 @@ export default function App() {
     const boot = async () => {
       if (!IS_CLEAN) await seedDatabase()
       await ensureExpenseCategories()
+      // Las DOS sesiones se revalidan por separado, porque son independientes: cada
+      // una vive en su propio store y ninguna sabe de la otra.
       await revalidateSession()
+      await revalidateOwnerSession()
     }
     boot().catch(console.error).finally(() => setBooting(false))
-  }, [revalidateSession])
+  }, [revalidateSession, revalidateOwnerSession])
 
   // Hasta terminar el arranque no se decide qué pantalla mostrar: si se consultara
   // el estado de la instalación antes de sembrar, DEMO parpadearía en la pantalla
@@ -135,12 +145,23 @@ export default function App() {
         <Route path="/login" element={<AuthEntry />} />
         <Route path="/" element={<Navigate to="/login" replace />} />
 
-        {/* Platform / Super Admin */}
-        <Route path="/platform" element={
-          <RequireAuth roles={['superadmin']}>
-            <PlatformPage />
-          </RequireAuth>
-        } />
+        {/* ============================================================
+            PORTAL OWNER — NIVEL PLATAFORMA.
+            Puerta propia (`/owner/login`) y guard propio (`RequireOwner`, que solo
+            mira `useOwnerAuth`). Ningún usuario de empresa puede entrar aquí, ni
+            siquiera un Super Admin: su sesión vive en otro store y en otra tabla.
+            ============================================================ */}
+        <Route path="/owner/login" element={<OwnerAuthEntry />} />
+        <Route path="/owner" element={
+          <RequireOwner>
+            <OwnerLayout />
+          </RequireOwner>
+        }>
+          <Route index element={<OwnerDashboardPage />} />
+          <Route path="empresas" element={<OwnerCompaniesPage />} />
+          <Route path="empresas/:companyId" element={<OwnerCompanyDetailPage />} />
+          <Route path="cobros" element={<OwnerBillingPage />} />
+        </Route>
 
         {/* Socio (perfil de consulta / solo lectura) */}
         <Route path="/socio" element={
@@ -180,7 +201,8 @@ export default function App() {
           {operationalRoutes()}
         </Route>
 
-        {/* Admin panel (Administrador y Super Admin operando dentro de una empresa) */}
+        {/* Panel de EMPRESA. El Super Admin es aquí la máxima autoridad —y solo aquí:
+            su alcance es su propio tenant, sin ninguna puerta hacia la plataforma. */}
         <Route path="/admin" element={
           <RequireAuth roles={['admin', 'superadmin']}>
             <AdminLayout />
