@@ -445,6 +445,44 @@ await spec('OWNER-METRICS-003', 'Owner · Métricas', 'primer y último ingreso 
   assert(!/userId/.test(cuerpo.slice(0, 400)), 'la telemetría es de la empresa, no de la persona')
 })
 
+await spec('OWNER-METRICS-005', 'Owner · Métricas', 'el login de empresa ESTÁ CABLEADO a la telemetría', () => {
+  // `authenticateUser` es deliberadamente PURO (no muta nada), así que la telemetría
+  // se dispara en el único punto por el que pasa todo acceso real: `useAuth.login`.
+  // Sin esta comprobación, `recordTenantLogin` podría ser una función perfecta que
+  // nadie llama — que es exactamente lo que detectó el smoke de esta entrega.
+  const store = readSource('src/hooks/useAuth.ts')
+  const authSvc = readSource('src/services/authService.ts')
+
+  metric('useAuth importa recordTenantLogin', store.includes("from '@/platform/companyControlService'"))
+  metric('useAuth lo invoca en login', store.includes('await recordTenantLogin(result.user.tenantId)'))
+  assert(store.includes('await recordTenantLogin(result.user.tenantId)'),
+    'el login de empresa debe registrar el acceso en el plano de control')
+
+  // Y se invoca DESPUÉS de comprobar credenciales: un intento fallido no registra
+  // actividad que no ocurrió.
+  const iFallo = store.indexOf('if (!result.ok)')
+  const iTelemetria = store.indexOf('await recordTenantLogin(')
+  metric('se registra solo tras un acceso correcto', iFallo < iTelemetria)
+  assert(iFallo > -1 && iFallo < iTelemetria, 'la telemetría debe ir después del rechazo de credenciales')
+
+  // `authenticateUser` se mantiene puro: no escribe en el plano de control.
+  metric('authenticateUser escribe en el plano de control', /recordTenantLogin|controlPlane/.test(authSvc) ? 'SÍ' : 'no (puro)')
+  assert(!/recordTenantLogin|controlPlane/.test(authSvc),
+    'la comprobación de credenciales debe seguir siendo una lectura pura')
+})
+
+await spec('OWNER-METRICS-006', 'Owner · Métricas', 'las operaciones de ruta ESTÁN CABLEADAS a la métrica', () => {
+  const routeSvc = readSource('src/services/routeService.ts')
+  const routesPage = readSource('src/pages/admin/RoutesPage.tsx')
+
+  metric('createRouteWithAdmins emite ROUTE_CREATED', routeSvc.includes("metricsSink(input.tenantId, 'ROUTE_CREATED'"))
+  metric('RoutesPage emite al activar/desactivar', routesPage.includes("'ROUTE_CREATED' : 'ROUTE_DEACTIVATED'"))
+  metric('RoutesPage emite al eliminar', routesPage.includes("'ROUTE_DELETED'"))
+  assert(routeSvc.includes("metricsSink(input.tenantId, 'ROUTE_CREATED'"), 'crear una ruta debe mover la métrica')
+  assert(routesPage.includes("'ROUTE_DEACTIVATED'"), 'desactivar una ruta debe mover la métrica')
+  assert(routesPage.includes("'ROUTE_DELETED'"), 'eliminar una ruta debe mover la métrica')
+})
+
 await spec('OWNER-METRICS-004', 'Owner · Métricas', 'la métrica NUNCA bloquea la operación del cliente', async () => {
   const db = new MemoryDb()
   const { tenant, superAdmin } = await altaDeEmpresa(db)
