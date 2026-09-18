@@ -68,22 +68,54 @@ export async function authenticateOwner(
 }
 
 /**
- * Revalida un Owner persistido en sesión contra la base. Devuelve `null` si dejó de
- * existir o fue desactivado: en ese caso la sesión debe cerrarse.
+ * Resultado de revalidar una sesión de Owner. Son TRES desenlaces y no dos, y
+ * confundirlos tiene consecuencias: un fallo transitorio de lectura no puede
+ * significar lo mismo que una cuenta borrada.
+ *
+ *   'ok'       → la cuenta sigue viva y activa; se refresca.
+ *   'revoked'  → dejó de existir o fue desactivada; hay que CERRAR la sesión.
+ *   'unknown'  → no se pudo leer la base; se MANTIENE la sesión tal cual.
+ */
+export type OwnerRevalidation =
+  | { status: 'ok'; owner: PlatformUser }
+  | { status: 'revoked' }
+  | { status: 'unknown' }
+
+/**
+ * Revalida un Owner persistido en sesión contra la base.
+ *
+ * CORRECCIÓN: antes devolvía `null` tanto cuando la cuenta había desaparecido como
+ * cuando la lectura fallaba, y el store cerraba la sesión en ambos casos — pese a que
+ * el comentario afirmaba lo contrario. Un error transitorio de IndexedDB al arrancar
+ * expulsaba al Owner sin motivo. Ahora los tres desenlaces son distinguibles, igual
+ * que en `useAuth.revalidateSession` para el nivel empresa.
+ */
+export async function revalidateOwnerSession(
+  ownerId: string,
+  plane: SaaSControlPlane = controlPlane,
+): Promise<OwnerRevalidation> {
+  try {
+    const owners = await plane.listOwners()
+    const fresh = owners.find(o => o.id === ownerId)
+    if (!fresh || fresh.status !== 'activo') return { status: 'revoked' }
+    return { status: 'ok', owner: fresh }
+  } catch {
+    // Fallo de lectura: NO se expulsa de la sesión por un error transitorio.
+    return { status: 'unknown' }
+  }
+}
+
+/**
+ * Compatibilidad: devuelve el Owner o `null`. Se conserva para quien solo necesite
+ * "dámelo si está vivo"; para decidir si cerrar la sesión hay que usar
+ * `revalidateOwnerSession`, que distingue el fallo de lectura.
  */
 export async function revalidateOwner(
   ownerId: string,
   plane: SaaSControlPlane = controlPlane,
 ): Promise<PlatformUser | null> {
-  try {
-    const owners = await plane.listOwners()
-    const fresh = owners.find(o => o.id === ownerId)
-    if (!fresh || fresh.status !== 'activo') return null
-    return fresh
-  } catch {
-    // Error transitorio de lectura: no se expulsa de la sesión por un fallo de base.
-    return null
-  }
+  const r = await revalidateOwnerSession(ownerId, plane)
+  return r.status === 'ok' ? r.owner : null
 }
 
 /** Cambio de contraseña del propio Owner. Voluntario: nunca se fuerza ni se recuerda. */

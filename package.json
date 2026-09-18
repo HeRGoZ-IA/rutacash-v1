@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "verify:deploy": "node scripts/verify-deploy.mjs",
     "lint": "eslint . --ext ts,tsx",
     "test:permissions": "npx --yes esbuild tests/permissions.test.ts --bundle --format=esm --platform=node --outfile=tests/_out.mjs && node tests/_out.mjs",
     "test:financial": "npx --yes esbuild tests/payments.test.ts --bundle --format=esm --platform=node --alias:@=./src --outfile=tests/_out.financial.mjs && node tests/_out.financial.mjs",

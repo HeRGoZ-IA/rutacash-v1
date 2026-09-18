@@ -30,6 +30,7 @@ import {
   hasOperationalRoutes, canManageRole, canManageUser, canAccessRoute, can,
   filterAccessibleRoutes, filterByAccessibleRoute,
 } from '../src/lib/permissions'
+import { ownerGuardDecision } from '../src/components/auth/guardRules'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import {
@@ -3007,7 +3008,13 @@ await spec('OWNER-ROUTING-003', 'Arquitectura', 'los dos guards leen sesiones di
     'el guard de empresa no puede mirar la sesión de plataforma')
   assert(requireOwner.includes('useOwnerAuth()') && !requireOwner.includes('useAuth()'),
     'el guard de plataforma no puede mirar la sesión de empresa')
-  assert(requireOwner.includes("<Navigate to=\"/owner/login\" replace />"), 'sin sesión Owner debe volver a su propio login')
+  // El destino de la redirección ya NO se comprueba leyendo el JSX: la decisión vive
+  // en `guardRules` y se verifica EJECUTÁNDOLA (OWNER-SETTINGS-002, GUARD-OWNER-*).
+  // Leer el texto del guard fue justamente lo que dejó pasar el fallo de la 6.1.
+  metric('la decisión es una función pura', guards.includes("from '@/components/auth/guardRules'"))
+  assert(guards.includes("from '@/components/auth/guardRules'"), 'la decisión del guard debe ser verificable')
+  assert(ownerGuardDecision({ isAuthenticated: false, owner: null }).allow === false,
+    'sin sesión Owner no se puede pasar')
   // Y las dos sesiones se persisten con claves distintas: no se pisan ni se heredan.
   const ownerStore = readSource('src/hooks/useOwnerAuth.ts')
   const tenantStore = readSource('src/hooks/useAuth.ts')

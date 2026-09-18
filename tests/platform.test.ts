@@ -42,6 +42,10 @@ import {
   tenantHasActiveSuperadmin,
 } from '../src/lib/superadminProtection'
 import { canManageRole, canManageUser, assignableRoles, can, homePathForRole } from '../src/lib/permissions'
+import {
+  ownerGuardDecision, tenantGuardDecision, OWNER_LOGIN_PATH, TENANT_LOGIN_PATH,
+} from '../src/components/auth/guardRules'
+import { FACTORY_RESET_PHRASE } from '../src/components/owner/FactoryResetDialog'
 import { authenticateUser, type AuthDatabase } from '../src/services/authService'
 import { isCompanyBlocked, companyBlockMessage } from '../src/lib/company'
 import { createRouteWithAdmins, type RouteDatabase, type RouteAuditSink } from '../src/services/routeService'
@@ -88,6 +92,50 @@ function readSource(rel: string): string {
   const p = resolve(process.cwd(), rel)
   if (!existsSync(p)) throw new Error(`No se encuentra ${rel} (cwd=${process.cwd()})`)
   return readFileSync(p, 'utf8')
+}
+
+/**
+ * Bloque JSX de un `<Route path="X" ...>` con sus hijos, emparejando `<Route`/`</Route>`.
+ *
+ * POR QUÉ SE PARSEA EL ÁRBOL Y NO SE BUSCA UNA CADENA: la corrección 6.2 nació de un
+ * fallo que una búsqueda de texto no podía ver. `containsLine(app, '<Route
+ * path="configuracion" ...>')` es verdad tanto si la ruta cuelga de `/owner` (bien)
+ * como si estuviera suelta fuera del guard (mal). Lo que importa es DÓNDE está, y eso
+ * exige mirar la estructura.
+ */
+function bloqueDeRuta(src: string, path: string): string {
+  const inicio = src.indexOf(`<Route path="${path}"`)
+  if (inicio === -1) throw new Error(`No existe la ruta ${path} en App.tsx`)
+  // Ruta autocerrada (`<Route ... />`): no tiene hijos.
+  const finAuto = src.indexOf('/>', inicio)
+  const finApertura = src.indexOf('>', inicio)
+  if (finAuto !== -1 && finAuto === finApertura - 1) return src.slice(inicio, finAuto + 2)
+
+  let i = finApertura + 1
+  let profundidad = 1
+  while (i < src.length && profundidad > 0) {
+    const abre = src.indexOf('<Route', i)
+    const cierra = src.indexOf('</Route>', i)
+    if (cierra === -1) break
+    if (abre !== -1 && abre < cierra) {
+      // Una apertura autocerrada no abre nivel.
+      const cierreEtiqueta = src.indexOf('>', abre)
+      if (src.slice(abre, cierreEtiqueta + 1).trimEnd().endsWith('/>')) { i = cierreEtiqueta + 1; continue }
+      profundidad++
+      i = cierreEtiqueta + 1
+    } else {
+      profundidad--
+      i = cierra + '</Route>'.length
+      if (profundidad === 0) return src.slice(inicio, i)
+    }
+  }
+  throw new Error(`Etiquetas <Route> desbalanceadas para ${path}`)
+}
+
+/** Rutas hijas declaradas dentro de un bloque (`path="..."`), en orden. */
+function hijasDe(bloque: string): string[] {
+  const cuerpo = bloque.slice(bloque.indexOf('>') + 1)
+  return [...cuerpo.matchAll(/<Route\s+(?:path="([^"]*)"|index)/g)].map(m => m[1] ?? '(index)')
 }
 
 /** Todos los archivos .ts/.tsx bajo un directorio, recursivamente. */
@@ -147,6 +195,231 @@ const usuario = (over: Partial<User> & { tenantId: string; rol: User['rol'] }): 
   password: 'ClaveInicial1', status: 'activo', mustChangePassword: false,
   createdAt: '', updatedAt: '',
   ...over,
+})
+
+// ############################################################
+// FAMILIA — OWNER-SETTINGS / ROUTING REAL
+// ------------------------------------------------------------
+// Estas pruebas existen por un fallo concreto: en Producción, /owner/configuracion
+// devolvía al Owner a /login. La suite anterior no podía verlo porque comprobaba que
+// CIERTAS CADENAS existieran en App.tsx, no dónde estaban ni qué hacía el guard.
+// Aquí se parsea el árbol de rutas y se EJECUTA la decisión de los guards.
+// ############################################################
+await spec('OWNER-SETTINGS-001', 'Owner · Configuración', '/owner/configuracion existe como ruta', () => {
+  const app = readSource('src/app/App.tsx')
+  const owner = bloqueDeRuta(app, '/owner')
+  const hijas = hijasDe(owner)
+  metric('hijas de /owner', hijas.join(', '))
+  assert(hijas.includes('configuracion'), `/owner/configuracion no está declarada; hijas: ${hijas.join(', ')}`)
+  assert(owner.includes('<Route path="configuracion" element={<OwnerSettingsPage />} />'),
+    'la ruta debe montar OwnerSettingsPage')
+  // Y las cinco rutas del portal existen, con su jerarquía.
+  for (const r of ['(index)', 'empresas', 'empresas/:companyId', 'cobros', 'configuracion']) {
+    metric(`ruta ${r}`, hijas.includes(r))
+    assert(hijas.includes(r), `falta la ruta ${r} del portal Owner`)
+  }
+  metric('/owner/login', app.includes('<Route path="/owner/login" element={<OwnerAuthEntry />} />'))
+  assert(app.includes('<Route path="/owner/login" element={<OwnerAuthEntry />} />'), 'falta /owner/login')
+})
+
+await spec('OWNER-SETTINGS-002', 'Owner · Configuración', 'está bajo RequireOwner, NUNCA bajo RequireAuth', () => {
+  const app = readSource('src/app/App.tsx')
+  const owner = bloqueDeRuta(app, '/owner')
+  // La cabecera del bloque (hasta el primer hijo) es el elemento que envuelve a TODAS
+  // las rutas de dentro, `configuracion` incluida.
+  const cabecera = owner.slice(0, owner.indexOf('<Route index'))
+  metric('envoltura de /owner', cabecera.replace(/\s+/g, ' ').trim())
+  assert(cabecera.includes('<RequireOwner>'), '/owner debe estar envuelto en RequireOwner')
+  assert(!cabecera.includes('RequireAuth'), '/owner NO puede usar el guard de empresa')
+  // Y `configuracion` está DENTRO de ese bloque, no suelta fuera del guard.
+  const iConfig = app.indexOf('<Route path="configuracion"')
+  const iInicio = app.indexOf('<Route path="/owner"')
+  const iFin = iInicio + owner.length
+  metric('configuracion dentro del bloque guardado', iConfig > iInicio && iConfig < iFin)
+  assert(iConfig > iInicio && iConfig < iFin, 'la configuración quedó fuera del guard de plataforma')
+})
+
+await spec('OWNER-SETTINGS-003', 'Owner · Configuración', 'un Owner autenticado puede abrirla; los demás no', async () => {
+  const db = new MemoryDb()
+  const owner = await nuevoOwner(db)
+
+  // DECISIÓN REAL del guard, ejecutada. No es una comprobación de texto.
+  const conSesion = ownerGuardDecision({ isAuthenticated: true, owner })
+  metric('Owner activo autenticado', conSesion.allow ? 'PASA' : `redirige a ${(conSesion as any).redirectTo}`)
+  assert(conSesion.allow, 'un Owner autenticado debe poder abrir /owner/configuracion')
+
+  const casos: Array<[string, Parameters<typeof ownerGuardDecision>[0]]> = [
+    ['sin sesión', { isAuthenticated: false, owner: null }],
+    ['sesión sin Owner', { isAuthenticated: true, owner: null }],
+    ['Owner desactivado', { isAuthenticated: true, owner: { ...owner, status: 'inactivo' } }],
+    ['cuenta que no es Owner', { isAuthenticated: true, owner: { ...owner, rol: 'admin' as never } }],
+  ]
+  for (const [nombre, input] of casos) {
+    const d = ownerGuardDecision(input)
+    metric(nombre, d.allow ? 'PASA — ERROR' : `redirige a ${d.redirectTo}`)
+    assert(!d.allow, `${nombre} no debería pasar`)
+    if (d.allow) continue   // estrecha el tipo: a partir de aquí hay `redirectTo`
+    // LO CRÍTICO: nunca al portal de empresa.
+    assert(d.redirectTo === OWNER_LOGIN_PATH, `${nombre} redirige a ${d.redirectTo}, debía ser ${OWNER_LOGIN_PATH}`)
+    assert(d.redirectTo !== TENANT_LOGIN_PATH, `${nombre} devuelve al Owner al portal de empresa`)
+  }
+
+  // Y un Super Admin, por mucha autoridad que tenga, tampoco entra.
+  const { superAdmin } = await altaDeEmpresa(db, { owner })
+  const comoSuperAdmin = ownerGuardDecision({ isAuthenticated: true, owner: superAdmin as unknown as PlatformUser })
+  metric('Super Admin intentando entrar', comoSuperAdmin.allow ? 'PASA — ERROR' : `redirige a ${(comoSuperAdmin as any).redirectTo}`)
+  assert(!comoSuperAdmin.allow, 'un Super Admin no puede abrir la configuración de plataforma')
+})
+
+await spec('OWNER-SETTINGS-004', 'Owner · Configuración', 'el menú Owner contiene Configuración', () => {
+  const layout = readSource('src/pages/owner/OwnerLayout.tsx')
+  const destinos = [...layout.matchAll(/<NavLink to="([^"]+)"/g)].map(m => m[1])
+  metric('entradas del menú', destinos.join(', '))
+  for (const d of ['/owner', '/owner/empresas', '/owner/cobros', '/owner/configuracion']) {
+    metric(`menú → ${d}`, destinos.includes(d))
+    assert(destinos.includes(d), `el menú Owner no ofrece ${d}`)
+  }
+  assert(layout.includes('Configuración'), 'falta la etiqueta «Configuración» en el menú')
+  // El menú NO puede ofrecer nada del portal de empresa.
+  const fuera = destinos.filter(d => !d.startsWith('/owner'))
+  metric('entradas fuera de /owner', fuera.join(', ') || 'ninguna')
+  assert(fuera.length === 0, `el menú Owner enlaza fuera de su portal: ${fuera.join(', ')}`)
+})
+
+await spec('OWNER-SETTINGS-005', 'Owner · Configuración', 'una URL desconocida bajo /owner NO expulsa al portal de empresa', () => {
+  // El fallo observado en Producción: /owner/configuracion no existía, caía en el
+  // comodín global y aterrizaba en /login. Aunque la ruta ya exista, cualquier otra
+  // URL mal escrita bajo /owner debe quedarse dentro del portal de plataforma.
+  const app = readSource('src/app/App.tsx')
+  const owner = bloqueDeRuta(app, '/owner')
+  const hijas = hijasDe(owner)
+  metric('comodín propio de /owner', hijas.includes('*'))
+  assert(hijas.includes('*'), '/owner necesita su propio comodín, o una URL desconocida cae en /login')
+  assert(owner.includes('<Route path="*" element={<Navigate to="/owner" replace />} />'),
+    'el comodín de /owner debe devolver a /owner, no al portal de empresa')
+
+  // El comodín GLOBAL sigue existiendo para el resto de la aplicación.
+  metric('comodín global', app.includes('<Route path="*" element={<Navigate to="/login" replace />} />'))
+  assert(app.includes('<Route path="*" element={<Navigate to="/login" replace />} />'),
+    'el comodín global del portal de empresa debe conservarse')
+})
+
+await spec('OWNER-RESET-UI-001', 'Owner · Configuración', 'el Factory Reset se renderiza dentro de la configuración Owner', () => {
+  const settings = readSource('src/pages/owner/OwnerSettingsPage.tsx')
+  metric('monta el diálogo', settings.includes('<FactoryResetDialog'))
+  metric('sección', 'Zona de pruebas')
+  metric('acción', 'Restablecer RutaCash a cero')
+  assert(settings.includes('<FactoryResetDialog'), 'la configuración Owner debe montar el diálogo de restablecimiento')
+  assert(settings.includes('Zona de pruebas'), 'falta la sección separada de restablecimiento')
+  assert(settings.includes('Restablecer RutaCash a cero'), 'falta la acción de restablecimiento')
+
+  // Y es la ÚNICA pantalla de toda la aplicación que lo monta.
+  const montan = archivosDe('src').filter(f => readSource(f).includes('<FactoryResetDialog'))
+  metric('pantallas que lo montan', montan.join(', '))
+  assert(montan.length === 1 && montan[0] === 'src/pages/owner/OwnerSettingsPage.tsx',
+    `el reset debe tener UNA sola entrada; lo montan: ${montan.join(', ')}`)
+
+  // Que está detrás del guard de plataforma (encadenado con OWNER-SETTINGS-002).
+  const app = readSource('src/app/App.tsx')
+  const bloque = bloqueDeRuta(app, '/owner')
+  assert(bloque.includes('OwnerSettingsPage') && bloque.includes('<RequireOwner>') === false
+    ? true : bloque.includes('OwnerSettingsPage'),
+    'la pantalla del reset debe colgar del bloque /owner')
+  metric('confirmación exigida', FACTORY_RESET_PHRASE)
+  assert(readSource('src/components/owner/FactoryResetDialog.tsx').includes("FACTORY_RESET_PHRASE = 'RESTABLECER'"),
+    'la confirmación debe exigir escribir RESTABLECER')
+})
+
+await spec('TENANT-NO-RESET-005', 'Sin reset en empresa', '/login NO contiene «Restablecer RutaCash desde cero»', () => {
+  // Texto EXACTO del fallo reportado en Producción.
+  const TEXTO = 'Restablecer RutaCash desde cero'
+  const pantallasCliente = [
+    'src/pages/auth/LoginPage.tsx',
+    'src/pages/auth/AuthEntry.tsx',
+    'src/pages/auth/EmptyInstallationNotice.tsx',
+    'src/pages/admin/SettingsPage.tsx',
+  ]
+  for (const f of pantallasCliente) {
+    const src = readSource(f)
+    metric(f, src.includes(TEXTO) ? 'PRESENTE — ERROR' : 'ausente')
+    assert(!src.includes(TEXTO), `${f} sigue ofreciendo «${TEXTO}»`)
+  }
+  // El texto no puede existir ya en NINGÚN sitio: la acción se llama «a cero».
+  const todos = archivosDe('src').filter(f => readSource(f).includes(TEXTO))
+  metric('archivos con ese texto', todos.join(', ') || 'ninguno')
+  assert(todos.length === 0, `el texto retirado sobrevive en: ${todos.join(', ')}`)
+
+  // Y el estado «Todavía no hay empresas» solo ofrece ir al portal de plataforma.
+  const vacia = readSource('src/pages/auth/EmptyInstallationNotice.tsx')
+  const botones = [...vacia.matchAll(/<(?:Link|button)[^>]*>([\s\S]*?)<\/(?:Link|button)>/g)]
+    .map(m => m[1].replace(/\s+/g, ' ').trim())
+  metric('acciones de la pantalla vacía', botones.join(' | ') || 'ninguna')
+  assert(botones.length === 1 && botones[0].includes('Ir al portal de la plataforma'),
+    `esa pantalla solo puede ofrecer «Ir al portal de la plataforma»; ofrece: ${botones.join(' | ')}`)
+})
+
+await spec('TENANT-NO-RESET-006', 'Sin reset en empresa', 'LoginPage no importa factoryReset', () => {
+  const login = readSource('src/pages/auth/LoginPage.tsx')
+  const imports = [...login.matchAll(/from\s+['"]([^'"]+)['"]/g)].map(m => m[1])
+  metric('imports de LoginPage', imports.join(', '))
+  for (const prohibido of ['factoryReset', 'FactoryResetDialog', 'featureFlags', 'resetApp', 'FullResetDialog']) {
+    const importa = imports.some(m => m.includes(prohibido))
+    metric(`importa ${prohibido}`, importa ? 'SÍ — ERROR' : 'no')
+    assert(!importa, `LoginPage importa ${prohibido}`)
+  }
+  // Ni lo usa por otra vía.
+  for (const pr of ['wipeLocalInstallation', 'factoryResetAndRestart', 'db.delete', 'location.replace']) {
+    metric(`usa ${pr}`, login.includes(pr) ? 'SÍ — ERROR' : 'no')
+    assert(!login.includes(pr), `LoginPage ejecuta un borrado (${pr})`)
+  }
+})
+
+await spec('TENANT-NO-RESET-007', 'Sin reset en empresa', '/admin/** no expone ningún Factory Reset global', () => {
+  const paginasAdmin = archivosDe('src/pages/admin')
+  metric('pantallas /admin revisadas', paginasAdmin.length)
+  const culpables: string[] = []
+  for (const f of paginasAdmin) {
+    const src = readSource(f)
+    for (const pr of ['factoryReset', 'FactoryResetDialog', 'wipeLocalInstallation', 'resetLocalAppData', 'ENABLE_FACTORY_RESET']) {
+      if (src.includes(pr)) culpables.push(`${f} → ${pr}`)
+    }
+  }
+  metric('referencias al borrado total', culpables.join(' | ') || 'ninguna')
+  assert(culpables.length === 0, `/admin expone el borrado total: ${culpables.join(' | ')}`)
+
+  // Y ninguna ruta de /admin monta la configuración del Owner.
+  const app = readSource('src/app/App.tsx')
+  const admin = bloqueDeRuta(app, '/admin')
+  metric('/admin monta OwnerSettingsPage', admin.includes('OwnerSettingsPage') ? 'SÍ — ERROR' : 'no')
+  assert(!admin.includes('OwnerSettingsPage'), 'la configuración del Owner cuelga del portal de empresa')
+  assert(!admin.includes('FactoryReset'), '/admin monta el diálogo de restablecimiento')
+})
+
+await spec('GUARD-TENANT-001', 'Guards', 'el guard de empresa decide bien y nunca manda a /owner', async () => {
+  const db = new MemoryDb()
+  const { superAdmin } = await altaDeEmpresa(db)
+
+  const ok = tenantGuardDecision({ isAuthenticated: true, user: superAdmin, roles: ['admin', 'superadmin'] })
+  metric('Super Admin en /admin', ok.allow ? 'PASA' : `redirige a ${(ok as any).redirectTo}`)
+  assert(ok.allow, 'un Super Admin activo debe entrar al panel de su empresa')
+
+  const sinSesion = tenantGuardDecision({ isAuthenticated: false, user: null })
+  metric('sin sesión', sinSesion.allow ? 'PASA — ERROR' : `redirige a ${(sinSesion as any).redirectTo}`)
+  assert(!sinSesion.allow && (sinSesion as any).redirectTo === TENANT_LOGIN_PATH, 'sin sesión debe ir a /login')
+
+  const inactivo = tenantGuardDecision({ isAuthenticated: true, user: { ...superAdmin, status: 'inactivo' } })
+  assert(!inactivo.allow && (inactivo as any).redirectTo === TENANT_LOGIN_PATH, 'un usuario inactivo sale a /login')
+
+  // Rol que no corresponde → su propia home, NO /login (que parecería sesión caída).
+  const rolAjeno = tenantGuardDecision({ isAuthenticated: true, user: superAdmin, roles: ['cobrador'] })
+  metric('rol no permitido', rolAjeno.allow ? 'PASA — ERROR' : `redirige a ${(rolAjeno as any).redirectTo}`)
+  assert(!rolAjeno.allow, 'un rol no permitido no puede pasar')
+  assert((rolAjeno as any).redirectTo === homePathForRole('superadmin'), 'debe volver a SU home, no al login')
+
+  // Y el guard de empresa NUNCA manda a nadie al portal de plataforma.
+  for (const d of [sinSesion, inactivo, rolAjeno]) {
+    assert(!(d as any).redirectTo?.startsWith('/owner'), 'el guard de empresa no puede redirigir al portal Owner')
+  }
 })
 
 // ############################################################

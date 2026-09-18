@@ -161,6 +161,13 @@ export default function App() {
           <Route path="empresas/:companyId" element={<OwnerCompanyDetailPage />} />
           <Route path="cobros" element={<OwnerBillingPage />} />
           <Route path="configuracion" element={<OwnerSettingsPage />} />
+          {/* CUALQUIER `/owner/*` desconocido se queda DENTRO del portal de
+              plataforma. Sin esta línea caería en el comodín global de abajo y
+              devolvería al Owner a `/login`, es decir, al portal de EMPRESA: un
+              destino que no le corresponde y que hace parecer que su sesión se ha
+              perdido. Una URL mal escrita bajo /owner es un error de navegación,
+              no un cambio de portal. */}
+          <Route path="*" element={<Navigate to="/owner" replace />} />
         </Route>
 
         {/* Socio (perfil de consulta / solo lectura) */}

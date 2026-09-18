@@ -16,7 +16,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import {
-  authenticateOwner, revalidateOwner, changeOwnerPassword,
+  authenticateOwner, revalidateOwner, revalidateOwnerSession, changeOwnerPassword,
 } from '@/platform/platformAuthService'
 import type { PlatformUser } from '@/platform/types'
 
@@ -58,9 +58,12 @@ export const useOwnerAuth = create<OwnerAuthState>()(
       revalidate: async () => {
         const { owner, isAuthenticated } = get()
         if (!isAuthenticated || !owner) return
-        const fresh = await revalidateOwner(owner.id)
-        if (!fresh) { set({ owner: null, isAuthenticated: false }); return }
-        set({ owner: fresh })
+        const r = await revalidateOwnerSession(owner.id)
+        // Solo se cierra la sesión si la cuenta fue REVOCADA (borrada o desactivada).
+        // Ante un fallo de lectura ('unknown') se conserva: expulsar al Owner por un
+        // error transitorio de IndexedDB al arrancar es un fallo, no una protección.
+        if (r.status === 'revoked') { set({ owner: null, isAuthenticated: false }); return }
+        if (r.status === 'ok') set({ owner: r.owner })
       },
 
       refresh: async () => {
