@@ -47,6 +47,7 @@ import {
 } from '../src/components/auth/guardRules'
 import { FACTORY_RESET_PHRASE } from '../src/components/owner/FactoryResetDialog'
 import { authenticateUser, type AuthDatabase } from '../src/services/authService'
+import { formatDate, today } from '../src/lib/formatters'
 import { isCompanyBlocked, companyBlockMessage } from '../src/lib/company'
 import { createRouteWithAdmins, type RouteDatabase, type RouteAuditSink } from '../src/services/routeService'
 import { MemoryDb } from './financial/harness'
@@ -765,6 +766,176 @@ await spec('ONBOARDING-CLEAN-002', 'Onboarding', 'el primer Super Admin configur
   for (const rol of ['superadmin', 'admin', 'supervisor', 'cobrador', 'secretario', 'socio'] as const) {
     assert(canManageRole(su, rol), `el Super Admin debe poder crear el rol ${rol}`)
   }
+})
+
+// ############################################################
+// FAMILIA — OWNER-COMPANY-DATE (fecha de creación en el alta)
+// ------------------------------------------------------------
+// El alta de empresa pedía «Próximo cobro», un dato de gestión comercial que no
+// pinta nada en el momento de crear la empresa: obligaba a decidir cuándo se va a
+// cobrar antes incluso de que el cliente exista. En su lugar se muestra la FECHA DE
+// CREACIÓN, que es un hecho, no una decisión.
+// ############################################################
+
+/**
+ * Código sin comentarios: bloques `/* … *\/` (que en JSX llegan como `{/* … *\/}`)
+ * y líneas `//`. Los barridos de «esto ya no puede aparecer» tienen que mirar lo que
+ * la pantalla RENDERIZA, no lo que documenta. Un comentario que explica qué campo se
+ * retiró y por qué es información útil; una prueba que se cae por culpa de esa
+ * explicación solo enseña a borrar comentarios.
+ */
+function codigoSinComentarios(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .split(String.fromCharCode(10))
+    .filter(l => !l.trim().startsWith('//'))
+    .join(' ')
+}
+
+
+/** Cuerpo del modal «Nueva empresa». La tabla del listado NO es el formulario. */
+function modalNuevaEmpresa(): string {
+  const src = codigoSinComentarios(readSource('src/pages/owner/OwnerCompaniesPage.tsx'))
+  const i0 = src.indexOf('<Modal open={modalOpen}')
+  if (i0 === -1) throw new Error('No se encuentra el modal de alta de empresa')
+  const i1 = src.indexOf('</Modal>', i0)
+  return src.slice(i0, i1)
+}
+
+await spec('OWNER-COMPANY-DATE-001', 'Owner · Alta', '«Nueva empresa» muestra Fecha de creación', () => {
+  const modal = modalNuevaEmpresa()
+  metric('campo presente', modal.includes('label="Fecha de creación"'))
+  assert(modal.includes('label="Fecha de creación"'), 'el alta debe mostrar la Fecha de creación')
+
+  // Es informativa: de solo lectura, no un dato que el Owner decida.
+  metric('solo lectura', modal.includes('label="Fecha de creación" type="text" readOnly'))
+  assert(/label="Fecha de creación"[^>]*readOnly/.test(modal), 'la Fecha de creación no puede ser editable')
+  assert(modal.includes('Se registra automáticamente al crear la empresa.'),
+    'debe explicarse que la fecha se registra sola')
+
+  // ORDEN VISUAL: estado comercial → modo de cobro → tarifa → fecha de creación.
+  const orden = ['Estado comercial', 'Modo de cobro', 'Tarifa', 'Fecha de creación']
+    .map(l => ({ l, i: modal.indexOf(l) }))
+  metric('orden', orden.map(o => o.l).join(' → '))
+  for (const o of orden) assert(o.i > -1, `falta el campo ${o.l}`)
+  for (let i = 1; i < orden.length; i++) {
+    assert(orden[i].i > orden[i - 1].i, `«${orden[i].l}» debe ir después de «${orden[i - 1].l}»`)
+  }
+})
+
+await spec('OWNER-COMPANY-DATE-002', 'Owner · Alta', 'el alta NO pide «Próximo cobro»', () => {
+  const modal = modalNuevaEmpresa()
+  metric('«Próximo cobro» en el formulario', modal.includes('Próximo cobro') ? 'PRESENTE — ERROR' : 'ausente')
+  metric('nextBillingDate en el formulario', modal.includes('nextBillingDate') ? 'PRESENTE — ERROR' : 'ausente')
+  assert(!modal.includes('Próximo cobro'), 'el alta de empresa no puede pedir el próximo cobro')
+  assert(!modal.includes('nextBillingDate'), 'el alta no puede capturar nextBillingDate')
+
+  // Tampoco se envía al servicio desde el alta.
+  const page = codigoSinComentarios(readSource('src/pages/owner/OwnerCompaniesPage.tsx'))
+  const handler = page.slice(page.indexOf('async function handleCreate()'), page.indexOf('async function toggleStatus'))
+  metric('handleCreate envía nextBillingDate', /nextBillingDate:/.test(handler) ? 'SÍ — ERROR' : 'no')
+  assert(!/nextBillingDate:/.test(handler), 'el alta no puede persistir un próximo cobro')
+
+  // Y NO vive en el estado del formulario.
+  const estado = page.slice(page.indexOf('const emptyForm = {'), page.indexOf('const [form, setForm]'))
+  metric('estado del formulario', estado.replace(/\s+/g, ' ').trim())
+  assert(!estado.includes('nextBillingDate'), 'nextBillingDate sigue en el estado del formulario')
+})
+
+await spec('OWNER-COMPANY-DATE-003', 'Owner · Alta', 'la Fecha de creación se inicializa con la fecha actual', () => {
+  const modal = modalNuevaEmpresa()
+  // Se DERIVA de `today()` en cada render: aparece ya diligenciada al abrir el modal
+  // y no puede quedarse obsoleta si el formulario se deja abierto mucho rato.
+  metric('valor mostrado', 'formatDate(today())')
+  assert(modal.includes('value={formatDate(today())}'), 'la fecha debe derivarse de la fecha actual del sistema')
+
+  // No depende del modo de cobro ni de la tarifa.
+  const campo = modal.slice(modal.indexOf('label="Fecha de creación"'))
+  const hastaCierre = campo.slice(0, campo.indexOf('/>') + 2)
+  metric('depende de billing', /billingMode|billingRate|expectedPeriod/.test(hastaCierre) ? 'SÍ — ERROR' : 'no')
+  assert(!/billingMode|billingRate|expectedPeriod/.test(hastaCierre), 'la fecha no puede depender de billing')
+
+  // Y el formato es el del resto de la aplicación (dd/MM/yyyy).
+  metric('hoy', formatDate(today()))
+  assert(/^\d{2}\/\d{2}\/\d{4}$/.test(formatDate(today())), 'la fecha debe mostrarse como dd/MM/yyyy')
+})
+
+await spec('OWNER-COMPANY-DATE-004', 'Owner · Alta', 'la empresa persiste createdAt con la fecha/hora REAL de creación', async () => {
+  const db = new MemoryDb()
+  const antes = Date.now()
+  const { tenant, record } = await altaDeEmpresa(db)
+  const despues = Date.now()
+
+  metric('tenant.createdAt', tenant.createdAt)
+  metric('record.createdAt', record.createdAt)
+  const sellado = Date.parse(record.createdAt)
+  metric('dentro de la ventana de creación', sellado >= antes && sellado <= despues)
+  assert(!Number.isNaN(sellado), 'createdAt debe ser una fecha ISO válida')
+  assert(sellado >= antes && sellado <= despues,
+    'createdAt debe ser el instante real de creación, no un valor traído del formulario')
+  assert(tenant.createdAt === record.createdAt, 'empresa y ficha de control deben sellar el MISMO instante')
+
+  // La fecha visible del listado sale de ahí.
+  metric('mostrada en el listado', formatDate(record.createdAt))
+  assert(formatDate(record.createdAt) === formatDate(today()), 'la fecha mostrada debe ser la de hoy')
+
+  // Y el alta NO fija ningún próximo cobro: eso es gestión comercial posterior.
+  metric('nextBillingDate al crear', record.nextBillingDate ?? '(vacío)')
+  assert(record.nextBillingDate === undefined, 'el alta no puede dejar fijado un próximo cobro')
+
+  // El servicio sella con `nowISO()`, no con lo que llegue del formulario.
+  const svc = readSource('src/platform/companyControlService.ts')
+  const alta = svc.slice(svc.indexOf('export async function createCompanyWithFirstSuperAdmin'))
+  metric('el servicio sella con', 'const at = nowISO()')
+  assert(alta.includes('const at = nowISO()'), 'el instante debe sellarlo el servicio')
+  assert(alta.includes('createdAt: at'), 'createdAt debe salir del sello del servicio')
+})
+
+await spec('OWNER-COMPANY-DATE-005', 'Owner · Alta', 'no se añade ningún campo de fecha redundante', () => {
+  // `createdAt` ya representa la fecha de creación. Duplicarla en otro campo crearía
+  // dos fuentes de verdad que se desincronizan a la primera edición.
+  const tipos = readSource('src/platform/types.ts')
+  const ficha = tipos.slice(tipos.indexOf('export interface CompanyControlRecord'), tipos.indexOf('/** Cobro de RutaCash'))
+  const campos = [...ficha.matchAll(/^\s{2}(\w+)\??:/gm)].map(m => m[1])
+  metric('campos de la ficha', campos.join(', '))
+
+  const REDUNDANTES = ['creationDate', 'companyCreatedDate', 'fechaCreacion', 'createdDate', 'altaDate', 'fechaAlta']
+  for (const r of REDUNDANTES) {
+    metric(`campo ${r}`, campos.includes(r) ? 'PRESENTE — ERROR' : 'no existe')
+    assert(!campos.includes(r), `se creó un campo redundante: ${r}`)
+  }
+  metric('fuente única', 'createdAt')
+  assert(campos.includes('createdAt'), 'createdAt debe seguir siendo la fuente de verdad')
+  // Un solo campo de fecha de creación en toda la ficha.
+  const deCreacion = campos.filter(c => /^(created|creation|fechaCreacion|fechaAlta|alta)/i.test(c))
+  metric('campos de creación', deCreacion.join(', '))
+  assert(deCreacion.length === 1 && deCreacion[0] === 'createdAt',
+    `debe haber UNA sola fecha de creación; hay: ${deCreacion.join(', ')}`)
+
+  // Y el Tenant tampoco gana un duplicado.
+  const modelos = readSource('src/models/types.ts')
+  const tenant = modelos.slice(modelos.indexOf('export interface Tenant'), modelos.indexOf('export interface Office'))
+  for (const r of REDUNDANTES) assert(!tenant.includes(`${r}:`), `Tenant ganó un campo redundante: ${r}`)
+  metric('Tenant conserva', 'createdAt / updatedAt')
+})
+
+await spec('OWNER-COMPANY-DATE-006', 'Owner · Alta', 'el próximo cobro sigue gestionándose donde corresponde', () => {
+  // Quitarlo del alta NO puede haber roto la gestión comercial: se edita en la ficha
+  // de la empresa y se ve en el listado y en Cobros.
+  const detalle = readSource('src/pages/owner/OwnerCompanyDetailPage.tsx')
+  metric('la ficha lo edita', detalle.includes('label="Próximo cobro"'))
+  metric('la ficha lo envía', detalle.includes('nextBillingDate: form.nextBillingDate'))
+  assert(detalle.includes('label="Próximo cobro"'), 'la ficha debe seguir permitiendo fijar el próximo cobro')
+  assert(detalle.includes('nextBillingDate: form.nextBillingDate'), 'la ficha debe persistirlo')
+
+  const listado = readSource('src/pages/owner/OwnerCompaniesPage.tsx')
+  metric('el listado lo muestra', listado.includes('>Próximo cobro</th>'))
+  assert(listado.includes('>Próximo cobro</th>'), 'el listado debe seguir mostrando el próximo cobro')
+
+  // Y el servicio conserva el campo en su contrato (billing intacto).
+  const svc = readSource('src/platform/companyControlService.ts')
+  metric('updateCompanyBilling lo acepta', svc.includes('nextBillingDate?: string'))
+  assert(svc.includes('nextBillingDate?: string'), 'el motor de billing no puede haber perdido el campo')
 })
 
 // ############################################################

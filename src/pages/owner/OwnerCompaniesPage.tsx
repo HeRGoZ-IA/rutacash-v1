@@ -6,7 +6,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Input, Select } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { toast } from '@/components/ui/Toast'
-import { formatCurrency, formatDate, formatDateTime } from '@/lib/formatters'
+import { formatCurrency, formatDate, formatDateTime, today } from '@/lib/formatters'
 import { generateTemporaryPassword } from '@/lib/utils'
 import { useOwnerAuth } from '@/hooks/useOwnerAuth'
 import { controlPlane } from '@/platform/controlPlane'
@@ -41,7 +41,7 @@ export default function OwnerCompaniesPage() {
     nombre: '', email: '', identificacion: '', contacto: '',
     status: 'trial' as 'trial' | 'active',
     billingMode: 'per_route' as 'per_route' | 'fixed',
-    billingRate: '', nextBillingDate: '',
+    billingRate: '',
     adminNombre: '', adminEmail: '', adminPassword: generateTemporaryPassword(),
   }
   const [form, setForm] = useState(emptyForm)
@@ -72,7 +72,8 @@ export default function OwnerCompaniesPage() {
         status: form.status,
         billingMode: form.billingMode,
         billingRate: Number(form.billingRate) || 0,
-        nextBillingDate: form.nextBillingDate || undefined,
+        // `nextBillingDate` NO se define en el alta: es gestión comercial posterior.
+        // El servicio lo deja vacío y se fija luego desde la ficha de la empresa.
         superAdmin: {
           nombre: form.adminNombre,
           email: form.adminEmail,
@@ -209,7 +210,17 @@ export default function OwnerCompaniesPage() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Input label="Tarifa" type="number" value={form.billingRate} onChange={e => setForm(f => ({ ...f, billingRate: e.target.value }))} />
-            <Input label="Próximo cobro" type="date" value={form.nextBillingDate} onChange={e => setForm(f => ({ ...f, nextBillingDate: e.target.value }))} />
+            {/* FECHA DE CREACIÓN — informativa y de solo lectura.
+                Se deriva de `today()` en cada render, así que aparece ya diligenciada
+                al abrir el formulario y no puede quedarse obsoleta si el modal se deja
+                abierto. NO vive en el estado del formulario ni se envía al servicio:
+                la fecha que se persiste es la que sella `createCompanyWithFirstSuperAdmin`
+                con `nowISO()` al escribir, no lo que muestre este campo.
+                Aquí NO va «Próximo cobro»: ese dato es de gestión comercial y se
+                administra después desde la ficha de la empresa y desde Cobros. */}
+            <Input label="Fecha de creación" type="text" readOnly value={formatDate(today())}
+              className="bg-gray-50 text-gray-500 cursor-default"
+              hint="Se registra automáticamente al crear la empresa." />
           </div>
 
           <div className="pt-3 border-t border-gray-100 space-y-3">
