@@ -4,6 +4,7 @@ import { toast } from '@/components/ui/Toast'
 import { PhotoInput } from '@/components/ui/PhotoInput'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
+import { hasPersonalCashbox } from '@/lib/collectorAttribution'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { generateId } from '@/lib/utils'
@@ -51,11 +52,15 @@ export default function CollectorExpensesPage() {
         descripcion: form.descripcion || undefined, receiptPhotoDataUrl: form.receiptPhotoDataUrl,
         fecha: today(),
         // `userId` = quién REGISTRÓ el gasto. `collectorId` = a qué caja personal se
-        // carga. En la app operativa el cobrador pone el dinero de su propio bolsillo,
-        // así que ambos coinciden; un gasto registrado por otro rol no se carga a
-        // ninguna caja personal (queda como gasto de la ruta).
+        // carga. En la app operativa quien opera pone el dinero de su propio bolsillo,
+        // así que ambos coinciden; un gasto registrado por un rol SIN caja personal
+        // no se carga a ninguna (queda como gasto de la ruta).
+        //
+        // SIMETRÍA (Fase 1): se decide con `hasPersonalCashbox`, el mismo predicado
+        // que usan cobros y desembolsos. Antes era `rol === 'cobrador'`, así que el
+        // gasto que pagaba un SUPERVISOR de su bolsillo no se le descontaba a nadie.
         userId: user.id,
-        collectorId: user.rol === 'cobrador' ? user.id : undefined,
+        collectorId: hasPersonalCashbox(user.rol) ? user.id : undefined,
         syncStatus: navigator.onLine ? 'synced' : 'pending', createdAt: nowISO(),
       }
       await db.expenses.add(expense)

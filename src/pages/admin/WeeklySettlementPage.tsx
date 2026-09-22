@@ -321,10 +321,15 @@ export default function WeeklySettlementPage() {
             <Row label="Saldo anterior" value={settlement.saldoAnterior} />
             <Row label="(+) Ingreso capital" value={settlement.ingresoCapital} tone="text-emerald-600" />
             <Row label="(+) Cobros" value={settlement.cobros} tone="text-emerald-600" />
-            <Row label="(+) Transferencias recibidas" value={settlement.transferenciasEntradas} tone="text-emerald-600" />
+            {/* ETIQUETA NEUTRA (decisión D-6): NO se renombra a "Base recibida" porque
+                este total agrega naturalezas distintas — una transferencia socio→ruta
+                sí es base nueva, pero una ruta→ruta es un traslado interno que otra
+                ruta perdió. Distinguirlas exige modelado nuevo (Fase 2). Hasta
+                entonces, una sola etiqueta consistente en toda la app. */}
+            <Row label="(+) Transferencias entrantes" value={settlement.transferenciasEntradas} tone="text-emerald-600" />
             <Row label="(−) Préstamos entregados" value={settlement.prestamosEntregados} tone="text-blue-600" />
             <Row label="(−) Gastos" value={settlement.gastos} tone="text-red-500" />
-            <Row label="(−) Transferencias enviadas" value={settlement.transferenciasSalidas} tone="text-red-500" />
+            <Row label="(−) Transferencias salientes" value={settlement.transferenciasSalidas} tone="text-red-500" />
             <Row label="(−) Retiros" value={settlement.retiros} tone="text-amber-600" />
             <div className="flex items-center justify-between px-4 py-3.5 bg-gray-50">
               <span className="text-sm font-semibold text-gray-800">Saldo final</span>

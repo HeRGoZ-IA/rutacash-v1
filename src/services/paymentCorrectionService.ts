@@ -127,6 +127,12 @@ async function executeCorrection(original: Payment, actor: User, input: Correcti
     id: reversalId,
     tenantId: original.tenantId, saleId: original.saleId, clientId: original.clientId,
     routeId: original.routeId, collectorId: original.collectorId,
+    // AUTORÍA ≠ RESPONSABILIDAD: el dinero sigue siendo de quien lo recibió
+    // (`collectorId` heredado, NUNCA se reatribuye al corrector), pero debe constar
+    // quién ejecutó el asiento. Sin esto la reversión quedaba con
+    // `createdByUserId: undefined`, que por la regla legacy equivale a `collectorId`
+    // y borraba la traza de que la corrigió otra persona.
+    createdByUserId: actor.id,
     valor: -original.valor, fecha: original.fecha, tipo: original.tipo,
     observacion: `Reversión de pago ${original.id}`,
     syncStatus: 'synced', createdAt: ts,
@@ -138,6 +144,8 @@ async function executeCorrection(original: Payment, actor: User, input: Correcti
     id: correctedId,
     tenantId: original.tenantId, saleId: original.saleId, clientId: original.clientId,
     routeId: original.routeId, collectorId: original.collectorId,
+    // Mismo criterio que la reversión: responsable original, autor el corrector.
+    createdByUserId: actor.id,
     valor: input.newValor, fecha: input.newFecha ?? original.fecha, tipo: original.tipo,
     observacion: input.observacion || original.observacion,
     syncStatus: 'synced', createdAt: ts,
@@ -290,4 +298,24 @@ export async function countPendingAdjustmentRequests(tenantId: string): Promise<
   if (!tenantId) return 0
   const reqs = await db.paymentAdjustmentRequests.where('tenantId').equals(tenantId).toArray()
   return reqs.filter(r => r.status === 'pending').length
+}
+
+/**
+ * Solicitudes de ajuste pendientes que ESTE usuario puede APROBAR.
+ *
+ * Mismo principio que `countPendingSaleRequestsForUser`: el badge debe valer lo
+ * mismo que la lista. Aquí la capacidad es `payment.approveAdjustment`, que el
+ * Secretario NO tiene: él ORIGINA los ajustes, los aprueba un Administrador. Con
+ * este contador, el Secretario obtiene 0 por la propia regla de permisos, sin
+ * necesidad de una excepción escrita en la pantalla.
+ */
+export async function countPendingAdjustmentRequestsForUser(
+  user: User | null | undefined,
+  tenantId: string,
+): Promise<number> {
+  if (!user || !tenantId) return 0
+  const reqs = await db.paymentAdjustmentRequests.where('tenantId').equals(tenantId).toArray()
+  return reqs.filter(r =>
+    r.status === 'pending' && can(user, 'payment.approveAdjustment', { routeId: r.routeId, tenantId }),
+  ).length
 }

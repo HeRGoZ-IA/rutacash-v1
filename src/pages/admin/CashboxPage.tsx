@@ -104,7 +104,7 @@ export default function CashboxPage() {
               <CashboxRow label="(+) Transferencias entrantes" value={summary.transferenciasEntradas} type="positive" />
               <CashboxRow label="(-) Préstamos entregados" value={summary.prestamosEntregados} type="negative" />
               <CashboxRow label="(-) Gastos" value={summary.gastos} type="negative" />
-              <CashboxRow label="(-) Transferencias salientes" value={summary.transferenciasSalidas} type="negative" />
+              <CashboxRow label="(−) Transferencias salientes" value={summary.transferenciasSalidas} type="negative" />
               <CashboxRow label="(-) Retiros" value={summary.retiros} type="negative" />
             </div>
             <div className="px-4 py-4 bg-primary-50 border-t-2 border-primary-200">

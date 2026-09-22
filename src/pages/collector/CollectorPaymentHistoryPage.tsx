@@ -6,7 +6,8 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
-import { getAuthorizedRouteIds } from '@/lib/roles'
+import { useCollectorRoute } from '@/hooks/useCollectorRoute'
+import { effectivePayments } from '@/lib/paymentState'
 import { formatCurrency, formatDate } from '@/lib/formatters'
 import type { Client, Sale, Payment } from '@/models/types'
 
@@ -15,11 +16,25 @@ import type { Client, Sale, Payment } from '@/models/types'
  * un cliente dice que pagó y el sistema muestra algo distinto.
  * Nota: los abonos no guardan la parcela exacta afectada (el motor distribuye el
  * pago entre parcelas), por eso esa columna no se muestra en V1.
+ *
+ * ALCANCE — RUTA ACTIVA (corregido en Fase 0):
+ * Esta pantalla usaba TODAS las rutas autorizadas del usuario, así que un cobrador
+ * con Ruta A y Ruta B veía clientes de ambas mientras trabajaba solo en A. Era la
+ * única pantalla operativa con acceso a datos que ignoraba `activeRouteId`.
+ * Ahora clientes, ventas y abonos se recortan por la RUTA ACTIVA, igual que el
+ * resto de la app operativa.
+ *
+ * SEMÁNTICA DE PAGOS: se listan los abonos VIGENTES (`effectivePayments`). Un pago
+ * corregido aparecía tres veces —original, reversión negativa y corrección—, que es
+ * el detalle contable, no el histórico que el cobrador necesita para hablar con el
+ * cliente. La trazabilidad completa sigue disponible en Auditoría y en la pantalla
+ * administrativa de corrección de pagos.
  */
 export default function CollectorPaymentHistoryPage() {
   const { saleId: paramSaleId } = useParams<{ saleId?: string }>()
   const { user } = useAuth()
   const { currency } = useTenant()
+  const { activeRouteId } = useCollectorRoute()
   const [clients, setClients] = useState<Client[]>([])
   const [sales, setSales] = useState<Sale[]>([])
   const [payments, setPayments] = useState<Payment[]>([])
@@ -27,22 +42,34 @@ export default function CollectorPaymentHistoryPage() {
   const [saleId, setSaleId] = useState('')
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => { init() }, [user])
+  const routeId = activeRouteId ?? user?.routeId ?? null
+
+  useEffect(() => { init() }, [user, routeId])
+
+  /** Ventas de un cliente DENTRO de la ruta activa, más recientes primero. */
+  async function loadSalesOfClient(clientId: string): Promise<Sale[]> {
+    if (!routeId) return []
+    const cs = await db.sales.where('clientId').equals(clientId).toArray()
+    return cs
+      .filter(s => s.routeId === routeId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  }
 
   async function init() {
-    if (!user) { setLoading(false); return }
-    const routeIds = getAuthorizedRouteIds(user)
+    setClientId(''); setSaleId(''); setSales([]); setPayments([])
+    if (!user || !routeId) { setClients([]); setLoading(false); return }
+    setLoading(true)
     const allClients = await db.clients.where('tenantId').equals(user.tenantId).toArray()
-    const mine = allClients.filter(c => routeIds.includes(c.routeId))
-    setClients(mine)
+    // Solo los clientes de la RUTA ACTIVA, no de todas las rutas autorizadas.
+    setClients(allClients.filter(c => c.routeId === routeId))
 
-    // Si viene un saleId en la URL, preselecciona cliente + venta
+    // Si viene un saleId en la URL, preselecciona cliente + venta — pero solo si
+    // esa venta pertenece a la ruta activa: un enlace no amplía el alcance.
     if (paramSaleId) {
       const sale = await db.sales.get(paramSaleId)
-      if (sale) {
+      if (sale && sale.routeId === routeId) {
         setClientId(sale.clientId)
-        const cs = await db.sales.where('clientId').equals(sale.clientId).toArray()
-        setSales(cs.sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+        setSales(await loadSalesOfClient(sale.clientId))
         setSaleId(sale.id)
         await loadPayments(sale.id)
       }
@@ -53,8 +80,7 @@ export default function CollectorPaymentHistoryPage() {
   async function onSelectClient(id: string) {
     setClientId(id); setSaleId(''); setPayments([])
     if (!id) { setSales([]); return }
-    const cs = await db.sales.where('clientId').equals(id).toArray()
-    setSales(cs.sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+    setSales(await loadSalesOfClient(id))
   }
 
   async function onSelectSale(id: string) {
@@ -64,7 +90,8 @@ export default function CollectorPaymentHistoryPage() {
 
   async function loadPayments(sid: string) {
     const ps = await db.payments.where('saleId').equals(sid).toArray()
-    setPayments(ps.sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
+    // Solo abonos VIGENTES: un pago corregido no debe aparecer tres veces.
+    setPayments(effectivePayments(ps).sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
   }
 
   const selectedSale = sales.find(s => s.id === saleId)

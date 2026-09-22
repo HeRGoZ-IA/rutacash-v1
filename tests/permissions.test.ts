@@ -48,7 +48,7 @@ import {
 } from '../src/lib/officeManagement'
 import { readFileSync as readFileSyncForOffices } from 'node:fs'
 import { resolve as resolvePathForOffices } from 'node:path'
-import { resolveResponsibleCollector, hasPersonalCashbox } from '../src/lib/collectorAttribution'
+import { resolveResponsibleCollector, hasPersonalCashbox, isEligibleCashHolder } from '../src/lib/collectorAttribution'
 import type { User, UserRole, Tenant, Office, Route, Sale, Installment, Payment, Expense } from '../src/models/types'
 
 /** Lee un archivo de producción para verificar contratos estructurales. */
@@ -2163,6 +2163,54 @@ check('ATRIB — el cobrador tiene caja personal', hasPersonalCashbox('cobrador'
 check('ATRIB — el supervisor tiene caja personal', hasPersonalCashbox('supervisor'))
 check('ATRIB — el admin NO tiene caja personal', !hasPersonalCashbox('admin'))
 check('ATRIB — el secretario NO tiene caja personal', !hasPersonalCashbox('secretario'))
+
+// ------------------------------------------------------------
+// ATRIB-SUP — EL SUPERVISOR COMO RESPONSABLE DEL EFECTIVO (Fase 1)
+// ------------------------------------------------------------
+// Antes, el universo de responsables era SOLO el rol 'cobrador': un Supervisor que
+// cobraba en persona no podía indicarse ni a sí mismo (devolvía 'invalid') y el
+// dinero se cargaba al cobrador habitual. Ver auditoría §29 CASO B.
+const atrSup = { id: 'u-sup', rol: 'supervisor' as UserRole, status: 'activo' as const }
+const atrSupInactivo = { id: 'u-supOff', rol: 'supervisor' as UserRole, status: 'inactivo' as const }
+
+// 1) El Supervisor actor puede quedarse el efectivo si lo declara explícitamente.
+const rSupYo = resolveResponsibleCollector({ actor: actorSup, requested: 'u-sup', routeCollectors: [atrCobA] })
+check('ATRIB-SUP — el Supervisor puede indicarse a si mismo', rSupYo.ok && rSupYo.collectorId === 'u-sup' && rSupYo.source === 'explicit')
+
+// 2) Pero NUNCA se lo queda por el mero hecho de digitar: se exige decidir.
+const rSupAuto = resolveResponsibleCollector({ actor: actorSup, routeCollectors: [atrCobA] })
+check('ATRIB-SUP — con un cobrador en la ruta el Supervisor debe ELEGIR', !rSupAuto.ok && rSupAuto.code === 'must-choose')
+check('ATRIB-SUP — el Supervisor no se autoasigna por ser el actor', !(rSupAuto.ok && (rSupAuto as { collectorId: string }).collectorId === 'u-sup'))
+
+// 3) Y tampoco se preselecciona al cobrador habitual cuando el Supervisor opera.
+check('ATRIB-SUP — no se preselecciona al cobrador habitual si el Supervisor opera', !(rSupAuto.ok && (rSupAuto as { collectorId: string }).collectorId === 'u-atrCobA'))
+
+// 4) Ruta SIN cobradores: no hay nada que elegir, el Supervisor responde (legacy).
+const rSupSolo = resolveResponsibleCollector({ actor: actorSup, routeCollectors: [] })
+check('ATRIB-SUP — sin cobradores en la ruta el Supervisor responde', rSupSolo.ok && rSupSolo.collectorId === 'u-sup' && rSupSolo.source === 'legacy-actor')
+
+// 5) Un Supervisor ASIGNADO a la ruta es destino válido aunque no sea el actor.
+const rSupOtro = resolveResponsibleCollector({ actor: actorAdmin, requested: 'u-sup', routeCollectors: [atrCobA, atrSup] })
+check('ATRIB-SUP — un Supervisor de la ruta es destino valido para el Admin', rSupOtro.ok && rSupOtro.collectorId === 'u-sup')
+
+// 6) Un Supervisor INACTIVO no puede recibir efectivo.
+const rSupOff = resolveResponsibleCollector({ actor: actorAdmin, requested: 'u-supOff', routeCollectors: [atrCobA, atrSupInactivo] })
+check('ATRIB-SUP — un Supervisor inactivo se rechaza', !rSupOff.ok && rSupOff.code === 'invalid')
+
+// 7) El Admin NO amplia su alcance: sigue sin caja personal ni indicandose.
+const rAdmYo = resolveResponsibleCollector({ actor: actorAdmin, requested: 'u-adm', routeCollectors: [atrCobA] })
+check('ATRIB-SUP — el Admin no puede atribuirse el efectivo', !rAdmYo.ok && rAdmYo.code === 'invalid')
+
+// 8) El Admin conserva la preseleccion con un unico cobrador (no compite por la caja).
+const rAdmUno = resolveResponsibleCollector({ actor: actorAdmin, routeCollectors: [atrCobA] })
+check('ATRIB-SUP — el Admin conserva la preseleccion de un unico cobrador', rAdmUno.ok && rAdmUno.source === 'single-route-collector')
+
+// 9) Predicado de elegibilidad: activo + rol con caja personal.
+check('ATRIB-SUP — cobrador activo es elegible', isEligibleCashHolder(atrCobA))
+check('ATRIB-SUP — supervisor activo es elegible', isEligibleCashHolder(atrSup))
+check('ATRIB-SUP — cobrador inactivo NO es elegible', !isEligibleCashHolder(atrCobInactivo))
+check('ATRIB-SUP — supervisor inactivo NO es elegible', !isEligibleCashHolder(atrSupInactivo))
+check('ATRIB-SUP — un admin activo NO es elegible', !isEligibleCashHolder({ id: 'u-adm', rol: 'admin', status: 'activo' }))
 
 console.log(`\nPRUEBA DE PERMISOS: ${passed} OK, ${failed} FALLIDAS`)
 if (failed > 0) process.exit(1)

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, MapPin, CreditCard, Wallet,
@@ -9,8 +9,7 @@ import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { cn } from '@/lib/utils'
 import { initials } from '@/lib/formatters'
 import { CountBadge } from '@/components/ui/CountBadge'
-import { countPendingSaleRequests } from '@/services/saleRequestService'
-import { countPendingAdjustmentRequests } from '@/services/paymentCorrectionService'
+import { usePendingSaleRequests, usePendingAdjustmentRequests } from '@/hooks/usePendingBadges'
 import { hasOperationalRoutes, ROLE_LABELS } from '@/lib/permissions'
 import { AdminNoRoutes } from '@/components/layout/AdminNoRoutes'
 
@@ -53,17 +52,12 @@ export function AdminLayout() {
   // Admin pertenece a UNA empresa y no hay ninguna lista de empresas a la que volver:
   // la gestión de empresas es del Owner y vive en otro portal, con otra sesión.
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [pendingAuth, setPendingAuth] = useState(0)
-  const [pendingAdj, setPendingAdj] = useState(0)
-
   // Badges: solicitudes de venta y de ajuste de pago pendientes por revisar.
+  // Recortados por RUTAS AUTORIZADAS (antes contaban toda la empresa) y reactivos
+  // dentro del mismo dispositivo. Ver `usePendingBadges`.
   const tenantId = tenant?.id ?? user?.tenantId ?? ''
-  useEffect(() => {
-    let alive = true
-    countPendingSaleRequests(tenantId).then(n => { if (alive) setPendingAuth(n) })
-    countPendingAdjustmentRequests(tenantId).then(n => { if (alive) setPendingAdj(n) })
-    return () => { alive = false }
-  }, [tenantId, location.pathname])
+  const pendingAuth = usePendingSaleRequests(user, tenantId)
+  const pendingAdj = usePendingAdjustmentRequests(user, tenantId)
 
   const badges: Record<string, number> = {
     '/admin/sale-authorizations': pendingAuth,

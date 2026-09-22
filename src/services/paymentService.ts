@@ -29,7 +29,7 @@ import { nowISO, today } from '@/lib/formatters'
 import { can } from '@/lib/permissions'
 import { getAssignedRouteIds } from '@/lib/roles'
 import {
-  resolveResponsibleCollector, COLLECTOR_ATTRIBUTION_MESSAGE,
+  resolveResponsibleCollector, hasPersonalCashbox, COLLECTOR_ATTRIBUTION_MESSAGE,
   type CollectorAttributionSource,
 } from '@/lib/collectorAttribution'
 import { logAction } from '@/services/auditService'
@@ -85,8 +85,8 @@ export type PaymentRejectionCode =
   | 'SALE_NOT_DISBURSED'  // venta aprobada pero aún no desembolsada
   | 'NO_INSTALLMENTS'     // venta sin parcelas: dato inconsistente, nunca se cobra
   | 'NO_BALANCE'          // la venta ya no tiene saldo pendiente
-  | 'COLLECTOR_REQUIRED'  // varios cobradores en la ruta: hay que indicar quién cobró
-  | 'COLLECTOR_INVALID'   // el cobrador indicado no es cobrador activo de esa ruta
+  | 'COLLECTOR_REQUIRED'  // hay más de un destino posible: hay que indicar quién recibió el dinero
+  | 'COLLECTOR_INVALID'   // el responsable indicado no puede responder por el efectivo de esa ruta
   | 'OFFICE_INACTIVE'     // la Oficina de la ruta está inactiva: no admite operaciones nuevas
   | 'WRITE_FAILED'        // fallo de persistencia: se revirtió todo
 
@@ -98,9 +98,10 @@ export interface RegisterPaymentInput {
   /** Usuario en sesión. Se valida su capacidad contra la ruta real de la venta. */
   actor: User | null | undefined
   /**
-   * COBRADOR RESPONSABLE del recaudo (quien recibió el dinero), cuando NO coincide
-   * con el actor. Lo envían las interfaces administrativas al registrar un cobro
-   * hecho por un cobrador. Si se omite, lo resuelve `resolveResponsibleCollector`.
+   * RESPONSABLE DEL EFECTIVO (quien recibió el dinero). Puede ser un cobrador o un
+   * SUPERVISOR —incluido el propio actor—, nunca un rol sin caja personal. Lo envían
+   * las interfaces al registrar un cobro cuyo destino no es evidente. Si se omite,
+   * lo resuelve `resolveResponsibleCollector`, que rechaza el pago antes que adivinar.
    */
   collectorId?: string
   tipo?: PaymentType
@@ -116,7 +117,7 @@ export interface RegisterPaymentInput {
 export interface RegisterPaymentSuccess {
   ok: true
   paymentId: string
-  /** Cobrador al que quedó atribuido el dinero (puede no ser el actor). */
+  /** Responsable del efectivo al que quedó atribuido el dinero (puede no ser el actor). */
   collectorId: string
   /** Cómo se determinó ese cobrador (ver `CollectorAttributionSource`). */
   collectorSource: CollectorAttributionSource
@@ -273,21 +274,29 @@ export async function registerPayment(
         throw new PaymentRejection('NO_BALANCE', REJECTION_MESSAGES.NO_BALANCE)
       }
 
-      // ---- 4.b COBRADOR RESPONSABLE DEL RECAUDO ------------------------------
+      // ---- 4.b RESPONSABLE DEL EFECTIVO --------------------------------------
       // Quien REGISTRA no es necesariamente quien recibió el dinero. Se resuelve
-      // contra los cobradores REALES de la ruta de la venta (releídos de la base,
-      // no enviados por la pantalla). Con varios cobradores no se adivina: se exige
-      // indicar quién cobró, para que el efectivo no se cargue a la caja equivocada.
+      // contra los usuarios REALES de la ruta de la venta (releídos de la base, no
+      // enviados por la pantalla). Cuando hay más de un destino plausible NO se
+      // adivina: se exige indicar quién recibió el efectivo, para que no se cargue
+      // a la caja equivocada.
+      //
+      // El conjunto de candidatos es "usuarios CON CAJA PERSONAL asignados a la
+      // ruta" (`hasPersonalCashbox`), no solo cobradores: un Supervisor que opera
+      // la ruta recibe dinero de verdad y debe poder quedar como responsable.
       const routeCollectors = (await database.users.where('tenantId').equals(sale.tenantId).toArray())
-        .filter(u => u.rol === 'cobrador' && getAssignedRouteIds(u).includes(sale.routeId))
+        .filter(u => hasPersonalCashbox(u.rol) && getAssignedRouteIds(u).includes(sale.routeId))
       const atribucion = resolveResponsibleCollector({
         actor: input.actor!,
         requested: input.collectorId,
         routeCollectors,
       })
       if (!atribucion.ok) {
+        // 'ambiguous' y 'must-choose' son el mismo hecho para la UI —falta decidir
+        // quién recibió el dinero— y comparten código de rechazo; el MENSAJE sí
+        // distingue el caso, porque las opciones que se ofrecen son distintas.
         throw new PaymentRejection(
-          atribucion.code === 'ambiguous' ? 'COLLECTOR_REQUIRED' : 'COLLECTOR_INVALID',
+          atribucion.code === 'invalid' ? 'COLLECTOR_INVALID' : 'COLLECTOR_REQUIRED',
           atribucion.message,
         )
       }

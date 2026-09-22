@@ -7,8 +7,10 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { getAuthorizedRouteIds } from '@/lib/roles'
+import { can } from '@/lib/permissions'
 import { formatCurrency } from '@/lib/formatters'
 import { isSaleDisbursed } from '@/services/installmentEngine'
+import { getRouteAvailableCapital } from '@/services/cashboxEngine'
 import { groupRoutesByOffice } from '@/lib/officeGrouping'
 import type { Office, Route } from '@/models/types'
 
@@ -17,6 +19,13 @@ interface RouteSummary {
   clientes: number
   ventasActivas: number
   cartera: number
+  /**
+   * BASE de la ruta (saldo de caja). `undefined` cuando el usuario NO tiene
+   * `cashbox.viewRoute`: no es que se oculte, es que NO SE PIDE. Esta tarjeta la
+   * comparten Cobrador y Supervisor, y el Cobrador no debe conocer la cifra
+   * financiera de la ruta ni por accidente.
+   */
+  base?: number
 }
 
 export default function CollectorSelectRoutePage() {
@@ -42,11 +51,15 @@ export default function CollectorSelectRoutePage() {
     const result: RouteSummary[] = []
     for (const route of mine) {
       const sales = (await db.sales.where('routeId').equals(route.id).and(s => s.status === 'activa').toArray()).filter(isSaleDisbursed)
+      // BASE: solo para quien puede ver la caja financiera de ESA ruta (Supervisor,
+      // Admin, Super Admin). Fail-closed: sin la capacidad el dato ni se consulta.
+      const verBase = can(user, 'cashbox.viewRoute', { routeId: route.id, tenantId: user.tenantId })
       result.push({
         route,
         clientes: new Set(sales.map(s => s.clientId)).size,
         ventasActivas: sales.length,
         cartera: sales.reduce((sum, s) => sum + s.saldo, 0),
+        base: verBase ? await getRouteAvailableCapital(route.id) : undefined,
       })
     }
     setSummaries(result)
@@ -77,7 +90,7 @@ export default function CollectorSelectRoutePage() {
             {(offices.length > 0 || grupo.key !== '__sin_oficina__') && summaries.length > 1 && (
               <p className="text-[11px] font-semibold uppercase tracking-wide text-primary-500 px-1">{grupo.label}</p>
             )}
-          {grupo.routes.map(r => summaries.find(s => s.route.id === r.id)!).map(({ route, clientes, ventasActivas, cartera }) => {
+          {grupo.routes.map(r => summaries.find(s => s.route.id === r.id)!).map(({ route, clientes, ventasActivas, cartera, base }) => {
             const isActive = route.id === activeRouteId
             const single = summaries.length === 1
             return (
@@ -95,6 +108,10 @@ export default function CollectorSelectRoutePage() {
                   {isActive && <span className="text-[10px] font-semibold text-primary-600 bg-primary-50 rounded-full px-2 py-0.5">Activa</span>}
                 </div>
 
+                {/* Indicadores de la ruta. Con permiso de caja se PRIORIZA la Base
+                    (lo que el Supervisor necesita al entrar); la Cartera sigue
+                    visible debajo, no se pierde. Sin permiso, la tarjeta es
+                    exactamente la de siempre: Clientes · Ventas · Cartera. */}
                 <div className="grid grid-cols-3 gap-2 mt-3">
                   <div className="bg-gray-50 rounded-xl p-2 text-center">
                     <p className="text-sm font-bold text-gray-700">{clientes}</p>
@@ -104,11 +121,25 @@ export default function CollectorSelectRoutePage() {
                     <p className="text-sm font-bold text-primary-600">{ventasActivas}</p>
                     <p className="text-xs text-gray-400">Ventas</p>
                   </div>
-                  <div className="bg-gray-50 rounded-xl p-2 text-center">
-                    <p className="text-sm font-bold text-amber-600 leading-tight">{formatCurrency(cartera, currency)}</p>
-                    <p className="text-xs text-gray-400">Cartera</p>
-                  </div>
+                  {base === undefined ? (
+                    <div className="bg-gray-50 rounded-xl p-2 text-center">
+                      <p className="text-sm font-bold text-amber-600 leading-tight">{formatCurrency(cartera, currency)}</p>
+                      <p className="text-xs text-gray-400">Cartera</p>
+                    </div>
+                  ) : (
+                    <div className="bg-primary-50 rounded-xl p-2 text-center">
+                      <p className="text-sm font-bold text-primary-700 leading-tight">{formatCurrency(base, currency)}</p>
+                      <p className="text-xs text-primary-500">Base</p>
+                    </div>
+                  )}
                 </div>
+
+                {base !== undefined && (
+                  <div className="mt-2 flex items-center justify-between rounded-xl bg-gray-50 px-3 py-1.5">
+                    <span className="text-xs text-gray-400">Cartera</span>
+                    <span className="text-xs font-semibold text-amber-600">{formatCurrency(cartera, currency)}</span>
+                  </div>
+                )}
 
                 <button
                   onClick={() => enter(route.id)}

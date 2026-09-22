@@ -179,6 +179,20 @@ export interface Route {
   tasaLibre: boolean
   montoMaximoPrestamo: number
   capitalInicial: number
+  /**
+   * @deprecated NO es la Base de la ruta ni un saldo vivo. Se fija al CREAR la ruta
+   * (= `capitalInicial`) y nunca se recalcula: no lo actualiza ningún cobro, gasto,
+   * transferencia ni retiro. Leerlo como "capital disponible" da una cifra falsa.
+   *
+   * La FUENTE REAL de la Base es el motor financiero:
+   *   · `getCashboxSummary(routeId).saldoActual`
+   *   · `getRouteAvailableCapital(routeId)`
+   *   · `getRouteFinancialSummary(routeId).baseActual`
+   *
+   * Se conserva el campo porque `routeService.createRoute` lo escribe y existen
+   * rutas persistidas con él; eliminarlo exigiría una migración de esquema sin
+   * ninguna ganancia funcional. No añadir lecturas nuevas.
+   */
   capitalActual: number
   cobradorId?: string
   status: RouteStatus
@@ -403,11 +417,20 @@ export interface Payment {
   clientId: string
   routeId: string
   /**
-   * COBRADOR RESPONSABLE del recaudo: quien recibió FÍSICAMENTE el dinero y debe
-   * responder por él en su caja. NO es necesariamente quien digitó la operación.
+   * RESPONSABLE DEL EFECTIVO: quien recibió FÍSICAMENTE el dinero y debe responder
+   * por él en su caja. NO es necesariamente quien digitó la operación.
    *
    * Si un Supervisor registra un abono que cobró Fabio, `collectorId` es Fabio y
    * `createdByUserId` es el Supervisor: el dinero se atribuye a quien lo tiene.
+   *
+   * ALCANCE DEL CAMPO (Fase 1): el nombre dice `collector` por historia, pero el
+   * valor admite a CUALQUIER usuario con caja personal — hoy `cobrador` y
+   * `supervisor` (ver `hasPersonalCashbox`). Un Supervisor que opera una ruta
+   * recibe dinero real y puede quedar aquí como responsable. El campo NO se
+   * renombró para no forzar una migración de esquema sin ganancia funcional.
+   *
+   * Nunca contiene un rol SIN caja personal (Admin, Secretario, Socio): esos
+   * pueden registrar la operación, pero no cargar el efectivo a su nombre.
    */
   collectorId: string
   /**

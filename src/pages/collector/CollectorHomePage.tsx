@@ -151,7 +151,7 @@ export default function CollectorHomePage() {
         <div className="flex flex-wrap gap-2 mt-3.5">
           <Chip label="Gastos" to={`${base}/expenses`} />
           <Chip label="Informe del día" to={`${base}/daily-report`} />
-          <Chip label="Mi caja" to={`${base}/cashclose`} />
+          <Chip label="Mi efectivo" to={`${base}/cashclose`} />
         </div>
       </div>
 

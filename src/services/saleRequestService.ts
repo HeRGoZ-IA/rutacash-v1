@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
 import { nowISO, today } from '@/lib/formatters'
 import { can } from '@/lib/permissions'
+import { hasPersonalCashbox } from '@/lib/collectorAttribution'
 import { assertCan } from '@/services/authz'
 import {
   calculateTotalWithInterest, calculateInstallmentValue,
@@ -204,7 +205,14 @@ export async function findActiveSaleForClient(clientId: string): Promise<Sale | 
   return sales.find(s => s.status === 'activa') ?? null
 }
 
-/** Cuenta las solicitudes de venta pendientes por revisar (Administrador). */
+/**
+ * Solicitudes de venta pendientes de TODA la empresa, sin recorte por rutas.
+ *
+ * @deprecated Para un BADGE usa `countPendingSaleRequestsForUser`: este contador
+ * ignora `authorizedRouteIds`, así que a un usuario limitado a algunas rutas le
+ * mostraba un número mayor que la lista que puede abrir. Se conserva para usos
+ * donde el total de la empresa SÍ es lo que se quiere medir.
+ */
 export async function countPendingSaleRequests(tenantId: string): Promise<number> {
   if (!tenantId) return 0
   const reqs = await db.saleRequests.where('tenantId').equals(tenantId).toArray()
@@ -212,16 +220,43 @@ export async function countPendingSaleRequests(tenantId: string): Promise<number
 }
 
 /**
+ * Solicitudes de venta pendientes que ESTE usuario puede realmente gestionar.
+ *
+ * REGLA: el badge tiene que coincidir EXACTAMENTE con la lista que el usuario abre
+ * al pulsarlo. Por eso aplica el mismo criterio de acceso que las pantallas de
+ * autorizaciones (`can(user, 'authorization.access', { routeId })`), no un filtro
+ * paralelo que pueda divergir. Fail-closed: sin usuario o sin empresa, cero.
+ *
+ * Sirve para el Administrador y para el Secretario: la diferencia entre ambos ya
+ * está en la capacidad y en sus rutas autorizadas, no en el contador.
+ */
+export async function countPendingSaleRequestsForUser(
+  user: User | null | undefined,
+  tenantId: string,
+): Promise<number> {
+  if (!user || !tenantId) return 0
+  const reqs = await db.saleRequests.where('tenantId').equals(tenantId).toArray()
+  return reqs.filter(r =>
+    r.status === 'pending' && can(user, 'authorization.access', { routeId: r.routeId, tenantId }),
+  ).length
+}
+
+/**
  * Confirma el desembolso de una venta aprobada: la venta queda desembolsada
  * (cobrable) y la solicitud asociada pasa a 'disbursed'.
  *
- * ATRIBUCIÓN DEL EFECTIVO (revisión del socio): se registra QUIÉN entregó el dinero
- * y CUÁNDO. El desembolso sale de la caja personal del cobrador que lo entrega, así
- * que sin estos datos su cuadre no cierra. Se distingue igual que en los pagos:
- *   · `disbursedByCollectorId` → cobrador que entregó físicamente el dinero.
+ * ATRIBUCIÓN DEL EFECTIVO: se registra QUIÉN entregó el dinero y CUÁNDO. El
+ * desembolso sale de la caja personal de quien lo entrega, así que sin estos datos
+ * su cuadre no cierra. Se distingue igual que en los pagos:
+ *   · `disbursedByCollectorId` → responsable del efectivo que entregó el dinero.
  *   · `disbursedByUserId`      → usuario que registró la confirmación.
- * Si quien confirma no es cobrador, el desembolso NO se atribuye a la caja personal
- * de nadie (queda como entrega administrativa de la ruta).
+ *
+ * SIMETRÍA (Fase 1): el responsable se decide con `hasPersonalCashbox`, el MISMO
+ * predicado que usan los cobros y los gastos. Antes esto era `rol === 'cobrador'`,
+ * así que un SUPERVISOR entregaba dinero de su bolsillo y no se le descontaba de
+ * ninguna caja: recaudaba sin poder desembolsar y su arqueo nunca cerraba.
+ * Si quien confirma no tiene caja personal (Admin, Super Admin), el desembolso NO
+ * se atribuye a nadie: queda como entrega administrativa de la ruta.
  */
 export async function confirmDisbursement(saleId: string, actor?: User): Promise<void> {
   const sale = await db.sales.get(saleId)
@@ -233,7 +268,7 @@ export async function confirmDisbursement(saleId: string, actor?: User): Promise
   await db.transaction('rw', [db.sales, db.saleRequests], async () => {
     await db.sales.update(saleId, {
       disbursementStatus: 'desembolsado',
-      disbursedByCollectorId: actor?.rol === 'cobrador' ? actor.id : undefined,
+      disbursedByCollectorId: actor && hasPersonalCashbox(actor.rol) ? actor.id : undefined,
       disbursedByUserId: actor?.id,
       fechaDesembolso,
       updatedAt: nowISO(),

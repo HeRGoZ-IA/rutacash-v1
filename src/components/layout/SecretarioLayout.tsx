@@ -2,12 +2,23 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { Users, ClipboardCheck, Receipt, UserCog, LogOut, Wifi, WifiOff } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
+import { CountBadge } from '@/components/ui/CountBadge'
+import { usePendingSaleRequests } from '@/hooks/usePendingBadges'
 import { cn } from '@/lib/utils'
 import { initials } from '@/lib/formatters'
 
 /**
  * Layout del SECRETARIO. Acceso limitado a: Clientes (edición operativa),
  * Autorizaciones y Corrección de pagos. Sin caja, transferencias ni configuración.
+ *
+ * BADGE DE AUTORIZACIONES (Fase 0): el Secretario es quien revisa las solicitudes
+ * de venta, pero no tenía ningún aviso de que hubiera trabajo esperando. Cuenta
+ * SOLO las solicitudes `pending` de sus rutas autorizadas, con el mismo criterio
+ * que usa su propia pantalla, de modo que el globo y la lista nunca discrepan.
+ *
+ * NO cuenta solicitudes de ajuste de pago: el Secretario las ORIGINA, no las
+ * aprueba (no tiene `payment.approveAdjustment`), así que un globo ahí le pediría
+ * una acción que no puede ejecutar.
  */
 const nav = [
   { to: '/secretario/clientes', label: 'Clientes', icon: <Users className="w-4 h-4" /> },
@@ -20,6 +31,12 @@ export function SecretarioLayout() {
   const { user, tenant, logout } = useAuth()
   const isOnline = useOnlineStatus()
   const navigate = useNavigate()
+  const tenantId = tenant?.id ?? user?.tenantId ?? ''
+  const pendingAuth = usePendingSaleRequests(user, tenantId)
+
+  const badges: Record<string, number> = {
+    '/secretario/autorizaciones': pendingAuth,
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -53,6 +70,7 @@ export function SecretarioLayout() {
                 isActive ? 'border-white text-white' : 'border-transparent text-primary-300 hover:text-white'
               )}>
               {n.icon}{n.label}
+              {badges[n.to] > 0 && <CountBadge count={badges[n.to]} />}
             </NavLink>
           ))}
         </nav>

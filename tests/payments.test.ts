@@ -24,7 +24,7 @@ import {
   reconcileFinancials, formatReconciliationReport, LEGACY_ISSUES,
   type ReconciliationDatabase, type LegacyIssueCode,
 } from '../src/services/financialReconciliation'
-import type { Sale, User, Payment, AuditLog } from '../src/models/types'
+import type { Sale, User, UserRole, Payment, AuditLog } from '../src/models/types'
 import {
   buildScenario, buildCashboxScenario, readFinancialState, computeCobrosComoCaja, TEST_IDS,
   MemoryDb, type FinancialState,
@@ -48,9 +48,13 @@ import {
   buildClientCreditHistory, resolveSealedCompletionDate, CREDIT_STATUS_LABEL,
 } from '../src/lib/creditHistory'
 import { effectivePayments, lastEffectivePaymentDate } from '../src/lib/paymentState'
-import { filterAccessibleRoutes } from '../src/lib/permissions'
+import { can, filterAccessibleRoutes } from '../src/lib/permissions'
 import { getCollectorDailyCashSummary, hasCapitalForSale, type CollectorCashDatabase } from '../src/services/cashboxEngine'
 import { adminQuickPaymentFlow, operationalPaymentFlow } from './financial/flows'
+import { readdirSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { hasPersonalCashbox } from '../src/lib/collectorAttribution'
+import { extractFunctionBody } from './financial/sourceContract'
 import {
   adminHandlerBody, operationalHandlerBody, paymentServiceBody, opensDexieTransaction,
   writeSequence, capsAmountToBalance, validatesDisbursement, validatesSaleStatus,
@@ -2870,6 +2874,500 @@ await spec('OFFICE-SETTLE-003', 'Oficinas', 'se puede liquidar una ruta Sin Ofic
   metric('rutas liquidables sin Oficina', enSinOficina.map(r => r.id).join(', '))
   assert(enSinOficina.length === 1 && enSinOficina[0].id === 'r-X',
     'una ruta sin Oficina debe poder seleccionarse para liquidar')
+})
+
+
+// ############################################################
+// FAMILIA — ATTRIB-SUP · EL SUPERVISOR COMO SUJETO FINANCIERO
+// ------------------------------------------------------------
+// La auditoría (§29 CASO B) demostró que un Supervisor que cobraba en persona NO
+// podía quedarse con el dinero: `resolveResponsibleCollector` solo admitía el rol
+// 'cobrador', así que indicarse a sí mismo devolvía COLLECTOR_INVALID y el efectivo
+// se cargaba a la caja del cobrador habitual. Aquí se fija el comportamiento nuevo.
+// ############################################################
+const DIA_SUP = '2026-09-21'
+
+/** Escenario con cobradores Y supervisores asignados a la MISMA ruta. */
+function escenarioConEquipo(
+  cobradorIds: string[],
+  supervisorIds: string[] = [],
+  opts: Parameters<typeof buildScenario>[0] = { valorVenta: 1_000_000, numeroCuotas: 10 },
+) {
+  const sc = buildScenario(opts)
+  const base = {
+    tenantId: TEST_IDS.TENANT_ID, password: 'x', status: 'activo',
+    authorizedRouteIds: [TEST_IDS.ROUTE_ID], createdAt: '', updatedAt: '',
+  }
+  sc.db.users._seed([
+    ...cobradorIds.map(id => ({ ...base, id, nombre: id, email: `${id}@t.com`, rol: 'cobrador' })),
+    ...supervisorIds.map(id => ({ ...base, id, nombre: id, email: `${id}@t.com`, rol: 'supervisor' })),
+  ])
+  return sc
+}
+
+await spec('ATTRIB-SUP-001', 'Supervisor', 'el Supervisor PUEDE quedar como responsable explícito del efectivo', async () => {
+  const sc = escenarioConEquipo(['u-cobA'], [USER_SUPERVISOR.id])
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 300_000, actor: USER_SUPERVISOR, collectorId: USER_SUPERVISOR.id, fecha: DIA_SUP },
+    asDb(sc.db),
+  )
+  const pago = (await sc.db.payments.toArray())[0] as Payment | undefined
+  metric('resultado', res.ok ? `ACEPTADO (${res.collectorSource})` : res.code)
+  metric('collectorId', pago?.collectorId)
+  metric('createdByUserId', pago?.createdByUserId)
+  assert(res.ok, `el Supervisor no pudo responder por el dinero que recibió: ${res.ok ? '' : res.code}`)
+  assert(pago?.collectorId === USER_SUPERVISOR.id, 'el efectivo no quedó a nombre del Supervisor')
+  assert(pago?.createdByUserId === USER_SUPERVISOR.id, 'no se registró quién digitó')
+})
+
+await spec('ATTRIB-SUP-002', 'Supervisor', 'el Supervisor NO se queda el dinero solo por registrarlo', async () => {
+  // Con cobradores en la ruta hay DOS destinos plausibles. Ni se lo lleva el
+  // Supervisor por ser actor, ni el cobrador por ser el habitual: se exige decidir.
+  const sc = escenarioConEquipo(['u-cobA'], [USER_SUPERVISOR.id])
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 300_000, actor: USER_SUPERVISOR, fecha: DIA_SUP },
+    asDb(sc.db),
+  )
+  metric('resultado', res.ok ? `ACEPTADO — ERROR (${res.collectorId})` : res.code)
+  metric('pagos escritos', (await sc.db.payments.toArray()).length)
+  assert(!res.ok && res.code === 'COLLECTOR_REQUIRED', 'se adivinó el responsable en vez de exigir la decisión')
+  assert((await sc.db.payments.toArray()).length === 0, 'se escribió un pago pese al rechazo')
+})
+
+await spec('ATTRIB-SUP-003', 'Supervisor', 'el Supervisor puede atribuir el dinero al Cobrador que lo recibió', async () => {
+  const sc = escenarioConEquipo(['u-cobA'], [USER_SUPERVISOR.id])
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 300_000, actor: USER_SUPERVISOR, collectorId: 'u-cobA', fecha: DIA_SUP },
+    asDb(sc.db),
+  )
+  const pago = (await sc.db.payments.toArray())[0] as Payment | undefined
+  metric('collectorId', pago?.collectorId)
+  metric('createdByUserId', pago?.createdByUserId)
+  assert(res.ok && pago?.collectorId === 'u-cobA', 'el dinero no quedó a nombre del Cobrador indicado')
+  assert(pago?.createdByUserId === USER_SUPERVISOR.id, 'se perdió la autoría del Supervisor')
+  assert(pago?.collectorId !== pago?.createdByUserId, 'autor y responsable volvieron a ser el mismo campo')
+})
+
+await spec('ATTRIB-SUP-004', 'Supervisor', 'el Cobrador sigue autoasignándose sin fricción nueva', async () => {
+  const sc = escenarioConEquipo([USER_COBRADOR.id, 'u-cobB'], [USER_SUPERVISOR.id])
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 50_000, actor: USER_COBRADOR, fecha: DIA_SUP },
+    asDb(sc.db),
+  )
+  metric('resultado', res.ok ? `ACEPTADO (${res.collectorSource})` : res.code)
+  assert(res.ok && res.collectorSource === 'actor', 'se añadió fricción al Cobrador que cobra lo suyo')
+  assert(res.ok && res.collectorId === USER_COBRADOR.id, 'el cobrador no respondió por su propio recaudo')
+})
+
+await spec('ATTRIB-SUP-005', 'Supervisor', 'un Admin NO obtiene caja personal ni indicándose a sí mismo', async () => {
+  const sc = escenarioConEquipo(['u-cobA'], [])
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 40_000, actor: USER_ADMIN, collectorId: USER_ADMIN.id, fecha: DIA_SUP },
+    asDb(sc.db),
+  )
+  metric('hasPersonalCashbox(admin)', hasPersonalCashbox('admin'))
+  metric('resultado', res.ok ? 'ACEPTADO — ERROR' : res.code)
+  assert(!hasPersonalCashbox('admin'), 'el Admin no puede tener caja personal')
+  assert(!res.ok && res.code === 'COLLECTOR_INVALID', 'el Admin se cargó el efectivo a su nombre')
+  assert((await sc.db.payments.toArray()).length === 0, 'se escribió un pago pese al rechazo')
+})
+
+await spec('ATTRIB-SUP-006', 'Supervisor', 'Secretario, Socio y Admin siguen sin caja personal', () => {
+  const invalidos: UserRole[] = ['secretario', 'socio', 'admin', 'superadmin']
+  for (const rol of invalidos) metric(`hasPersonalCashbox(${rol})`, hasPersonalCashbox(rol))
+  metric('hasPersonalCashbox(cobrador)', hasPersonalCashbox('cobrador'))
+  metric('hasPersonalCashbox(supervisor)', hasPersonalCashbox('supervisor'))
+  assert(invalidos.every(r => !hasPersonalCashbox(r)), 'se amplió la caja personal a un rol que no opera efectivo')
+  assert(hasPersonalCashbox('cobrador') && hasPersonalCashbox('supervisor'), 'los perfiles de calle deben tener caja personal')
+})
+
+await spec('ATTRIB-SUP-007', 'Supervisor', 'un Supervisor de OTRA ruta se rechaza: el alcance no se amplía', async () => {
+  const sc = escenarioConEquipo(['u-cobA'], [])
+  sc.db.users._seed([{
+    id: 'u-supOtro', tenantId: TEST_IDS.TENANT_ID, nombre: 'Sup ajeno', email: 'so@t.com', password: 'x',
+    rol: 'supervisor', status: 'activo', authorizedRouteIds: ['route-ajena'], createdAt: '', updatedAt: '',
+  }])
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 20_000, actor: USER_ADMIN, collectorId: 'u-supOtro', fecha: DIA_SUP },
+    asDb(sc.db),
+  )
+  metric('resultado', res.ok ? 'ACEPTADO — ERROR' : res.code)
+  assert(!res.ok && res.code === 'COLLECTOR_INVALID', 'se aceptó a un supervisor ajeno a la ruta')
+  assert((await sc.db.payments.toArray()).length === 0, 'se escribió un pago pese al rechazo')
+})
+
+await spec('ATTRIB-SUP-008', 'Supervisor', 'un usuario INACTIVO no puede recibir la atribución', async () => {
+  const sc = buildScenario({ valorVenta: 1_000_000, numeroCuotas: 10 })
+  sc.db.users._seed([{
+    id: 'u-cobInact', tenantId: TEST_IDS.TENANT_ID, nombre: 'Inactivo', email: 'i@t.com', password: 'x',
+    rol: 'cobrador', status: 'inactivo', authorizedRouteIds: [TEST_IDS.ROUTE_ID], createdAt: '', updatedAt: '',
+  }])
+  const res = await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 20_000, actor: USER_ADMIN, collectorId: 'u-cobInact', fecha: DIA_SUP },
+    asDb(sc.db),
+  )
+  metric('resultado', res.ok ? 'ACEPTADO — ERROR' : res.code)
+  assert(!res.ok && res.code === 'COLLECTOR_INVALID', 'se atribuyó efectivo a un usuario inactivo')
+})
+
+// ############################################################
+// FAMILIA — CASH-SUP · LA CAJA PERSONAL DEL SUPERVISOR
+// ############################################################
+
+await spec('CASH-SUP-001', 'Supervisor', 'el cobro del Supervisor aumenta SU efectivo, no el del Cobrador', async () => {
+  const sc = escenarioConEquipo(['u-juan'], [USER_SUPERVISOR.id])
+  await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 300_000, actor: USER_SUPERVISOR, collectorId: USER_SUPERVISOR.id, fecha: DIA_SUP },
+    asDb(sc.db),
+  )
+  const laura = await getCollectorDailyCashSummary({ routeId: TEST_IDS.ROUTE_ID, collectorId: USER_SUPERVISOR.id, fecha: DIA_SUP }, asCollectorDb(sc.db))
+  const juan = await getCollectorDailyCashSummary({ routeId: TEST_IDS.ROUTE_ID, collectorId: 'u-juan', fecha: DIA_SUP }, asCollectorDb(sc.db))
+  metric('Mi efectivo · Supervisor', laura.efectivoAEntregar)
+  metric('Mi efectivo · Cobrador', juan.efectivoAEntregar)
+  assert(laura.efectivoAEntregar === 300_000, `el Supervisor no recibió su efectivo: ${laura.efectivoAEntregar}`)
+  assert(juan.efectivoAEntregar === 0, 'el dinero se cargó a la caja del Cobrador que no lo recibió')
+})
+
+await spec('CASH-SUP-002', 'Supervisor', 'el desembolso del Supervisor RESTA de su efectivo', async () => {
+  // Antes `disbursedByCollectorId` solo se escribía si el actor era 'cobrador':
+  // el Supervisor entregaba dinero de su bolsillo y no se le descontaba a nadie.
+  const sc = escenarioConEquipo(['u-juan'], [USER_SUPERVISOR.id])
+  await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 300_000, actor: USER_SUPERVISOR, collectorId: USER_SUPERVISOR.id, fecha: DIA_SUP },
+    asDb(sc.db),
+  )
+  // Venta desembolsada con la MISMA forma que escribe `confirmDisbursement`.
+  sc.db.sales._seed([{
+    ...sc.sale, id: 'sale-desembolsada-sup', valorVenta: 200_000,
+    disbursementStatus: 'desembolsado',
+    disbursedByCollectorId: hasPersonalCashbox(USER_SUPERVISOR.rol) ? USER_SUPERVISOR.id : undefined,
+    disbursedByUserId: USER_SUPERVISOR.id, fechaDesembolso: DIA_SUP,
+  } as unknown as Sale])
+  const laura = await getCollectorDailyCashSummary({ routeId: TEST_IDS.ROUTE_ID, collectorId: USER_SUPERVISOR.id, fecha: DIA_SUP }, asCollectorDb(sc.db))
+  metric('recaudado', laura.recaudado)
+  metric('desembolsado', laura.desembolsado)
+  metric('efectivo a entregar', laura.efectivoAEntregar)
+  assert(laura.desembolsado === 200_000, `el desembolso del Supervisor no se le cargó: ${laura.desembolsado}`)
+  assert(laura.efectivoAEntregar === 100_000, `300.000 − 200.000 debía dar 100.000, dio ${laura.efectivoAEntregar}`)
+})
+
+await spec('CASH-SUP-003', 'Supervisor', 'el gasto del Supervisor RESTA de su efectivo', async () => {
+  const sc = escenarioConEquipo(['u-juan'], [USER_SUPERVISOR.id])
+  await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 300_000, actor: USER_SUPERVISOR, collectorId: USER_SUPERVISOR.id, fecha: DIA_SUP },
+    asDb(sc.db),
+  )
+  // Gasto con la MISMA forma que escribe CollectorExpensesPage tras la corrección.
+  sc.db.expenses._seed([{
+    id: 'exp-sup', tenantId: TEST_IDS.TENANT_ID, routeId: TEST_IDS.ROUTE_ID, categoryId: 'cat-1',
+    valor: 50_000, fecha: DIA_SUP, userId: USER_SUPERVISOR.id,
+    collectorId: hasPersonalCashbox(USER_SUPERVISOR.rol) ? USER_SUPERVISOR.id : undefined,
+    syncStatus: 'synced', createdAt: `${DIA_SUP}T11:00:00.000Z`,
+  }])
+  const laura = await getCollectorDailyCashSummary({ routeId: TEST_IDS.ROUTE_ID, collectorId: USER_SUPERVISOR.id, fecha: DIA_SUP }, asCollectorDb(sc.db))
+  metric('gastos', laura.gastos)
+  metric('efectivo a entregar', laura.efectivoAEntregar)
+  assert(laura.gastos === 50_000, `el gasto del Supervisor no se le cargó: ${laura.gastos}`)
+  assert(laura.efectivoAEntregar === 250_000, `300.000 − 50.000 debía dar 250.000, dio ${laura.efectivoAEntregar}`)
+})
+
+await spec('CASH-SUP-004', 'Supervisor', 'un pago atribuido al Cobrador NO aparece en la caja del Supervisor', async () => {
+  const sc = escenarioConEquipo(['u-juan'], [USER_SUPERVISOR.id])
+  await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 300_000, actor: USER_SUPERVISOR, collectorId: 'u-juan', fecha: DIA_SUP },
+    asDb(sc.db),
+  )
+  const laura = await getCollectorDailyCashSummary({ routeId: TEST_IDS.ROUTE_ID, collectorId: USER_SUPERVISOR.id, fecha: DIA_SUP }, asCollectorDb(sc.db))
+  const juan = await getCollectorDailyCashSummary({ routeId: TEST_IDS.ROUTE_ID, collectorId: 'u-juan', fecha: DIA_SUP }, asCollectorDb(sc.db))
+  metric('Mi efectivo · Supervisor', laura.efectivoAEntregar)
+  metric('Mi efectivo · Cobrador', juan.efectivoAEntregar)
+  assert(juan.efectivoAEntregar === 300_000, 'el Cobrador no recibió el dinero que sí cobró')
+  assert(laura.efectivoAEntregar === 0, 'el Supervisor se quedó con dinero que solo digitó')
+})
+
+await spec('CASH-SUP-005', 'Supervisor', '"Mi efectivo" NO puede incluir la Base ni el capital de la Ruta', () => {
+  // Garantía ESTRUCTURAL, no cosmética: la superficie de datos de la caja personal
+  // no declara `capitalMovements`, `transfers` ni `withdrawals`, así que esas cifras
+  // no pueden filtrarse a "Mi efectivo" ni por accidente.
+  const engine = readSource(SRC.cashbox)
+  const desde = engine.indexOf('export interface CollectorCashDatabase')
+  const iface = engine.slice(desde, engine.indexOf('}', desde) + 1)
+  const prohibidas = ['capitalMovements', 'transfers', 'withdrawals']
+  metric('superficie de la caja personal', iface.replace(/\s+/g, ' ').trim())
+  for (const t of prohibidas) metric(`declara ${t}`, iface.includes(t) ? 'SÍ — ERROR' : 'no')
+  assert(desde !== -1, 'no se encontró la superficie de datos de la caja personal')
+  assert(prohibidas.every(t => !iface.includes(t)), 'la caja personal no puede leer capital, transferencias ni retiros')
+  assert(['payments', 'sales', 'expenses'].every(t => iface.includes(t)), 'la caja personal debe leer pagos, ventas y gastos')
+})
+
+// ############################################################
+// FAMILIA — PAYMENT-AUTHOR · AUTOR ≠ RESPONSABLE
+// ############################################################
+
+await spec('PAYMENT-AUTHOR-001', 'Autoría', 'createdByUserId conserva SIEMPRE al actor real', async () => {
+  const sc = escenarioConEquipo(['u-juan'], [USER_SUPERVISOR.id])
+  await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 100_000, actor: USER_SUPERVISOR, collectorId: 'u-juan', fecha: DIA_SUP },
+    asDb(sc.db),
+  )
+  const pago = (await sc.db.payments.toArray())[0] as Payment
+  metric('createdByUserId', pago.createdByUserId)
+  metric('collectorId', pago.collectorId)
+  assert(pago.createdByUserId === USER_SUPERVISOR.id, 'se perdió el autor real de la operación')
+})
+
+await spec('PAYMENT-AUTHOR-002', 'Autoría', 'autor y responsable pueden ser personas distintas', async () => {
+  const sc = escenarioConEquipo(['u-juan'], [USER_SUPERVISOR.id])
+  await registerPayment(
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 100_000, actor: USER_SUPERVISOR, collectorId: 'u-juan', fecha: DIA_SUP },
+    asDb(sc.db),
+  )
+  const pago = (await sc.db.payments.toArray())[0] as Payment
+  metric('registrado por', pago.createdByUserId)
+  metric('responsable del efectivo', pago.collectorId)
+  assert(pago.createdByUserId !== pago.collectorId, 'autor y responsable colapsaron en el mismo valor')
+  assert(pago.collectorId === 'u-juan' && pago.createdByUserId === USER_SUPERVISOR.id, 'los campos se cruzaron')
+})
+
+await spec('PAYMENT-AUTHOR-003', 'Autoría', 'la corrección conserva al responsable original y registra al corrector', () => {
+  // El dinero NO se reatribuye a quien corrige: sigue siendo de quien lo recibió.
+  // Pero la reversión y el pago corregido deben decir QUIÉN los ejecutó; antes
+  // quedaban con `createdByUserId: undefined` y la traza se perdía.
+  const body = extractFunctionBody(readSource(SRC.correction), 'async function executeCorrection(')
+  const heredaResponsable = (body.match(/collectorId: original\.collectorId/g) ?? []).length
+  const registraAutor = (body.match(/createdByUserId: actor\.id/g) ?? []).length
+  metric('hereda collectorId del original', heredaResponsable)
+  metric('escribe createdByUserId = corrector', registraAutor)
+  assert(heredaResponsable === 2, `la reversión y la corrección deben heredar el responsable (encontrado ${heredaResponsable})`)
+  assert(registraAutor === 2, `ambos asientos deben registrar al corrector (encontrado ${registraAutor})`)
+  assert(!body.includes('collectorId: actor.id'), 'el dinero se reatribuyó a quien corrige')
+})
+
+// ############################################################
+// FAMILIA — SUPERVISOR-UI · LO QUE VE CADA PERFIL
+// ############################################################
+
+await spec('SUPERVISOR-UI-001', 'Supervisor', 'el Supervisor puede ver la Base de la Ruta', () => {
+  const puede = can(USER_SUPERVISOR, 'cashbox.viewRoute', { routeId: TEST_IDS.ROUTE_ID, tenantId: TEST_IDS.TENANT_ID })
+  metric('supervisor · cashbox.viewRoute', puede)
+  assert(puede, 'el Supervisor debe poder consultar la caja financiera de sus rutas')
+})
+
+await spec('SUPERVISOR-UI-002', 'Supervisor', 'el Cobrador NO ve la Base: ni se le muestra ni se le pide', () => {
+  const puede = can(USER_COBRADOR, 'cashbox.viewRoute', { routeId: TEST_IDS.ROUTE_ID, tenantId: TEST_IDS.TENANT_ID })
+  // Y la tarjeta de ruta —compartida por ambos perfiles— consulta la Base SOLO
+  // detrás de la guarda: sin la capacidad el dato ni siquiera se obtiene.
+  const card = readSource('src/pages/collector/CollectorSelectRoutePage.tsx')
+  const guarded = card.includes("const verBase = can(user, 'cashbox.viewRoute'")
+    && card.includes('base: verBase ? await getRouteAvailableCapital(route.id) : undefined')
+  metric('cobrador · cashbox.viewRoute', puede)
+  metric('la tarjeta pide la Base tras la guarda', guarded)
+  assert(!puede, 'el Cobrador no puede acceder a la caja financiera de la ruta')
+  assert(guarded, 'la Base debe consultarse solo con `cashbox.viewRoute` (fail-closed)')
+})
+
+await spec('SUPERVISOR-UI-003', 'Supervisor', '"Mi efectivo" y "Caja de la Ruta" son bloques separados', () => {
+  const page = readSource('src/pages/collector/CollectorCashClosePage.tsx')
+  const tieneMiEfectivo = page.includes('Mi efectivo')
+  const tieneCajaRuta = page.includes('Caja de la Ruta')
+  const avisa = page.includes('no forma parte de tu efectivo')
+  const failClosed = page.includes('verCajaRuta ? await getRouteFinancialSummary(routeId) : null')
+  metric('bloque "Mi efectivo"', tieneMiEfectivo)
+  metric('bloque "Caja de la Ruta"', tieneCajaRuta)
+  metric('advierte que no es su dinero', avisa)
+  metric('el dato de ruta es fail-closed', failClosed)
+  assert(tieneMiEfectivo && tieneCajaRuta, 'los dos dineros deben presentarse como bloques distintos')
+  assert(avisa, 'debe decirse en pantalla que la caja de la ruta no es efectivo del usuario')
+  assert(failClosed, 'sin `cashbox.viewRoute` el dato financiero NO debe pedirse')
+})
+
+await spec('SUPERVISOR-UI-004', 'Supervisor', 'el selector ofrece "Yo — {Supervisor}" y no lo preselecciona', () => {
+  const picker = readSource('src/components/ui/CollectorPicker.tsx')
+  const ofreceYo = picker.includes('`Yo — ${user.nombre}`')
+  const usaPredicado = picker.includes('hasPersonalCashbox(user!.rol)')
+  const noPreselecciona = picker.includes('if (list.length === 1 && !value && !actorPuedeResponder) onChange(list[0].id)')
+  metric('ofrece "Yo — {nombre}"', ofreceYo)
+  metric('decide con hasPersonalCashbox', usaPredicado)
+  metric('no preselecciona si el actor compite', noPreselecciona)
+  assert(ofreceYo, 'el Supervisor debe poder indicarse a sí mismo como responsable')
+  assert(usaPredicado, 'la elegibilidad debe salir del predicado único, no de un `rol ===` suelto')
+  assert(noPreselecciona, 'con dos destinos posibles no puede preseleccionarse ninguno')
+})
+
+await spec('SUPERVISOR-UI-005', 'Supervisor', 'la atribución se decide con UN solo predicado en los tres flujos', () => {
+  // Cobros, desembolsos y gastos usaban tres reglas distintas: el Supervisor
+  // recaudaba pero no podía desembolsar ni gastar contra su caja. Ahora los tres
+  // preguntan exactamente lo mismo.
+  const disb = readSource('src/services/saleRequestService.ts')
+  const exp = readSource('src/pages/collector/CollectorExpensesPage.tsx')
+  const pay = readSource(SRC.paymentService)
+  const usos = {
+    desembolso: disb.includes('hasPersonalCashbox(actor.rol)'),
+    gasto: exp.includes('hasPersonalCashbox(user.rol)'),
+    cobro: pay.includes('hasPersonalCashbox(u.rol)'),
+  }
+  for (const [k, v] of Object.entries(usos)) metric(`${k} usa hasPersonalCashbox`, v)
+  const sueltos = [
+    disb.includes("actor?.rol === 'cobrador' ? actor.id"),
+    exp.includes("user.rol === 'cobrador' ? user.id"),
+  ]
+  metric('reglas `rol === cobrador` dispersas', sueltos.filter(Boolean).length)
+  assert(Object.values(usos).every(Boolean), 'los tres flujos deben decidir con el mismo predicado')
+  assert(!sueltos.some(Boolean), 'quedó una regla de atribución dispersa fuera del predicado único')
+})
+
+// ############################################################
+// FAMILIA — SCOPE-HIST · ALCANCE DE LA CAPA OPERATIVA
+// ############################################################
+
+await spec('SCOPE-HIST-001', 'Alcance', 'el histórico de abonos solo muestra clientes de la RUTA ACTIVA', () => {
+  const page = readSource('src/pages/collector/CollectorPaymentHistoryPage.tsx')
+  const usaRutaActiva = page.includes('const routeId = activeRouteId ?? user?.routeId ?? null')
+  const filtraClientes = page.includes('allClients.filter(c => c.routeId === routeId)')
+  const yaNoUsaTodas = !page.includes('getAuthorizedRouteIds')
+  metric('usa la ruta activa', usaRutaActiva)
+  metric('filtra clientes por esa ruta', filtraClientes)
+  metric('ya no usa todas las rutas autorizadas', yaNoUsaTodas)
+  assert(usaRutaActiva && filtraClientes, 'el histórico debe recortarse por la ruta activa')
+  assert(yaNoUsaTodas, 'sigue leyendo TODAS las rutas autorizadas')
+})
+
+await spec('SCOPE-HIST-002', 'Alcance', 'las ventas de otra Ruta no aparecen en el histórico', () => {
+  const page = readSource('src/pages/collector/CollectorPaymentHistoryPage.tsx')
+  const filtraVentas = page.includes('.filter(s => s.routeId === routeId)')
+  // Un saleId recibido por URL tampoco puede ampliar el alcance.
+  const urlNoAmplia = page.includes('if (sale && sale.routeId === routeId)')
+  metric('filtra ventas por ruta activa', filtraVentas)
+  metric('un enlace directo no amplía el alcance', urlNoAmplia)
+  assert(filtraVentas, 'las ventas del cliente deben filtrarse por la ruta activa')
+  assert(urlNoAmplia, 'un saleId de otra ruta no puede preseleccionarse')
+})
+
+await spec('SCOPE-HIST-003', 'Alcance', 'el histórico aplica la semántica de pagos VIGENTES', () => {
+  const page = readSource('src/pages/collector/CollectorPaymentHistoryPage.tsx')
+  const usaEfectivos = page.includes('effectivePayments(ps)')
+  // Comprobación ejecutable de la semántica que la pantalla aplica.
+  const filas = [
+    { id: 'p1', state: 'active' as const },
+    { id: 'p2', state: 'reversed' as const },
+    { id: 'p3', state: 'reversal' as const },
+  ]
+  const visibles = effectivePayments(filas).map(p => p.id)
+  metric('la pantalla usa effectivePayments', usaEfectivos)
+  metric('filas visibles de 3', visibles.join(', '))
+  assert(usaEfectivos, 'un pago corregido volvería a aparecer tres veces')
+  assert(visibles.length === 1 && visibles[0] === 'p1', 'solo el pago vigente debe listarse')
+})
+
+await spec('SCOPE-HIST-004', 'Alcance', 'la pantalla de sincronización usa la ruta activa, no la legacy', () => {
+  const page = readSource('src/pages/collector/CollectorSyncPage.tsx')
+  const usaActiva = page.includes('const routeId = activeRouteId ?? user?.routeId ?? null')
+  const yaNoLegacy = !page.includes("db.payments.where('routeId').equals(user.routeId)")
+  metric('usa la ruta activa', usaActiva)
+  metric('ya no consulta user.routeId directamente', yaNoLegacy)
+  assert(usaActiva && yaNoLegacy, 'el cobrador multi-ruta seguiría viendo la ruta equivocada')
+})
+
+await spec('SCOPE-HIST-005', 'Alcance', 'CONTRATO: ninguna pantalla operativa de datos ignora la ruta activa', () => {
+  // Guardián del patrón, no un grep ingenuo: se listan las EXCEPCIONES legítimas y
+  // se exige que cualquier OTRA pantalla que resuelva rutas use `activeRouteId`.
+  //
+  // Excepciones documentadas:
+  //  · CollectorSelectRoutePage → su propósito ES elegir ruta: debe verlas todas.
+  //  · CollectorNewClientPage / CollectorNewSalePage → crean una entidad ELIGIENDO
+  //    ruta explícitamente; ofrecen las autorizadas y usan la activa por defecto.
+  const EXCEPCIONES = new Set([
+    'CollectorSelectRoutePage.tsx',
+    'CollectorNewClientPage.tsx',
+    'CollectorNewSalePage.tsx',
+  ])
+  const dir = resolve(process.cwd(), 'src/pages/collector')
+  const infractoras: string[] = []
+  for (const f of readdirSync(dir).filter(n => n.endsWith('.tsx'))) {
+    if (EXCEPCIONES.has(f)) continue
+    const src = readFileSync(resolve(dir, f), 'utf8')
+    const resuelveRutas = /getAuthorizedRouteIds|getAssignedRouteIds/.test(src)
+    if (resuelveRutas && !/activeRouteId/.test(src)) infractoras.push(f)
+  }
+  metric('excepciones documentadas', [...EXCEPCIONES].join(', '))
+  metric('pantallas revisadas', readdirSync(dir).filter(n => n.endsWith('.tsx')).length)
+  metric('pantallas infractoras', infractoras.length === 0 ? 'ninguna' : infractoras.join(', '))
+  assert(infractoras.length === 0,
+    `estas pantallas resuelven rutas sin respetar la ruta activa: ${infractoras.join(', ')}`)
+})
+
+// ############################################################
+// FAMILIA — SCOPE-BADGE · EL GLOBO VALE LO QUE LA LISTA
+// ############################################################
+
+await spec('SCOPE-BADGE-001', 'Alcance', 'el contador del Secretario cuenta SOLO sus rutas autorizadas', () => {
+  // Réplica pura de la regla del contador: `can(user, 'authorization.access', {routeId})`.
+  const secretario: User = {
+    id: 'u-sec', tenantId: 't-1', nombre: 'Sec', email: 's@t.com', password: 'x',
+    rol: 'secretario', status: 'activo', authorizedRouteIds: ['r-A'], createdAt: '', updatedAt: '',
+  }
+  const solicitudes = [
+    { routeId: 'r-A', status: 'pending' }, { routeId: 'r-A', status: 'pending' },
+    { routeId: 'r-B', status: 'pending' }, { routeId: 'r-B', status: 'pending' }, { routeId: 'r-B', status: 'pending' },
+    { routeId: 'r-A', status: 'approved' },
+  ]
+  const badge = solicitudes.filter(r =>
+    r.status === 'pending' && can(secretario, 'authorization.access', { routeId: r.routeId, tenantId: 't-1' })).length
+  metric('pendientes en la empresa', solicitudes.filter(r => r.status === 'pending').length)
+  metric('pendientes en SUS rutas', badge)
+  assert(badge === 2, `el badge debía contar 2 y contó ${badge}`)
+})
+
+await spec('SCOPE-BADGE-002', 'Alcance', 'el Admin deja de contar rutas que no tiene autorizadas', () => {
+  const admin: User = {
+    id: 'u-adm2', tenantId: 't-1', nombre: 'Adm', email: 'a2@t.com', password: 'x',
+    rol: 'admin', status: 'activo', authorizedRouteIds: ['r-A', 'r-C'], createdAt: '', updatedAt: '',
+  }
+  const solicitudes = [
+    { routeId: 'r-A', status: 'pending' }, { routeId: 'r-B', status: 'pending' },
+    { routeId: 'r-C', status: 'pending' }, { routeId: 'r-D', status: 'pending' },
+  ]
+  const todas = solicitudes.filter(r => r.status === 'pending').length
+  const suyas = solicitudes.filter(r =>
+    r.status === 'pending' && can(admin, 'authorization.access', { routeId: r.routeId, tenantId: 't-1' })).length
+  // Los layouts consumen los contadores a través de `usePendingBadges`, que es el
+  // ÚNICO punto donde se resuelve el número del globo. Se comprueba ahí el alcance
+  // y en el layout que no haya vuelto a colarse el contador sin recorte.
+  const hook = readSource('src/hooks/usePendingBadges.ts')
+  const layout = readSource('src/components/layout/AdminLayout.tsx')
+  const hookConAlcance = hook.includes('countPendingSaleRequestsForUser(user, tenantId)')
+    && hook.includes('countPendingAdjustmentRequestsForUser(user, tenantId)')
+  const layoutUsaHook = layout.includes('usePendingSaleRequests(user, tenantId)')
+    && layout.includes('usePendingAdjustmentRequests(user, tenantId)')
+  const sinContadorGlobal = !/countPendingSaleRequests\(|countPendingAdjustmentRequests\(/.test(layout)
+    && !/countPendingSaleRequests\(|countPendingAdjustmentRequests\(/.test(hook)
+  metric('contador antiguo (toda la empresa)', todas)
+  metric('contador nuevo (sus rutas)', suyas)
+  metric('el hook usa los contadores con alcance', hookConAlcance)
+  metric('AdminLayout consume el hook', layoutUsaHook)
+  metric('nadie usa ya el contador sin recorte', sinContadorGlobal)
+  assert(suyas === 2 && todas === 4, 'el recorte por rutas no se aplicó')
+  assert(hookConAlcance && layoutUsaHook, 'el badge del Admin debe salir del contador con alcance')
+  assert(sinContadorGlobal, 'volvió a usarse el contador que cuenta toda la empresa')
+})
+
+await spec('SCOPE-BADGE-003', 'Alcance', 'el Secretario tiene badge y NO cuenta ajustes que no puede aprobar', () => {
+  const layout = readSource('src/components/layout/SecretarioLayout.tsx')
+  const tieneBadge = layout.includes('CountBadge') && layout.includes('usePendingSaleRequests(user, tenantId)')
+  // El Secretario NO monta el contador de ajustes: los origina, no los aprueba.
+  const noCuentaAjustes = !layout.includes('usePendingAdjustmentRequests')
+    && !layout.includes('countPendingAdjustmentRequests')
+  const secretario: User = {
+    id: 'u-sec2', tenantId: 't-1', nombre: 'Sec', email: 's2@t.com', password: 'x',
+    rol: 'secretario', status: 'activo', authorizedRouteIds: ['r-A'], createdAt: '', updatedAt: '',
+  }
+  const puedeAprobarAjustes = can(secretario, 'payment.approveAdjustment', { routeId: 'r-A', tenantId: 't-1' })
+  metric('SecretarioLayout monta el badge', tieneBadge)
+  metric('no cuenta ajustes de pago', noCuentaAjustes)
+  metric('secretario · payment.approveAdjustment', puedeAprobarAjustes)
+  assert(tieneBadge, 'el Secretario sigue sin aviso de autorizaciones pendientes')
+  assert(noCuentaAjustes, 'no debe contarse lo que el Secretario no puede aprobar')
+  assert(!puedeAprobarAjustes, 'el Secretario no aprueba ajustes: solo los solicita')
 })
 
 // ############################################################

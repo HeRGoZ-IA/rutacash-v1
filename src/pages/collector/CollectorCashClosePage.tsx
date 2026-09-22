@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Calculator, TrendingUp, TrendingDown, Banknote, Wallet, MapPin } from 'lucide-react'
+import { Calculator, TrendingUp, TrendingDown, Banknote, Wallet, MapPin, Landmark, Info } from 'lucide-react'
 import { getCollectorDailyCashSummary, getRouteFinancialSummary } from '@/services/cashboxEngine'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
@@ -9,18 +9,27 @@ import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import type { CollectorCashSummary, RouteFinancialSummary } from '@/models/types'
 
 /**
- * CUADRE DEL DÍA — CAJA PERSONAL.
+ * MI EFECTIVO — CIERRE DEL DÍA DE LA CAJA PERSONAL.
  *
- * Regla vigente (revisión del socio): lo que se cuadra es el EFECTIVO OPERATIVO bajo
- * la responsabilidad de quien está en sesión, NO la caja financiera de la ruta:
+ * Lo que se cuadra aquí es el EFECTIVO OPERATIVO bajo la responsabilidad de quien
+ * está en sesión, NO la caja financiera de la ruta:
  *
  *     recaudado por él − desembolsado por él − sus gastos = efectivo a entregar
  *
- * El CAPITAL de la ruta (capital inicial, base actual, movimientos de capital) ya NO
- * se muestra al Cobrador y —más importante— ya NO se consulta: `getCollectorDailyCashSummary`
- * ni siquiera lee `capitalMovements`. El bloque financiero de la ruta solo se calcula
- * para quien tiene `cashbox.viewRoute` (Supervisor, Administrador, Super Admin), ya que
- * esta pantalla es compartida por la capa operativa.
+ * DOS DINEROS DISTINTOS, DOS BLOQUES DISTINTOS (Fase 1):
+ * La pantalla se llamaba "Mi caja" y, justo debajo del total personal, mostraba
+ * "Base actual" de la ruta. Dos cifras de naturaleza completamente distinta bajo un
+ * mismo título posesivo: el Supervisor podía leer la Base de la ruta como si fuera
+ * dinero suyo. Ahora la separación es explícita:
+ *
+ *   · "Mi efectivo"     → lo que ESTA persona debe entregar. Su responsabilidad.
+ *   · "Caja de la Ruta" → información financiera de la RUTA. No es su dinero.
+ *
+ * El CAPITAL de la ruta no se muestra al Cobrador y —más importante— ni siquiera se
+ * consulta: `getCollectorDailyCashSummary` no lee `capitalMovements`. El bloque de
+ * ruta solo se calcula para quien tiene `cashbox.viewRoute` (Supervisor,
+ * Administrador, Super Admin), porque esta pantalla es compartida por la capa
+ * operativa. Ocultar la tarjeta no habría bastado: el dato no se pide.
  */
 export default function CollectorCashClosePage() {
   const { user } = useAuth()
@@ -56,41 +65,61 @@ export default function CollectorCashClosePage() {
   const aEntregar = cash?.efectivoAEntregar ?? 0
 
   return (
-    <div className="p-4 space-y-4">
-      <div>
-        <h1 className="font-bold text-gray-900">Mi caja</h1>
-        <p className="text-xs text-gray-500">{formatDate(today())} · efectivo bajo tu responsabilidad</p>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-card divide-y divide-gray-50">
-        <Row icon={<TrendingUp className="w-4 h-4 text-emerald-600" />} label="Recaudado por ti" value={`+${formatCurrency(recaudado, currency)}`} color="text-emerald-600" />
-        <Row icon={<Banknote className="w-4 h-4 text-primary-600" />} label="Desembolsado por ti" value={`-${formatCurrency(desembolsado, currency)}`} color="text-primary-600" />
-        <Row icon={<TrendingDown className="w-4 h-4 text-red-500" />} label="Tus gastos" value={`-${formatCurrency(gastos, currency)}`} color="text-red-500" />
-      </div>
-
-      <div className="bg-gradient-to-r from-primary-600 to-primary-800 rounded-2xl p-5 text-white">
-        <div className="flex items-center gap-2 text-primary-200 text-sm">
-          <Calculator className="w-4 h-4" /> Efectivo a entregar
+    <div className="p-4 space-y-6">
+      {/* ================= BLOQUE 1 — MI EFECTIVO (responsabilidad personal) ====== */}
+      <section className="space-y-4">
+        <div>
+          <h1 className="font-bold text-gray-900">Mi efectivo</h1>
+          <p className="text-xs text-gray-500">{formatDate(today())} · dinero bajo tu responsabilidad</p>
         </div>
-        <p className="text-3xl font-bold mt-1">{formatCurrency(aEntregar, currency)}</p>
-        <p className="text-primary-200 text-xs mt-2">Recaudado − desembolsado − gastos</p>
-      </div>
 
-      {/* Caja FINANCIERA de la ruta: solo para roles con `cashbox.viewRoute`. */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-card divide-y divide-gray-50">
+          <Row icon={<TrendingUp className="w-4 h-4 text-emerald-600" />} label="Recaudado por ti" value={`+${formatCurrency(recaudado, currency)}`} color="text-emerald-600" />
+          <Row icon={<Banknote className="w-4 h-4 text-primary-600" />} label="Desembolsado por ti" value={`-${formatCurrency(desembolsado, currency)}`} color="text-primary-600" />
+          <Row icon={<TrendingDown className="w-4 h-4 text-red-500" />} label="Tus gastos" value={`-${formatCurrency(gastos, currency)}`} color="text-red-500" />
+        </div>
+
+        <div className="bg-gradient-to-r from-primary-600 to-primary-800 rounded-2xl p-5 text-white">
+          <div className="flex items-center gap-2 text-primary-200 text-sm">
+            <Calculator className="w-4 h-4" /> Efectivo a entregar
+          </div>
+          <p className="text-3xl font-bold mt-1">{formatCurrency(aEntregar, currency)}</p>
+          <p className="text-primary-200 text-xs mt-2">Recaudado − desembolsado − gastos</p>
+        </div>
+      </section>
+
+      {/* ============ BLOQUE 2 — CAJA DE LA RUTA (NO es dinero del usuario) ======= */}
+      {/* Separado a propósito: es información financiera de la RUTA. Solo se
+          muestra —y solo se consulta— con `cashbox.viewRoute`. */}
       {verCajaRuta && route && (
-        <div className="space-y-2">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Caja de la ruta</p>
+        <section className="space-y-3 border-t border-gray-200 pt-5">
+          <div className="flex items-start gap-2">
+            <Landmark className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <h2 className="text-sm font-semibold text-gray-700">Caja de la Ruta</h2>
+              <p className="text-xs text-gray-500">Información financiera de la ruta</p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-100 px-3 py-2">
+            <Info className="w-3.5 h-3.5 text-amber-600 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-amber-800">
+              Este dinero <span className="font-semibold">no forma parte de tu efectivo</span>: pertenece a la ruta
+              y no entra en lo que debes entregar.
+            </p>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4">
-              <div className="flex items-center gap-1.5 text-xs text-gray-400"><Wallet className="w-3.5 h-3.5" /> Base actual</div>
+              <div className="flex items-center gap-1.5 text-xs text-gray-400"><Wallet className="w-3.5 h-3.5" /> Base de la ruta</div>
               <p className="text-lg font-bold text-primary-700 mt-1">{formatCurrency(route.baseActual, currency)}</p>
             </div>
             <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4">
-              <div className="flex items-center gap-1.5 text-xs text-gray-400"><MapPin className="w-3.5 h-3.5" /> Cartera Activa</div>
+              <div className="flex items-center gap-1.5 text-xs text-gray-400"><MapPin className="w-3.5 h-3.5" /> Cartera activa</div>
               <p className="text-lg font-bold text-indigo-600 mt-1">{formatCurrency(route.carteraEnCalle, currency)}</p>
             </div>
           </div>
-        </div>
+        </section>
       )}
     </div>
   )
