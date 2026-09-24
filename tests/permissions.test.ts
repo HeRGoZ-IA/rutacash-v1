@@ -2135,8 +2135,11 @@ const actorAdmin = { id: 'u-adm', rol: 'admin' as UserRole }
 const rCob = resolveResponsibleCollector({ actor: actorCob, routeCollectors: [atrCobA, atrCobB] })
 check('ATRIB — el cobrador responde por su propio recaudo', rCob.ok && rCob.collectorId === 'u-atrCobA' && rCob.source === 'actor')
 
-// Supervisor registra un cobro hecho por A: el dinero es de A, no del Supervisor.
-const rExp = resolveResponsibleCollector({ actor: actorSup, requested: 'u-atrCobA', routeCollectors: [atrCobA, atrCobB] })
+// Un actor ADMINISTRATIVO registra un cobro hecho por A: el dinero es de A, no de
+// quien digita. [MODIFICADO 2026-09-24 — regla Supervisor: antes el actor era el
+// Supervisor; por la regla definitiva el Supervisor ya no puede cargar su cobro a
+// otra persona, así que la intención se conserva con un Admin.]
+const rExp = resolveResponsibleCollector({ actor: actorAdmin, requested: 'u-atrCobA', routeCollectors: [atrCobA, atrCobB] })
 check('ATRIB — el dinero se atribuye al cobrador indicado, no a quien digita', rExp.ok && rExp.collectorId === 'u-atrCobA' && rExp.source === 'explicit')
 
 // Ruta con UN solo cobrador: se preselecciona sin ambiguedad.
@@ -2173,21 +2176,32 @@ check('ATRIB — el secretario NO tiene caja personal', !hasPersonalCashbox('sec
 const atrSup = { id: 'u-sup', rol: 'supervisor' as UserRole, status: 'activo' as const }
 const atrSupInactivo = { id: 'u-supOff', rol: 'supervisor' as UserRole, status: 'inactivo' as const }
 
-// 1) El Supervisor actor puede quedarse el efectivo si lo declara explícitamente.
+// 1) El Supervisor actor queda como responsable aunque se indique a sí mismo.
+//    [MODIFICADO 2026-09-24: source 'explicit' → 'actor'. Regla definitiva: el
+//    Supervisor responde por su registro por ser quien cobra, no por elegirse.]
 const rSupYo = resolveResponsibleCollector({ actor: actorSup, requested: 'u-sup', routeCollectors: [atrCobA] })
-check('ATRIB-SUP — el Supervisor puede indicarse a si mismo', rSupYo.ok && rSupYo.collectorId === 'u-sup' && rSupYo.source === 'explicit')
+check('ATRIB-SUP — el Supervisor puede indicarse a si mismo', rSupYo.ok && rSupYo.collectorId === 'u-sup' && rSupYo.source === 'actor')
 
-// 2) Pero NUNCA se lo queda por el mero hecho de digitar: se exige decidir.
+// 2) [SUSTITUIDO 2026-09-24] Regla anterior (Fase 1): con cobradores en la ruta el
+//    Supervisor debía ELEGIR ('must-choose'). Regla definitiva aprobada por
+//    negocio: el Supervisor que registra el pago ES el responsable, sin selector.
 const rSupAuto = resolveResponsibleCollector({ actor: actorSup, routeCollectors: [atrCobA] })
-check('ATRIB-SUP — con un cobrador en la ruta el Supervisor debe ELEGIR', !rSupAuto.ok && rSupAuto.code === 'must-choose')
-check('ATRIB-SUP — el Supervisor no se autoasigna por ser el actor', !(rSupAuto.ok && (rSupAuto as { collectorId: string }).collectorId === 'u-sup'))
+check('SUP-RESP — con un cobrador en la ruta el Supervisor responde automaticamente', rSupAuto.ok && rSupAuto.collectorId === 'u-sup' && rSupAuto.source === 'actor')
+const rSupDos = resolveResponsibleCollector({ actor: actorSup, routeCollectors: [atrCobA, atrCobB] })
+check('SUP-RESP — con dos cobradores en la ruta el Supervisor responde automaticamente', rSupDos.ok && rSupDos.collectorId === 'u-sup')
+const rSupDesvio = resolveResponsibleCollector({ actor: actorSup, requested: 'u-atrCobA', routeCollectors: [atrCobA, atrCobB] })
+check('SUP-RESP — el Supervisor NO puede cargar su cobro a un Cobrador', !rSupDesvio.ok && rSupDesvio.code === 'actor-owns-cash')
+const rCobDesvio = resolveResponsibleCollector({ actor: actorCob, requested: 'u-atrCobB', routeCollectors: [atrCobA, atrCobB] })
+check('SUP-RESP — el Cobrador NO puede cargar su cobro a otro Cobrador', !rCobDesvio.ok && rCobDesvio.code === 'actor-owns-cash')
 
 // 3) Y tampoco se preselecciona al cobrador habitual cuando el Supervisor opera.
 check('ATRIB-SUP — no se preselecciona al cobrador habitual si el Supervisor opera', !(rSupAuto.ok && (rSupAuto as { collectorId: string }).collectorId === 'u-atrCobA'))
 
-// 4) Ruta SIN cobradores: no hay nada que elegir, el Supervisor responde (legacy).
+// 4) Ruta SIN cobradores: el Supervisor responde.
+//    [MODIFICADO 2026-09-24: source 'legacy-actor' → 'actor'. Ya no es la rama de
+//    respaldo: es la regla general del Supervisor.]
 const rSupSolo = resolveResponsibleCollector({ actor: actorSup, routeCollectors: [] })
-check('ATRIB-SUP — sin cobradores en la ruta el Supervisor responde', rSupSolo.ok && rSupSolo.collectorId === 'u-sup' && rSupSolo.source === 'legacy-actor')
+check('ATRIB-SUP — sin cobradores en la ruta el Supervisor responde', rSupSolo.ok && rSupSolo.collectorId === 'u-sup' && rSupSolo.source === 'actor')
 
 // 5) Un Supervisor ASIGNADO a la ruta es destino válido aunque no sea el actor.
 const rSupOtro = resolveResponsibleCollector({ actor: actorAdmin, requested: 'u-sup', routeCollectors: [atrCobA, atrSup] })

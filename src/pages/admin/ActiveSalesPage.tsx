@@ -11,6 +11,7 @@ import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { useRouteCapital } from '@/hooks/useRouteCapital'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
@@ -88,8 +89,13 @@ export default function ActiveSalesPage() {
 
   useEffect(() => { load() }, [tenantId, user])
 
-  async function load() {
-    setLoading(true)
+  // Un abono registrado en otra pestaña (Cobrador/Supervisor, mismo navegador)
+  // cambia saldos y parcelas: se recarga la lista sin spinner ni F5.
+  const revision = useDataRevision()
+  useEffect(() => { if (revision > 0) load(true) }, [revision])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function load(silent = false) {
+    if (!silent) setLoading(true)
     const [rawSales, rawClients, rawRoutes] = await Promise.all([
       db.sales.where('tenantId').equals(tenantId).toArray(),
       db.clients.where('tenantId').equals(tenantId).toArray(),

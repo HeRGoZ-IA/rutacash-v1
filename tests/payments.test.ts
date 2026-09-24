@@ -2136,10 +2136,13 @@ function escenarioConCobradores(ids: string[], opts: Parameters<typeof buildScen
   return sc
 }
 
-await spec('COLL-ATTR-001', 'Caja cobrador', 'el Supervisor registra el cobro de A y el dinero queda a nombre de A', async () => {
+// [MODIFICADO 2026-09-24 — regla Supervisor] Antes el actor era el Supervisor. Por
+// la regla definitiva el Supervisor responde por lo que registra y ya no puede
+// cargarlo a A; la intención (autor ≠ responsable) se conserva con un Admin.
+await spec('COLL-ATTR-001', 'Caja cobrador', 'un Admin registra el cobro de A y el dinero queda a nombre de A', async () => {
   const sc = escenarioConCobradores(['u-cobA', 'u-cobB'])
   const res = await registerPayment(
-    { saleId: TEST_IDS.SALE_ID, requestedAmount: 100_000, actor: USER_SUPERVISOR, collectorId: 'u-cobA', fecha: DIA },
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 100_000, actor: USER_ADMIN, collectorId: 'u-cobA', fecha: DIA },
     asDb(sc.db),
   )
   const pago = (await sc.db.payments.toArray())[0]
@@ -2148,16 +2151,16 @@ await spec('COLL-ATTR-001', 'Caja cobrador', 'el Supervisor registra el cobro de
   metric('createdByUserId guardado', pago?.createdByUserId)
   assert(res.ok, `el pago fue rechazado: ${res.ok ? '' : res.code}`)
   assert(pago.collectorId === 'u-cobA', `el dinero se atribuyo a ${pago.collectorId} en lugar de al cobrador`)
-  assert(pago.createdByUserId === USER_SUPERVISOR.id, `no se registro quien digito: ${pago.createdByUserId}`)
+  assert(pago.createdByUserId === USER_ADMIN.id, `no se registro quien digito: ${pago.createdByUserId}`)
   assert(pago.collectorId !== pago.createdByUserId, 'registrar y responder siguen siendo el mismo campo')
 
-  // Y la caja de A refleja ese dinero; la del Supervisor, no.
+  // Y la caja de A refleja ese dinero; la del Admin, no.
   const cajaA = await getCollectorDailyCashSummary({ routeId: TEST_IDS.ROUTE_ID, collectorId: 'u-cobA', fecha: DIA }, asCollectorDb(sc.db))
-  const cajaSup = await getCollectorDailyCashSummary({ routeId: TEST_IDS.ROUTE_ID, collectorId: USER_SUPERVISOR.id, fecha: DIA }, asCollectorDb(sc.db))
+  const cajaSup = await getCollectorDailyCashSummary({ routeId: TEST_IDS.ROUTE_ID, collectorId: USER_ADMIN.id, fecha: DIA }, asCollectorDb(sc.db))
   metric('caja de A', cajaA.recaudado)
-  metric('caja del Supervisor', cajaSup.recaudado)
+  metric('caja del Admin', cajaSup.recaudado)
   assert(cajaA.recaudado === 100_000, `la caja de A no recibio el dinero: ${cajaA.recaudado}`)
-  assert(cajaSup.recaudado === 0, 'el Supervisor se quedo con dinero que no cobro')
+  assert(cajaSup.recaudado === 0, 'el Admin se quedo con dinero que no cobro')
 })
 
 await spec('COLL-ATTR-002', 'Caja cobrador', 'un Admin NO puede atribuir el dinero solo por digitarlo si hay varios cobradores', async () => {
@@ -2430,25 +2433,29 @@ await spec('PAY-COLL-REG-007', 'App Cobrador', 'con varios cobradores en la ruta
   assert(pago?.collectorId === USER_COBRADOR.id, 'el dinero debe quedar a nombre del Cobrador que lo recibió')
 })
 
-await spec('PAY-COLL-REG-008', 'App Cobrador', 'el Supervisor registra el cobro recibido por otro Cobrador', async () => {
+// [SUSTITUIDO 2026-09-24 — regla Supervisor] Regla anterior: sin indicar
+// responsable → COLLECTOR_REQUIRED; indicando 'u-cobA' → dinero de A. Regla
+// definitiva: el Supervisor responde por lo que registra, haya los cobradores que haya.
+await spec('PAY-COLL-REG-008', 'App Cobrador', 'el Supervisor que registra el cobro queda como responsable aunque haya varios Cobradores', async () => {
   const sc = escenarioConCobradores(['u-cobA', 'u-cobB'])
-  const ambiguo = await registerPayment(
+  const auto = await registerPayment(
     { saleId: TEST_IDS.SALE_ID, requestedAmount: 6_000, actor: USER_SUPERVISOR, fecha: DIA_REG },
     asDb(sc.db),
   )
-  const explicito = await registerPayment(
+  const desvio = await registerPayment(
     { saleId: TEST_IDS.SALE_ID, requestedAmount: 6_000, actor: USER_SUPERVISOR, collectorId: 'u-cobA', fecha: DIA_REG },
     asDb(sc.db),
   )
-  const pago = (await sc.db.payments.toArray())[0] as Payment | undefined
-  metric('sin indicar responsable', ambiguo.ok ? 'ACEPTADO — ERROR' : ambiguo.code)
-  metric('indicando responsable', explicito.ok ? `ACEPTADO (${explicito.collectorSource})` : explicito.code)
-  metric('collectorId', pago?.collectorId)
-  metric('createdByUserId', pago?.createdByUserId)
-  assert(!ambiguo.ok && ambiguo.code === 'COLLECTOR_REQUIRED', 'con varios cobradores no puede adivinarse quién cobró')
-  assert(explicito.ok, 'indicando el responsable el pago debe registrarse')
-  assert(pago?.collectorId === 'u-cobA', 'el dinero debe atribuirse al Cobrador que lo recibió')
-  assert(pago?.createdByUserId === USER_SUPERVISOR.id, 'debe constar que lo digitó el Supervisor')
+  const pagos = await sc.db.payments.toArray() as Payment[]
+  metric('sin indicar responsable', auto.ok ? `ACEPTADO (${auto.collectorSource})` : auto.code)
+  metric('intentando cargarlo a u-cobA', desvio.ok ? 'ACEPTADO — ERROR' : desvio.code)
+  metric('collectorId', pagos[0]?.collectorId)
+  metric('createdByUserId', pagos[0]?.createdByUserId)
+  assert(auto.ok && auto.collectorSource === 'actor', 'el Supervisor debía responder automáticamente')
+  assert(!desvio.ok && desvio.code === 'COLLECTOR_INVALID', 'el Supervisor no puede cargar su cobro a otro')
+  assert(pagos.length === 1, 'solo debía escribirse el pago aceptado')
+  assert(pagos[0]?.collectorId === USER_SUPERVISOR.id, 'el dinero debe quedar a nombre del Supervisor')
+  assert(pagos[0]?.createdByUserId === USER_SUPERVISOR.id, 'debe constar que lo digitó el Supervisor')
 })
 
 await spec('PAY-COLL-REG-009', 'App Cobrador', 'un fallo a mitad de la escritura revierte TODO', async () => {
@@ -2920,32 +2927,33 @@ await spec('ATTRIB-SUP-001', 'Supervisor', 'el Supervisor PUEDE quedar como resp
   assert(pago?.createdByUserId === USER_SUPERVISOR.id, 'no se registró quién digitó')
 })
 
-await spec('ATTRIB-SUP-002', 'Supervisor', 'el Supervisor NO se queda el dinero solo por registrarlo', async () => {
-  // Con cobradores en la ruta hay DOS destinos plausibles. Ni se lo lleva el
-  // Supervisor por ser actor, ni el cobrador por ser el habitual: se exige decidir.
+// [SUSTITUIDO 2026-09-24 — regla Supervisor] Regla anterior (Fase 1): el
+// Supervisor NO se quedaba el dinero solo por registrarlo (COLLECTOR_REQUIRED).
+// Regla definitiva aprobada por negocio: el Supervisor que registra ES responsable.
+await spec('ATTRIB-SUP-002', 'Supervisor', 'el Supervisor que registra el cobro queda como responsable sin elegir', async () => {
   const sc = escenarioConEquipo(['u-cobA'], [USER_SUPERVISOR.id])
   const res = await registerPayment(
     { saleId: TEST_IDS.SALE_ID, requestedAmount: 300_000, actor: USER_SUPERVISOR, fecha: DIA_SUP },
     asDb(sc.db),
   )
-  metric('resultado', res.ok ? `ACEPTADO — ERROR (${res.collectorId})` : res.code)
-  metric('pagos escritos', (await sc.db.payments.toArray()).length)
-  assert(!res.ok && res.code === 'COLLECTOR_REQUIRED', 'se adivinó el responsable en vez de exigir la decisión')
-  assert((await sc.db.payments.toArray()).length === 0, 'se escribió un pago pese al rechazo')
+  const pago = (await sc.db.payments.toArray())[0] as Payment | undefined
+  metric('resultado', res.ok ? `ACEPTADO (${res.collectorSource})` : res.code)
+  metric('collectorId', pago?.collectorId)
+  assert(res.ok && res.collectorSource === 'actor', `el Supervisor debía responder automáticamente: ${res.ok ? '' : res.code}`)
+  assert(pago?.collectorId === USER_SUPERVISOR.id, 'el efectivo no quedó a nombre del Supervisor')
 })
 
-await spec('ATTRIB-SUP-003', 'Supervisor', 'el Supervisor puede atribuir el dinero al Cobrador que lo recibió', async () => {
+// [SUSTITUIDO 2026-09-24 — regla Supervisor] Regla anterior: el Supervisor podía
+// atribuir el dinero al Cobrador. Regla definitiva: no puede; se rechaza sin escribir.
+await spec('ATTRIB-SUP-003', 'Supervisor', 'el Supervisor NO puede cargar su cobro a la caja de un Cobrador', async () => {
   const sc = escenarioConEquipo(['u-cobA'], [USER_SUPERVISOR.id])
   const res = await registerPayment(
     { saleId: TEST_IDS.SALE_ID, requestedAmount: 300_000, actor: USER_SUPERVISOR, collectorId: 'u-cobA', fecha: DIA_SUP },
     asDb(sc.db),
   )
-  const pago = (await sc.db.payments.toArray())[0] as Payment | undefined
-  metric('collectorId', pago?.collectorId)
-  metric('createdByUserId', pago?.createdByUserId)
-  assert(res.ok && pago?.collectorId === 'u-cobA', 'el dinero no quedó a nombre del Cobrador indicado')
-  assert(pago?.createdByUserId === USER_SUPERVISOR.id, 'se perdió la autoría del Supervisor')
-  assert(pago?.collectorId !== pago?.createdByUserId, 'autor y responsable volvieron a ser el mismo campo')
+  metric('resultado', res.ok ? 'ACEPTADO — ERROR' : res.code)
+  assert(!res.ok && res.code === 'COLLECTOR_INVALID', 'se desvió el cobro del Supervisor a otra caja')
+  assert((await sc.db.payments.toArray()).length === 0, 'se escribió un pago pese al rechazo')
 })
 
 await spec('ATTRIB-SUP-004', 'Supervisor', 'el Cobrador sigue autoasignándose sin fricción nueva', async () => {
@@ -3071,18 +3079,21 @@ await spec('CASH-SUP-003', 'Supervisor', 'el gasto del Supervisor RESTA de su ef
   assert(laura.efectivoAEntregar === 250_000, `300.000 − 50.000 debía dar 250.000, dio ${laura.efectivoAEntregar}`)
 })
 
-await spec('CASH-SUP-004', 'Supervisor', 'un pago atribuido al Cobrador NO aparece en la caja del Supervisor', async () => {
+// [SUSTITUIDO 2026-09-24 — regla Supervisor] Antes: el Supervisor atribuía el pago
+// a Juan y se verificaba que no cayera en su caja. Ahora ese desvío no existe; se
+// verifica el reverso: el cobro del Supervisor NO aparece en la caja de Juan.
+await spec('CASH-SUP-004', 'Supervisor', 'el cobro del Supervisor NO aparece en la caja del Cobrador activo', async () => {
   const sc = escenarioConEquipo(['u-juan'], [USER_SUPERVISOR.id])
   await registerPayment(
-    { saleId: TEST_IDS.SALE_ID, requestedAmount: 300_000, actor: USER_SUPERVISOR, collectorId: 'u-juan', fecha: DIA_SUP },
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 300_000, actor: USER_SUPERVISOR, fecha: DIA_SUP },
     asDb(sc.db),
   )
   const laura = await getCollectorDailyCashSummary({ routeId: TEST_IDS.ROUTE_ID, collectorId: USER_SUPERVISOR.id, fecha: DIA_SUP }, asCollectorDb(sc.db))
   const juan = await getCollectorDailyCashSummary({ routeId: TEST_IDS.ROUTE_ID, collectorId: 'u-juan', fecha: DIA_SUP }, asCollectorDb(sc.db))
   metric('Mi efectivo · Supervisor', laura.efectivoAEntregar)
   metric('Mi efectivo · Cobrador', juan.efectivoAEntregar)
-  assert(juan.efectivoAEntregar === 300_000, 'el Cobrador no recibió el dinero que sí cobró')
-  assert(laura.efectivoAEntregar === 0, 'el Supervisor se quedó con dinero que solo digitó')
+  assert(laura.efectivoAEntregar === 300_000, 'el Supervisor no recibió su propio cobro')
+  assert(juan.efectivoAEntregar === 0, 'el cobro del Supervisor se cargó al Cobrador')
 })
 
 await spec('CASH-SUP-005', 'Supervisor', '"Mi efectivo" NO puede incluir la Base ni el capital de la Ruta', () => {
@@ -3104,29 +3115,32 @@ await spec('CASH-SUP-005', 'Supervisor', '"Mi efectivo" NO puede incluir la Base
 // FAMILIA — PAYMENT-AUTHOR · AUTOR ≠ RESPONSABLE
 // ############################################################
 
+// [MODIFICADO 2026-09-24 — regla Supervisor] PAYMENT-AUTHOR-001/002 usaban al
+// Supervisor digitando para Juan. Ese caso ya no existe; autor ≠ responsable sigue
+// siendo posible para un actor administrativo, que es quien ahora lo ejercita.
 await spec('PAYMENT-AUTHOR-001', 'Autoría', 'createdByUserId conserva SIEMPRE al actor real', async () => {
-  const sc = escenarioConEquipo(['u-juan'], [USER_SUPERVISOR.id])
+  const sc = escenarioConEquipo(['u-juan', 'u-pedro'], [USER_SUPERVISOR.id])
   await registerPayment(
-    { saleId: TEST_IDS.SALE_ID, requestedAmount: 100_000, actor: USER_SUPERVISOR, collectorId: 'u-juan', fecha: DIA_SUP },
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 100_000, actor: USER_ADMIN, collectorId: 'u-juan', fecha: DIA_SUP },
     asDb(sc.db),
   )
   const pago = (await sc.db.payments.toArray())[0] as Payment
   metric('createdByUserId', pago.createdByUserId)
   metric('collectorId', pago.collectorId)
-  assert(pago.createdByUserId === USER_SUPERVISOR.id, 'se perdió el autor real de la operación')
+  assert(pago.createdByUserId === USER_ADMIN.id, 'se perdió el autor real de la operación')
 })
 
 await spec('PAYMENT-AUTHOR-002', 'Autoría', 'autor y responsable pueden ser personas distintas', async () => {
-  const sc = escenarioConEquipo(['u-juan'], [USER_SUPERVISOR.id])
+  const sc = escenarioConEquipo(['u-juan', 'u-pedro'], [USER_SUPERVISOR.id])
   await registerPayment(
-    { saleId: TEST_IDS.SALE_ID, requestedAmount: 100_000, actor: USER_SUPERVISOR, collectorId: 'u-juan', fecha: DIA_SUP },
+    { saleId: TEST_IDS.SALE_ID, requestedAmount: 100_000, actor: USER_ADMIN, collectorId: 'u-juan', fecha: DIA_SUP },
     asDb(sc.db),
   )
   const pago = (await sc.db.payments.toArray())[0] as Payment
   metric('registrado por', pago.createdByUserId)
   metric('responsable del efectivo', pago.collectorId)
   assert(pago.createdByUserId !== pago.collectorId, 'autor y responsable colapsaron en el mismo valor')
-  assert(pago.collectorId === 'u-juan' && pago.createdByUserId === USER_SUPERVISOR.id, 'los campos se cruzaron')
+  assert(pago.collectorId === 'u-juan' && pago.createdByUserId === USER_ADMIN.id, 'los campos se cruzaron')
 })
 
 await spec('PAYMENT-AUTHOR-003', 'Autoría', 'la corrección conserva al responsable original y registra al corrector', () => {
@@ -3181,17 +3195,17 @@ await spec('SUPERVISOR-UI-003', 'Supervisor', '"Mi efectivo" y "Caja de la Ruta"
   assert(failClosed, 'sin `cashbox.viewRoute` el dato financiero NO debe pedirse')
 })
 
-await spec('SUPERVISOR-UI-004', 'Supervisor', 'el selector ofrece "Yo — {Supervisor}" y no lo preselecciona', () => {
+// [SUSTITUIDO 2026-09-24 — regla Supervisor] Antes exigía la opción "Yo — {nombre}"
+// sin preselección. Regla definitiva: el Supervisor NO ve el selector.
+await spec('SUPERVISOR-UI-004', 'Supervisor', 'el selector no se muestra a quien tiene caja personal', () => {
   const picker = readSource('src/components/ui/CollectorPicker.tsx')
-  const ofreceYo = picker.includes('`Yo — ${user.nombre}`')
-  const usaPredicado = picker.includes('hasPersonalCashbox(user!.rol)')
-  const noPreselecciona = picker.includes('if (list.length === 1 && !value && !actorPuedeResponder) onChange(list[0].id)')
-  metric('ofrece "Yo — {nombre}"', ofreceYo)
-  metric('decide con hasPersonalCashbox', usaPredicado)
-  metric('no preselecciona si el actor compite', noPreselecciona)
-  assert(ofreceYo, 'el Supervisor debe poder indicarse a sí mismo como responsable')
-  assert(usaPredicado, 'la elegibilidad debe salir del predicado único, no de un `rol ===` suelto')
-  assert(noPreselecciona, 'con dos destinos posibles no puede preseleccionarse ninguno')
+  const ocultaConCaja = picker.includes('const actorRespondePorSiMismo = Boolean(user) && hasPersonalCashbox(user!.rol)')
+    && picker.includes('if (!user || actorRespondePorSiMismo) return null')
+  const sinYo = !picker.includes('`Yo — ${user.nombre}`')
+  metric('oculto para Cobrador/Supervisor', ocultaConCaja)
+  metric('sin opción "Yo — {nombre}"', sinYo)
+  assert(ocultaConCaja, 'Cobrador y Supervisor no deben ver el selector de responsable')
+  assert(sinYo, 'no debe ofrecerse "Yo" como opción: el Supervisor responde siempre')
 })
 
 await spec('SUPERVISOR-UI-005', 'Supervisor', 'la atribución se decide con UN solo predicado en los tres flujos', () => {

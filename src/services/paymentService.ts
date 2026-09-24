@@ -98,10 +98,10 @@ export interface RegisterPaymentInput {
   /** Usuario en sesión. Se valida su capacidad contra la ruta real de la venta. */
   actor: User | null | undefined
   /**
-   * RESPONSABLE DEL EFECTIVO (quien recibió el dinero). Puede ser un cobrador o un
-   * SUPERVISOR —incluido el propio actor—, nunca un rol sin caja personal. Lo envían
-   * las interfaces al registrar un cobro cuyo destino no es evidente. Si se omite,
-   * lo resuelve `resolveResponsibleCollector`, que rechaza el pago antes que adivinar.
+   * RESPONSABLE DEL EFECTIVO (quien recibió el dinero). Solo lo envía un actor
+   * ADMINISTRATIVO cuando la ruta tiene varios responsables posibles. Si el actor es
+   * Cobrador o Supervisor, el responsable es SIEMPRE él mismo: enviar otro id se
+   * rechaza. Si se omite, lo resuelve `resolveResponsibleCollector`.
    */
   collectorId?: string
   tipo?: PaymentType
@@ -281,9 +281,10 @@ export async function registerPayment(
       // adivina: se exige indicar quién recibió el efectivo, para que no se cargue
       // a la caja equivocada.
       //
-      // El conjunto de candidatos es "usuarios CON CAJA PERSONAL asignados a la
-      // ruta" (`hasPersonalCashbox`), no solo cobradores: un Supervisor que opera
-      // la ruta recibe dinero de verdad y debe poder quedar como responsable.
+      // Regla definitiva (2026-09-24): si el ACTOR tiene caja personal (Cobrador o
+      // Supervisor) responde él por su registro, sin selector y sin mirar cuántos
+      // cobradores tenga la ruta. Los candidatos solo sirven para los actores
+      // administrativos: "usuarios CON CAJA PERSONAL asignados a la ruta".
       const routeCollectors = (await database.users.where('tenantId').equals(sale.tenantId).toArray())
         .filter(u => hasPersonalCashbox(u.rol) && getAssignedRouteIds(u).includes(sale.routeId))
       const atribucion = resolveResponsibleCollector({
@@ -292,11 +293,11 @@ export async function registerPayment(
         routeCollectors,
       })
       if (!atribucion.ok) {
-        // 'ambiguous' y 'must-choose' son el mismo hecho para la UI —falta decidir
-        // quién recibió el dinero— y comparten código de rechazo; el MENSAJE sí
-        // distingue el caso, porque las opciones que se ofrecen son distintas.
+        // 'ambiguous' = falta decidir (solo actores administrativos). 'invalid' y
+        // 'actor-owns-cash' = el responsable indicado no es aceptable; comparten
+        // código, pero el MENSAJE distingue el caso.
         throw new PaymentRejection(
-          atribucion.code === 'invalid' ? 'COLLECTOR_INVALID' : 'COLLECTOR_REQUIRED',
+          atribucion.code === 'ambiguous' ? 'COLLECTOR_REQUIRED' : 'COLLECTOR_INVALID',
           atribucion.message,
         )
       }

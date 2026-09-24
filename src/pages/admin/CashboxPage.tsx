@@ -7,6 +7,7 @@ import { LoadingState } from '@/components/ui/EmptyState'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { getCashboxSummary } from '@/services/cashboxEngine'
 import { filterAccessibleRoutes, canAccessRoute } from '@/lib/permissions'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
@@ -25,9 +26,12 @@ export default function CashboxPage() {
   const [loading, setLoading] = useState(false)
   const [fechaDesde, setFechaDesde] = useState(getWeekStart())
   const [fechaHasta, setFechaHasta] = useState(getWeekEnd())
+  // Un movimiento confirmado en esta u otra pestaña (mismo navegador) recalcula la
+  // caja visible sin F5. El botón "Actualizar" se conserva.
+  const revision = useDataRevision()
 
   useEffect(() => { loadRoutes() }, [tenantId, user])
-  useEffect(() => { if (selectedRoute) loadSummary() }, [selectedRoute, fechaDesde, fechaHasta])
+  useEffect(() => { if (selectedRoute) loadSummary() }, [selectedRoute, fechaDesde, fechaHasta, revision])
 
   async function loadRoutes() {
     // RESTRICCIÓN POR RUTAS: solo rutas autorizadas en el selector de caja.

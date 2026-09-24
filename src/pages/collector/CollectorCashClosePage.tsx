@@ -4,6 +4,7 @@ import { getCollectorDailyCashSummary, getRouteFinancialSummary } from '@/servic
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { can } from '@/lib/permissions'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import type { CollectorCashSummary, RouteFinancialSummary } from '@/models/types'
@@ -43,11 +44,13 @@ export default function CollectorCashClosePage() {
   // Solo quien puede ver la caja FINANCIERA de la ruta obtiene ese bloque.
   const verCajaRuta = can(user, 'cashbox.viewRoute', { routeId: routeId ?? undefined })
 
-  useEffect(() => { load() }, [user, routeId, verCajaRuta])
+  // Un cobro, desembolso o gasto confirmado en esta u otra pestaña recalcula.
+  const revision = useDataRevision()
+  useEffect(() => { load(revision > 0) }, [user, routeId, verCajaRuta, revision])
 
-  async function load() {
+  async function load(silent = false) {
     if (!user || !routeId) { setLoading(false); return }
-    setLoading(true)
+    if (!silent) setLoading(true)
     const resumen = await getCollectorDailyCashSummary({ routeId, collectorId: user.id, fecha: today() })
     setCash(resumen)
     // Fail-closed: si no tiene la capacidad, el dato financiero NO se pide.

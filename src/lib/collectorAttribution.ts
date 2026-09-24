@@ -17,9 +17,13 @@
 // explícita (`COLLECTOR_INVALID`), así que su efectivo se cargaba al cobrador
 // habitual. Ver docs/AUDITORIA_CUADRE_CAJA_SUPERVISOR_2026-09.md §29 CASO B.
 //
-// Lo que NO cambia: NUNCA se adivina. El Supervisor no se autoasigna el dinero por
-// el mero hecho de digitar, igual que el Admin nunca lo hizo. Cuando hay más de un
-// destino posible, se EXIGE una decisión explícita.
+// REGLA DEFINITIVA (2026-09-24, aprobada por negocio — sustituye la regla
+// `must-choose` de la Fase 1): QUIEN TIENE CAJA PERSONAL Y REGISTRA UN COBRO
+// RESPONDE POR ÉL. El Cobrador que cobra y el SUPERVISOR que cobra quedan como
+// responsables de su propio registro, siempre y sin selector — aunque la ruta
+// tenga uno, varios o ningún cobrador activo. Solo los actores administrativos
+// (sin caja personal) pueden necesitar indicar a quién se carga el dinero, y a
+// ellos NUNCA se les adivina ni se les autoasigna.
 // ============================================================
 import type { User, UserRole } from '@/models/types'
 
@@ -52,7 +56,7 @@ export function isEligibleCashHolder(c: CollectorCandidate): boolean {
 export type CollectorAttributionSource =
   /** Lo eligió explícitamente quien registra. */
   | 'explicit'
-  /** El propio cobrador registró su cobro. */
+  /** Quien registró tiene caja personal (Cobrador o Supervisor) y responde por su cobro. */
   | 'actor'
   /** La ruta tiene un único cobrador operativo: se preselecciona sin ambigüedad. */
   | 'single-route-collector'
@@ -63,11 +67,11 @@ export type CollectorAttributionError =
   /** Varios cobradores en la ruta: hay que elegir, no se adivina. */
   | 'ambiguous'
   /**
-   * El actor TIENE caja personal pero NO es el único destino posible (Supervisor
-   * operando una ruta que ya tiene cobradores). No se adivina si el dinero lo
-   * recibió él o el cobrador: se exige decidirlo.
+   * El actor TIENE caja personal (Cobrador/Supervisor) e intentó cargar el cobro a
+   * OTRA persona. Por regla de negocio quien cobra con caja personal responde por
+   * su propio registro: no puede desviarlo a otra caja.
    */
-  | 'must-choose'
+  | 'actor-owns-cash'
   /** El responsable indicado no es un usuario válido con caja personal en esa ruta. */
   | 'invalid'
 
@@ -77,7 +81,7 @@ export type CollectorAttribution =
 
 export const COLLECTOR_ATTRIBUTION_MESSAGE: Record<CollectorAttributionError, string> = {
   ambiguous: 'Esta ruta tiene varios cobradores: indica quién recibió el dinero.',
-  'must-choose': 'Indica quién recibió el dinero: tú o el cobrador de la ruta.',
+  'actor-owns-cash': 'Los cobros que registras quedan bajo tu responsabilidad: no pueden cargarse a otra persona.',
   invalid: 'El responsable indicado no puede responder por el efectivo de esta ruta.',
 }
 
@@ -92,19 +96,17 @@ export const COLLECTOR_ATTRIBUTION_MESSAGE: Record<CollectorAttributionError, st
  *                        (ver `hasPersonalCashbox`).
  *
  * Orden de decisión:
- *  1. `requested` → debe ser un responsable VÁLIDO: usuario activo con caja
- *     personal asignado a la ruta, o el propio actor si tiene caja personal.
- *     Cualquier otro (Admin, Secretario, usuario de otra ruta, inactivo) se rechaza.
- *  2. El actor es COBRADOR → responde él mismo. Es su recaudo y su caja: no se le
- *     añade fricción (decisión D-1).
- *  3. El actor tiene caja personal pero NO es cobrador (Supervisor) y la ruta TIENE
- *     cobradores activos → 'must-choose'. Dos destinos plausibles, ninguno
- *     adivinable: el Supervisor pudo cobrar él o estar digitando lo de otro.
- *  4. La ruta tiene EXACTAMENTE UN cobrador activo → se preselecciona (caso del
- *     Administrador, que no tiene caja personal y por tanto no compite).
- *  5. La ruta tiene VARIOS → 'ambiguous': se exige elección explícita. Nunca se
+ *  1. El actor TIENE CAJA PERSONAL (Cobrador o Supervisor) → responde él mismo,
+ *     SIEMPRE. No se consulta a los cobradores de la ruta ni cuántos hay. Si la
+ *     UI envía otro responsable se rechaza ('actor-owns-cash'): el dinero que
+ *     registra quien sale a la calle no se desvía a otra caja.
+ *  2. Actor administrativo con `requested` → debe ser responsable VÁLIDO: usuario
+ *     activo con caja personal asignado a la ruta. Cualquier otro (el propio
+ *     Admin, Secretario, usuario de otra ruta, inactivo) se rechaza.
+ *  3. La ruta tiene EXACTAMENTE UN cobrador activo → se preselecciona.
+ *  4. La ruta tiene VARIOS → 'ambiguous': se exige elección explícita. Nunca se
  *     atribuye al Admin solo por ser quien digitó.
- *  6. La ruta no tiene NINGÚN cobrador → se atribuye al actor (comportamiento
+ *  5. La ruta no tiene NINGÚN cobrador → se atribuye al actor (comportamiento
  *     legacy). Es el único caso sin alternativa razonable y queda marcado como tal.
  */
 export function resolveResponsibleCollector(params: {
@@ -115,42 +117,33 @@ export function resolveResponsibleCollector(params: {
   const fail = (code: CollectorAttributionError): CollectorAttribution =>
     ({ ok: false, code, message: COLLECTOR_ATTRIBUTION_MESSAGE[code] })
 
+  // 1) Quien tiene caja personal responde por lo que registra. Sin selector, sin
+  //    depender de cuántos cobradores tenga la ruta ni de si siguen activos.
+  if (hasPersonalCashbox(params.actor.rol)) {
+    if (params.requested && params.requested !== params.actor.id) return fail('actor-owns-cash')
+    return { ok: true, collectorId: params.actor.id, source: 'actor' }
+  }
+
   /** Cobradores activos de la ruta: base de las reglas automáticas. */
   const cobradores = params.routeCollectors.filter(c => c.rol === 'cobrador' && c.status === 'activo')
   /** Responsables válidos: cobradores y supervisores ACTIVOS de la ruta. */
   const elegibles = params.routeCollectors.filter(isEligibleCashHolder)
-  const actorPuedeResponder = hasPersonalCashbox(params.actor.rol)
 
-  // 1) Elección explícita: debe ser válida.
-  //    El ACTOR cuenta como destino válido si tiene caja personal, aunque no
-  //    figure en la lista de la ruta (p. ej. un Supervisor que la está operando).
+  // 2) Elección explícita de un actor administrativo: debe ser válida.
   if (params.requested) {
-    const esElegibleDeLaRuta = elegibles.some(c => c.id === params.requested)
-    const esElActorConCaja = params.requested === params.actor.id && actorPuedeResponder
-    return esElegibleDeLaRuta || esElActorConCaja
+    return elegibles.some(c => c.id === params.requested)
       ? { ok: true, collectorId: params.requested, source: 'explicit' }
       : fail('invalid')
   }
 
-  // 2) El cobrador registra su propio recaudo: sin fricción.
-  if (params.actor.rol === 'cobrador') {
-    return { ok: true, collectorId: params.actor.id, source: 'actor' }
-  }
-
-  // 3) Supervisor operando una ruta CON cobradores: hay dos destinos plausibles.
-  //    No se adivina ninguno — ni él por ser actor, ni el cobrador por ser el
-  //    habitual. Se exige decidir. Sin cobradores en la ruta no hay nada que
-  //    elegir y la decisión cae sola en el paso 6.
-  if (actorPuedeResponder && cobradores.length > 0) return fail('must-choose')
-
-  // 4) Un único cobrador en la ruta: no hay ambigüedad posible.
+  // 3) Un único cobrador en la ruta: no hay ambigüedad posible.
   if (cobradores.length === 1) {
     return { ok: true, collectorId: cobradores[0].id, source: 'single-route-collector' }
   }
 
-  // 5) Varios cobradores: NO se adivina.
+  // 4) Varios cobradores: NO se adivina.
   if (cobradores.length > 1) return fail('ambiguous')
 
-  // 6) Ruta sin cobradores: se conserva el comportamiento anterior.
+  // 5) Ruta sin cobradores: se conserva el comportamiento anterior.
   return { ok: true, collectorId: params.actor.id, source: 'legacy-actor' }
 }

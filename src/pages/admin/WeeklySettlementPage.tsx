@@ -13,6 +13,7 @@ import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { generateWeeklySettlementForUser } from '@/services/weeklySettlementEngine'
 import {
   closeSettlement,
@@ -106,6 +107,26 @@ export default function WeeklySettlementPage() {
 
   useEffect(() => { loadHistorial() }, [loadHistorial])
 
+  /**
+   * VISTA PREVIA VIVA. La vista previa es un cálculo, no un documento: si mientras
+   * está en pantalla un Cobrador o Supervisor registra un cobro en esta ruta (en
+   * otra pestaña del mismo navegador), se recalcula con los MISMOS parámetros con
+   * los que se generó. Un documento CERRADO nunca se recalcula: sus cifras son las
+   * archivadas.
+   */
+  const [previewKey, setPreviewKey] = useState<{ routeId: string; semanaInicio: string; semanaFin: string } | null>(null)
+  const revision = useDataRevision()
+  useEffect(() => {
+    if (revision === 0) return
+    loadHistorial()
+    if (!previewKey) return
+    let alive = true
+    generateWeeklySettlementForUser({ user, tenantId, ...previewKey })
+      .then(data => { if (alive && data) setSettlement(data) })
+      .catch(() => { /* la vista previa anterior sigue visible */ })
+    return () => { alive = false }
+  }, [revision])  // eslint-disable-line react-hooks/exhaustive-deps
+
   // Rutas ofrecidas: las accesibles, recortadas por la Oficina elegida.
   const routesInOffice = filterRoutesByOffice(routes, officeId)
 
@@ -135,11 +156,13 @@ export default function WeeklySettlementPage() {
       const data = await generateWeeklySettlementForUser({ user, tenantId, routeId, semanaInicio, semanaFin })
       if (!data) {
         setSettlement(null)
+        setPreviewKey(null)
         setGeneratedRoute(null)
         toast.error('No tienes acceso a esa ruta.')
         return
       }
       setSettlement(data)
+      setPreviewKey({ routeId, semanaInicio, semanaFin })
       setGeneratedRoute(routes.find(r => r.id === routeId) ?? null)
       toast.success(`Liquidación generada: ${routes.find(r => r.id === routeId)?.nombre ?? 'ruta'}`)
     } catch { toast.error('Error al generar liquidación') } finally { setLoading(false) }
@@ -156,6 +179,7 @@ export default function WeeklySettlementPage() {
       const doc = await closeSettlement({ actor: user, tenantId, routeId, semanaInicio, semanaFin })
       toast.success(`Semana cerrada (versión ${doc.version ?? 1}). Las cifras quedan congeladas.`)
       setSettlement(doc)
+      setPreviewKey(null)  // se muestra el documento archivado: ya no se recalcula
       setGeneratedRoute(routes.find(r => r.id === routeId) ?? null)
       await loadHistorial()
     } catch (e) {

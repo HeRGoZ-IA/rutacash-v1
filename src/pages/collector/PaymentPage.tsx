@@ -73,8 +73,8 @@ export default function PaymentPage() {
         saleId: sale.id,
         requestedAmount: valor,
         actor: user,
-        // Solo aplica cuando quien registra NO es el cobrador (p. ej. un Supervisor
-        // que digita un cobro hecho por otra persona).
+        // Solo lo envía un actor administrativo: Cobrador y Supervisor responden
+        // siempre por lo que registran y no ven el selector.
         collectorId: collectorId || undefined,
         observacion,
         lat,

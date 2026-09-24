@@ -1610,7 +1610,9 @@ await spec('ROUTE-FREE-007', 'Ruta libre', 'la ruta sin responsables no rompe li
   assert(filterAccessibleRoutes(su, routes as never[]).length === 1, 'la ruta debe listarse para el Super Admin')
 
   // Dashboard: la ruta sin cobrador es un AVISO, no un error que la invalide.
-  const dashboard = readSource('src/pages/admin/DashboardPage.tsx')
+  // [2026-09-24] El cálculo del Dashboard se movió a `adminDashboardService` para
+  // poder probarlo con Dexie real; la expectativa es la misma, cambia el archivo.
+  const dashboard = readSource('src/services/adminDashboardService.ts')
   const desde = dashboard.indexOf('const rutasSinCobrador')
   const bloque = dashboard.slice(desde, desde + 500)
   metric('severidad del aviso', bloque.includes("severity: 'warning'") ? 'warning' : 'error')

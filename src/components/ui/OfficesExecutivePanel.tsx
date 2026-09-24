@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { useAuth } from '@/hooks/useAuth'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency } from '@/lib/formatters'
 import { NO_OFFICE } from '@/lib/officeGrouping'
@@ -28,6 +29,8 @@ export function OfficesExecutivePanel() {
   const { tenantId, currency } = useTenant()
   const [data, setData] = useState<OfficesExecutiveSummary | null>(null)
   const [loading, setLoading] = useState(true)
+  // Recalcula al confirmarse un cobro/gasto/venta en esta u otra pestaña.
+  const revision = useDataRevision()
 
   useEffect(() => {
     let alive = true
@@ -38,7 +41,7 @@ export function OfficesExecutivePanel() {
       setLoading(false)
     })
     return () => { alive = false }
-  }, [user, tenantId])
+  }, [user, tenantId, revision])
 
   if (loading || !data || data.rows.length === 0) return null
 

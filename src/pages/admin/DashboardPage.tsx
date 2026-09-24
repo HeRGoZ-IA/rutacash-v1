@@ -10,159 +10,31 @@ import { LoadingState } from '@/components/ui/EmptyState'
 import { SetupChecklist } from '@/components/ui/SetupChecklist'
 import { OfficesExecutivePanel } from '@/components/ui/OfficesExecutivePanel'
 import { PendingSettlementsNotice } from '@/components/ui/PendingSettlementsNotice'
-import { db } from '@/lib/db'
-import { getRouteFinancialSummary } from '@/services/cashboxEngine'
-import { getAccessibleRouteIdSet } from '@/lib/scope'
+import { getAdminDashboardData, type DashboardData } from '@/services/adminDashboardService'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
-import { formatCurrency, formatDate, today, getWeekStart, getWeekEnd } from '@/lib/formatters'
-import { format, subDays } from 'date-fns'
-import { es } from 'date-fns/locale'
-
-interface DashboardData {
-  baseActualTotal: number
-  carteraEnCalle: number
-  totalControlado: number
-  recaudoHoy: number
-  recaudoSemana: number
-  ventasActivas: number
-  clientesActivos: number
-  gastosSemana: number
-  pagosPendientesSync: number
-  rutasConMora: number
-  topRoutes: { nombre: string; cobrado: number }[]
-  recaudoDiario: { dia: string; valor: number }[]
-  alertas: { tipo: string; mensaje: string; severity: 'warning' | 'error' | 'info' }[]
-}
+import { useDataRevision } from '@/hooks/useDataRevision'
+import { formatCurrency, formatDate, today } from '@/lib/formatters'
 
 export default function DashboardPage() {
   const { user } = useAuth()
   const { tenantId } = useTenant()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  // Se recalcula cuando cambian pagos, ventas, gastos… en ESTA pestaña o en otra
+  // del mismo navegador (p. ej. el Cobrador registra un abono en otra ventana).
+  const revision = useDataRevision()
 
   useEffect(() => {
-    loadDashboard()
-  }, [tenantId, user])
-
-  async function loadDashboard() {
-    setLoading(true)
-    try {
-      const todayStr = today()
-      const weekStart = getWeekStart()
-      const weekEnd = getWeekEnd()
-
-      // RESTRICCIÓN POR RUTAS: el alcance limita TODAS las agregaciones ANTES de sumar.
-      const scope = await getAccessibleRouteIdSet(user, tenantId)
-
-      // Routes (solo rutas autorizadas)
-      const routes = (await db.routes.where('tenantId').equals(tenantId).toArray()).filter(r => scope.has(r.id))
-
-      // Sales (solo de rutas autorizadas)
-      const allSales = (await db.sales.where('tenantId').equals(tenantId).toArray()).filter(s => scope.has(s.routeId))
-      const ventasActivas = allSales.filter(s => s.status === 'activa')
-
-      // Revisión socio 25-jun — Base actual vs Cartera en calle (consolidado de la empresa).
-      // Se calcula con el mismo helper por ruta para evitar cálculos distintos por pantalla.
-      let baseActualTotal = 0
-      let carteraEnCalle = 0
-      for (const r of routes) {
-        const s = await getRouteFinancialSummary(r.id)
-        baseActualTotal += s.baseActual
-        carteraEnCalle += s.carteraEnCalle
-      }
-      const totalControlado = baseActualTotal + carteraEnCalle
-
-      // Payments (solo de rutas autorizadas)
-      const allPayments = (await db.payments.where('tenantId').equals(tenantId).toArray()).filter(p => scope.has(p.routeId))
-      const recaudoHoy = allPayments
-        .filter(p => p.fecha === todayStr)
-        .reduce((s, p) => s + p.valor, 0)
-      const recaudoSemana = allPayments
-        .filter(p => p.fecha >= weekStart && p.fecha <= weekEnd)
-        .reduce((s, p) => s + p.valor, 0)
-
-      // Clients (solo de rutas autorizadas)
-      const allClients = (await db.clients.where('tenantId').equals(tenantId).toArray()).filter(c => scope.has(c.routeId))
-      const clientesActivos = allClients.filter(c => c.status === 'activo').length
-
-      // Expenses (solo de rutas autorizadas)
-      const allExpenses = (await db.expenses.where('tenantId').equals(tenantId).toArray()).filter(e => scope.has(e.routeId))
-      const gastosSemana = allExpenses
-        .filter(e => e.fecha >= weekStart && e.fecha <= weekEnd)
-        .reduce((s, e) => s + e.valor, 0)
-
-      // Pending sync (de los pagos en alcance)
-      const pagosPendientesSync = allPayments.filter(p => p.syncStatus === 'pending').length
-
-      // Rutas con mora
-      const installments = await db.installments.toArray()
-      const rutasConMoraSet = new Set<string>()
-      const salesMap = new Map(allSales.map(s => [s.id, s]))
-      for (const inst of installments) {
-        if (inst.status === 'vencida' && inst.diasMora > 0) {
-          const sale = salesMap.get(inst.saleId)
-          if (sale) rutasConMoraSet.add(sale.routeId)
-        }
-      }
-
-      // Top routes
-      const routePayments: Record<string, number> = {}
-      for (const p of allPayments.filter(p => p.fecha >= weekStart && p.fecha <= weekEnd)) {
-        routePayments[p.routeId] = (routePayments[p.routeId] ?? 0) + p.valor
-      }
-      const routeMap = new Map(routes.map(r => [r.id, r]))
-      const topRoutes = Object.entries(routePayments)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([id, cobrado]) => ({ nombre: routeMap.get(id)?.nombre ?? id, cobrado }))
-
-      // Recaudo diario 7 días
-      const recaudoDiario = Array.from({ length: 7 }, (_, i) => {
-        const date = format(subDays(new Date(), 6 - i), 'yyyy-MM-dd')
-        const label = format(subDays(new Date(), 6 - i), 'EEE', { locale: es })
-        const valor = allPayments
-          .filter(p => p.fecha === date)
-          .reduce((s, p) => s + p.valor, 0)
-        return { dia: label, valor }
-      })
-
-      // Alertas
-      const alertas: DashboardData['alertas'] = []
-      if (pagosPendientesSync > 0) {
-        alertas.push({ tipo: 'sync', mensaje: `${pagosPendientesSync} pagos pendientes de sincronizar`, severity: 'warning' })
-      }
-      // Ruta sin Cobrador = estado VÁLIDO (pendiente de asignación), no un error:
-      // la ruta existe, simplemente no tiene operación de cobro todavía.
-      const rutasSinCobrador = routes.filter(r => !r.cobradorId && r.status === 'activa')
-      if (rutasSinCobrador.length > 0) {
-        alertas.push({ tipo: 'ruta', mensaje: `${rutasSinCobrador.length} ruta(s) sin Cobrador asignado: sin operación de cobro hasta asignarlo`, severity: 'warning' })
-      }
-      if (rutasConMoraSet.size > 0) {
-        alertas.push({ tipo: 'mora', mensaje: `${rutasConMoraSet.size} ruta(s) tienen clientes en mora`, severity: 'warning' })
-      }
-
-      setData({
-        baseActualTotal,
-        carteraEnCalle,
-        totalControlado,
-        recaudoHoy,
-        recaudoSemana,
-        ventasActivas: ventasActivas.length,
-        clientesActivos,
-        gastosSemana,
-        pagosPendientesSync,
-        rutasConMora: rutasConMoraSet.size,
-        topRoutes,
-        recaudoDiario,
-        alertas,
-      })
-    } catch (err) {
-      console.error('Dashboard error:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
+    let alive = true
+    // El cálculo vive en `getAdminDashboardData` (probado con Dexie real). Solo la
+    // PRIMERA carga muestra el spinner; los refrescos sustituyen las cifras en sitio.
+    getAdminDashboardData({ user, tenantId })
+      .then(d => { if (alive) setData(d) })
+      .catch(err => console.error('Dashboard error:', err))
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [tenantId, user, revision])
 
   if (loading) return <LoadingState message="Cargando dashboard..." />
   if (!data) return null

@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { toast } from '@/components/ui/Toast'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { can, ROLE_LABELS, canManageUser } from '@/lib/permissions'
 import { formatCurrency } from '@/lib/formatters'
 import { NO_OFFICE_LABEL } from '@/lib/officeGrouping'
@@ -65,9 +66,9 @@ export default function OfficeDetailPage() {
   const [assignSelected, setAssignSelected] = useState<string[]>([])
   const [assignSaving, setAssignSaving] = useState(false)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
     if (!user || !tenantId || !officeId) { setLoading(false); return }
-    setLoading(true)
+    if (!silent) setLoading(true)
     const summary = await getOfficeManagementSummary({ user, tenantId, officeId })
     if (!summary) { setNotFound(true); setLoading(false); return }
     setData(summary)
@@ -81,6 +82,11 @@ export default function OfficeDetailPage() {
   }, [user, tenantId, officeId])
 
   useEffect(() => { load() }, [load])
+
+  // Un cobro, gasto o cierre confirmado en esta u otra pestaña del mismo navegador
+  // recalcula el panel sin spinner ni F5.
+  const revision = useDataRevision()
+  useEffect(() => { if (revision > 0) load(true) }, [revision])  // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return (

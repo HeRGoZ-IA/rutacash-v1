@@ -3,6 +3,7 @@
 // ============================================================
 import { db } from '@/lib/db'
 import { effectivePayments } from '@/lib/paymentState'
+import { today as todayLocal } from '@/lib/formatters'
 import type {
   CashboxSummary, RouteFinancialSummary, CollectorCashSummary,
   CapitalMovement, Expense, Payment, Sale, Transfer, Withdrawal,
@@ -37,9 +38,13 @@ export async function getCashboxSummary(
   fechaHasta?: string,
   database: CashboxDatabase = db,
 ): Promise<CashboxSummary> {
-  const today = new Date().toISOString().slice(0, 10)
+  // Fecha LOCAL, la misma con la que `paymentService` sella `Payment.fecha`
+  // (`today()`). Antes se usaba la fecha UTC: en husos por delante de UTC, entre la
+  // medianoche local y la UTC, los cobros de "hoy" quedaban FUERA de la Base
+  // (auditoría de actualización local, 2026-09-24). En Colombia (UTC−5) no se
+  // manifestaba porque la fecha UTC nunca es anterior a la local.
   const desde = fechaDesde ?? '2000-01-01'
-  const hasta = fechaHasta ?? today
+  const hasta = fechaHasta ?? todayLocal()
 
   // Capital
   const capitalMovs = await database.capitalMovements
