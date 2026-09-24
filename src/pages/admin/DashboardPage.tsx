@@ -10,6 +10,7 @@ import { LoadingState } from '@/components/ui/EmptyState'
 import { SetupChecklist } from '@/components/ui/SetupChecklist'
 import { OfficesExecutivePanel } from '@/components/ui/OfficesExecutivePanel'
 import { PendingSettlementsNotice } from '@/components/ui/PendingSettlementsNotice'
+import { PendingShortagesNotice } from '@/components/settlement/WorkerCashSettlementPanel'
 import { getAdminDashboardData, type DashboardData } from '@/services/adminDashboardService'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
@@ -55,6 +56,9 @@ export default function DashboardPage() {
 
       {/* Semanas sin cerrar de las rutas autorizadas. Se oculta si no hay ninguna. */}
       <PendingSettlementsNotice />
+
+      {/* Trabajadores con faltante pendiente en su último cuadre (no bloquea). */}
+      <PendingShortagesNotice />
 
       {/* Resumen ejecutivo por Oficina: tarjetas + comparativo objetivo, siempre
           sobre las rutas autorizadas del usuario. Se oculta solo si no hay ninguna. */}

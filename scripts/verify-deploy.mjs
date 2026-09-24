@@ -26,6 +26,12 @@ const MARCADORES = [
   ['BORRAR TODO', false, 'confirmación antigua del reset (≤6.0)'],
   ['MODO DEMO', false, 'banner del modo DEMO (≤6.0)'],
   ['superadmin@demo.com', false, 'credenciales del conjunto DEMO (≤6.0)'],
+  // Entrega 2026-09-24: regla definitiva del Supervisor + cuadre por trabajador.
+  ['Cuadre por trabajador', true, 'pestaña de cuadre por trabajador en Liquidación (2026-09-24)'],
+  ['worker-settlements', true, 'pantalla de cuadre de otros trabajadores del Supervisor (2026-09-24)'],
+  ['Este faltante continuará pendiente en el siguiente ciclo.', true, 'confirmación de faltante (2026-09-24)'],
+  ['cashSettlements', true, 'tabla Dexie v14 cashSettlements (2026-09-24)'],
+  ['Indica quién recibió el dinero: tú o el cobrador de la ruta.', false, 'regla must-choose del Supervisor retirada (≤2026-09-22)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

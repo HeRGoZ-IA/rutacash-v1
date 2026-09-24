@@ -58,6 +58,7 @@ import CollectorNewSalePage from '@/pages/collector/CollectorNewSalePage'
 import CollectorDisbursementsPage from '@/pages/collector/CollectorDisbursementsPage'
 import CollectorDailyReportPage from '@/pages/collector/CollectorDailyReportPage'
 import CollectorCashClosePage from '@/pages/collector/CollectorCashClosePage'
+import CollectorWorkerSettlementsPage from '@/pages/collector/CollectorWorkerSettlementsPage'
 import CollectorPaymentHistoryPage from '@/pages/collector/CollectorPaymentHistoryPage'
 import CollectorSelectRoutePage from '@/pages/collector/CollectorSelectRoutePage'
 import OperationalAccountPage from '@/pages/collector/OperationalAccountPage'
@@ -92,6 +93,7 @@ function operationalRoutes() {
       <Route path="disbursements" element={<CollectorDisbursementsPage />} />
       <Route path="daily-report" element={<CollectorDailyReportPage />} />
       <Route path="cashclose" element={<CollectorCashClosePage />} />
+      <Route path="worker-settlements" element={<CollectorWorkerSettlementsPage />} />
       <Route path="payment-history" element={<CollectorPaymentHistoryPage />} />
       <Route path="payment-history/:saleId" element={<CollectorPaymentHistoryPage />} />
       <Route path="payment/:saleId" element={<PaymentPage />} />

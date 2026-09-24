@@ -271,6 +271,8 @@ export async function confirmDisbursement(saleId: string, actor?: User): Promise
       disbursedByCollectorId: actor && hasPersonalCashbox(actor.rol) ? actor.id : undefined,
       disbursedByUserId: actor?.id,
       fechaDesembolso,
+      // Instante exacto: el cuadre por trabajador corta por instante, no por día.
+      disbursedAt: nowISO(),
       updatedAt: nowISO(),
     })
     if (sale.saleRequestId) {

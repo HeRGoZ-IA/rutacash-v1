@@ -1550,3 +1550,85 @@ Ninguna expectativa anterior fue modificada.
 **AUDITORÍA COMPLETA — LISTO PARA DEFINIR IMPLEMENTACIÓN**
 
 **FASE 0 + FASE 1 IMPLEMENTADAS (2026-09-22) — PENDIENTE EL CUADRE POR TRABAJADOR**
+
+---
+
+# 42. CONTINUIDAD — 2026-09-24
+
+> Sección añadida. Las secciones 1–41 se conservan tal como se escribieron: son la
+> evidencia del estado anterior y no se reescriben.
+
+## 42.1 Cambio de regla del Supervisor (decisión de negocio)
+
+La Fase 1 implementó `must-choose`: el Supervisor debía elegir entre "Yo" y el
+Cobrador. **El negocio la sustituyó**:
+
+> **Si el usuario que registra el pago es Supervisor, el responsable del efectivo es
+> siempre ese Supervisor.** Sin selector, sin depender de cuántos Cobradores haya ni
+> de si siguen activos.
+
+Efecto sobre los casos forenses de §29 y §41.3:
+
+| Caso | §41.3 (Fase 1) | Ahora |
+|---|---|---|
+| **B** — Laura cobra, Juan ACTIVO | Laura elige `Yo — Laura`; sin elegir → `COLLECTOR_REQUIRED` | **Automático:** `collectorId = u-laura`. Si la pantalla envía otro responsable → `COLLECTOR_INVALID` |
+| **C** — Juan inhabilitado | Elección explícita | **Automático** (idéntico con 0, 1 o 2 cobradores) |
+| **E/F/G** — Cuadre | Pendientes de `CashSettlement` | **Ejecutables** (§42.3) |
+
+## 42.2 Diagnóstico de actualización Cobrador/Supervisor → Admin (mismo equipo)
+
+**Contexto real:** un solo PC, un solo navegador. RutaCash usa **una única IndexedDB
+de nombre fijo `RutaCashDB`** por origen y perfil (`super('RutaCashDB')` en
+`src/lib/db.ts`). Todas las sesiones de ese navegador leen y escriben la misma base;
+la sesión (`useAuth`) solo guarda *quién* está conectado, no los datos.
+**Excepción:** una ventana de incógnito u otro perfil del navegador es **otra base**.
+
+**Método:** se ejecutaron los servicios de producción sobre Dexie real
+(`fake-indexeddb`) con el singleton `db`, simulando logout/login con
+`authenticateUser` y cerrando/reabriendo la conexión (`tests/workercash.test.ts`,
+familia `LOCAL-SYNC-*`).
+
+**Resultado:**
+
+| Pregunta | Resultado |
+|---|---|
+| ¿El pago persiste en `RutaCashDB`? | ✅ (id, routeId, collectorId, createdByUserId, valor, fecha, createdAt verificados) |
+| ¿Otra conexión a la misma base lo ve? | ✅ `LOCAL-SYNC-000` |
+| ¿Dashboard, Caja, Oficina, Reportes, Liquidación lo suman al remontar? | ✅ Todas, para Cobrador **y** Supervisor |
+| ¿Logout → login Admin lo pierde? | ❌ No lo pierde (`LOCAL-SYNC-006/007`) |
+| ¿Alguna vista filtra por rol del responsable? | ❌ Ninguna: todas agregan por `routeId` (`LOCAL-SYNC-015`) |
+
+**Conclusión:** **no había bug de cálculo ni de scoping** para este escenario. El
+síntoma era **TIPO 2 — vista obsoleta**: todas las vistas administrativas cargaban
+sus cifras **solo al montarse** (`useEffect` sin dependencia de los datos). Con el
+Cobrador en una ventana y el Admin en otra, el pago ya estaba en IndexedDB pero la
+pantalla del Admin seguía mostrando la cifra vieja hasta navegar o pulsar F5.
+
+**Hallazgos secundarios (TIPO 1, latentes):**
+
+1. `getCashboxSummary` usaba la fecha **UTC** como fin de rango por defecto mientras
+   `Payment.fecha` es **local**. En husos por delante de UTC, entre la medianoche
+   local y la UTC, los cobros de "hoy" quedaban fuera de la Base. En Colombia (UTC−5)
+   no se manifestaba. **Corregido.**
+2. La semana operativa es **lunes → sábado** (`getWeekEnd`). Un cobro registrado en
+   **domingo** no cae en "Recaudo semanal", ni en la Caja por defecto, ni en el rango
+   por defecto de la Liquidación. **No se cambió** (es la convención declarada en la
+   pantalla: "Lunes a Sábado"); queda como decisión de negocio pendiente.
+
+## 42.3 Cuadre real por trabajador
+
+Implementado `CashSettlement` (Route + persona + ciclo por instantes, Dexie v14) con
+esperado, entregado, diferencia, faltante arrastrado en positivo, sobrante trazado
+sin crédito automático, no autocierre y reapertura versionada. Detalle completo en
+`docs/IMPLEMENTACION_CUADRE_TRABAJADOR_2026-09.md`.
+
+## 42.4 Preguntas críticas revisadas (otra vez)
+
+| Pregunta | §41.4 | Ahora |
+|---|---|---|
+| **1** — ¿De quién es el efectivo de Laura? | De quien se declare | **De Laura, siempre que ella lo registre** |
+| **2** — ¿A quién pertenece la Base? | A la Route | A la Route (sin cambio) |
+| **3** — ¿El motor de caja conoce el cierre? | NO | **SÍ** para la caja personal (`getCollectorCashSummary` parte del último cuadre). La caja de la RUTA sigue sin conocerlo, a propósito |
+| **4** — ¿Hay sitio para un faltante? | NO | **SÍ** (`CashSettlement.faltante`, arrastrado al siguiente ciclo) |
+
+**RESPONSABILIDAD Y SINCRONÍA LOCAL CORREGIDAS — CUADRE POR TRABAJADOR OPERATIVO (2026-09-24)**

@@ -116,6 +116,10 @@ export const CAPABILITY_METADATA: Record<Capability, CapabilityMeta> = {
   // Liquidaciones
   'settlement.close': { key: 'settlement.close', label: 'Cerrar semana', description: 'Archivar la liquidacion de una semana y congelar sus cifras.', category: 'Pagos y caja', risk: 'alto' },
   'settlement.reopen': { key: 'settlement.reopen', label: 'Reabrir periodo', description: 'Levantar el cierre de una semana indicando el motivo.', category: 'Pagos y caja', risk: 'alto' },
+  'cashSettlement.view': { key: 'cashSettlement.view', label: 'Ver cuadres de trabajadores', description: 'Consultar y previsualizar el cuadre de efectivo de los trabajadores de las rutas autorizadas.', category: 'Pagos y caja', risk: 'medio' },
+  'cashSettlement.viewOwn': { key: 'cashSettlement.viewOwn', label: 'Ver mi ciclo de efectivo', description: 'Consultar el efectivo propio desde el último cuadre, incluido el faltante pendiente.', category: 'Pagos y caja' },
+  'cashSettlement.close': { key: 'cashSettlement.close', label: 'Cerrar cuadre de trabajador', description: 'Registrar lo que entregó un trabajador y cerrar su cuadre. Nunca el propio.', category: 'Pagos y caja', risk: 'alto' },
+  'cashSettlement.reopen': { key: 'cashSettlement.reopen', label: 'Reabrir cuadre de trabajador', description: 'Reabrir el último cuadre vigente de un trabajador indicando el motivo.', category: 'Pagos y caja', risk: 'alto' },
 
   // Reportes
   'report.view': { key: 'report.view', label: 'Ver reportes', description: 'Consultar reportes.', category: 'Reportes' },

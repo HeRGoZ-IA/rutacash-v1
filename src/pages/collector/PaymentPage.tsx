@@ -195,9 +195,9 @@ export default function PaymentPage() {
             )}
           </div>
 
-          {/* ¿Quién recibió el dinero? Solo aparece cuando quien registra NO es el
-              cobrador (Supervisor). Para el Cobrador el componente no renderiza nada:
-              responde él, así que no hay nada que preguntar. */}
+          {/* ¿Quién recibió el dinero? En la capa operativa nunca se pregunta:
+              Cobrador y Supervisor responden por lo que registran, así que el
+              componente no renderiza nada. Solo existe para actores administrativos. */}
           {sale && <CollectorPicker routeId={sale.routeId} value={collectorId} onChange={setCollectorId} />}
 
           {/* Observation */}

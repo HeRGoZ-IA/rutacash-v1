@@ -72,6 +72,8 @@ export type AuditAction =
   // --- Oficinas (Empresa → Oficina → Ruta) ---
   // --- Liquidaciones y cierre de periodo ---
   | 'SETTLEMENT_CLOSED'
+  | 'CASH_SETTLEMENT_CLOSED'
+  | 'CASH_SETTLEMENT_REOPENED'
   | 'SETTLEMENT_REOPENED'
   | 'CREATE_OFFICE'
   | 'UPDATE_OFFICE'
@@ -119,6 +121,14 @@ export interface Tenant {
   moneda: string
   direccion?: string
   responsable?: string
+  /**
+   * INICIO DEL MODELO PERSONAL DE EFECTIVO (v14). Instante a partir del cual los
+   * movimientos cuentan para el cuadre por trabajador (`CashSettlement`). La
+   * migración v14 lo fija al instante de actualizar en las empresas existentes: la
+   * atribución histórica anterior no es fiable y NO se reconstruyen cuadres
+   * antiguos. Empresas creadas después: se usa `createdAt`.
+   */
+  cashModelStartAt?: string
   createdAt: string
   updatedAt: string
 }
@@ -334,6 +344,13 @@ export interface Sale {
    * realmente entregó el dinero, no el día en que se creó el registro.
    */
   fechaDesembolso?: string
+  /**
+   * INSTANTE (ISO completo) en que se confirmó el desembolso. Lo necesita el cuadre
+   * por trabajador (`CashSettlement`), que corta por instante y no por día: dos
+   * cierres el mismo día deben saber a cuál pertenece cada entrega. Ventas
+   * anteriores a v14 no lo tienen; ver `movementInstant` en `cashSettlementRules`.
+   */
+  disbursedAt?: string
   /** Solicitud de venta de origen, si la venta nació de una autorización. */
   saleRequestId?: string
   motivoPerdida?: string
@@ -650,6 +667,63 @@ export interface CashboxMovement {
   referenceId?: string
   fecha: string
   createdAt: string
+}
+
+/**
+ * CUADRE REAL POR TRABAJADOR — Route + persona + periodo (v14).
+ *
+ * Responde: "¿cuánto efectivo debía entregar ESTA persona en ESTA ruta, cuánto
+ * entregó y qué diferencia quedó?". NO sustituye a `WeeklySettlement`, que es el
+ * cierre de la RUTA; ambos coexisten y ninguno modifica movimientos.
+ *
+ *   esperado   = arrastreAnterior + recaudado − desembolsado − gastos
+ *   diferencia = entregado − esperado      (0 exacto · <0 faltante · >0 sobrante)
+ *   arrastre siguiente = max(0, −diferencia)   ← el faltante se arrastra POSITIVO
+ *
+ * El sobrante NO genera saldo a favor: queda registrado y motivado.
+ * `desde`/`hasta` son INSTANTES ISO completos, no fechas.
+ */
+export interface CashSettlement {
+  id: string
+  tenantId: string
+  routeId: string
+  /** Trabajador cuadrado (Cobrador o Supervisor: `hasPersonalCashbox`). */
+  userId: string
+
+  /** Instante del último cierre vigente, o inicio del modelo personal. EXCLUSIVO. */
+  desde: string
+  /** Instante del cierre. INCLUSIVO. */
+  hasta: string
+  /** De dónde sale `desde`. */
+  origenDesde: 'ultimo-cierre' | 'inicio-modelo'
+  /** Cierre anterior del que se hereda `desde` y el arrastre (si existe). */
+  previousSettlementId?: string
+
+  arrastreAnterior: number
+  recaudado: number
+  desembolsado: number
+  gastos: number
+  esperado: number
+  entregado: number
+  diferencia: number
+  /** max(0, −diferencia). Continúa en el siguiente ciclo. */
+  faltante: number
+  /** max(0, diferencia). Registrado y motivado; nunca crédito automático. */
+  sobrante: number
+  /** Obligatorio si `diferencia !== 0`. */
+  motivo?: string
+
+  status: 'cerrada' | 'reabierta'
+  version: number
+  supersededBy?: string
+
+  createdAt: string
+  closedAt: string
+  closedByUserId: string
+
+  reopenedAt?: string
+  reopenedByUserId?: string
+  reopenReason?: string
 }
 
 export interface WeeklySettlement {

@@ -32,7 +32,9 @@ import {
 import { filterAccessibleRoutes, canAccessRoute, can } from '@/lib/permissions'
 import { formatCurrency, formatDate, getWeekStart, getWeekEnd } from '@/lib/formatters'
 import { downloadCSV } from '@/lib/utils'
-import type { WeeklySettlement, Route } from '@/models/types'
+import { WorkerCashSettlementPanel, PendingShortagesNotice } from '@/components/settlement/WorkerCashSettlementPanel'
+import { listCashSettlementsForUser } from '@/services/cashSettlementService'
+import type { WeeklySettlement, Route, CashSettlement } from '@/models/types'
 
 /**
  * LIQUIDACIÓN SEMANAL — SIEMPRE DE UNA RUTA.
@@ -94,6 +96,17 @@ export default function WeeklySettlementPage() {
   const [motivo, setMotivo] = useState('')
   const [reabriendo, setReabriendo] = useState(false)
 
+  /**
+   * DOS CIERRES DISTINTOS EN LA MISMA PANTALLA:
+   *  · "Liquidación de ruta"   → WeeklySettlement: Route + semana. Qué movió la RUTA.
+   *  · "Cuadre por trabajador" → CashSettlement: Route + persona + ciclo. Cuánto
+   *    efectivo debía entregar cada PERSONA. Coexisten; ninguno sustituye al otro.
+   */
+  const puedeVerCuadres = can(user, 'cashSettlement.view', { tenantId })
+  const [vista, setVista] = useState<'ruta' | 'trabajadores'>('ruta')
+  /** Cuadres de trabajadores de la ruta (sección informativa de la liquidación). */
+  const [cuadresRuta, setCuadresRuta] = useState<CashSettlement[]>([])
+
   const puedeCerrar = can(user, 'settlement.close', { routeId: routeId || undefined, tenantId })
   const puedeReabrir = can(user, 'settlement.reopen', { routeId: routeId || undefined, tenantId })
 
@@ -106,6 +119,13 @@ export default function WeeklySettlementPage() {
   }, [routeId, user])
 
   useEffect(() => { loadHistorial() }, [loadHistorial])
+
+  useEffect(() => {
+    let alive = true
+    if (!routeId || !puedeVerCuadres) { setCuadresRuta([]); return }
+    listCashSettlementsForUser(user, tenantId).then(l => { if (alive) setCuadresRuta(l.filter(c => c.routeId === routeId)) })
+    return () => { alive = false }
+  }, [routeId, user, tenantId, puedeVerCuadres, settlement])
 
   /**
    * VISTA PREVIA VIVA. La vista previa es un cálculo, no un documento: si mientras
@@ -267,7 +287,7 @@ export default function WeeklySettlementPage() {
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div><h1 className="text-xl font-bold text-gray-900">Liquidación Semanal</h1><p className="text-sm text-gray-500 mt-0.5">Lunes a Sábado · por ruta</p></div>
-        <div className="flex gap-2">
+        {vista === 'ruta' && <div className="flex gap-2">
           {settlement && <Button variant="secondary" onClick={exportCSV} icon={<Download className="w-4 h-4" />}>CSV</Button>}
           <Button onClick={generate} loading={loading} disabled={!routeId} icon={<RefreshCw className="w-4 h-4" />}>Generar</Button>
           {puedeCerrar && (
@@ -281,8 +301,35 @@ export default function WeeklySettlementPage() {
               Cerrar semana
             </Button>
           )}
-        </div>
+        </div>}
       </div>
+
+      {puedeVerCuadres && (
+        <div className="flex gap-1 border-b border-gray-200">
+          {([['ruta', 'Liquidación de ruta'], ['trabajadores', 'Cuadre por trabajador']] as const).map(([k, label]) => (
+            <button key={k} onClick={() => setVista(k)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${vista === k ? 'border-primary-600 text-primary-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {vista === 'trabajadores' && puedeVerCuadres && (
+        <div className="space-y-4">
+          <PendingShortagesNotice />
+          <div className="flex flex-wrap gap-3 items-end">
+            <OfficeSelector offices={offices} value={officeId} onChange={changeOffice}
+              includeUnassigned={hasUnassigned} className="w-56" />
+            <RouteSelector routes={routesInOffice} value={routeId} onChange={setRouteId} className="w-64" />
+          </div>
+          {routeId
+            ? <WorkerCashSettlementPanel routeId={routeId} />
+            : <p className="text-sm text-gray-500">Selecciona la ruta para ver a sus trabajadores.</p>}
+        </div>
+      )}
+
+      {vista === 'ruta' && (<>
 
       <div className="flex flex-wrap gap-3 items-end">
         {/* Ruta OBLIGATORIA: sin "Todas las rutas". */}
@@ -362,6 +409,26 @@ export default function WeeklySettlementPage() {
               </span>
             </div>
           </div>
+
+          {/* INFORMATIVO: cuadres de trabajadores cerrados en el rango. No se suman
+              ni se concilian contra la liquidación: son otro documento. */}
+          {puedeVerCuadres && (() => {
+            const enRango = cuadresRuta.filter(c => c.status === 'cerrada'
+              && c.closedAt.slice(0, 10) >= settlement.semanaInicio && c.closedAt.slice(0, 10) <= settlement.semanaFin)
+            return (
+              <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-xs text-gray-600">
+                <p className="font-semibold text-gray-700">Cuadres de trabajadores (informativo)</p>
+                {enRango.length === 0
+                  ? <p className="mt-0.5">Ningún cuadre por trabajador cerrado en este rango.</p>
+                  : <p className="mt-0.5">
+                      {enRango.length} cuadre(s) · entregado {formatCurrency(enRango.reduce((n, c) => n + c.entregado, 0), currency)}
+                      {' · '}faltantes {formatCurrency(enRango.reduce((n, c) => n + c.faltante, 0), currency)}
+                      {' · '}sobrantes {formatCurrency(enRango.reduce((n, c) => n + c.sobrante, 0), currency)}.
+                      {' '}No forma parte del cálculo de la liquidación de la ruta.
+                    </p>}
+              </div>
+            )
+          })()}
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center py-16 text-gray-400">
@@ -428,6 +495,8 @@ export default function WeeklySettlementPage() {
           )}
         </div>
       )}
+
+      </>)}
 
       {/* ---------------- REAPERTURA CONTROLADA ---------------- */}
       <Modal

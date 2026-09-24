@@ -29,6 +29,12 @@ import { effectivePayments } from '../src/lib/paymentState'
 import { filterAccessibleRoutes } from '../src/lib/permissions'
 import { hasPersonalCashbox } from '../src/lib/collectorAttribution'
 import { subscribeDataChanges, mutatedTables } from '../src/lib/dataRevision'
+import { confirmDisbursement } from '../src/services/saleRequestService'
+import {
+  previewCashSettlement, closeCashSettlement, reopenCashSettlement, getPendingShortagesForUser,
+} from '../src/services/cashSettlementService'
+import { closeCycleBlockedReason } from '../src/lib/cashSettlementRules'
+import { can } from '../src/lib/permissions'
 import { today, getWeekStart, getWeekEnd } from '../src/lib/formatters'
 import type { Payment, Sale, User } from '../src/models/types'
 import * as fs from 'node:fs'
@@ -455,7 +461,548 @@ await spec('LOCAL-SYNC-016', 'Semántica', 'la suma bruta del Dashboard equivale
   assert(bruto === 80_000 && vigente === 80_000 && dash.recaudoHoy === 80_000, 'la suma bruta diverge de effectivePayments')
 })
 
-// @@BLOQUE_C@@
+// ############################################################
+// BLOQUE C — CUADRE REAL POR TRABAJADOR (CashSettlement)
+// ############################################################
+const tick = (ms = 4) => new Promise(r => setTimeout(r, ms))
+
+/** Desembolso REAL (servicio de producción) de una venta nueva, por `actor`. */
+async function desembolsar(actor: User, routeId: string, valor: number): Promise<Sale> {
+  const n = ++saleSeq
+  const sale = {
+    id: `sale-d${n}`, tenantId: T, routeId, clientId: `cli-d${n}`, createdByUserId: actor.id,
+    valorVenta: valor, tasaInteres: 0, valorInteres: 0, valorTotal: valor, saldo: valor,
+    numeroCuotas: 1, valorCuota: valor, frecuenciaPago: 'diaria', fechaInicio: HOY, fechaFinalEstimada: HOY,
+    status: 'activa', disbursementStatus: 'pendiente', createdAt: new Date().toISOString(), updatedAt: '',
+  } as unknown as Sale
+  await db.sales.add(sale)
+  await confirmDisbursement(sale.id, actor)
+  return (await db.sales.get(sale.id)) as Sale
+}
+
+/** Gasto con la MISMA forma que escribe CollectorExpensesPage. */
+async function gastar(actor: User, routeId: string, valor: number) {
+  await db.expenses.add({
+    id: `exp-${Math.random().toString(36).slice(2)}`, tenantId: T, routeId, categoryId: 'cat-1', valor,
+    fecha: HOY, userId: actor.id, collectorId: hasPersonalCashbox(actor.rol) ? actor.id : undefined,
+    syncStatus: 'synced', createdAt: new Date().toISOString(),
+  })
+}
+
+const previewDe = (userId: string, routeId = R_NORTE, actor: User = ADMIN) =>
+  previewCashSettlement({ actor, tenantId: T, routeId, userId })
+
+async function cerrar(userId: string, entregado: number, opts: { actor?: User; routeId?: string; motivo?: string } = {}) {
+  await tick()
+  const doc = await closeCashSettlement({
+    actor: opts.actor ?? ADMIN, tenantId: T, routeId: opts.routeId ?? R_NORTE, userId, entregado, motivo: opts.motivo,
+  })
+  await tick()
+  return doc
+}
+
+async function rechazo(fn: () => Promise<unknown>): Promise<string> {
+  try { await fn(); return 'ACEPTADO' } catch (e) { return e instanceof Error ? e.message : String(e) }
+}
+
+const snapshot = async () => ({
+  payments: JSON.stringify(await db.payments.toArray()),
+  sales: JSON.stringify(await db.sales.toArray()),
+  expenses: JSON.stringify(await db.expenses.toArray()),
+})
+
+await spec('CASH-SETTLEMENT-001', 'Cuadre', 'el primer cuadre arranca con arrastre 0 desde el inicio del modelo', async () => {
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 100_000)
+  const p = await previewDe(JUAN.id)
+  metric('origen / desde', `${p.origenDesde} / ${p.desde}`)
+  metric('arrastre', p.arrastreAnterior)
+  assert(p.arrastreAnterior === 0 && p.origenDesde === 'inicio-modelo', 'el primer ciclo debe partir de 0 y del inicio del modelo')
+})
+
+await spec('CASH-SETTLEMENT-002', 'Cuadre', 'el pago del trabajador entra al esperado', async () => {
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 250_000)
+  const p = await previewDe(JUAN.id)
+  metric('recaudado / esperado', `${p.recaudado} / ${p.esperado}`)
+  assert(p.recaudado === 250_000 && p.esperado === 250_000, 'el cobro del trabajador no entró')
+})
+
+await spec('CASH-SETTLEMENT-003', 'Cuadre', 'createdBy distinto pero collectorId = trabajador → entra', async () => {
+  await empresa()
+  await pagar(ADMIN, await venta(R_NORTE), 90_000, { collectorId: JUAN.id })
+  const pago = (await db.payments.toArray())[0]
+  const p = await previewDe(JUAN.id)
+  metric('createdBy / collector', `${pago.createdByUserId} / ${pago.collectorId}`)
+  metric('recaudado Juan', p.recaudado)
+  assert(pago.createdByUserId === ADMIN.id && p.recaudado === 90_000, 'el cuadre debe seguir al RESPONSABLE, no al autor')
+})
+
+await spec('CASH-SETTLEMENT-004', 'Cuadre', 'el pago de otro responsable NO entra', async () => {
+  await empresa()
+  await pagar(PEDRO, await venta(R_NORTE), 80_000)
+  await pagar(LAURA, await venta(R_NORTE), 300_000)
+  const p = await previewDe(JUAN.id)
+  metric('recaudado Juan', p.recaudado)
+  assert(p.recaudado === 0, 'se cargó a Juan dinero de otros')
+})
+
+await spec('CASH-SETTLEMENT-005', 'Cuadre', 'el desembolso del trabajador resta', async () => {
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 500_000)
+  const s = await desembolsar(JUAN, R_NORTE, 200_000)
+  const p = await previewDe(JUAN.id)
+  metric('disbursedAt / disbursedByCollectorId', `${s.disbursedAt} / ${s.disbursedByCollectorId}`)
+  metric('desembolsado / esperado', `${p.desembolsado} / ${p.esperado}`)
+  assert(Boolean(s.disbursedAt), 'confirmDisbursement debe sellar el instante')
+  assert(p.desembolsado === 200_000 && p.esperado === 300_000, '500.000 − 200.000 debía dar 300.000')
+})
+
+await spec('CASH-SETTLEMENT-006', 'Cuadre', 'el gasto del trabajador resta', async () => {
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 500_000)
+  await gastar(JUAN, R_NORTE, 40_000)
+  const p = await previewDe(JUAN.id)
+  metric('gastos / esperado', `${p.gastos} / ${p.esperado}`)
+  assert(p.gastos === 40_000 && p.esperado === 460_000, '500.000 − 40.000 debía dar 460.000')
+})
+
+await spec('CASH-SETTLEMENT-007', 'Cuadre', 'cuadre exacto: diferencia 0 y el siguiente ciclo parte en 0', async () => {
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 1_000_000)
+  const doc = await cerrar(JUAN.id, 1_000_000)
+  const next = await previewDe(JUAN.id)
+  metric('esperado / entregado / diferencia', `${doc.esperado} / ${doc.entregado} / ${doc.diferencia}`)
+  metric('siguiente ciclo · arrastre / esperado', `${next.arrastreAnterior} / ${next.esperado}`)
+  assert(doc.diferencia === 0 && doc.faltante === 0 && doc.sobrante === 0, 'el cuadre exacto no dio 0')
+  assert(next.arrastreAnterior === 0 && next.esperado === 0 && next.origenDesde === 'ultimo-cierre', 'el siguiente ciclo no partió de 0')
+})
+
+await spec('CASH-SETTLEMENT-008', 'Cuadre', 'faltante: diferencia negativa persistida con motivo', async () => {
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 1_000_000)
+  const doc = await cerrar(JUAN.id, 900_000, { motivo: 'faltaron billetes en la entrega' })
+  metric('diferencia / faltante', `${doc.diferencia} / ${doc.faltante}`)
+  assert(doc.diferencia === -100_000 && doc.faltante === 100_000 && doc.sobrante === 0, 'el faltante no quedó registrado')
+  assert((await db.cashSettlements.get(doc.id))?.faltante === 100_000, 'el faltante no se persistió')
+})
+
+await spec('CASH-SETTLEMENT-009', 'Cuadre', 'el faltante se arrastra POSITIVO al siguiente esperado', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE)
+  await pagar(JUAN, sale, 1_000_000)
+  await cerrar(JUAN.id, 900_000, { motivo: 'faltaron billetes en la entrega' })
+  await pagar(JUAN, sale, 300_000)
+  const p = await previewDe(JUAN.id)
+  metric('arrastre / recaudado / esperado', `${p.arrastreAnterior} / ${p.recaudado} / ${p.esperado}`)
+  assert(p.arrastreAnterior === 100_000, `el arrastre debía ser +100.000, es ${p.arrastreAnterior}`)
+  assert(p.esperado === 400_000, `100.000 + 300.000 debía dar 400.000, dio ${p.esperado}`)
+})
+
+await spec('CASH-SETTLEMENT-010', 'Cuadre', 'sobrante: se registra con motivo y NO se vuelve crédito', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE)
+  await pagar(JUAN, sale, 1_000_000)
+  const doc = await cerrar(JUAN.id, 1_050_000, { motivo: 'cliente pagó de más, se devolverá' })
+  await pagar(JUAN, sale, 200_000)
+  const next = await previewDe(JUAN.id)
+  metric('diferencia / sobrante', `${doc.diferencia} / ${doc.sobrante}`)
+  metric('siguiente ciclo · arrastre / esperado', `${next.arrastreAnterior} / ${next.esperado}`)
+  assert(doc.sobrante === 50_000 && doc.faltante === 0 && doc.motivo, 'el sobrante no quedó registrado y motivado')
+  assert(next.arrastreAnterior === 0 && next.esperado === 200_000, 'el sobrante se compensó automáticamente')
+})
+
+await spec('CASH-SETTLEMENT-011', 'Cuadre', 'una diferencia exige motivo (≥10 caracteres)', async () => {
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 1_000_000)
+  const sin = await rechazo(() => closeCashSettlement({ actor: ADMIN, tenantId: T, routeId: R_NORTE, userId: JUAN.id, entregado: 900_000 }))
+  const corto = await rechazo(() => closeCashSettlement({ actor: ADMIN, tenantId: T, routeId: R_NORTE, userId: JUAN.id, entregado: 900_000, motivo: 'falta' }))
+  metric('sin motivo', sin)
+  metric('motivo corto', corto)
+  assert(/motivo/i.test(sin) && /motivo/i.test(corto), 'se aceptó una diferencia sin motivo suficiente')
+  assert((await db.cashSettlements.count()) === 0, 'se escribió un cuadre pese al rechazo')
+})
+
+await spec('CASH-SETTLEMENT-012', 'Permisos', 'el Cobrador NO autocierra (ni cierra a nadie)', async () => {
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 100_000)
+  const propio = await rechazo(() => closeCashSettlement({ actor: JUAN, tenantId: T, routeId: R_NORTE, userId: JUAN.id, entregado: 100_000 }))
+  const otro = await rechazo(() => closeCashSettlement({ actor: JUAN, tenantId: T, routeId: R_NORTE, userId: PEDRO.id, entregado: 0 }))
+  metric('Juan cierra el suyo', propio)
+  metric('Juan cierra el de Pedro', otro)
+  assert(propio !== 'ACEPTADO' && otro !== 'ACEPTADO', 'un Cobrador pudo cerrar un cuadre')
+})
+
+await spec('CASH-SETTLEMENT-013', 'Permisos', 'el Supervisor NO autocierra', async () => {
+  await empresa()
+  await pagar(LAURA, await venta(R_NORTE), 300_000)
+  const r = await rechazo(() => closeCashSettlement({ actor: LAURA, tenantId: T, routeId: R_NORTE, userId: LAURA.id, entregado: 300_000 }))
+  metric('Laura cierra el suyo', r)
+  assert(/propio cuadre/.test(r), 'el Supervisor pudo cerrar su propio cuadre')
+})
+
+await spec('CASH-SETTLEMENT-014', 'Permisos', 'el Admin cierra (y el Super Admin también)', async () => {
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 100_000)
+  await pagar(LAURA, await venta(R_NORTE), 50_000)
+  const a = await cerrar(JUAN.id, 100_000, { actor: ADMIN })
+  const s = await cerrar(LAURA.id, 50_000, { actor: SUPER })
+  metric('Admin → Juan', `${a.closedByUserId} · dif ${a.diferencia}`)
+  metric('SuperAdmin → Laura', `${s.closedByUserId} · dif ${s.diferencia}`)
+  assert(a.closedByUserId === ADMIN.id && s.closedByUserId === SUPER.id, 'Admin/SuperAdmin no pudieron cerrar')
+})
+
+await spec('CASH-SETTLEMENT-015', 'Permisos', 'el Supervisor cierra a OTRO trabajador autorizado, no fuera de su ruta', async () => {
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 120_000)
+  const doc = await cerrar(JUAN.id, 120_000, { actor: MARTA })
+  await pagar(JUAN, await venta(R_SUR), 70_000)
+  const fuera = await rechazo(() => closeCashSettlement({ actor: MARTA, tenantId: T, routeId: R_SUR, userId: JUAN.id, entregado: 70_000 }))
+  const secre = await rechazo(() => closeCashSettlement({ actor: SECRE, tenantId: T, routeId: R_NORTE, userId: PEDRO.id, entregado: 0 }))
+  metric('Marta cierra a Juan en Norte', doc.closedByUserId)
+  metric('Marta en Sur (no autorizada)', fuera)
+  metric('Secretario', secre)
+  assert(doc.closedByUserId === MARTA.id, 'el Supervisor no pudo cerrar a otro')
+  assert(fuera !== 'ACEPTADO' && secre !== 'ACEPTADO', 'se cerró fuera de alcance o sin permiso')
+})
+
+await spec('CASH-SETTLEMENT-016', 'Independencia', 'dos trabajadores de la misma ruta tienen cuadres independientes', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE)
+  await pagar(JUAN, sale, 100_000)
+  await pagar(LAURA, sale, 300_000)
+  await cerrar(JUAN.id, 60_000, { motivo: 'entregó solo una parte hoy' })
+  const laura = await previewDe(LAURA.id)
+  const juan = await previewDe(JUAN.id)
+  metric('Laura · arrastre / esperado', `${laura.arrastreAnterior} / ${laura.esperado}`)
+  metric('Juan · arrastre / esperado', `${juan.arrastreAnterior} / ${juan.esperado}`)
+  assert(laura.arrastreAnterior === 0 && laura.esperado === 300_000 && laura.origenDesde === 'inicio-modelo', 'el cuadre de Juan afectó a Laura')
+  assert(juan.arrastreAnterior === 40_000 && juan.esperado === 40_000, 'el faltante de Juan no quedó en su ciclo')
+})
+
+await spec('CASH-SETTLEMENT-017', 'Independencia', 'el mismo trabajador en dos rutas tiene ciclos independientes', async () => {
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 100_000)
+  await pagar(JUAN, await venta(R_SUR), 70_000)
+  await cerrar(JUAN.id, 100_000)
+  const sur = await previewDe(JUAN.id, R_SUR)
+  const norte = await previewDe(JUAN.id, R_NORTE)
+  metric('Sur · origen / esperado', `${sur.origenDesde} / ${sur.esperado}`)
+  metric('Norte · esperado', norte.esperado)
+  assert(sur.origenDesde === 'inicio-modelo' && sur.esperado === 70_000, 'cerrar Norte alteró Sur')
+  assert(norte.esperado === 0, 'Norte debía quedar en 0')
+})
+
+await spec('CASH-SETTLEMENT-018', 'Periodo', 'los movimientos anteriores al cierre no vuelven a entrar', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE)
+  await pagar(JUAN, sale, 400_000)
+  await gastar(JUAN, R_NORTE, 10_000)
+  await cerrar(JUAN.id, 390_000)
+  await pagar(JUAN, sale, 25_000)
+  const p = await previewDe(JUAN.id)
+  metric('recaudado / gastos del ciclo nuevo', `${p.recaudado} / ${p.gastos}`)
+  assert(p.recaudado === 25_000 && p.gastos === 0, 'movimientos ya cuadrados volvieron a contar')
+})
+
+await spec('CASH-SETTLEMENT-019', 'Periodo', 'dos cierres el mismo día se ordenan por instante', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE)
+  await pagar(JUAN, sale, 100_000)
+  const a = await cerrar(JUAN.id, 100_000)
+  await pagar(JUAN, sale, 30_000)
+  const b = await cerrar(JUAN.id, 30_000)
+  metric('cierre 1', `${a.desde} → ${a.hasta} · recaudado ${a.recaudado}`)
+  metric('cierre 2', `${b.desde} → ${b.hasta} · recaudado ${b.recaudado}`)
+  assert(a.hasta.slice(0, 10) === b.hasta.slice(0, 10), 'la prueba exige dos cierres el mismo día')
+  assert(b.desde === a.hasta && b.hasta > a.hasta, 'el segundo ciclo no empieza en el instante del primero')
+  assert(a.recaudado === 100_000 && b.recaudado === 30_000, 'los cierres del mismo día mezclaron movimientos')
+})
+
+await spec('CASH-SETTLEMENT-020', 'Periodo', 'el solapamiento con un cuadre vigente se bloquea', async () => {
+  const lista = [{ id: 'x', routeId: R_NORTE, userId: JUAN.id, desde: '2026-09-20T10:00:00.000Z', hasta: '2026-09-22T10:00:00.000Z', status: 'cerrada' }] as never[]
+  const solapa = closeCycleBlockedReason(lista, R_NORTE, JUAN.id, '2026-09-21T00:00:00.000Z', '2026-09-23T00:00:00.000Z')
+  const borde = closeCycleBlockedReason(lista, R_NORTE, JUAN.id, '2026-09-22T10:00:00.000Z', '2026-09-23T00:00:00.000Z')
+  const vacio = closeCycleBlockedReason([], R_NORTE, JUAN.id, '2026-09-22T10:00:00.000Z', '2026-09-22T10:00:00.000Z')
+  metric('rango que se solapa', solapa)
+  metric('rango que comparte solo el borde', borde ?? 'permitido')
+  metric('rango vacío', vacio)
+  assert(solapa && !borde && vacio, 'la regla de solapamiento por instantes es incorrecta')
+  // Y en el servicio: dos cierres concurrentes del mismo ciclo no pueden coexistir.
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 10_000)
+  await tick()
+  const [r1, r2] = await Promise.all([
+    rechazo(() => closeCashSettlement({ actor: ADMIN, tenantId: T, routeId: R_NORTE, userId: JUAN.id, entregado: 10_000 })),
+    rechazo(() => closeCashSettlement({ actor: SUPER, tenantId: T, routeId: R_NORTE, userId: JUAN.id, entregado: 10_000 })),
+  ])
+  const vigentes = (await db.cashSettlements.toArray()).filter(s => s.status === 'cerrada')
+  metric('dos cierres simultáneos', `${r1} | ${r2}`)
+  metric('cuadres vigentes', vigentes.length)
+  assert(vigentes.length === 1, 'quedaron dos cuadres vigentes solapados')
+})
+
+await spec('CASH-SETTLEMENT-021', 'Reapertura', 'reabrir exige motivo y conserva el documento (versionado)', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE)
+  await pagar(JUAN, sale, 500_000)
+  const v1 = await cerrar(JUAN.id, 500_000)
+  const sin = await rechazo(() => reopenCashSettlement({ actor: ADMIN, settlementId: v1.id, motivo: 'no' }))
+  const sup = await rechazo(() => reopenCashSettlement({ actor: LAURA, settlementId: v1.id, motivo: 'motivo suficientemente largo' }))
+  await reopenCashSettlement({ actor: ADMIN, settlementId: v1.id, motivo: 'se registró mal el entregado' })
+  const reabierto = await previewDe(JUAN.id)
+  const v2 = await cerrar(JUAN.id, 500_000)
+  const v1Final = (await db.cashSettlements.get(v1.id))!
+  metric('sin motivo', sin)
+  metric('Supervisor reabre', sup)
+  metric('tras reabrir · desde / esperado', `${reabierto.desde === v1.desde ? 'mismo arranque' : 'OTRO'} / ${reabierto.esperado}`)
+  metric('versiones', `v1=${v1Final.status}→${v1Final.supersededBy === v2.id ? 'v2' : '?'} · v2=${v2.version}`)
+  assert(/motivo/i.test(sin) && sup !== 'ACEPTADO', 'se reabrió sin motivo o sin permiso')
+  assert(reabierto.desde === v1.desde && reabierto.esperado === 500_000, 'reabrir no devolvió el ciclo')
+  assert(v1Final.status === 'reabierta' && v1Final.reopenReason && v1Final.supersededBy === v2.id && v2.version === 2, 'el versionado no es correcto')
+})
+
+await spec('CASH-SETTLEMENT-022', 'Reapertura', 'NO se reabre un cuadre antiguo si hay uno posterior vigente', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE)
+  await pagar(JUAN, sale, 100_000)
+  const a = await cerrar(JUAN.id, 100_000)
+  await pagar(JUAN, sale, 50_000)
+  await cerrar(JUAN.id, 50_000)
+  const r = await rechazo(() => reopenCashSettlement({ actor: ADMIN, settlementId: a.id, motivo: 'intento de reabrir el antiguo' }))
+  metric('reabrir el primero', r)
+  assert(/posterior/.test(r), 'se reabrió un cuadre con otro posterior vigente')
+})
+
+for (const [id, tabla] of [['CASH-SETTLEMENT-023', 'payments'], ['CASH-SETTLEMENT-024', 'sales'], ['CASH-SETTLEMENT-025', 'expenses']] as const) {
+  await spec(id, 'Inmutabilidad', `cerrar (y reabrir) NO modifica ${tabla}`, async () => {
+    await empresa()
+    await pagar(JUAN, await venta(R_NORTE), 300_000)
+    await desembolsar(JUAN, R_NORTE, 100_000)
+    await gastar(JUAN, R_NORTE, 20_000)
+    const antes = await snapshot()
+    const doc = await cerrar(JUAN.id, 150_000, { motivo: 'faltante reconocido por el cobrador' })
+    await reopenCashSettlement({ actor: ADMIN, settlementId: doc.id, motivo: 'revisión de la entrega del día' })
+    const despues = await snapshot()
+    metric(`${tabla} idéntica`, antes[tabla] === despues[tabla])
+    assert(antes[tabla] === despues[tabla], `el cuadre modificó ${tabla}`)
+  })
+}
+
+await spec('CASH-SETTLEMENT-026', 'Semántica', 'motor por rango = effectivePayments() cuando la corrección cae en el mismo ciclo', async () => {
+  await empresa()
+  const p = await pagar(JUAN, await venta(R_NORTE), 100_000)
+  await correctPayment(SUPER, p.id, { newValor: 80_000, reason: 'valor mal digitado' })
+  const pagos = await db.payments.where('routeId').equals(R_NORTE).toArray()
+  const vigente = effectivePayments(pagos).filter(x => x.collectorId === JUAN.id).reduce((s, x) => s + x.valor, 0)
+  const prev = await previewDe(JUAN.id)
+  metric('effectivePayments / motor', `${vigente} / ${prev.recaudado}`)
+  assert(vigente === 80_000 && prev.recaudado === 80_000, 'el motor por rango diverge de effectivePayments')
+})
+
+await spec('CASH-SETTLEMENT-027', 'Semántica', 'corrección en un ciclo POSTERIOR carga solo el ajuste (no cobra dos veces)', async () => {
+  await empresa()
+  const p = await pagar(JUAN, await venta(R_NORTE), 100_000)
+  await cerrar(JUAN.id, 100_000)
+  await correctPayment(SUPER, p.id, { newValor: 80_000, reason: 'valor mal digitado' })
+  const prev = await previewDe(JUAN.id)
+  metric('ciclo nuevo · recaudado / esperado', `${prev.recaudado} / ${prev.esperado}`)
+  assert(prev.recaudado === -20_000, `debía cargarse el ajuste −20.000, se cargó ${prev.recaudado}`)
+})
+
+await spec('CASH-SETTLEMENT-028', 'Histórico', 'NO se inventa histórico: lo anterior al inicio del modelo no cuenta', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE)
+  const viejo = await pagar(JUAN, sale, 700_000)
+  await tick()
+  await db.tenants.update(T, { cashModelStartAt: new Date().toISOString() })
+  await tick()
+  await correctPayment(SUPER, viejo.id, { newValor: 650_000, reason: 'corrección de un pago histórico' })
+  await pagar(JUAN, sale, 50_000)
+  const p = await previewDe(JUAN.id)
+  metric('recaudado del primer ciclo', p.recaudado)
+  metric('cuadres existentes', await db.cashSettlements.count())
+  assert(p.recaudado === 50_000, `solo debía contar lo posterior al inicio del modelo, contó ${p.recaudado}`)
+})
+
+await spec('CASH-SETTLEMENT-029', 'Mi efectivo', '"Mi efectivo" = movimientos desde el último cuadre + faltante', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE)
+  await pagar(JUAN, sale, 1_000_000)
+  await cerrar(JUAN.id, 900_000, { motivo: 'faltaron billetes en la entrega' })
+  await pagar(JUAN, sale, 300_000)
+  const mio = await previewCashSettlement({ actor: JUAN, tenantId: T, routeId: R_NORTE, userId: JUAN.id })
+  const hoy = await miEfectivo(JUAN.id)
+  const ajeno = await rechazo(() => previewCashSettlement({ actor: JUAN, tenantId: T, routeId: R_NORTE, userId: PEDRO.id }))
+  metric('Mi efectivo (ciclo)', mio.esperado)
+  metric('Mi recaudo hoy (KPI diario)', hoy)
+  metric('Juan consulta el ciclo de Pedro', ajeno)
+  assert(mio.esperado === 400_000, 'Mi efectivo no refleja el faltante + lo nuevo')
+  assert(hoy === 1_300_000, 'el KPI diario debe seguir siendo diario')
+  assert(ajeno !== 'ACEPTADO', 'un Cobrador vio el ciclo de otro')
+  const page = readSource('src/pages/collector/CollectorCashClosePage.tsx')
+  assert(page.includes('previewCashSettlement(') && page.includes('Mi recaudo hoy'), 'la pantalla no separa Mi efectivo de Mi recaudo hoy')
+})
+
+await spec('CASH-SETTLEMENT-030', 'Alertas', 'Admin identifica trabajadores con faltante pendiente', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE)
+  await pagar(JUAN, sale, 1_000_000)
+  await pagar(LAURA, sale, 200_000)
+  await cerrar(JUAN.id, 900_000, { motivo: 'faltaron billetes en la entrega' })
+  await cerrar(LAURA.id, 200_000)
+  const alertas = await getPendingShortagesForUser(ADMIN, T)
+  const alertasSur = await getPendingShortagesForUser(ADMIN_SUR, T)
+  metric('faltantes (Admin)', alertas.map(a => `${a.userId}:${a.faltante}`).join(', '))
+  metric('faltantes (Admin solo Sur)', alertasSur.length)
+  assert(alertas.length === 1 && alertas[0].userId === JUAN.id && alertas[0].faltante === 100_000, 'la alerta de faltante no es correcta')
+  assert(alertasSur.length === 0, 'un Admin vio faltantes de una ruta ajena')
+  // Saldado en el ciclo siguiente → desaparece.
+  await pagar(JUAN, sale, 300_000)
+  await cerrar(JUAN.id, 400_000)
+  metric('tras saldar', (await getPendingShortagesForUser(ADMIN, T)).length)
+  assert((await getPendingShortagesForUser(ADMIN, T)).length === 0, 'el faltante saldado sigue alertando')
+})
+
+await spec('CASH-SETTLEMENT-031', 'Liquidación', 'WeeklySettlement conserva su significado tras cuadrar trabajadores', async () => {
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 100_000)
+  await pagar(LAURA, await venta(R_NORTE), 300_000)
+  const antes = await generateWeeklySettlementForUser({ user: ADMIN, tenantId: T, routeId: R_NORTE, ...rangoQueContieneHoy() })
+  await cerrar(JUAN.id, 50_000, { motivo: 'entregó la mitad por ahora' })
+  await cerrar(LAURA.id, 300_000)
+  const despues = await generateWeeklySettlementForUser({ user: ADMIN, tenantId: T, routeId: R_NORTE, ...rangoQueContieneHoy() })
+  metric('cobros de la ruta antes / después', `${antes?.cobros} / ${despues?.cobros}`)
+  metric('saldo final antes / después', `${antes?.saldoFinal} / ${despues?.saldoFinal}`)
+  assert(antes?.cobros === 400_000 && despues?.cobros === 400_000 && antes?.saldoFinal === despues?.saldoFinal,
+    'cuadrar trabajadores alteró la liquidación de la ruta')
+  const engine = readSource('src/services/weeklySettlementEngine.ts')
+  assert(!engine.includes('cashSettlement'), 'el motor de liquidación no debe leer cuadres de trabajadores')
+})
+
+await spec('CASH-SETTLEMENT-032', 'Permisos', 'capacidades nuevas por rol', () => {
+  const tiene = (u: User, c: Parameters<typeof can>[1]) => can(u, c, { routeId: R_NORTE, tenantId: T })
+  const fila = (u: User) => ['view', 'viewOwn', 'close', 'reopen'].map(c => tiene(u, `cashSettlement.${c}` as never) ? 'S' : '·').join('')
+  for (const u of [SUPER, ADMIN, LAURA, JUAN, SECRE]) metric(`${u.rol.padEnd(10)} view/own/close/reopen`, fila(u))
+  assert(fila(SUPER) === 'S·SS' && fila(ADMIN) === 'S·SS', 'Admin/SuperAdmin: ver, cerrar y reabrir')
+  assert(fila(LAURA) === 'SSS·', 'Supervisor: ver, propio y cerrar a otros; NO reabrir')
+  assert(fila(JUAN) === '·S··', 'Cobrador: solo su propio ciclo')
+  assert(fila(SECRE) === '····', 'Secretario: nada')
+})
+
+// ############################################################
+// SMOKES pedidos por el socio
+// ############################################################
+await spec('SMOKE-S1', 'Smoke', 'Supervisor sin selector: Laura paga 300k con Juan activo', async () => {
+  await empresa({ cobradoresActivosNorte: [JUAN.id] })
+  const p = await pagar(LAURA, await venta(R_NORTE), 300_000)
+  metric('createdBy / responsable', `${p.createdByUserId} / ${p.collectorId}`)
+  metric('Mi efectivo Laura / Juan', `${await miEfectivo(LAURA.id)} / ${await miEfectivo(JUAN.id)}`)
+  assert(p.createdByUserId === LAURA.id && p.collectorId === LAURA.id, 'Laura no es la responsable')
+  assert(readSource('src/components/ui/CollectorPicker.tsx').includes('if (!user || actorRespondePorSiMismo) return null'), 'el selector sigue visible')
+})
+
+await spec('SMOKE-S2', 'Smoke', 'Cobrador → Admin en la misma base (+100k) y la vista se entera sin F5', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE)
+  const antes = await getAdminDashboardData({ user: ADMIN, tenantId: T, now: AHORA })
+  let aviso = false
+  const off = subscribeDataChanges(['payments'], () => { aviso = true })
+  await pagar(JUAN, sale, 100_000)
+  await tick(10)
+  off()
+  const despues = await getAdminDashboardData({ user: ADMIN, tenantId: T, now: AHORA })
+  const caja = await getCashboxSummary(R_NORTE, HOY, HOY)
+  metric('Dashboard recaudo hoy', `${antes.recaudoHoy} → ${despues.recaudoHoy}`)
+  metric('Caja Norte cobros hoy', caja.cobros)
+  metric('reporte', await reportePagos(ADMIN))
+  metric('aviso de refresco recibido', aviso)
+  assert(despues.recaudoHoy - antes.recaudoHoy === 100_000 && caja.cobros === 100_000 && aviso, 'S2 falló')
+})
+
+await spec('SMOKE-S3', 'Smoke', 'Supervisor → Admin: Route +300k, preview +300k, Mi efectivo Laura +300k, Juan 0', async () => {
+  await empresa()
+  await pagar(LAURA, await venta(R_NORTE), 300_000)
+  const caja = await getCashboxSummary(R_NORTE, HOY, HOY)
+  const prev = await generateWeeklySettlementForUser({ user: ADMIN, tenantId: T, routeId: R_NORTE, ...rangoQueContieneHoy() })
+  const dash = await getAdminDashboardData({ user: ADMIN, tenantId: T, now: AHORA })
+  metric('Route / Admin recaudo / preview cobros', `${caja.cobros} / ${dash.recaudoHoy} / ${prev?.cobros}`)
+  metric('Mi efectivo Laura / Juan', `${await miEfectivo(LAURA.id)} / ${await miEfectivo(JUAN.id)}`)
+  assert(caja.cobros === 300_000 && dash.recaudoHoy === 300_000 && prev?.cobros === 300_000, 'la ruta no recibió el cobro')
+  assert(await miEfectivo(LAURA.id) === 300_000 && await miEfectivo(JUAN.id) === 0, 'la responsabilidad quedó mal')
+})
+
+await spec('SMOKE-S4', 'Smoke', 'cambio de sesión: Cobrador registra → logout → login Admin → visible', async () => {
+  await empresa()
+  const j = await reingresarComo(JUAN)
+  await pagar(j, await venta(R_NORTE), 100_000)
+  const a = await reingresarComo(ADMIN)
+  const dash = await getAdminDashboardData({ user: a, tenantId: a.tenantId, now: AHORA })
+  metric('Admin tras login · recaudo hoy', dash.recaudoHoy)
+  assert(dash.recaudoHoy === 100_000, 'FAIL: el Admin no ve el pago tras el cambio de sesión')
+})
+
+await spec('SMOKE-C1', 'Smoke', 'cierre limpio: esperado 1.000.000, entrega 1.000.000 → 0 y siguiente ciclo 0', async () => {
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 1_000_000)
+  const doc = await cerrar(JUAN.id, 1_000_000)
+  const next = await previewDe(JUAN.id)
+  metric('diferencia / siguiente esperado', `${doc.diferencia} / ${next.esperado}`)
+  assert(doc.esperado === 1_000_000 && doc.diferencia === 0 && next.esperado === 0, 'C1 falló')
+})
+
+await spec('SMOKE-C2', 'Smoke', 'faltante: esperado 1.000.000, entrega 900.000 → faltante 100.000 y arrastre 100.000', async () => {
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 1_000_000)
+  const doc = await cerrar(JUAN.id, 900_000, { motivo: 'faltaron billetes en la entrega' })
+  const next = await previewDe(JUAN.id)
+  metric('faltante / arrastre siguiente', `${doc.faltante} / ${next.arrastreAnterior}`)
+  assert(doc.faltante === 100_000 && next.arrastreAnterior === 100_000, 'C2 falló')
+})
+
+await spec('SMOKE-C3', 'Smoke', 'faltante + recaudo nuevo: 100.000 + 300.000 = 400.000, entrega 400.000 → 0', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE)
+  await pagar(JUAN, sale, 1_000_000)
+  await cerrar(JUAN.id, 900_000, { motivo: 'faltaron billetes en la entrega' })
+  await pagar(JUAN, sale, 300_000)
+  const doc = await cerrar(JUAN.id, 400_000)
+  metric('arrastre / recaudado / esperado / diferencia', `${doc.arrastreAnterior} / ${doc.recaudado} / ${doc.esperado} / ${doc.diferencia}`)
+  assert(doc.arrastreAnterior === 100_000 && doc.esperado === 400_000 && doc.diferencia === 0, 'C3 falló')
+})
+
+await spec('SMOKE-C4', 'Smoke', 'Supervisor: recauda 300k, desembolsa 100k, gasta 50k → esperado 150k; Admin cierra 150k', async () => {
+  await empresa()
+  await pagar(LAURA, await venta(R_NORTE), 300_000)
+  await desembolsar(LAURA, R_NORTE, 100_000)
+  await gastar(LAURA, R_NORTE, 50_000)
+  const doc = await cerrar(LAURA.id, 150_000, { actor: ADMIN })
+  metric('recaudado / desembolsado / gastos / esperado / diferencia', `${doc.recaudado} / ${doc.desembolsado} / ${doc.gastos} / ${doc.esperado} / ${doc.diferencia}`)
+  assert(doc.esperado === 150_000 && doc.diferencia === 0, 'C4 falló')
+})
+
+await spec('SMOKE-C5', 'Smoke', 'Juan y Laura operan la misma ruta: cuadres independientes', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE)
+  await pagar(JUAN, sale, 200_000)
+  await pagar(LAURA, sale, 300_000)
+  const j = await cerrar(JUAN.id, 200_000)
+  const l = await cerrar(LAURA.id, 280_000, { motivo: 'faltante de la supervisora' })
+  metric('Juan', `esperado ${j.esperado} · dif ${j.diferencia}`)
+  metric('Laura', `esperado ${l.esperado} · dif ${l.diferencia}`)
+  assert(j.esperado === 200_000 && l.esperado === 300_000 && j.diferencia === 0 && l.diferencia === -20_000, 'C5 falló')
+})
+
+await spec('SMOKE-C6', 'Smoke', 'no autocierre: Laura intenta cerrar el propio → rechazo; Admin lo cierra', async () => {
+  await empresa()
+  await pagar(LAURA, await venta(R_NORTE), 300_000)
+  const r = await rechazo(() => closeCashSettlement({ actor: LAURA, tenantId: T, routeId: R_NORTE, userId: LAURA.id, entregado: 300_000 }))
+  const doc = await cerrar(LAURA.id, 300_000, { actor: ADMIN })
+  metric('Laura → su cuadre', r)
+  metric('Admin → cuadre de Laura', `${doc.closedByUserId} · dif ${doc.diferencia}`)
+  assert(r !== 'ACEPTADO' && doc.closedByUserId === ADMIN.id, 'C6 falló')
+})
+
 
 // ############################################################
 // INFORME

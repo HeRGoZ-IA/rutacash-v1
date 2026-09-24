@@ -6,6 +6,11 @@
 **Baseline antes:** 1008 PASS / 0 FAIL · **Después:** 1051 PASS / 0 FAIL
 **Migraciones de esquema:** ninguna (sigue en Dexie v13)
 
+> **⚠ ACTUALIZACIÓN 2026-09-24 — CAMBIO DE REGLA APROBADO POR NEGOCIO.**
+> La regla `must-choose` descrita en §2 y §4 **quedó sustituida**: el Supervisor que
+> registra un pago es SIEMPRE el responsable del efectivo, sin selector. Ver §13 al
+> final. El resto del documento se conserva como registro de la Fase 1.
+
 ---
 
 ## 1. Qué resuelve esta entrega
@@ -423,3 +428,62 @@ recálculo masivo inventaría hechos que nadie puede verificar hoy. Cuando exist
 `CashSettlement`, el primer cuadre de cada trabajador debe arrancar con
 `arrastreAnterior = 0` y una marca de inicio de modelo, igual que hizo la migración
 v12 con `createdByUserId`.
+
+
+---
+
+## 13. Cambio de regla aprobado por negocio (2026-09-24)
+
+### «Supervisor que registra pago = Supervisor responsable.»
+
+| | Regla anterior (Fase 1, §2) | Regla definitiva |
+|---|---|---|
+| Cobrador registra | responde él | responde él (sin cambio) |
+| **Supervisor registra, ruta con cobradores** | `must-choose`: elegir entre "Yo" y el Cobrador | **responde el Supervisor**, automático |
+| Supervisor registra, ruta sin cobradores | responde él (`legacy-actor`) | responde él (`actor`) |
+| Cobrador/Supervisor envía otro responsable | aceptado si era elegible | **rechazado** (`actor-owns-cash` → `COLLECTOR_INVALID`) |
+| Admin / Super Admin | 1 cobrador → preselección · varios → elegir · ninguno → legacy | **sin cambio**; nunca adquieren caja personal |
+
+`resolveResponsibleCollector` ([collectorAttribution.ts](../src/lib/collectorAttribution.ts)):
+el paso 1 es ahora *"el actor tiene caja personal → responde él"*. No consulta a los
+cobradores de la ruta, ni cuántos hay, ni si están activos. `must-choose` desapareció
+del tipo de error.
+
+`CollectorPicker`: devuelve `null` para cualquier rol con caja personal (Cobrador y
+Supervisor). Se eliminó la opción `Yo — {nombre}`. El selector solo existe para
+actores administrativos.
+
+Desembolsos (`disbursedByCollectorId = supervisor.id`) y gastos
+(`collectorId = supervisor.id`) ya seguían esta regla desde la Fase 1: sin cambios.
+
+**Autor vs responsable** se conserva: para un pago del propio Supervisor coinciden;
+siguen divergiendo en correcciones (el corrector es autor, el responsable se hereda)
+y cuando un Admin registra el cobro de un Cobrador.
+
+### Tests sustituidos por la nueva regla
+
+Solo se tocaron los tests cuya expectativa **era la regla anterior**. Cada uno quedó
+anotado en el código con `[SUSTITUIDO 2026-09-24]` o `[MODIFICADO 2026-09-24]`.
+
+| Test | Regla anterior que fijaba | Cambio |
+|---|---|---|
+| `permissions` · "ATRIB — el dinero se atribuye al cobrador indicado, no a quien digita" | Supervisor carga el cobro a A | Mismo propósito (autor ≠ responsable) con actor **Admin** |
+| `permissions` · "ATRIB-SUP — el Supervisor puede indicarse a sí mismo" | `source: 'explicit'` | `source: 'actor'` |
+| `permissions` · "ATRIB-SUP — con un cobrador… debe ELEGIR" + "…no se autoasigna por ser el actor" | `must-choose` | Sustituidos por 4 checks `SUP-RESP` (1 y 2 cobradores → Supervisor; Supervisor y Cobrador no pueden desviar) |
+| `permissions` · "ATRIB-SUP — sin cobradores… el Supervisor responde" | `source: 'legacy-actor'` | `source: 'actor'` |
+| `payments` · `COLL-ATTR-001` | Supervisor registra el cobro de A | Actor **Admin** (misma intención) |
+| `payments` · `PAY-COLL-REG-008` | Sin responsable → `COLLECTOR_REQUIRED`; con A → dinero de A | Supervisor responde automáticamente; desviar a A → `COLLECTOR_INVALID` |
+| `payments` · `ATTRIB-SUP-002` | Supervisor no se queda el dinero por registrarlo | Supervisor queda responsable sin elegir |
+| `payments` · `ATTRIB-SUP-003` | Supervisor puede atribuir al Cobrador | Supervisor **no** puede atribuir al Cobrador |
+| `payments` · `CASH-SUP-004` | Pago atribuido a Juan no cae en la caja del Supervisor | Pago del Supervisor no cae en la caja de Juan |
+| `payments` · `PAYMENT-AUTHOR-001/002` | Supervisor digita para Juan | Actor **Admin** (autor ≠ responsable sigue probado) |
+| `payments` · `SUPERVISOR-UI-004` | Selector con "Yo — {nombre}" sin preselección | El selector no se muestra a roles con caja personal |
+
+Cambios de **ruta de archivo, no de expectativa** (el código se movió):
+
+| Test | Motivo |
+|---|---|
+| `bootstrap` · `ROUTE-FREE-007` | El aviso "ruta sin Cobrador" vive ahora en `adminDashboardService.ts` (extraído de `DashboardPage` para probarlo con Dexie real). Misma aserción. |
+| `migrations` · `VERSION_ACTUAL` 13 → 14 | Constante centralizada precisamente para esto; nueva migración v14. |
+
+Ninguna otra expectativa se modificó.

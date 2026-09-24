@@ -4,7 +4,7 @@ import type {
   Tenant, Office, Route, User, Client, Sale, Installment, Payment,
   NoPaymentVisit, ExpenseCategory, Expense, CapitalMovement, Transfer,
   Withdrawal, CashboxMovement, WeeklySettlement, AuditLog, SaleRequest,
-  PartnerCashMovement, PaymentAdjustmentRequest,
+  PartnerCashMovement, PaymentAdjustmentRequest, CashSettlement,
 } from '@/models/types'
 import type {
   PlatformUser, CompanyControlRecord, SaaSPayment, ControlEvent,
@@ -31,6 +31,8 @@ export class RutaCashDB extends Dexie {
   saleRequests!: Table<SaleRequest>
   partnerCashMovements!: Table<PartnerCashMovement>
   paymentAdjustmentRequests!: Table<PaymentAdjustmentRequest>
+  /** Cuadre real por trabajador (v14). Route + persona + periodo por instantes. */
+  cashSettlements!: Table<CashSettlement>
 
   // ------------------------------------------------------------
   // PLANO DE CONTROL SaaS (NIVEL PLATAFORMA — v13)
@@ -547,6 +549,37 @@ export class RutaCashDB extends Dexie {
           ? ` AVISO: hay ${empresas.length} empresas y el Super Admin heredado solo pudo asignarse a "${destino?.nombre}". ` +
             `Las demás quedan sin Super Admin: créalos desde el portal Owner.`
           : ''),
+      )
+    })
+
+    // ============================================================
+    // v14 (CUADRE REAL POR TRABAJADOR): aditiva.
+    //
+    //   1) Tabla nueva `cashSettlements`. Índices: los que filtra el servicio
+    //      (empresa, ruta, persona, estado) y el compuesto [routeId+userId], que es
+    //      la llave de un ciclo de efectivo. SIN `officeId`: la Oficina se deriva
+    //      por la ruta, igual que en el resto del modelo.
+    //
+    //   2) NO SE INVENTA HISTÓRICO. No se crea ningún cuadre para el pasado: la
+    //      atribución anterior a la regla definitiva del Supervisor no es fiable y
+    //      reconstruir cierres sería fabricar hechos. En su lugar se marca en cada
+    //      empresa el INICIO DEL MODELO PERSONAL (`cashModelStartAt`) = instante de
+    //      esta actualización. El primer cuadre de cada trabajador parte de ahí con
+    //      arrastre 0.
+    //
+    // No se borra ni se modifica ningún pago, venta, gasto ni liquidación.
+    // ============================================================
+    this.version(14).stores({
+      cashSettlements: 'id, tenantId, routeId, userId, status, [routeId+userId]',
+    }).upgrade(async (tx) => {
+      const inicio = new Date().toISOString()
+      let marcadas = 0
+      await tx.table('tenants').toCollection().modify((t: Tenant) => {
+        if (!t.cashModelStartAt) { t.cashModelStartAt = inicio; marcadas++ }
+      })
+      console.log(
+        `[RutaCash][migración v14] Cuadre por trabajador habilitado. Inicio del modelo personal ` +
+        `fijado en ${marcadas} empresa(s) a ${inicio}. No se crearon cuadres históricos.`,
       )
     })
   }

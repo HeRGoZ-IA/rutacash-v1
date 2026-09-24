@@ -1,58 +1,76 @@
 import { useState, useEffect } from 'react'
-import { Calculator, TrendingUp, TrendingDown, Banknote, Wallet, MapPin, Landmark, Info } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import {
+  Calculator, TrendingUp, TrendingDown, Banknote, Wallet, MapPin, Landmark, Info, AlertTriangle, ChevronRight,
+} from 'lucide-react'
 import { getCollectorDailyCashSummary, getRouteFinancialSummary } from '@/services/cashboxEngine'
+import {
+  previewCashSettlement, listCashSettlementsForUser, type CashSettlementPreview,
+} from '@/services/cashSettlementService'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { useDataRevision } from '@/hooks/useDataRevision'
+import { useOpBase } from '@/hooks/useOpBase'
 import { can } from '@/lib/permissions'
-import { formatCurrency, formatDate, today } from '@/lib/formatters'
-import type { CollectorCashSummary, RouteFinancialSummary } from '@/models/types'
+import { formatCurrency, formatDate, formatDateTime, today } from '@/lib/formatters'
+import type { CashSettlement, CollectorCashSummary, RouteFinancialSummary } from '@/models/types'
 
 /**
- * MI EFECTIVO — CIERRE DEL DÍA DE LA CAJA PERSONAL.
+ * MI EFECTIVO — CICLO PERSONAL DESDE EL ÚLTIMO CUADRE (v14).
  *
- * Lo que se cuadra aquí es el EFECTIVO OPERATIVO bajo la responsabilidad de quien
- * está en sesión, NO la caja financiera de la ruta:
+ * Lo que se muestra aquí es el EFECTIVO OPERATIVO bajo la responsabilidad de quien
+ * está en sesión, NO la caja financiera de la ruta. Desde el cuadre por trabajador
+ * ya no es "lo de hoy": es todo lo ocurrido desde su último cuadre vigente, más el
+ * faltante que quedó pendiente en él:
  *
- *     recaudado por él − desembolsado por él − sus gastos = efectivo a entregar
+ *     faltante pendiente + recaudado − desembolsado − gastos = efectivo a entregar
+ *
+ * Lo calcula `previewCashSettlement`, el MISMO servicio que usará quien cierre el
+ * cuadre: el trabajador y quien lo cuadra ven la misma cifra. "Mi recaudo hoy" se
+ * conserva aparte como KPI diario (`getCollectorDailyCashSummary`).
  *
  * DOS DINEROS DISTINTOS, DOS BLOQUES DISTINTOS (Fase 1):
- * La pantalla se llamaba "Mi caja" y, justo debajo del total personal, mostraba
- * "Base actual" de la ruta. Dos cifras de naturaleza completamente distinta bajo un
- * mismo título posesivo: el Supervisor podía leer la Base de la ruta como si fuera
- * dinero suyo. Ahora la separación es explícita:
- *
  *   · "Mi efectivo"     → lo que ESTA persona debe entregar. Su responsabilidad.
  *   · "Caja de la Ruta" → información financiera de la RUTA. No es su dinero.
  *
  * El CAPITAL de la ruta no se muestra al Cobrador y —más importante— ni siquiera se
- * consulta: `getCollectorDailyCashSummary` no lee `capitalMovements`. El bloque de
- * ruta solo se calcula para quien tiene `cashbox.viewRoute` (Supervisor,
- * Administrador, Super Admin), porque esta pantalla es compartida por la capa
- * operativa. Ocultar la tarjeta no habría bastado: el dato no se pide.
+ * consulta: el motor personal no lee `capitalMovements`. El bloque de ruta solo se
+ * calcula para quien tiene `cashbox.viewRoute` (Supervisor, Administrador, Super
+ * Admin). Ocultar la tarjeta no habría bastado: el dato no se pide.
  */
 export default function CollectorCashClosePage() {
   const { user } = useAuth()
-  const { currency } = useTenant()
+  const { currency, tenantId } = useTenant()
   const { activeRouteId } = useCollectorRoute()
-  const [cash, setCash] = useState<CollectorCashSummary | null>(null)
+  const base = useOpBase()
+  const [ciclo, setCiclo] = useState<CashSettlementPreview | null>(null)
+  const [hoy, setHoy] = useState<CollectorCashSummary | null>(null)
+  const [misCuadres, setMisCuadres] = useState<CashSettlement[]>([])
   const [route, setRoute] = useState<RouteFinancialSummary | null>(null)
   const [loading, setLoading] = useState(true)
 
   const routeId = activeRouteId ?? user?.routeId ?? null
   // Solo quien puede ver la caja FINANCIERA de la ruta obtiene ese bloque.
   const verCajaRuta = can(user, 'cashbox.viewRoute', { routeId: routeId ?? undefined })
+  // El Supervisor cuadra a OTROS trabajadores de la ruta desde aquí.
+  const cuadraOtros = can(user, 'cashSettlement.close', { routeId: routeId ?? undefined, tenantId })
 
-  // Un cobro, desembolso o gasto confirmado en esta u otra pestaña recalcula.
+  // Un cobro, desembolso, gasto o cuadre confirmado en esta u otra pestaña recalcula.
   const revision = useDataRevision()
   useEffect(() => { load(revision > 0) }, [user, routeId, verCajaRuta, revision])
 
   async function load(silent = false) {
     if (!user || !routeId) { setLoading(false); return }
     if (!silent) setLoading(true)
-    const resumen = await getCollectorDailyCashSummary({ routeId, collectorId: user.id, fecha: today() })
-    setCash(resumen)
+    try {
+      setCiclo(await previewCashSettlement({ actor: user, tenantId: user.tenantId, routeId, userId: user.id }))
+    } catch {
+      setCiclo(null)
+    }
+    setHoy(await getCollectorDailyCashSummary({ routeId, collectorId: user.id, fecha: today() }))
+    setMisCuadres((await listCashSettlementsForUser(user, user.tenantId))
+      .filter(c => c.userId === user.id && c.routeId === routeId).slice(0, 5))
     // Fail-closed: si no tiene la capacidad, el dato financiero NO se pide.
     setRoute(verCajaRuta ? await getRouteFinancialSummary(routeId) : null)
     setLoading(false)
@@ -62,10 +80,7 @@ export default function CollectorCashClosePage() {
     return <div className="flex justify-center py-12"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
   }
 
-  const recaudado = cash?.recaudado ?? 0
-  const desembolsado = cash?.desembolsado ?? 0
-  const gastos = cash?.gastos ?? 0
-  const aEntregar = cash?.efectivoAEntregar ?? 0
+  const money = (n: number) => formatCurrency(n, currency)
 
   return (
     <div className="p-4 space-y-6">
@@ -73,22 +88,61 @@ export default function CollectorCashClosePage() {
       <section className="space-y-4">
         <div>
           <h1 className="font-bold text-gray-900">Mi efectivo</h1>
-          <p className="text-xs text-gray-500">{formatDate(today())} · dinero bajo tu responsabilidad</p>
+          <p className="text-xs text-gray-500">
+            Dinero bajo tu responsabilidad
+            {ciclo && <> desde {ciclo.origenDesde === 'ultimo-cierre' ? 'tu último cuadre' : 'el inicio del modelo personal'} ({formatDateTime(ciclo.desde)})</>}
+          </p>
         </div>
 
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-card divide-y divide-gray-50">
-          <Row icon={<TrendingUp className="w-4 h-4 text-emerald-600" />} label="Recaudado por ti" value={`+${formatCurrency(recaudado, currency)}`} color="text-emerald-600" />
-          <Row icon={<Banknote className="w-4 h-4 text-primary-600" />} label="Desembolsado por ti" value={`-${formatCurrency(desembolsado, currency)}`} color="text-primary-600" />
-          <Row icon={<TrendingDown className="w-4 h-4 text-red-500" />} label="Tus gastos" value={`-${formatCurrency(gastos, currency)}`} color="text-red-500" />
-        </div>
+        {ciclo && (
+          <>
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-card divide-y divide-gray-50">
+              {ciclo.arrastreAnterior > 0 && (
+                <Row icon={<AlertTriangle className="w-4 h-4 text-amber-600" />} label="Faltante pendiente del cuadre anterior" value={`+${money(ciclo.arrastreAnterior)}`} color="text-amber-600" />
+              )}
+              <Row icon={<TrendingUp className="w-4 h-4 text-emerald-600" />} label="Recaudado por ti" value={`+${money(ciclo.recaudado)}`} color="text-emerald-600" />
+              <Row icon={<Banknote className="w-4 h-4 text-primary-600" />} label="Desembolsado por ti" value={`-${money(ciclo.desembolsado)}`} color="text-primary-600" />
+              <Row icon={<TrendingDown className="w-4 h-4 text-red-500" />} label="Tus gastos" value={`-${money(ciclo.gastos)}`} color="text-red-500" />
+            </div>
 
-        <div className="bg-gradient-to-r from-primary-600 to-primary-800 rounded-2xl p-5 text-white">
-          <div className="flex items-center gap-2 text-primary-200 text-sm">
-            <Calculator className="w-4 h-4" /> Efectivo a entregar
+            <div className="bg-gradient-to-r from-primary-600 to-primary-800 rounded-2xl p-5 text-white">
+              <div className="flex items-center gap-2 text-primary-200 text-sm">
+                <Calculator className="w-4 h-4" /> Efectivo a entregar
+              </div>
+              <p className="text-3xl font-bold mt-1">{money(ciclo.esperado)}</p>
+              <p className="text-primary-200 text-xs mt-2">Faltante pendiente + recaudado − desembolsado − gastos, desde tu último cuadre</p>
+            </div>
+          </>
+        )}
+
+        {/* KPI DIARIO — separado a propósito de "Mi efectivo". */}
+        {hoy && (
+          <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3">
+            <span className="text-sm text-gray-600">Mi recaudo hoy · {formatDate(today())}</span>
+            <span className="text-sm font-bold text-emerald-600">{money(hoy.recaudado)}</span>
           </div>
-          <p className="text-3xl font-bold mt-1">{formatCurrency(aEntregar, currency)}</p>
-          <p className="text-primary-200 text-xs mt-2">Recaudado − desembolsado − gastos</p>
-        </div>
+        )}
+
+        {misCuadres.length > 0 && (
+          <div className="space-y-1.5">
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Mis últimos cuadres</h2>
+            {misCuadres.map(c => (
+              <div key={c.id} className="flex items-center justify-between rounded-lg bg-white border border-gray-100 px-3 py-2 text-xs">
+                <span className="text-gray-600">{formatDateTime(c.closedAt)}{c.status === 'reabierta' ? ' · reabierto' : ''}</span>
+                <span className={c.diferencia < 0 ? 'font-semibold text-red-600' : c.diferencia > 0 ? 'font-semibold text-amber-600' : 'font-semibold text-emerald-600'}>
+                  {c.diferencia === 0 ? 'Exacto' : c.diferencia < 0 ? `Faltante ${money(c.faltante)}` : `Sobrante ${money(c.sobrante)}`}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {cuadraOtros && (
+          <Link to={`${base}/worker-settlements`}
+            className="flex items-center justify-between rounded-xl border border-primary-100 bg-primary-50 px-4 py-3 text-sm font-medium text-primary-700">
+            Cuadrar a otro trabajador de la ruta <ChevronRight className="w-4 h-4" />
+          </Link>
+        )}
       </section>
 
       {/* ============ BLOQUE 2 — CAJA DE LA RUTA (NO es dinero del usuario) ======= */}

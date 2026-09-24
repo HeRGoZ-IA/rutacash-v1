@@ -105,7 +105,7 @@ async function crearBaseV1(): Promise<void> {
  * nueva no obligue a perseguir números sueltos por todo el archivo: lo que estos
  * casos comprueban es que la base llega al esquema actual, no que sea la 11.
  */
-const VERSION_ACTUAL = 13
+const VERSION_ACTUAL = 14
 
 /** Abre la base con el esquema ACTUAL de producción (dispara v2 → actual). */
 async function abrirActual() {
@@ -1704,6 +1704,129 @@ await spec('PLATFORM-MIG-007', 'Migración v13', 'no se pierde ni un dato operat
   assert(await actual.saasPayments.count() === 0, 'no se inventa ningún cobro')
   assert(await actual.controlEvents.count() === 0, 'no se inventa ningún evento pasado')
   actual.close()
+})
+
+// ############################################################
+// GRUPO — v14: CUADRE REAL POR TRABAJADOR (Dexie real)
+// ------------------------------------------------------------
+// Se fabrica una base v13 REAL (esquema idéntico al de producción en la v13, sin
+// `cashSettlements`) con datos operativos, y se abre con el código actual para que
+// Dexie ejecute SOLO el `upgrade()` de la v14.
+// ############################################################
+
+/** Esquema vigente, tabla por tabla, leído del propio motor (sin copiarlo a mano). */
+async function esquemaActual(): Promise<Record<string, string>> {
+  await Dexie.delete(DB_NAME)
+  const { RutaCashDB } = await import('../src/lib/db')
+  const tmp = new RutaCashDB()
+  await tmp.open()
+  const out: Record<string, string> = {}
+  for (const t of tmp.tables) {
+    out[t.name] = [t.schema.primKey.src, ...t.schema.indexes.map(i => i.src)].join(', ')
+  }
+  tmp.close()
+  await Dexie.delete(DB_NAME)
+  return out
+}
+
+async function crearBaseV13ConOperacion(): Promise<void> {
+  const esquema = await esquemaActual()
+  delete esquema.cashSettlements
+  const v13 = new Dexie(DB_NAME)
+  v13.version(13).stores(esquema)
+  await v13.open()
+  await v13.table('tenants').add({ id: 't-1', nombre: 'Caribe', email: 'c@c.com', status: 'activa', plan: 'profesional', pais: 'Colombia', moneda: 'COP', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '' })
+  await v13.table('routes').add({ id: 'r-1', tenantId: 't-1', nombre: 'Norte', codigo: 'N', status: 'activa' })
+  await v13.table('users').bulkAdd([
+    { id: 'u-cob', tenantId: 't-1', email: 'cob@c.com', nombre: 'Juan', rol: 'cobrador', status: 'activo', authorizedRouteIds: ['r-1'] },
+    { id: 'u-sup', tenantId: 't-1', email: 'sup@c.com', nombre: 'Laura', rol: 'supervisor', status: 'activo', authorizedRouteIds: ['r-1'] },
+  ])
+  await v13.table('sales').add({ id: 's-1', tenantId: 't-1', routeId: 'r-1', clientId: 'c-1', status: 'activa', saldo: 500, valorVenta: 1000, disbursementStatus: 'desembolsado', disbursedByCollectorId: 'u-cob', fechaDesembolso: '2026-09-01', createdAt: '2026-09-01' })
+  await v13.table('payments').bulkAdd([
+    { id: 'p-1', tenantId: 't-1', saleId: 's-1', clientId: 'c-1', routeId: 'r-1', collectorId: 'u-cob', createdByUserId: 'u-cob', valor: 300, fecha: '2026-09-20', syncStatus: 'synced', createdAt: '2026-09-20T10:00:00.000Z', state: 'active' },
+    { id: 'p-2', tenantId: 't-1', saleId: 's-1', clientId: 'c-1', routeId: 'r-1', collectorId: 'u-sup', createdByUserId: 'u-sup', valor: 200, fecha: '2026-09-21', syncStatus: 'synced', createdAt: '2026-09-21T10:00:00.000Z', state: 'active' },
+  ])
+  await v13.table('expenses').add({ id: 'e-1', tenantId: 't-1', routeId: 'r-1', categoryId: 'cat', userId: 'u-cob', collectorId: 'u-cob', valor: 50, fecha: '2026-09-20', syncStatus: 'synced', createdAt: '2026-09-20T11:00:00.000Z' })
+  await v13.table('weeklySettlements').add({ id: 'ws-1', tenantId: 't-1', routeId: 'r-1', semanaInicio: '2026-09-14', semanaFin: '2026-09-19', status: 'cerrada', cobros: 0, saldoFinal: 0, createdAt: '' })
+  v13.close()
+}
+
+await spec('MIG-CASH-001', 'Migración v14', 'v13 → v14 preserva todos los datos', async () => {
+  await crearBaseV13ConOperacion()
+  const antes = new Dexie(DB_NAME)
+  await antes.open()
+  metric('versión de partida', antes.verno)
+  const pagosAntes = JSON.stringify(await antes.table('payments').toArray())
+  const ventasAntes = JSON.stringify(await antes.table('sales').toArray())
+  const gastosAntes = JSON.stringify(await antes.table('expenses').toArray())
+  antes.close()
+  assert(antes.verno === 13, 'la base de partida debía ser v13')
+
+  const actual = await abrirActual()
+  metric('versión alcanzada', actual.verno)
+  const iguales = JSON.stringify(await actual.payments.toArray()) === pagosAntes
+    && JSON.stringify(await actual.sales.toArray()) === ventasAntes
+    && JSON.stringify(await actual.expenses.toArray()) === gastosAntes
+  metric('pagos, ventas y gastos idénticos', iguales)
+  metric('liquidaciones', await actual.weeklySettlements.count())
+  assert(actual.verno === 14, `debía quedar en v14, quedó en v${actual.verno}`)
+  assert(iguales, 'la migración v14 modificó movimientos')
+  assert(await actual.weeklySettlements.count() === 1 && await actual.users.count() === 2, 'se perdieron datos')
+  actual.close()
+})
+
+await spec('MIG-CASH-002', 'Migración v14', 'la tabla cashSettlements existe y admite escrituras', async () => {
+  await crearBaseV13ConOperacion()
+  const actual = await abrirActual()
+  const nombres = actual.tables.map(t => t.name)
+  metric('tiene cashSettlements', nombres.includes('cashSettlements'))
+  await actual.cashSettlements.add({ id: 'cs-x', tenantId: 't-1', routeId: 'r-1', userId: 'u-cob', status: 'cerrada' } as never)
+  metric('escritura de prueba', await actual.cashSettlements.count())
+  assert(nombres.includes('cashSettlements'), 'no existe la tabla cashSettlements')
+  actual.close()
+})
+
+await spec('MIG-CASH-003', 'Migración v14', 'índices: empresa, ruta, persona, estado y [routeId+userId]; sin officeId', async () => {
+  await crearBaseV13ConOperacion()
+  const actual = await abrirActual()
+  const idx = actual.cashSettlements.schema.indexes.map(i => i.src)
+  metric('índices', idx.join(', '))
+  for (const k of ['tenantId', 'routeId', 'userId', 'status', '[routeId+userId]']) {
+    assert(idx.includes(k), `falta el índice ${k}`)
+  }
+  assert(!idx.includes('officeId'), 'el cuadre no debe copiar officeId')
+  await actual.cashSettlements.bulkAdd([
+    { id: 'a', tenantId: 't-1', routeId: 'r-1', userId: 'u-cob', status: 'cerrada' },
+    { id: 'b', tenantId: 't-1', routeId: 'r-1', userId: 'u-sup', status: 'cerrada' },
+  ] as never[])
+  const porPar = await actual.cashSettlements.where('[routeId+userId]').equals(['r-1', 'u-cob']).toArray()
+  metric('consulta por [routeId+userId]', porPar.map(x => x.id).join(','))
+  assert(porPar.length === 1 && porPar[0].id === 'a', 'el índice compuesto no filtra por ruta + persona')
+  actual.close()
+})
+
+await spec('MIG-CASH-004', 'Migración v14', 'NO crea cuadres históricos: marca el inicio del modelo personal', async () => {
+  await crearBaseV13ConOperacion()
+  const antesDeMigrar = new Date().toISOString()
+  const actual = await abrirActual()
+  const tenant = await actual.tenants.get('t-1')
+  metric('cuadres creados por la migración', await actual.cashSettlements.count())
+  metric('cashModelStartAt', tenant?.cashModelStartAt)
+  assert(await actual.cashSettlements.count() === 0, 'la migración inventó cuadres históricos')
+  assert(Boolean(tenant?.cashModelStartAt) && tenant!.cashModelStartAt! >= antesDeMigrar,
+    'el inicio del modelo personal debe ser el instante de la migración')
+  actual.close()
+  // Y los pagos anteriores (20 y 21 de septiembre) quedan FUERA del primer ciclo.
+  const { RutaCashDB } = await import('../src/lib/db')
+  const db14 = new RutaCashDB()
+  const { getCollectorCashSummary } = await import('../src/services/cashboxEngine')
+  const r = await getCollectorCashSummary({
+    routeId: 'r-1', userId: 'u-cob', desde: tenant!.cashModelStartAt!, hasta: new Date(Date.now() + 1000).toISOString(),
+    modelStart: tenant!.cashModelStartAt!,
+  }, db14)
+  metric('primer ciclo de Juan (recaudado / gastos)', `${r.recaudado} / ${r.gastos}`)
+  assert(r.recaudado === 0 && r.gastos === 0, 'el histórico previo a v14 entró al primer ciclo')
+  db14.close()
 })
 
 // ############################################################

@@ -4,6 +4,9 @@
 import { db } from '@/lib/db'
 import { effectivePayments } from '@/lib/paymentState'
 import { today as todayLocal } from '@/lib/formatters'
+import {
+  personalPaymentLedger, disbursementInstant, expenseInstant, inCycle,
+} from '@/lib/cashSettlementRules'
 import type {
   CashboxSummary, RouteFinancialSummary, CollectorCashSummary,
   CapitalMovement, Expense, Payment, Sale, Transfer, Withdrawal,
@@ -278,6 +281,63 @@ export async function getCollectorDailyCashSummary(
     recaudado, desembolsado, gastos,
     efectivoAEntregar: recaudado - desembolsado - gastos,
   }
+}
+
+// ============================================================
+// CAJA PERSONAL POR RANGO DE INSTANTES (cuadre por trabajador, v14)
+// ------------------------------------------------------------
+// Misma superficie de datos que la caja diaria (pagos, ventas, gastos: NUNCA
+// capital, transferencias ni retiros) y el mismo criterio de responsable, pero el
+// periodo es (desde, hasta] en INSTANTES ISO: el ciclo de efectivo de una persona
+// empieza en su último cuadre, no a medianoche.
+//
+// `getCollectorDailyCashSummary` se conserva intacta: "Mi recaudo hoy" sigue siendo
+// un KPI diario. Esta función responde otra pregunta: "¿cuánto efectivo tiene esta
+// persona desde su último cuadre?".
+// ============================================================
+export interface CollectorCashRangeSummary {
+  routeId: string
+  userId: string
+  desde: string
+  hasta: string
+  recaudado: number
+  desembolsado: number
+  gastos: number
+  /** recaudado − desembolsado − gastos (SIN arrastre). */
+  neto: number
+}
+
+export async function getCollectorCashSummary(
+  params: { routeId: string; userId: string; desde: string; hasta: string; modelStart?: string },
+  database: CollectorCashDatabase = db,
+): Promise<CollectorCashRangeSummary> {
+  const { routeId, userId, desde, hasta } = params
+  const vacio: CollectorCashRangeSummary = { routeId, userId, desde, hasta, recaudado: 0, desembolsado: 0, gastos: 0, neto: 0 }
+  // Fail-closed: sin persona, sin ruta o con un rango vacío no se calcula nada.
+  if (!routeId || !userId || !(hasta > desde)) return vacio
+
+  const [payments, sales, expenses] = await Promise.all([
+    database.payments.where('routeId').equals(routeId).toArray(),
+    database.sales.where('routeId').equals(routeId).toArray(),
+    database.expenses.where('routeId').equals(routeId).toArray(),
+  ])
+
+  // Libro con signo, anclado al inicio del modelo (ver `personalPaymentLedger`).
+  const recaudado = personalPaymentLedger(payments, params.modelStart ?? '')
+    .filter(x => x.payment.collectorId === userId && inCycle(x.instante, desde, hasta))
+    .reduce((sum, x) => sum + x.aporte, 0)
+
+  const desembolsado = sales
+    .filter(s => s.disbursementStatus !== 'pendiente'
+      && s.disbursedByCollectorId === userId
+      && inCycle(disbursementInstant(s), desde, hasta))
+    .reduce((sum, s) => sum + s.valorVenta, 0)
+
+  const gastos = expenses
+    .filter(e => (e.collectorId ?? e.userId) === userId && inCycle(expenseInstant(e), desde, hasta))
+    .reduce((sum, e) => sum + e.valor, 0)
+
+  return { routeId, userId, desde, hasta, recaudado, desembolsado, gastos, neto: recaudado - desembolsado - gastos }
 }
 
 /**
