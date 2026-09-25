@@ -155,3 +155,19 @@ pestañas: Dashboard $0 → $300.000 sin F5), regla de domingo, sesión por pest
   trabajadores, backend/cross-device: Fase 3 y posteriores.
 - Teclado virtual: los formularios usan el flujo nativo del navegador (el campo con foco
   se desplaza a la vista); no se añadió gestión propia porque el patrón actual lo permite.
+
+---
+
+## 10. Autoridad comercial del Supervisor (2026-09-24)
+
+Se añadieron las funciones comerciales del Supervisor **sin romper la paridad**:
+
+| Función | Dónde | Guarda |
+|---|---|---|
+| Crédito directo | La misma pantalla de "Nueva venta": el Supervisor ve **"Crear venta"** y el Cobrador ve **"Enviar solicitud de venta"** | `sale.createDirect` |
+| Autorizaciones de su ruta activa | Chip **"Autorizaciones"** con globo en Inicio → `/supervisor/authorizations` (página compartida `CollectorAuthorizationsPage`) | `authorization.access` / `approve` / `reject` / `modifyConditions` / `phoneConfirm` |
+
+- **Barra inferior:** sigue con 5 ítems y es igual para ambos roles.
+- **Cobrador:** no ve el chip; si abre la URL, recibe "sin acceso".
+- **Sin `/admin/*` y sin páginas duplicadas** (`MOBILE-PARITY-011`).
+- **Detalle completo:** `SUPERVISOR_MOVIL_AUTORIDAD_COMERCIAL_2026-09.md`.

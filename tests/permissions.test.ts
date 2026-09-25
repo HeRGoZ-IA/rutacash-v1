@@ -81,7 +81,10 @@ const secretario = mkUser('secretario', { authorizedRouteIds: ['r1'] })
 check('superadmin puede venta directa', can(superadmin, 'sale.createDirect', { routeId: 'r1' }))
 check('admin puede venta directa (ruta autorizada)', can(admin, 'sale.createDirect', { routeId: 'r1' }))
 check('cobrador NO puede venta directa', !can(cobrador, 'sale.createDirect', { routeId: 'r1' }))
-check('supervisor NO puede venta directa', !can(supervisor, 'sale.createDirect', { routeId: 'r1' }))
+// [MODIFICADO 2026-09-24 — autoridad comercial del Supervisor] Regla anterior: el Supervisor NO
+// hacía venta directa. Regla aprobada: otorga crédito directo en SUS rutas.
+check('supervisor puede venta directa en su ruta', can(supervisor, 'sale.createDirect', { routeId: 'r1' }))
+check('supervisor NO puede venta directa en ruta ajena', !can(supervisor, 'sale.createDirect', { routeId: 'r9' }))
 check('secretario NO puede venta directa', !can(secretario, 'sale.createDirect', { routeId: 'r1' }))
 check('cobrador puede crear solicitud', can(cobrador, 'sale.createRequest', { routeId: 'r1' }))
 check('supervisor puede crear solicitud', can(supervisor, 'sale.createRequest', { routeId: 'r1' }))
@@ -164,17 +167,22 @@ check('supervisor: registra pago', can(supervisor, 'payment.register', { routeId
 check('supervisor: registra gasto', can(supervisor, 'expense.register', { routeId: 'r1' }))
 check('supervisor: hace cuadre', can(supervisor, 'cashbox.dailyClose', { routeId: 'r1' }))
 check('supervisor: exporta reportes', can(supervisor, 'report.export'))
-check('supervisor: NO venta directa', !can(supervisor, 'sale.createDirect', { routeId: 'r1' }))
+// [MODIFICADO 2026-09-24 — autoridad comercial del Supervisor] antes: NO venta directa.
+check('supervisor: venta directa en su ruta', can(supervisor, 'sale.createDirect', { routeId: 'r1' }))
 check('supervisor: NO corrige pago', !can(supervisor, 'payment.correct', { routeId: 'r1' }))
 check('supervisor: NO anula pago', !can(supervisor, 'payment.reverse', { routeId: 'r1' }))
 check('supervisor: NO corrige gasto', !can(supervisor, 'expense.correct', { routeId: 'r1' }))
-check('supervisor: NO aprueba', !can(supervisor, 'authorization.approve', { routeId: 'r1' }))
+// [MODIFICADO 2026-09-24 — autoridad comercial del Supervisor] antes: NO aprueba.
+check('supervisor: aprueba en su ruta', can(supervisor, 'authorization.approve', { routeId: 'r1' }))
+check('supervisor: NO aprueba en ruta ajena', !can(supervisor, 'authorization.approve', { routeId: 'r9' }))
 check('supervisor: NO indicadores consolidados', !can(supervisor, 'report.viewConsolidated'))
 check('supervisor: NO accede a ruta ajena', !can(supervisor, 'payment.register', { routeId: 'r9' }))
 
 // --- CAPACIDADES INCOMPATIBLES: grantedCapabilities NO habilita lo prohibido ---
 const supMalicioso = mkUser('supervisor', { authorizedRouteIds: ['r1'], grantedCapabilities: ['sale.createDirect', 'payment.correct', 'user.create'] as Capability[] })
-check('grant NO habilita venta directa en Supervisor', !can(supMalicioso, 'sale.createDirect', { routeId: 'r1' }))
+// [MODIFICADO 2026-09-24 — autoridad comercial del Supervisor] la venta directa ya es capacidad BASE del
+// Supervisor; la intención anti-manipulación se conserva con capacidades que sigue sin tener.
+check('grant NO habilita anular pagos en Supervisor', !can(mkUser('supervisor', { authorizedRouteIds: ['r1'], grantedCapabilities: ['payment.reverse'] as Capability[] }), 'payment.reverse', { routeId: 'r1' }))
 check('grant NO habilita corregir pago en Supervisor', !can(supMalicioso, 'payment.correct', { routeId: 'r1' }))
 check('grant NO habilita crear usuarios en Supervisor', !can(supMalicioso, 'user.create', { targetRole: 'cobrador' }))
 const cobMalicioso = mkUser('cobrador', { authorizedRouteIds: ['r1'], grantedCapabilities: ['sale.createDirect'] as Capability[] })
@@ -188,7 +196,9 @@ check('grant NO habilita registrar pago en Secretario', !can(secMalicioso, 'paym
 check('grant NO habilita ver caja en Secretario', !can(secMalicioso, 'cashbox.viewRoute', { routeId: 'r1' }))
 
 // --- isCapabilityCompatible / sanitize / delegable ---
-check('incompatible: supervisor + sale.createDirect', !isCapabilityCompatible('supervisor', 'sale.createDirect'))
+// [MODIFICADO 2026-09-24 — autoridad comercial del Supervisor] antes: venta directa incompatible con Supervisor.
+check('incompatible: supervisor + capital.manage', !isCapabilityCompatible('supervisor', 'capital.manage'))
+check('incompatible: cobrador + sale.createDirect', !isCapabilityCompatible('cobrador', 'sale.createDirect'))
 check('incompatible: socio + payment.register', !isCapabilityCompatible('socio', 'payment.register'))
 check('compatible: cobrador + report.viewPortfolio', isCapabilityCompatible('cobrador', 'report.viewPortfolio'))
 check('sanitize elimina incompatibles', sanitizeGrantedCapabilities('supervisor', ['sale.createDirect', 'report.export'] as Capability[]).every(c => c !== 'sale.createDirect'))

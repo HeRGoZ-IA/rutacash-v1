@@ -12,6 +12,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { can } from '@/lib/permissions'
+import { usePendingRouteSaleRequests } from '@/hooks/usePendingBadges'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import { isSaleDueToday, isSaleDisbursed } from '@/services/installmentEngine'
 import { effectivePayments } from '@/lib/paymentState'
@@ -27,6 +28,10 @@ export default function CollectorHomePage() {
   const [route, setRoute] = useState<Route | null>(null)
   const [stats, setStats] = useState({ pendientes: 0, cobradoHoy: 0, activos: 0, porDesembolsar: 0, pendientesSync: 0 })
   const [loading, setLoading] = useState(true)
+  // AUTORIDAD COMERCIAL (Supervisor): solicitudes pendientes de la RUTA ACTIVA que
+  // puede resolver. Reactivo y con el mismo criterio que la lista (badge = lista).
+  const puedeAutorizar = Boolean(activeRouteId) && can(user, 'authorization.access', { routeId: activeRouteId!, tenantId })
+  const pendientesAutorizar = usePendingRouteSaleRequests(user, tenantId, activeRouteId)
 
   useEffect(() => { if (activeRouteId) load(activeRouteId) }, [activeRouteId, user?.id])
 
@@ -135,6 +140,11 @@ export default function CollectorHomePage() {
           <Chip label="Nuevo cliente" to={`${base}/clients/new`} />
           <Chip label="Nueva venta" to={`${base}/new-sale`} />
           <Chip label="Desembolsos" to={`${base}/disbursements`} badge={stats.porDesembolsar} />
+          {/* FUNCIÓN ADICIONAL gobernada por capacidad: revisar y resolver las
+              solicitudes de los Cobradores de ESTA ruta, desde el teléfono. */}
+          {puedeAutorizar && (
+            <Chip label="Autorizaciones" to={`${base}/authorizations`} badge={pendientesAutorizar} />
+          )}
         </div>
       </div>
 

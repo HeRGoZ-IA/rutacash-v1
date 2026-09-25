@@ -182,12 +182,19 @@ const SOCIO_CAPS: Capability[] = [
   'password.changeOwn',
 ]
 
-// Supervisor: operativo sobre rutas autorizadas. NO venta directa, NO corrige
-// pagos, NO aprueba, NO configuración, NO indicadores consolidados.
+// Supervisor: experiencia MÓVIL del Cobrador + AUTORIDAD COMERCIAL sobre sus rutas
+// autorizadas (decisión de negocio 2026-09-24): otorga crédito directo y revisa,
+// aprueba, rechaza, modifica condiciones y confirma por teléfono las solicitudes de
+// los Cobradores. Todo acotado por RUTA (`ROUTE_SCOPED`). Sigue SIN corregir pagos,
+// SIN configuración, SIN usuarios/rutas, SIN capital/transferencias/caja de socios,
+// SIN indicadores consolidados y SIN cerrar la semana.
 const SUPERVISOR_CAPS: Capability[] = [
   'route.viewAssigned',
   'client.create', 'client.view',
   'sale.viewActive', 'sale.viewHistory', 'sale.createRequest', 'sale.confirmDisbursement',
+  'sale.createDirect',
+  'authorization.access', 'authorization.approve', 'authorization.reject',
+  'authorization.modifyConditions', 'authorization.phoneConfirm',
   'payment.register', 'payment.viewHistory',
   'expense.register',
   'cashbox.viewRoute', 'cashbox.viewOwnCollection', 'cashbox.dailyClose',
@@ -271,8 +278,8 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     'platform.access', 'company.create', 'company.edit', 'company.suspend',
   ],
   supervisor: [
-    'sale.createDirect',
-    'authorization.approve', 'authorization.reject', 'authorization.modifyConditions', 'authorization.phoneConfirm',
+    // (2026-09-24) Venta directa y autorizaciones YA NO son incompatibles: forman
+    // parte de la autoridad comercial del Supervisor en sus rutas.
     'payment.correct', 'payment.reverse', 'payment.approveAdjustment',
     'expense.correct',
     'transfer.create', 'partnerCash.viewAll', 'partnerCash.registerMovement',

@@ -87,7 +87,7 @@ export default function SaleAuthorizationsPage() {
       await logAction({ tenantId, userId: user.id, action: 'CREATE_SALE', entityType: 'SaleRequest', entityId: req.id, descripcion: `Solicitud de venta aprobada (${formatCurrency(req.amount, currency)})` })
       toast.success('Solicitud aprobada. Venta creada, pendiente de desembolso por el cobrador.')
       await load()
-    } catch { toast.error('Error al aprobar la solicitud') } finally { setRowWorkingId(null) }
+    } catch (e) { toast.error(e instanceof Error && e.name.startsWith('SaleR') ? e.message : 'Error al aprobar la solicitud') } finally { setRowWorkingId(null) }
   }
 
   // Rechazo rápido: abre el modal directamente en modo "rechazar" para pedir el motivo.
@@ -105,7 +105,7 @@ export default function SaleAuthorizationsPage() {
       toast.success('Solicitud aprobada. Venta creada, pendiente de desembolso por el cobrador.')
       setDetail(null)
       await load()
-    } catch { toast.error('Error al aprobar la solicitud') } finally { setWorking(false) }
+    } catch (e) { toast.error(e instanceof Error && e.name.startsWith('SaleR') ? e.message : 'Error al aprobar la solicitud') } finally { setWorking(false) }
   }
 
   async function handleReject() {
@@ -119,7 +119,7 @@ export default function SaleAuthorizationsPage() {
       toast.success('Solicitud rechazada')
       setDetail(null)
       await load()
-    } catch { toast.error('Error al rechazar la solicitud') } finally { setWorking(false) }
+    } catch (e) { toast.error(e instanceof Error && e.name.startsWith('SaleR') ? e.message : 'Error al rechazar la solicitud') } finally { setWorking(false) }
   }
 
   const filtered = filter ? requests.filter(r => r.status === filter) : requests

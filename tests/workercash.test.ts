@@ -16,7 +16,7 @@
 // Semántica convencional: cualquier caso fallido → exit 1.
 // ============================================================
 import 'fake-indexeddb/auto'
-import Dexie from 'dexie'
+import Dexie, { liveQuery } from 'dexie'
 import { db } from '../src/lib/db'
 import { addExpenseStamped } from '../src/services/expenseService'
 import { registerPayment } from '../src/services/paymentService'
@@ -31,14 +31,17 @@ import { effectivePayments } from '../src/lib/paymentState'
 import { filterAccessibleRoutes } from '../src/lib/permissions'
 import { hasPersonalCashbox } from '../src/lib/collectorAttribution'
 import { subscribeDataChanges, mutatedTables } from '../src/lib/dataRevision'
-import { confirmDisbursement } from '../src/services/saleRequestService'
+import {
+  confirmDisbursement, createDirectSale, createSaleRequest, approveSaleRequest, rejectSaleRequest,
+  listPendingSaleRequestsForRoute, countPendingSaleRequestsForRoute, countPendingSaleRequestsForUser, type SaleInputs,
+} from '../src/services/saleRequestService'
 import {
   previewCashSettlement, closeCashSettlement, reopenCashSettlement, getPendingShortagesForUser, waitClockPast,
 } from '../src/services/cashSettlementService'
 import { closeCycleBlockedReason, inCycle } from '../src/lib/cashSettlementRules'
 import { can } from '../src/lib/permissions'
 import { today, getWeekStart, getWeekEnd } from '../src/lib/formatters'
-import type { CashSettlement, Payment, Sale, User } from '../src/models/types'
+import type { CashSettlement, Client, Payment, Sale, User } from '../src/models/types'
 import * as fs from 'node:fs'
 
 // ============================================================
@@ -1260,6 +1263,446 @@ await spec('MOBILE-PARITY-010', 'Paridad móvil', 'ninguna pantalla operativa ex
   metric('una sola ruta entra directo (sin pasar por la selección)', unaRuta)
   assert(conAdmin.length === 0, `hay enlaces operativos a /admin: ${conAdmin.join(', ')}`)
   assert(unaRuta, 'con una sola ruta se vuelve a forzar la pantalla de selección')
+})
+
+// ############################################################
+// AUTORIDAD COMERCIAL DEL SUPERVISOR — crédito directo + autorizaciones
+// ------------------------------------------------------------
+// Servicios de producción sobre Dexie real. Laura (Supervisora) tiene Norte y Sur;
+// Marta (Supervisora) solo Norte; Juan y Pedro (Cobradores) solicitan en Norte.
+// ############################################################
+let cliSeq = 0
+async function clienteEn(routeId: string): Promise<string> {
+  const id = `cli-auth-${++cliSeq}`
+  await db.clients.add({ id, tenantId: T, routeId, nombre: `Cliente ${id}`, documento: id, status: 'activo', createdAt: '' } as never)
+  return id
+}
+const DIAS = [1, 2, 3, 4, 5, 6]
+const entrada = (routeId: string, clientId: string, actor: User, valor = 500_000, extra: Partial<SaleInputs> = {}): SaleInputs => ({
+  tenantId: T, routeId, clientId, createdByUserId: actor.id, valorVenta: valor, tasaInteres: 20, numeroCuotas: 20,
+  frecuenciaPago: 'diaria', fechaInicio: HOY, paymentDays: DIAS, ...extra,
+})
+async function solicitud(actor: User, routeId = R_NORTE, valor = 500_000) {
+  return createSaleRequest(entrada(routeId, await clienteEn(routeId), actor, valor), actor)
+}
+const SOCIO = base('u-socio', 'Sofía Socia', 'socio', [R_NORTE])
+const pendientes = (u: User, routeId: string) => countPendingSaleRequestsForRoute(u, T, routeId)
+const ventasDe = async (reqId: string) => (await db.sales.toArray()).filter(s => s.saleRequestId === reqId)
+
+// ---------------- SUP-AUTH ----------------
+await spec('SUP-AUTH-001', 'Autorizaciones', 'el Supervisor accede a las autorizaciones de su ruta', async () => {
+  await empresa()
+  const r = await solicitud(JUAN)
+  const lista = await listPendingSaleRequestsForRoute(LAURA, T, R_NORTE)
+  metric('authorization.access Norte', can(LAURA, 'authorization.access', { routeId: R_NORTE, tenantId: T }))
+  metric('lista Norte', lista.map(x => x.id === r.id ? 'solicitud de Juan' : x.id).join(', '))
+  assert(lista.length === 1 && lista[0].id === r.id, 'el Supervisor no ve la solicitud de su ruta')
+})
+
+await spec('SUP-AUTH-002', 'Autorizaciones', 'el Supervisor aprueba la solicitud de un Cobrador en su ruta', async () => {
+  await empresa()
+  const r = await solicitud(JUAN)
+  const venta = await approveSaleRequest(r.id, LAURA)
+  const res = (await db.saleRequests.get(r.id))!
+  metric('solicitud', `${res.status} · pidió ${res.requestedBy} · resolvió ${res.reviewedBy} · ${res.reviewedAt ? 'con fecha' : 'SIN fecha'}`)
+  metric('venta', `${venta.disbursementStatus} · creada a nombre de ${venta.createdByUserId}`)
+  assert(res.status === 'approved' && res.reviewedBy === LAURA.id && res.requestedBy === JUAN.id && res.saleId === venta.id, 'la aprobación no quedó trazada')
+  assert(venta.disbursementStatus === 'pendiente' && venta.createdByUserId === JUAN.id, 'aprobar no es desembolsar; la venta conserva al Cobrador')
+})
+
+await spec('SUP-AUTH-003', 'Autorizaciones', 'el Supervisor rechaza con motivo en su ruta', async () => {
+  await empresa()
+  const r = await solicitud(JUAN)
+  await rejectSaleRequest(r.id, LAURA, 'cliente sin referencias')
+  const res = (await db.saleRequests.get(r.id))!
+  metric('solicitud', `${res.status} · ${res.rejectionReason} · ${res.reviewedBy}`)
+  assert(res.status === 'rejected' && res.reviewedBy === LAURA.id && (await ventasDe(r.id)).length === 0, 'el rechazo no quedó bien')
+  assert(/motivo/.test(await rechazo(async () => rejectSaleRequest((await solicitud(PEDRO)).id, LAURA, '  '))), 'se aceptó un rechazo sin motivo')
+})
+
+await spec('SUP-AUTH-004', 'Autorizaciones', 'el Supervisor NO gestiona solicitudes de una ruta no autorizada', async () => {
+  await empresa()
+  const r = await solicitud(LAURA, R_SUR)                 // pendiente en Sur
+  const lista = await listPendingSaleRequestsForRoute(MARTA, T, R_SUR)
+  const aprobar = await rechazo(() => approveSaleRequest(r.id, MARTA))
+  const rechazar = await rechazo(() => rejectSaleRequest(r.id, MARTA, 'intento fuera de alcance'))
+  metric('Marta (solo Norte) · lista Sur', lista.length)
+  metric('aprobar / rechazar', `${aprobar} | ${rechazar}`)
+  assert(lista.length === 0 && aprobar !== 'ACEPTADO' && rechazar !== 'ACEPTADO', 'se gestionó una solicitud de ruta ajena')
+  assert((await db.saleRequests.get(r.id))!.status === 'pending', 'la solicitud ajena cambió de estado')
+})
+
+await spec('SUP-AUTH-005', 'Autorizaciones', 'una Oficina compartida NO amplía el acceso por ruta', async () => {
+  await empresa()
+  await db.routes.add({ id: 'r-norte-2', tenantId: T, officeId: OF_LETICIA, nombre: 'Norte 2', codigo: 'N-2', status: 'activa', capitalInicial: 0, capitalActual: 0, createdAt: '' } as never)
+  await db.users.update(PEDRO.id, { authorizedRouteIds: [R_NORTE, 'r-norte-2'] })
+  const pedro = (await db.users.get(PEDRO.id))!
+  const r = await solicitud(pedro, 'r-norte-2')
+  metric('Marta: Norte (Leticia) sí · Norte 2 (Leticia) no asignada', `${can(MARTA, 'authorization.access', { routeId: R_NORTE, tenantId: T })} / ${can(MARTA, 'authorization.access', { routeId: 'r-norte-2', tenantId: T })}`)
+  const aprobar = await rechazo(() => approveSaleRequest(r.id, MARTA))
+  metric('aprobar en Norte 2', aprobar)
+  assert(aprobar !== 'ACEPTADO' && (await pendientes(MARTA, 'r-norte-2')) === 0, 'la Oficina concedió acceso a una ruta no asignada')
+})
+
+await spec('SUP-AUTH-006', 'Autorizaciones', 'el Cobrador sigue sin poder aprobar ni rechazar', async () => {
+  await empresa()
+  const r = await solicitud(PEDRO)
+  const aprobar = await rechazo(() => approveSaleRequest(r.id, JUAN))
+  const rechazar = await rechazo(() => rejectSaleRequest(r.id, JUAN, 'no debería poder'))
+  metric('Juan aprueba / rechaza la de Pedro', `${aprobar} | ${rechazar}`)
+  assert(aprobar !== 'ACEPTADO' && rechazar !== 'ACEPTADO' && (await pendientes(JUAN, R_NORTE)) === 0, 'un Cobrador resolvió una solicitud')
+})
+
+await spec('SUP-AUTH-007', 'Autorizaciones', 'nadie resuelve su propia solicitud (Cobrador ni Supervisor)', async () => {
+  await empresa()
+  const deJuan = await solicitud(JUAN)
+  const deLaura = await solicitud(LAURA, R_NORTE, 900_000)
+  const juan = await rechazo(() => approveSaleRequest(deJuan.id, JUAN))
+  const laura = await rechazo(() => approveSaleRequest(deLaura.id, LAURA))
+  const lauraRechaza = await rechazo(() => rejectSaleRequest(deLaura.id, LAURA, 'me la rechazo yo misma'))
+  const enSuLista = (await listPendingSaleRequestsForRoute(LAURA, T, R_NORTE)).some(x => x.id === deLaura.id)
+  metric('Juan → la suya', juan)
+  metric('Laura → la suya (aprobar / rechazar)', `${laura} | ${lauraRechaza}`)
+  metric('la propia aparece en la lista de Laura', enSuLista)
+  assert(juan !== 'ACEPTADO' && /propia solicitud/.test(laura) && /propia solicitud/.test(lauraRechaza), 'alguien resolvió su propia solicitud')
+  assert(!enSuLista, 'la lista muestra una solicitud que el usuario no puede resolver')
+  const marta = await approveSaleRequest(deLaura.id, MARTA)
+  metric('otra Supervisora la aprueba', marta.saleRequestId === deLaura.id)
+})
+
+await spec('SUP-AUTH-008', 'Autorizaciones', 'el Admin mantiene su flujo (aprobar sin cambios de condiciones)', async () => {
+  await empresa()
+  const r = await solicitud(JUAN)
+  const venta = await approveSaleRequest(r, ADMIN)          // la pantalla del Admin envía el objeto
+  metric('Admin', `${(await db.saleRequests.get(r.id))!.status} · venta ${venta.disbursementStatus}`)
+  assert((await db.saleRequests.get(r.id))!.reviewedBy === ADMIN.id && venta.disbursementStatus === 'pendiente', 'el Admin cambió de comportamiento')
+})
+
+await spec('SUP-AUTH-009', 'Autorizaciones', 'el Secretario mantiene su flujo (condiciones + teléfono)', async () => {
+  await empresa()
+  const r = await solicitud(JUAN)
+  await approveSaleRequest(r, SECRE, { interestRate: 10, frequency: 'semanal', paymentDays: [1, 4], phoneConfirmed: true, phoneConfirmationNote: 'confirmó' })
+  const res = (await db.saleRequests.get(r.id))!
+  metric('solicitadas → finales', `${res.requestedInterestRate}%/${res.requestedFrequency} → ${res.approvedInterestRate}%/${res.approvedFrequency} · teléfono ${res.phoneConfirmed}`)
+  assert(res.requestedInterestRate === 20 && res.approvedInterestRate === 10 && res.approvedFrequency === 'semanal' && res.phoneConfirmed, 'el Secretario perdió su flujo o la trazabilidad')
+})
+
+await spec('SUP-AUTH-010', 'Autorizaciones', 'el Socio no obtiene autorizaciones por accidente', async () => {
+  await empresa()
+  await db.users.add(SOCIO)
+  const r = await solicitud(JUAN)
+  const caps = ['authorization.access', 'authorization.approve', 'authorization.reject', 'sale.createDirect'] as const
+  const tiene = caps.filter(c => can(SOCIO, c, { routeId: R_NORTE, tenantId: T }))
+  const aprobar = await rechazo(() => approveSaleRequest(r.id, SOCIO))
+  metric('capacidades comerciales del Socio', tiene.join(', ') || 'ninguna')
+  assert(tiene.length === 0 && aprobar !== 'ACEPTADO', 'el Socio obtuvo autoridad comercial')
+})
+
+await spec('SUP-AUTH-011', 'Autorizaciones', 'modificar condiciones y confirmar teléfono: Supervisor sí, con trazabilidad', async () => {
+  await empresa()
+  const r = await solicitud(JUAN)
+  await approveSaleRequest(r.id, LAURA, { interestRate: 10, frequency: 'semanal', paymentDays: [2, 5], phoneConfirmed: true, phoneConfirmationNote: 'habló con el cliente' })
+  const res = (await db.saleRequests.get(r.id))!
+  const venta = (await ventasDe(r.id))[0]
+  metric('antes → después', `${res.requestedInterestRate}%/${res.requestedFrequency}/${res.requestedPaymentDays} → ${res.approvedInterestRate}%/${res.approvedFrequency}/${res.approvedPaymentDays}`)
+  metric('venta generada con', `${venta.tasaInteres}% · ${venta.frecuenciaPago}`)
+  assert(res.requestedInterestRate === 20 && res.approvedInterestRate === 10 && venta.tasaInteres === 10 && venta.frecuenciaPago === 'semanal', 'las condiciones no se aplicaron con historial')
+  assert(res.phoneConfirmed === true && res.phoneConfirmationNote === 'habló con el cliente', 'no quedó la confirmación telefónica')
+  // Un Admin (sin phoneConfirm) no puede registrar una confirmación nueva.
+  const r2 = await solicitud(PEDRO)
+  const adminTel = await rechazo(() => approveSaleRequest(r2.id, ADMIN, { phoneConfirmed: true }))
+  metric('Admin registra teléfono', adminTel)
+  assert(adminTel !== 'ACEPTADO', 'se registró una confirmación telefónica sin la capacidad')
+})
+
+// ---------------- SUP-CREDIT ----------------
+await spec('SUP-CREDIT-001', 'Crédito directo', 'el Supervisor otorga crédito directo (desembolsado por él)', async () => {
+  await empresa()
+  const venta = await createDirectSale(entrada(R_NORTE, await clienteEn(R_NORTE), LAURA, 400_000), LAURA)
+  metric('venta', `${venta.status} · ${venta.disbursementStatus} · entregó ${venta.disbursedByCollectorId} · ${venta.disbursedAt ? 'instante sellado' : 'SIN instante'}`)
+  assert(venta.disbursementStatus === 'desembolsado' && venta.disbursedByCollectorId === LAURA.id && venta.disbursedAt, 'el crédito directo no quedó atribuido al Supervisor')
+  assert(!!(await db.sales.get(venta.id)) && (await db.installments.where('saleId').equals(venta.id).count()) === 20, 'la venta o sus parcelas no se guardaron')
+})
+
+await spec('SUP-CREDIT-002', 'Crédito directo', 'el crédito directo NO crea una solicitud pendiente', async () => {
+  await empresa()
+  const venta = await createDirectSale(entrada(R_NORTE, await clienteEn(R_NORTE), LAURA), LAURA)
+  metric('solicitudes en la base', await db.saleRequests.count())
+  metric('saleRequestId de la venta', venta.saleRequestId ?? 'ninguno')
+  assert((await db.saleRequests.count()) === 0 && !venta.saleRequestId, 'apareció una solicitud fantasma')
+})
+
+await spec('SUP-CREDIT-003', 'Crédito directo', 'respeta la ruta autorizada (Laura en Sur también es suya)', async () => {
+  await empresa()
+  const venta = await createDirectSale(entrada(R_SUR, await clienteEn(R_SUR), LAURA), LAURA)
+  metric('Laura en Sur', venta.routeId)
+  assert(venta.routeId === R_SUR, 'no pudo operar en otra ruta autorizada')
+})
+
+await spec('SUP-CREDIT-004', 'Crédito directo', 'rechaza una ruta no autorizada', async () => {
+  await empresa()
+  const r = await rechazo(async () => createDirectSale(entrada(R_SUR, await clienteEn(R_SUR), MARTA), MARTA))
+  metric('Marta en Sur', r)
+  assert(/No autorizado/.test(r) && (await db.sales.count()) === 0, 'se otorgó crédito fuera de alcance')
+})
+
+await spec('SUP-CREDIT-005', 'Crédito directo', 'respeta la Oficina inactiva', async () => {
+  await empresa()
+  const cli = await clienteEn(R_NORTE)
+  await db.offices.update(OF_LETICIA, { status: 'inactiva' })
+  const r = await rechazo(() => createDirectSale(entrada(R_NORTE, cli, LAURA), LAURA))
+  metric('Oficina Leticia inactiva', r)
+  assert(/Oficina/.test(r) && (await db.sales.count()) === 0, 'la Oficina inactiva no bloqueó el crédito')
+})
+
+await spec('SUP-CREDIT-006', 'Crédito directo', 'respeta capital disponible y límite de venta directa', async () => {
+  await empresa()
+  const capital = await rechazo(async () => createDirectSale(entrada(R_NORTE, await clienteEn(R_NORTE), LAURA, 50_000_000), LAURA))
+  await db.routes.update(R_NORTE, { montoMaximoPrestamo: 300_000 })
+  const limite = await rechazo(async () => createDirectSale(entrada(R_NORTE, await clienteEn(R_NORTE), LAURA, 400_000), LAURA))
+  const comoSolicitud = await createSaleRequest(entrada(R_NORTE, await clienteEn(R_NORTE), LAURA, 400_000), LAURA)
+  metric('supera el capital', capital)
+  metric('supera el límite de la ruta', limite)
+  metric('por encima del límite puede solicitarlo', comoSolicitud.status)
+  assert(/capital/.test(capital) && /límite/.test(limite) && (await db.sales.count()) === 0, 'se saltó una validación financiera')
+})
+
+await spec('SUP-CREDIT-007', 'Crédito directo', 'respeta tasa, periodicidad, días de pago y fecha', async () => {
+  await empresa()
+  const cli = await clienteEn(R_NORTE)
+  const casos: [string, Partial<SaleInputs>][] = [
+    ['sin días de pago', { paymentDays: [] }], ['día inválido', { paymentDays: [9] }], ['tasa 15%', { tasaInteres: 15 }],
+    ['frecuencia inválida', { frecuenciaPago: 'anual' as never }], ['inicio ayer', { fechaInicio: '2020-01-01' }],
+    ['parcelas 0', { numeroCuotas: 0 }], ['valor no entero', { valorVenta: 100.5 }],
+  ]
+  const res: string[] = []
+  for (const [k, extra] of casos) res.push(`${k}: ${await rechazo(() => createDirectSale(entrada(R_NORTE, cli, LAURA, 400_000, extra), LAURA))}`)
+  metric('rechazos', res.join(' · '))
+  assert(res.every(x => !x.endsWith('ACEPTADO')) && (await db.sales.count()) === 0, 'se aceptó una venta que rompe las reglas')
+  const ajeno = await rechazo(async () => createDirectSale(entrada(R_NORTE, await clienteEn(R_SUR), LAURA), LAURA))
+  metric('cliente de otra ruta', ajeno)
+  assert(/cliente/.test(ajeno), 'se aceptó un cliente de otra ruta')
+})
+
+await spec('SUP-CREDIT-008', 'Crédito directo', 'el Cobrador mantiene el flujo de solicitud', async () => {
+  await empresa()
+  const directa = await rechazo(async () => createDirectSale(entrada(R_NORTE, await clienteEn(R_NORTE), JUAN), JUAN))
+  const r = await solicitud(JUAN)
+  metric('Juan venta directa', directa)
+  metric('Juan solicitud', r.status)
+  assert(/No autorizado/.test(directa) && r.status === 'pending' && (await db.sales.count()) === 0, 'el Cobrador se saltó la autorización')
+})
+
+await spec('SUP-CREDIT-009', 'Crédito directo', 'el Supervisor NO obtiene permisos administrativos', () => {
+  const admin = ['user.create', 'user.edit', 'route.create', 'route.edit', 'route.assign', 'settings.access', 'capital.manage',
+    'transfer.create', 'partnerCash.viewAll', 'partnerCash.registerMovement', 'settlement.close', 'settlement.reopen',
+    'cashbox.viewConsolidated', 'report.viewConsolidated', 'payment.correct', 'payment.reverse', 'payment.approveAdjustment',
+    'company.enterPanel', 'cashSettlement.reopen'] as const
+  const concedidos = admin.filter(c => can(LAURA, c, { routeId: R_NORTE, tenantId: T, targetRole: 'cobrador' }))
+  metric('capacidades administrativas del Supervisor', concedidos.join(', ') || 'ninguna')
+  assert(concedidos.length === 0, `el Supervisor obtuvo: ${concedidos.join(', ')}`)
+})
+
+await spec('SUP-CREDIT-010', 'Crédito directo', 'autoría y efectivo: el desembolso directo resta de Mi efectivo del Supervisor', async () => {
+  await empresa()
+  await pagar(LAURA, await venta(R_NORTE), 600_000)
+  const v = await createDirectSale(entrada(R_NORTE, await clienteEn(R_NORTE), LAURA, 400_000), LAURA)
+  const hoy = await getCollectorDailyCashSummary({ routeId: R_NORTE, collectorId: LAURA.id, fecha: HOY })
+  const ciclo = await previewCashSettlement({ actor: ADMIN, tenantId: T, routeId: R_NORTE, userId: LAURA.id })
+  metric('venta: creada por / registró desembolso / responsable', `${v.createdByUserId} / ${v.disbursedByUserId} / ${v.disbursedByCollectorId}`)
+  metric('Mi efectivo hoy (recaudado − desembolsado)', `${hoy.recaudado} − ${hoy.desembolsado} = ${hoy.efectivoAEntregar}`)
+  metric('cuadre: esperado', ciclo.esperado)
+  assert(v.createdByUserId === LAURA.id && v.disbursedByUserId === LAURA.id && v.disbursedByCollectorId === LAURA.id, 'autoría incorrecta')
+  assert(hoy.efectivoAEntregar === 200_000 && ciclo.esperado === 200_000, 'el desembolso directo no se descontó de su efectivo')
+  // Un Admin (sin caja personal) sigue siendo entrega administrativa.
+  const va = await createDirectSale(entrada(R_NORTE, await clienteEn(R_NORTE), ADMIN, 100_000), ADMIN)
+  metric('venta directa del Admin · responsable', va.disbursedByCollectorId ?? 'ninguno (entrega de la ruta)')
+  assert(va.disbursedByCollectorId === undefined, 'el Admin adquirió caja personal')
+})
+
+await spec('SUP-CREDIT-011', 'Crédito directo', 'alta de cliente + crédito pasa por el servicio y es atómica', async () => {
+  await empresa()
+  const nuevo = { id: 'cli-nuevo', tenantId: T, routeId: R_NORTE, nombre: 'Nuevo', documento: 'N-1', status: 'activo', createdAt: '' } as never as Client
+  const v = await createDirectSale(entrada(R_NORTE, nuevo.id, LAURA, 300_000), LAURA, { newClient: nuevo })
+  const falla = { ...nuevo, id: 'cli-falla', documento: 'N-2' }
+  const r = await rechazo(() => createDirectSale(entrada(R_NORTE, falla.id, LAURA, 90_000_000), LAURA, { newClient: falla }))
+  metric('cliente + venta', `${!!(await db.clients.get(nuevo.id))} · ${v.disbursedByCollectorId}`)
+  metric('venta rechazada deja el cliente', `${r} · cliente ${(await db.clients.get('cli-falla')) ? 'CREADO — ERROR' : 'no creado'}`)
+  assert(!!(await db.clients.get(nuevo.id)) && !(await db.clients.get('cli-falla')), 'el alta combinada no es atómica')
+  const pantalla = readSource('src/pages/collector/CollectorNewClientPage.tsx')
+  assert(pantalla.includes('createDirectSale(input, user, { newClient: client })') && !pantalla.includes('buildSaleWithInstallments'),
+    'el alta de cliente escribe la venta sin pasar por el servicio')
+})
+
+// ---------------- SUP-BADGE ----------------
+async function escenarioBadge() {
+  await empresa()
+  const n1 = await solicitud(JUAN); const n2 = await solicitud(PEDRO)
+  for (let i = 0; i < 3; i++) await solicitud(JUAN, R_SUR)   // Juan también trabaja Sur
+  return { n1, n2 }
+}
+
+await spec('SUP-BADGE-001', 'Globo', 'ruta activa con 2 pendientes → globo 2', async () => {
+  const { n1, n2 } = await escenarioBadge()
+  metric('Norte', await pendientes(LAURA, R_NORTE))
+  assert((await pendientes(LAURA, R_NORTE)) === 2 && n1.routeId === R_NORTE && n2.routeId === R_NORTE, 'el globo de Norte no es 2')
+})
+
+await spec('SUP-BADGE-002', 'Globo', 'otra ruta autorizada con 3 pendientes NO suma si no está activa', async () => {
+  await escenarioBadge()
+  const norte = await pendientes(LAURA, R_NORTE)
+  const sur = await pendientes(LAURA, R_SUR)
+  const empresaEntera = await countPendingSaleRequestsForUser(LAURA, T)
+  metric('Norte activa / Sur / todas sus rutas', `${norte} / ${sur} / ${empresaEntera}`)
+  assert(norte === 2 && sur === 3 && empresaEntera === 5, 'el globo mezcla rutas')
+})
+
+await spec('SUP-BADGE-003', 'Globo', 'una ruta no autorizada nunca suma', async () => {
+  await escenarioBadge()
+  metric('Marta (solo Norte) consultando Sur', await pendientes(MARTA, R_SUR))
+  assert((await pendientes(MARTA, R_SUR)) === 0, 'una ruta ajena sumó al globo')
+})
+
+await spec('SUP-BADGE-004', 'Globo', 'globo = lista, y todo lo listado es resoluble', async () => {
+  await escenarioBadge()
+  const lista = await listPendingSaleRequestsForRoute(LAURA, T, R_NORTE)
+  const n = await pendientes(LAURA, R_NORTE)
+  for (const r of lista) await approveSaleRequest(r.id, LAURA)
+  metric('globo / lista / resueltas', `${n} / ${lista.length} / ${lista.length}`)
+  assert(n === lista.length && (await pendientes(LAURA, R_NORTE)) === 0, 'el globo no coincide con la lista')
+  const hook = readSource('src/hooks/usePendingBadges.ts')
+  assert(hook.includes('countPendingSaleRequestsForRoute(user, tenantId, routeId)'), 'el hook no usa el contador de la lista')
+})
+
+await spec('SUP-BADGE-005', 'Globo', 'aprobar reduce el globo', async () => {
+  const { n1 } = await escenarioBadge()
+  const antes = await pendientes(LAURA, R_NORTE)
+  await approveSaleRequest(n1.id, LAURA)
+  metric('antes → después', `${antes} → ${await pendientes(LAURA, R_NORTE)}`)
+  assert(antes === 2 && (await pendientes(LAURA, R_NORTE)) === 1, 'aprobar no redujo el globo')
+})
+
+await spec('SUP-BADGE-006', 'Globo', 'rechazar reduce el globo', async () => {
+  const { n2 } = await escenarioBadge()
+  await rejectSaleRequest(n2.id, LAURA, 'documentación incompleta')
+  metric('después de rechazar', await pendientes(LAURA, R_NORTE))
+  assert((await pendientes(LAURA, R_NORTE)) === 1, 'rechazar no redujo el globo')
+})
+
+await spec('SUP-BADGE-007', 'Globo', 'una solicitud nueva en la misma IndexedDB sube el globo sin F5', async () => {
+  await empresa()
+  const valores: number[] = []
+  const sub = liveQuery(() => countPendingSaleRequestsForRoute(LAURA, T, R_NORTE)).subscribe(v => valores.push(v))
+  await tick(30)
+  await solicitud(JUAN)
+  await tick(60)
+  const r = await solicitud(PEDRO)
+  await tick(60)
+  await approveSaleRequest(r.id, LAURA)
+  await tick(60)
+  sub.unsubscribe()
+  metric('valores observados', valores.join(' → '))
+  assert(valores.join(',') === '0,1,2,1', `la consulta viva no siguió los cambios: ${valores.join(',')}`)
+})
+
+await spec('SUP-BADGE-008', 'Globo', 'cambiar de ruta recalcula el globo', async () => {
+  await escenarioBadge()
+  const hook = readSource('src/hooks/usePendingBadges.ts')
+  const home = readSource('src/pages/collector/CollectorHomePage.tsx')
+  const depende = /\[user\?\.id, user\?\.rol, tenantId, routeId,/.test(hook)
+  metric('Norte → Sur', `${await pendientes(LAURA, R_NORTE)} → ${await pendientes(LAURA, R_SUR)}`)
+  metric('el hook depende de la ruta', depende)
+  metric('Inicio pasa la ruta activa', home.includes('usePendingRouteSaleRequests(user, tenantId, activeRouteId)'))
+  assert(depende && home.includes('usePendingRouteSaleRequests(user, tenantId, activeRouteId)'), 'el globo no se recalcula al cambiar de ruta')
+})
+
+// ---------------- SUP-AUTH-RACE ----------------
+await spec('SUP-AUTH-RACE-001', 'Concurrencia', 'Admin y Supervisor aprueban a la vez: UNA sola venta', async () => {
+  await empresa()
+  const r = await solicitud(JUAN)
+  const res = await Promise.allSettled([approveSaleRequest(r.id, ADMIN), approveSaleRequest(r.id, LAURA)])
+  const ok = res.filter(x => x.status === 'fulfilled').length
+  const msg = res.filter(x => x.status === 'rejected').map(x => (x as PromiseRejectedResult).reason.message)
+  metric('ganan / pierden', `${ok} / ${msg.join(' | ')}`)
+  metric('ventas creadas', (await ventasDe(r.id)).length)
+  assert(ok === 1 && msg[0] === 'Esta solicitud ya fue resuelta.' && (await ventasDe(r.id)).length === 1, 'se duplicó la aprobación')
+})
+
+await spec('SUP-AUTH-RACE-002', 'Concurrencia', 'Supervisor aprueba y Admin rechaza a la vez: UNA transición', async () => {
+  await empresa()
+  const r = await solicitud(JUAN)
+  const res = await Promise.allSettled([approveSaleRequest(r.id, LAURA), rejectSaleRequest(r.id, ADMIN, 'rechazo simultáneo')])
+  const final = (await db.saleRequests.get(r.id))!
+  const ventas = (await ventasDe(r.id)).length
+  metric('resultados', res.map(x => x.status).join(' / '))
+  metric('estado final / ventas', `${final.status} / ${ventas}`)
+  assert(res.filter(x => x.status === 'fulfilled').length === 1, 'hubo dos transiciones')
+  assert((final.status === 'approved' && ventas === 1) || (final.status === 'rejected' && ventas === 0), 'estado y ventas incoherentes')
+})
+
+await spec('SUP-AUTH-RACE-003', 'Concurrencia', 'una solicitud resuelta no vuelve a cambiar', async () => {
+  await empresa()
+  const a = await solicitud(JUAN)
+  await approveSaleRequest(a.id, LAURA)
+  const reRechazo = await rechazo(() => rejectSaleRequest(a.id, ADMIN, 'intento tardío'))
+  const reAprobar = await rechazo(() => approveSaleRequest(a.id, ADMIN))
+  const b = await solicitud(PEDRO)
+  await rejectSaleRequest(b.id, LAURA, 'no califica')
+  const trasRechazo = await rechazo(() => approveSaleRequest(b, ADMIN))     // objeto viejo de la pantalla: status 'pending'
+  metric('aprobada → rechazar / aprobar otra vez', `${reRechazo} | ${reAprobar}`)
+  metric('rechazada → aprobar con objeto viejo', trasRechazo)
+  assert([reRechazo, reAprobar, trasRechazo].every(x => x === 'Esta solicitud ya fue resuelta.'), 'una solicitud resuelta cambió de estado')
+  assert((await db.saleRequests.get(a.id))!.status === 'approved' && (await db.saleRequests.get(b.id))!.status === 'rejected'
+    && (await ventasDe(a.id)).length === 1 && (await ventasDe(b.id)).length === 0, 'los estados finales cambiaron')
+})
+
+// ---------------- SMOKE SA (servicios) ----------------
+await spec('SMOKE-SA-01..06,08', 'Smoke', 'recorrido comercial completo del Supervisor en Norte', async () => {
+  await empresa()
+  // SA-01 Juan solicita → pending
+  const r = await solicitud(JUAN)
+  // SA-02 Laura con Norte activa → globo 1
+  const globo = await pendientes(LAURA, R_NORTE)
+  // SA-04 pendiente en Sur, Marta solo Norte → no aparece, no suma, URL directa rechazada
+  const sur = await solicitud(LAURA, R_SUR)
+  const martaSur = await rechazo(() => approveSaleRequest(sur.id, MARTA))
+  // SA-03 Laura aprueba → resuelta, globo 0, sin duplicados
+  await approveSaleRequest(r.id, LAURA)
+  const globoTras = await pendientes(LAURA, R_NORTE)
+  // SA-05 crédito directo de Laura → sin solicitud
+  const antesSolicitudes = await db.saleRequests.count()
+  const directa = await createDirectSale(entrada(R_NORTE, await clienteEn(R_NORTE), LAURA, 250_000), LAURA)
+  // SA-06 Juan no puede saltar la autorización
+  const juanDirecta = await rechazo(async () => createDirectSale(entrada(R_NORTE, await clienteEn(R_NORTE), JUAN), JUAN))
+  // SA-08 Laura cobra después → responsable Laura
+  const pago = await pagar(LAURA, await venta(R_NORTE), 50_000)
+  metric('SA-01 solicitud de Juan', r.status)
+  metric('SA-02 globo Laura/Norte', globo)
+  metric('SA-03 tras aprobar: globo / ventas de la solicitud', `${globoTras} / ${(await ventasDe(r.id)).length}`)
+  metric('SA-04 Marta: globo Sur / aprobar Sur', `${await pendientes(MARTA, R_SUR)} / ${martaSur}`)
+  metric('SA-05 directa: estado / solicitudes nuevas', `${directa.disbursementStatus} / ${(await db.saleRequests.count()) - antesSolicitudes}`)
+  metric('SA-06 Juan directa', juanDirecta)
+  metric('SA-08 pago de Laura: responsable', pago.collectorId)
+  assert(r.status === 'pending' && globo === 1 && globoTras === 0 && (await ventasDe(r.id)).length === 1, 'SA-01..03')
+  assert((await pendientes(MARTA, R_SUR)) === 0 && martaSur !== 'ACEPTADO', 'SA-04')
+  assert(directa.disbursementStatus === 'desembolsado' && (await db.saleRequests.count()) === antesSolicitudes, 'SA-05')
+  assert(/No autorizado/.test(juanDirecta), 'SA-06')
+  assert(pago.collectorId === LAURA.id && pago.createdByUserId === LAURA.id, 'SA-08')
+})
+
+await spec('MOBILE-PARITY-011', 'Paridad móvil', 'Autorizaciones es una función adicional de la MISMA app operativa', () => {
+  const app = readSource('src/app/App.tsx')
+  const cuerpo = app.slice(app.indexOf('function operationalRoutes()'), app.indexOf('export default function App()'))
+  const pagina = readSource('src/pages/collector/CollectorAuthorizationsPage.tsx')
+  const home = readSource('src/pages/collector/CollectorHomePage.tsx')
+  const layout = readSource('src/components/layout/CollectorLayout.tsx')
+  const barra = (layout.match(/\{ path: `\$\{base\}\//g) ?? []).length
+  metric('ruta operativa authorizations', cuerpo.includes('path="authorizations"'))
+  metric('acceso en Inicio gobernado por capacidad', home.includes("can(user, 'authorization.access'"))
+  metric('ítems de la barra inferior', barra)
+  assert(cuerpo.includes('path="authorizations"') && home.includes("can(user, 'authorization.access'"), 'autorizaciones no está en la capa operativa')
+  assert(!/['"`]\/admin/.test(pagina) && pagina.includes('listPendingSaleRequestsForRoute(user, tenantId, routeId)'), 'la pantalla depende de /admin o no usa la lista de la ruta')
+  assert(barra === 5, 'se añadió un botón fijo a la barra inferior')
 })
 
 await spec('SMOKE-S1', 'Smoke', 'Supervisor sin selector: Laura paga 300k con Juan activo', async () => {

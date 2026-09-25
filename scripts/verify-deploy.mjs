@@ -34,6 +34,9 @@ const MARCADORES = [
   ['Indica quién recibió el dinero: tú o el cobrador de la ruta.', false, 'regla must-choose del Supervisor retirada (≤2026-09-22)'],
   // Ajuste previo a Fase 3: acceso móvil del Supervisor al cuadre de trabajadores.
   ['Cuadrar trabajadores', true, 'acceso al cuadre en Inicio de la app operativa (2026-09-24 b)'],
+  // Autoridad comercial del Supervisor.
+  ['Solicitudes pendientes de la ruta', true, 'autorizaciones móviles del Supervisor (2026-09-24 c)'],
+  ['Esta solicitud ya fue resuelta.', true, 'resolución única de solicitudes (2026-09-24 c)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

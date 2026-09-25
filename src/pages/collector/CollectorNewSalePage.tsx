@@ -12,7 +12,7 @@ import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { getAuthorizedRouteIds } from '@/lib/roles'
 import { can } from '@/lib/permissions'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
-import { computeSaleFinancials, createDirectSale, createSaleRequest, findActiveSaleForClient, type SaleInputs } from '@/services/saleRequestService'
+import { computeSaleFinancials, createDirectSale, createSaleRequest, findActiveSaleForClient, directSaleLimit, type SaleInputs } from '@/services/saleRequestService'
 import { useCapitalGuard } from '@/hooks/useCapitalGuard'
 import type { Client, Sale, Route } from '@/models/types'
 
@@ -87,10 +87,13 @@ export default function CollectorNewSalePage() {
   const selectedRoute = routes.find(r => r.id === selectedClient?.routeId)
   const routeLimit = selectedRoute && selectedRoute.montoMaximoPrestamo > 0 ? selectedRoute.montoMaximoPrestamo : Infinity
   const collectorLimit = user?.maxDirectSaleAmount && user.maxDirectSaleAmount > 0 ? user.maxDirectSaleAmount : Infinity
-  const effectiveLimit = Math.min(routeLimit, collectorLimit) // Infinity si ambos sin límite
+  // Fuente única compartida con el servicio, que revalida el mismo límite.
+  const effectiveLimit = directSaleLimit(selectedRoute, user) // Infinity si ambos sin límite
   const hasEffectiveLimit = Number.isFinite(effectiveLimit)
   // Venta directa: se resuelve por CAPACIDAD central (no por el flag legacy del cobrador).
-  // El Cobrador NO tiene `sale.createDirect` → siempre enviará solicitud.
+  // El Cobrador NO tiene `sale.createDirect` → siempre enviará solicitud. El
+  // Supervisor SÍ (autoridad comercial, 2026-09-24): otorga el crédito sin solicitud,
+  // salvo que supere el límite de venta directa, en cuyo caso también solicita.
   const canDirect = can(user, 'sale.createDirect', { routeId: selectedClient?.routeId })
   const withinLimit = !hasEffectiveLimit || form.valorVenta <= effectiveLimit
   const allowDirect = canDirect && withinLimit
@@ -142,7 +145,7 @@ export default function CollectorNewSalePage() {
       await createDirectSale(inputs, user ?? undefined)
       toast.success('Venta creada y activa para recaudo')
       navigate(`${base}/route`)
-    } catch { toast.error('Error al crear la venta') } finally { setSaving(false) }
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error al crear la venta') } finally { setSaving(false) }
   }
 
   async function handleRequest() {
@@ -155,7 +158,7 @@ export default function CollectorNewSalePage() {
       await createSaleRequest(inputs, user ?? undefined)
       toast.success('Solicitud de venta enviada al administrador')
       navigate(`${base}/home`)
-    } catch { toast.error('Error al enviar la solicitud') } finally { setSaving(false) }
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error al enviar la solicitud') } finally { setSaving(false) }
   }
 
   return (

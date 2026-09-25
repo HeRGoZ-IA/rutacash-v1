@@ -119,7 +119,7 @@ export default function SecretarioAuthorizationsPage() {
       }
       toast.success('Solicitud aprobada. Venta creada, pendiente de desembolso.')
       setDetail(null); await load()
-    } catch { toast.error('Error al aprobar') } finally { setWorking(false) }
+    } catch (e) { toast.error(e instanceof Error && e.name.startsWith('SaleR') ? e.message : 'Error al aprobar') } finally { setWorking(false) }
   }
 
   async function handleReject() {
@@ -135,7 +135,7 @@ export default function SecretarioAuthorizationsPage() {
       })
       toast.success('Solicitud rechazada')
       setDetail(null); await load()
-    } catch { toast.error('Error al rechazar') } finally { setWorking(false) }
+    } catch (e) { toast.error(e instanceof Error && e.name.startsWith('SaleR') ? e.message : 'Error al rechazar') } finally { setWorking(false) }
   }
 
   const pending = requests.filter(r => r.status === 'pending')

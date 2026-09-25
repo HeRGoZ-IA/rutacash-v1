@@ -20,7 +20,7 @@
 // por el que se mueve toda la aplicación.
 // ============================================================
 import { useLiveQuery } from 'dexie-react-hooks'
-import { countPendingSaleRequestsForUser } from '@/services/saleRequestService'
+import { countPendingSaleRequestsForUser, countPendingSaleRequestsForRoute } from '@/services/saleRequestService'
 import { countPendingAdjustmentRequestsForUser } from '@/services/paymentCorrectionService'
 import type { User } from '@/models/types'
 
@@ -51,6 +51,27 @@ export function usePendingAdjustmentRequests(user: User | null | undefined, tena
       }
     },
     [user?.id, user?.rol, tenantId, (user?.authorizedRouteIds ?? []).join(',')],
+    0,
+  )
+  return n ?? 0
+}
+
+/**
+ * Solicitudes pendientes de la RUTA ACTIVA que este usuario puede resolver (capa
+ * operativa: Supervisor en recorrido). Reactivo: sube cuando un Cobrador envía una
+ * solicitud en otra pestaña del mismo navegador y baja al aprobar/rechazar; se
+ * recalcula al cambiar de ruta. Mismo criterio que la lista (badge = lista).
+ */
+export function usePendingRouteSaleRequests(user: User | null | undefined, tenantId: string, routeId: string | null | undefined): number {
+  const n = useLiveQuery(
+    async () => {
+      try {
+        return await countPendingSaleRequestsForRoute(user, tenantId, routeId)
+      } catch {
+        return 0
+      }
+    },
+    [user?.id, user?.rol, tenantId, routeId, (user?.authorizedRouteIds ?? []).join(',')],
     0,
   )
   return n ?? 0

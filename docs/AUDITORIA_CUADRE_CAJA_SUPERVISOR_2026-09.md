@@ -1666,3 +1666,21 @@ sin crédito automático, no autocierre y reapertura versionada. Detalle complet
 semana lunes → sábado.
 
 **FRONTERAS FINANCIERAS PROTEGIDAS — SUPERVISOR Y COBRADOR ALINEADOS EN MÓVIL (2026-09-24)**
+
+---
+
+# 44. CONTINUIDAD — 2026-09-24 (autoridad comercial del Supervisor)
+
+> Sección añadida. Las secciones anteriores se conservan como evidencia.
+
+- **Decisión de negocio:** el Supervisor, que opera desde el móvil, otorga crédito directo y resuelve las solicitudes de los Cobradores de sus rutas.
+- **Auditoría de `sale.createDirect`:** su único efecto es crear una venta sin solicitud; no concede nada administrativo. Al auditarla aparecieron cuatro huecos, corregidos antes de ampliarla:
+  - la venta directa no registraba quién desembolsaba;
+  - las reglas de venta solo se validaban en la pantalla;
+  - el alta de cliente + venta escribía directamente, sin pasar por el servicio;
+  - aprobar o rechazar no comprobaba que la solicitud siguiera pendiente (dos aprobaciones creaban dos ventas).
+- **Globo de autorizaciones:** cuenta la ruta activa, coincide con la lista y es reactivo.
+- **Sin cambios:** responsabilidad del efectivo, CashSettlement y fronteras.
+- **Detalle:** `SUPERVISOR_MOVIL_AUTORIDAD_COMERCIAL_2026-09.md`.
+
+**SUPERVISOR MÓVIL OPERATIVO — AUTORIDAD COMERCIAL Y AUTORIZACIONES COMPLETAS (2026-09-24)**

@@ -14,7 +14,7 @@ import { getAuthorizedRouteIds } from '@/lib/roles'
 import { can } from '@/lib/permissions'
 import { generateId } from '@/lib/utils'
 import { nowISO, normalizeDoc, formatCurrency, formatDate, today } from '@/lib/formatters'
-import { computeSaleFinancials, buildSaleWithInstallments, buildSaleRequest, type SaleInputs } from '@/services/saleRequestService'
+import { computeSaleFinancials, createDirectSale, createSaleRequest, directSaleLimit, type SaleInputs } from '@/services/saleRequestService'
 import { useCapitalGuard } from '@/hooks/useCapitalGuard'
 import type { Client, Route, Sale } from '@/models/types'
 
@@ -74,7 +74,10 @@ export default function CollectorNewClientPage() {
   // Venta directa por CAPACIDAD central (no por el flag legacy): Cobrador y Supervisor
   // NUNCA la tienen → siempre solicitud pendiente de autorización.
   const canDirect = can(user, 'sale.createDirect', { routeId: form.routeId })
-  const maxAmount = user?.maxDirectSaleAmount && user.maxDirectSaleAmount > 0 ? user.maxDirectSaleAmount : null
+  // Mismo límite que Nueva venta y que revalida el servicio: el menor entre el de la
+  // RUTA y el del usuario (antes aquí solo se miraba el del usuario).
+  const limiteDirecto = directSaleLimit(routes.find(r => r.id === form.routeId), user)
+  const maxAmount = Number.isFinite(limiteDirecto) ? limiteDirecto : null
   const withinLimit = !maxAmount || saleForm.valorVenta <= maxAmount
   const allowDirect = canDirect && withinLimit
 
@@ -156,26 +159,18 @@ export default function CollectorNewClientPage() {
         frecuenciaPago: saleForm.frecuenciaPago, fechaInicio: saleForm.fechaInicio, paymentDays: saleForm.paymentDays,
       }
 
+      // Cliente + venta/solicitud en UNA transacción, pero SIEMPRE por el servicio:
+      // antes esta pantalla escribía la venta directa por su cuenta, sin revalidar
+      // permiso, reglas, límite ni capital, y sin registrar quién desembolsó.
       if (allowDirect) {
-        // Cliente + venta directa (desembolsada) + parcelas, atómico
-        const { sale, installments } = buildSaleWithInstallments(input, 'desembolsado')
-        await db.transaction('rw', [db.clients, db.sales, db.installments], async () => {
-          await db.clients.add(client)
-          await db.sales.add(sale)
-          await db.installments.bulkAdd(installments)
-        })
+        await createDirectSale(input, user, { newClient: client })
         toast.success('Cliente y venta creados')
       } else {
-        // Cliente + solicitud de venta (pendiente de autorización), atómico
-        const request = buildSaleRequest(input)
-        await db.transaction('rw', [db.clients, db.saleRequests], async () => {
-          await db.clients.add(client)
-          await db.saleRequests.add(request)
-        })
+        await createSaleRequest(input, user, { newClient: client })
         toast.success('Cliente creado y solicitud de venta enviada al administrador')
       }
       navigate(`${base}/home`)
-    } catch { toast.error('Error al guardar') } finally { setSaving(false) }
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error al guardar') } finally { setSaving(false) }
   }
 
   const dupRouteName = dup ? (routes.find(r => r.id === dup.routeId)?.nombre ?? 'otra ruta') : ''
