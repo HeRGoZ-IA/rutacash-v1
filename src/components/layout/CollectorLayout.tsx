@@ -93,6 +93,12 @@ export function CollectorLayout() {
 
   // Debe seleccionar ruta primero (varias rutas y ninguna activa válida)
   if (!activeRoute && !onSelectPage) {
+    // Con UNA sola ruta no hay nada que elegir: el efecto de arriba la activa en
+    // este mismo ciclo. Redirigir aquí obligaba a pulsar "Entrar a la ruta" en cada
+    // inicio de sesión (Cobrador y Supervisor). Se espera un instante en su lugar.
+    if (routes.length === 1) {
+      return <div className="flex items-center justify-center h-screen bg-gray-50"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
+    }
     return <Navigate to={`${base}/select-route`} replace />
   }
 

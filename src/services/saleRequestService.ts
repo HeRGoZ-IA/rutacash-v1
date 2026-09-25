@@ -266,14 +266,19 @@ export async function confirmDisbursement(saleId: string, actor?: User): Promise
   await assertRouteOperationalContext(sale.routeId)
   const fechaDesembolso = today()
   await db.transaction('rw', [db.sales, db.saleRequests], async () => {
+    // Primera lectura DENTRO de la transacción: con el bloqueo ya obtenido, el
+    // instante sellado no puede quedar detrás de la frontera de un cuadre que se
+    // está cerrando en otra pestaña (ver `closeCashSettlement`).
+    await db.sales.get(saleId)
+    const ahora = nowISO()
     await db.sales.update(saleId, {
       disbursementStatus: 'desembolsado',
       disbursedByCollectorId: actor && hasPersonalCashbox(actor.rol) ? actor.id : undefined,
       disbursedByUserId: actor?.id,
       fechaDesembolso,
       // Instante exacto: el cuadre por trabajador corta por instante, no por día.
-      disbursedAt: nowISO(),
-      updatedAt: nowISO(),
+      disbursedAt: ahora,
+      updatedAt: ahora,
     })
     if (sale.saleRequestId) {
       await db.saleRequests.update(sale.saleRequestId, { status: 'disbursed' })

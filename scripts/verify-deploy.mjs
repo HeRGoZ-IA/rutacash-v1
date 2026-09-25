@@ -32,6 +32,8 @@ const MARCADORES = [
   ['Este faltante continuará pendiente en el siguiente ciclo.', true, 'confirmación de faltante (2026-09-24)'],
   ['cashSettlements', true, 'tabla Dexie v14 cashSettlements (2026-09-24)'],
   ['Indica quién recibió el dinero: tú o el cobrador de la ruta.', false, 'regla must-choose del Supervisor retirada (≤2026-09-22)'],
+  // Ajuste previo a Fase 3: acceso móvil del Supervisor al cuadre de trabajadores.
+  ['Cuadrar trabajadores', true, 'acceso al cuadre en Inicio de la app operativa (2026-09-24 b)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

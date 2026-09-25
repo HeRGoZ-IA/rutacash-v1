@@ -1632,3 +1632,37 @@ sin crédito automático, no autocierre y reapertura versionada. Detalle complet
 | **4** — ¿Hay sitio para un faltante? | NO | **SÍ** (`CashSettlement.faltante`, arrastrado al siguiente ciclo) |
 
 **RESPONSABILIDAD Y SINCRONÍA LOCAL CORREGIDAS — CUADRE POR TRABAJADOR OPERATIVO (2026-09-24)**
+
+---
+
+# 43. CONTINUIDAD — 2026-09-24 (ajuste previo a Fase 3)
+
+> Sección añadida. Las secciones anteriores se conservan como evidencia.
+
+## 43.1 Fronteras temporales del cuadre por trabajador
+
+- Convención única verificada en código: **`(desde, hasta]`**, con un solo helper
+  (`inCycle`) para pagos, desembolsos y gastos. Un movimiento en el instante de la
+  frontera nunca podía contarse dos veces.
+- Riesgo encontrado y cerrado: un movimiento sellado ≤ `hasta` y confirmado después de
+  la lectura del cierre podía quedar en **ningún** ciclo. El cierre ahora calcula bajo
+  bloqueo de pagos/ventas/gastos y los escritores sellan su instante bajo bloqueo.
+- Pruebas `CASH-BOUNDARY-001..010`. Detalle en
+  `IMPLEMENTACION_CUADRE_TRABAJADOR_2026-09.md` §3.6.b.
+
+## 43.2 Paridad móvil Supervisor / Cobrador
+
+- Decisión de negocio: el Supervisor opera desde el teléfono, sin PC.
+- La capa operativa ya era una sola (mismas rutas, layout y páginas); se verificó con
+  `MOBILE-PARITY-001..010` y un recorrido real en 360×800, 390×844 y 412×915 (102
+  comprobaciones, 0 fallos).
+- Se corrigieron 5 problemas concretos (entrada directa con una sola ruta, acceso al
+  cuadre desde Inicio, histórico en tarjetas, importes largos, reinicio tras cerrar).
+  Detalle en `PARIDAD_MOVIL_SUPERVISOR_COBRADOR_2026-09.md`.
+
+## 43.3 Domingo
+
+**Pendiente confirmar si las Routes operan/cobran los domingos.** No se cambió la
+semana lunes → sábado.
+
+**FRONTERAS FINANCIERAS PROTEGIDAS — SUPERVISOR Y COBRADOR ALINEADOS EN MÓVIL (2026-09-24)**

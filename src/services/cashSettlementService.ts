@@ -58,6 +58,16 @@ export class CashSettlementError extends Error {
   }
 }
 
+/**
+ * Espera activa (≤ 1 ms) hasta que el reloj supere `instante`. Garantiza que todo lo
+ * que se selle después de soltar el bloqueo tenga un instante ESTRICTAMENTE
+ * posterior a la frontera del cierre.
+ */
+export function waitClockPast(instante: string): void {
+  const limite = Date.parse(instante)
+  while (Date.now() <= limite) { /* < 1 ms */ }
+}
+
 /** Instante de arranque del modelo personal de la empresa (v14). */
 export async function cashModelStartOf(tenantId: string, database: RutaCashDB = db): Promise<string> {
   const t = await database.tenants.get(tenantId)
@@ -192,62 +202,80 @@ export async function closeCashSettlement(
   if (errEntregado) throw new CashSettlementError(errEntregado)
   const entregado = Number(params.entregado)
 
-  // 5) Cifras recalculadas AHORA por el motor, nunca las de la pantalla.
-  const hasta = nowISO()
-  const { preview, existentes } = await computeCycle(tenantId, route, target, hasta, database)
-  const bloqueo = closeCycleBlockedReason(existentes, routeId, userId, preview.desde, hasta)
-  if (bloqueo) throw new CashSettlementError(bloqueo)
-  if (params.esperadoVisto !== undefined && params.esperadoVisto !== preview.esperado) {
-    throw new CashSettlementError(
-      'Las cifras cambiaron desde la vista previa (hubo movimientos nuevos). Revisa el nuevo esperado antes de cerrar.',
-    )
-  }
+  // 5–7) CÁLCULO, SELLO Y ESCRITURA BAJO UN ÚNICO BLOQUEO.
+  //
+  //   FRONTERA TEMPORAL. El ciclo es (desde, hasta]. Para que un movimiento no
+  //   quede en DOS ciclos basta la convención; para que no quede en NINGUNO hace
+  //   falta además que ningún movimiento con instante ≤ `hasta` se confirme DESPUÉS
+  //   de haber leído. Por eso:
+  //     · la transacción abarca pagos, ventas y gastos: un cobro/desembolso/gasto
+  //       en curso termina ANTES de que se lea, o espera a que el cierre termine;
+  //     · `hasta` se sella DESPUÉS de obtener el bloqueo (primera lectura);
+  //     · no se suelta el bloqueo hasta que el reloj supera `hasta`: todo lo que se
+  //       selle después tiene instante > `hasta` y cae en el ciclo siguiente.
+  //   Los escritores sellan su instante dentro de su propia transacción, después de
+  //   una lectura (paymentService, confirmDisbursement, corrección, gastos).
+  let documento!: CashSettlement
+  let outcome!: ReturnType<typeof settlementOutcome>
+  let sustituye: CashSettlement[] = []
+  await database.transaction(
+    'rw',
+    [database.cashSettlements, database.payments, database.sales, database.expenses, database.tenants],
+    async () => {
+      const antes = await settlementsOf(routeId, userId, database)   // obtiene el bloqueo
+      const hasta = nowISO()
+      const { preview, existentes } = await computeCycle(tenantId, route, target, hasta, database)
+      const ultimoAntes = lastActiveCashSettlement(antes, routeId, userId)
+      if ((ultimoAntes?.id ?? null) !== (preview.previousSettlementId ?? null)) {
+        throw new CashSettlementError('Otro usuario cerró este cuadre hace un momento. Recarga la vista previa.')
+      }
+      const bloqueo = closeCycleBlockedReason(existentes, routeId, userId, preview.desde, hasta)
+      if (bloqueo) throw new CashSettlementError(bloqueo)
+      if (params.esperadoVisto !== undefined && params.esperadoVisto !== preview.esperado) {
+        throw new CashSettlementError(
+          'Las cifras cambiaron desde la vista previa (hubo movimientos nuevos). Revisa el nuevo esperado antes de cerrar.',
+        )
+      }
 
-  // 6) Diferencia y motivo.
-  const outcome = settlementOutcome(preview.esperado, entregado)
-  const motivo = (params.motivo ?? '').trim()
-  const errMotivo = validateDifferenceReason(outcome.diferencia, motivo)
-  if (errMotivo) throw new CashSettlementError(errMotivo)
+      // Diferencia y motivo.
+      outcome = settlementOutcome(preview.esperado, entregado)
+      const motivo = (params.motivo ?? '').trim()
+      const errMotivo = validateDifferenceReason(outcome.diferencia, motivo)
+      if (errMotivo) throw new CashSettlementError(errMotivo)
 
-  const { version, sustituye } = nextCashVersion(existentes, routeId, userId, preview.desde)
-  const documento: CashSettlement = {
-    id: generateId(),
-    tenantId, routeId, userId,
-    desde: preview.desde,
-    hasta,
-    origenDesde: preview.origenDesde,
-    previousSettlementId: preview.previousSettlementId,
-    arrastreAnterior: preview.arrastreAnterior,
-    recaudado: preview.recaudado,
-    desembolsado: preview.desembolsado,
-    gastos: preview.gastos,
-    esperado: preview.esperado,
-    entregado,
-    diferencia: outcome.diferencia,
-    faltante: outcome.faltante,
-    sobrante: outcome.sobrante,
-    motivo: motivo || undefined,
-    status: 'cerrada',
-    version,
-    createdAt: hasta,
-    closedAt: hasta,
-    closedByUserId: actor!.id,
-  }
-
-  // 7) Escritura atómica. Se revalida DENTRO de la transacción que nadie cerró este
-  //    mismo ciclo entre la lectura y la escritura (dos pestañas del mismo navegador).
-  await database.transaction('rw', [database.cashSettlements], async () => {
-    const actuales = await settlementsOf(routeId, userId, database)
-    const ultimo = lastActiveCashSettlement(actuales, routeId, userId)
-    if ((ultimo?.id ?? null) !== (preview.previousSettlementId ?? null)
-      || closeCycleBlockedReason(actuales, routeId, userId, preview.desde, hasta)) {
-      throw new CashSettlementError('Otro usuario cerró este cuadre hace un momento. Recarga la vista previa.')
-    }
-    await database.cashSettlements.add(documento)
-    for (const previo of sustituye) {
-      await database.cashSettlements.update(previo.id, { supersededBy: documento.id })
-    }
-  })
+      const siguiente = nextCashVersion(existentes, routeId, userId, preview.desde)
+      sustituye = siguiente.sustituye
+      documento = {
+        id: generateId(),
+        tenantId, routeId, userId,
+        desde: preview.desde,
+        hasta,
+        origenDesde: preview.origenDesde,
+        previousSettlementId: preview.previousSettlementId,
+        arrastreAnterior: preview.arrastreAnterior,
+        recaudado: preview.recaudado,
+        desembolsado: preview.desembolsado,
+        gastos: preview.gastos,
+        esperado: preview.esperado,
+        entregado,
+        diferencia: outcome.diferencia,
+        faltante: outcome.faltante,
+        sobrante: outcome.sobrante,
+        motivo: motivo || undefined,
+        status: 'cerrada',
+        version: siguiente.version,
+        createdAt: hasta,
+        closedAt: hasta,
+        closedByUserId: actor!.id,
+      }
+      await database.cashSettlements.add(documento)
+      for (const previo of sustituye) {
+        await database.cashSettlements.update(previo.id, { supersededBy: documento.id })
+      }
+      waitClockPast(hasta)
+    },
+  )
+  const version = documento.version
 
   await auditSink({
     tenantId,

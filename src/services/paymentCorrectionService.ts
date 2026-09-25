@@ -121,6 +121,7 @@ export interface CorrectionInput {
 async function executeCorrection(original: Payment, actor: User, input: CorrectionInput): Promise<{ reversalId: string; correctedId: string }> {
   const reversalId = generateId()
   const correctedId = generateId()
+  // Provisional: el instante definitivo se sella dentro de la transacción, bajo bloqueo.
   const ts = nowISO()
 
   const reversal: Payment = {
@@ -157,9 +158,16 @@ async function executeCorrection(original: Payment, actor: User, input: Correcti
   // Si cualquier paso falla, Dexie revierte TODO: nunca quedan pagos corregidos
   // conviviendo con parcelas y saldo antiguos.
   await db.transaction('rw', [db.payments, db.installments, db.sales], async () => {
+    // Instante sellado BAJO BLOQUEO (primera lectura dentro de la transacción): la
+    // reversión y la corrección nunca quedan detrás de la frontera de un cuadre por
+    // trabajador que se esté cerrando a la vez (ver `closeCashSettlement`).
+    await db.payments.get(original.id)
+    const sello = nowISO()
+    reversal.createdAt = reversal.correctedAt = sello
+    corrected.createdAt = corrected.correctedAt = sello
     await db.payments.update(original.id, {
       state: 'reversed', correctedByPaymentId: correctedId,
-      correctionReason: input.reason, correctedBy: actor.id, correctedAt: ts,
+      correctionReason: input.reason, correctedBy: actor.id, correctedAt: sello,
     })
     await db.payments.add(reversal)
     await db.payments.add(corrected)

@@ -112,6 +112,8 @@ export default function CollectorSelectRoutePage() {
                     (lo que el Supervisor necesita al entrar); la Cartera sigue
                     visible debajo, no se pierde. Sin permiso, la tarjeta es
                     exactamente la de siempre: Clientes · Ventas · Cartera. */}
+                {/* Importes: tamaño fluido y corte seguro para que cifras de 8+ dígitos
+                    (p. ej. $ 12.500.000) no se salgan del recuadro en 360 px. */}
                 <div className="grid grid-cols-3 gap-2 mt-3">
                   <div className="bg-gray-50 rounded-xl p-2 text-center">
                     <p className="text-sm font-bold text-gray-700">{clientes}</p>
@@ -123,12 +125,12 @@ export default function CollectorSelectRoutePage() {
                   </div>
                   {base === undefined ? (
                     <div className="bg-gray-50 rounded-xl p-2 text-center">
-                      <p className="text-sm font-bold text-amber-600 leading-tight">{formatCurrency(cartera, currency)}</p>
+                      <p className="text-[clamp(11px,3.4vw,14px)] font-bold text-amber-600 leading-tight break-all">{formatCurrency(cartera, currency)}</p>
                       <p className="text-xs text-gray-400">Cartera</p>
                     </div>
                   ) : (
                     <div className="bg-primary-50 rounded-xl p-2 text-center">
-                      <p className="text-sm font-bold text-primary-700 leading-tight">{formatCurrency(base, currency)}</p>
+                      <p className="text-[clamp(11px,3.4vw,14px)] font-bold text-primary-700 leading-tight break-all">{formatCurrency(base, currency)}</p>
                       <p className="text-xs text-primary-500">Base</p>
                     </div>
                   )}

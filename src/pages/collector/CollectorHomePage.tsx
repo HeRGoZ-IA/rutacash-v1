@@ -11,6 +11,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
+import { can } from '@/lib/permissions'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import { isSaleDueToday, isSaleDisbursed } from '@/services/installmentEngine'
 import { effectivePayments } from '@/lib/paymentState'
@@ -18,7 +19,7 @@ import type { Route } from '@/models/types'
 
 export default function CollectorHomePage() {
   const { user } = useAuth()
-  const { currency } = useTenant()
+  const { currency, tenantId } = useTenant()
   const isOnline = useOnlineStatus()
   const { activeRouteId } = useCollectorRoute()
   const navigate = useNavigate()
@@ -152,6 +153,12 @@ export default function CollectorHomePage() {
           <Chip label="Gastos" to={`${base}/expenses`} />
           <Chip label="Informe del día" to={`${base}/daily-report`} />
           <Chip label="Mi efectivo" to={`${base}/cashclose`} />
+          {/* FUNCIÓN ADICIONAL (misma pantalla, gobernada por capacidad): quien puede
+              cuadrar a otros trabajadores —hoy el Supervisor— lo hace desde aquí, en
+              el móvil, sin pasar por ningún panel de Administración. */}
+          {activeRouteId && can(user, 'cashSettlement.close', { routeId: activeRouteId, tenantId }) && (
+            <Chip label="Cuadrar trabajadores" to={`${base}/worker-settlements`} />
+          )}
         </div>
       </div>
 

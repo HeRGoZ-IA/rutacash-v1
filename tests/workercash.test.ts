@@ -16,9 +16,11 @@
 // Semántica convencional: cualquier caso fallido → exit 1.
 // ============================================================
 import 'fake-indexeddb/auto'
+import Dexie from 'dexie'
 import { db } from '../src/lib/db'
+import { addExpenseStamped } from '../src/services/expenseService'
 import { registerPayment } from '../src/services/paymentService'
-import { getCashboxSummary, getCollectorDailyCashSummary } from '../src/services/cashboxEngine'
+import { getCashboxSummary, getCollectorDailyCashSummary, getCollectorCashSummary } from '../src/services/cashboxEngine'
 import { generateWeeklySettlementForUser } from '../src/services/weeklySettlementEngine'
 import { getAdminDashboardData } from '../src/services/adminDashboardService'
 import { getOfficeManagementSummary, getOfficesExecutiveSummary } from '../src/services/officeService'
@@ -31,12 +33,12 @@ import { hasPersonalCashbox } from '../src/lib/collectorAttribution'
 import { subscribeDataChanges, mutatedTables } from '../src/lib/dataRevision'
 import { confirmDisbursement } from '../src/services/saleRequestService'
 import {
-  previewCashSettlement, closeCashSettlement, reopenCashSettlement, getPendingShortagesForUser,
+  previewCashSettlement, closeCashSettlement, reopenCashSettlement, getPendingShortagesForUser, waitClockPast,
 } from '../src/services/cashSettlementService'
-import { closeCycleBlockedReason } from '../src/lib/cashSettlementRules'
+import { closeCycleBlockedReason, inCycle } from '../src/lib/cashSettlementRules'
 import { can } from '../src/lib/permissions'
 import { today, getWeekStart, getWeekEnd } from '../src/lib/formatters'
-import type { Payment, Sale, User } from '../src/models/types'
+import type { CashSettlement, Payment, Sale, User } from '../src/models/types'
 import * as fs from 'node:fs'
 
 // ============================================================
@@ -893,6 +895,373 @@ await spec('CASH-SETTLEMENT-032', 'Permisos', 'capacidades nuevas por rol', () =
 // ############################################################
 // SMOKES pedidos por el socio
 // ############################################################
+// ############################################################
+// FAMILIA — CASH-BOUNDARY · FRONTERAS TEMPORALES DEL CUADRE
+// ------------------------------------------------------------
+// Convención ÚNICA: el ciclo es (desde, hasta] — desde EXCLUSIVO, hasta INCLUSIVO —
+// y el ciclo siguiente empieza EXACTAMENTE en el `hasta` anterior. Un movimiento en
+// el instante T de la frontera entra UNA sola vez: en el ciclo que termina en T.
+// ############################################################
+const T0 = '2026-09-24T08:00:00.000Z'
+const TF = '2026-09-24T15:30:00.000Z'            // hasta de A = desde de B
+const T2 = '2026-09-24T20:00:00.000Z'
+const msDe = (iso: string, delta: number) => new Date(Date.parse(iso) + delta).toISOString()
+
+let semillaSeq = 0
+async function sembrarMovimiento(tipo: 'pago' | 'desembolso' | 'gasto', instante: string, valor: number, userId = JUAN.id) {
+  const n = ++semillaSeq
+  if (tipo === 'pago') {
+    await db.payments.add({
+      id: `pb-${n}`, tenantId: T, saleId: 'sale-x', clientId: 'cli-x', routeId: R_NORTE, collectorId: userId,
+      createdByUserId: userId, valor, fecha: instante.slice(0, 10), tipo: 'efectivo', syncStatus: 'synced',
+      createdAt: instante, state: 'active',
+    } as Payment)
+  } else if (tipo === 'desembolso') {
+    await db.sales.add({
+      id: `sb-${n}`, tenantId: T, routeId: R_NORTE, clientId: 'cli-x', createdByUserId: userId, valorVenta: valor,
+      tasaInteres: 0, valorInteres: 0, valorTotal: valor, saldo: valor, numeroCuotas: 1, valorCuota: valor,
+      frecuenciaPago: 'diaria', fechaInicio: instante.slice(0, 10), fechaFinalEstimada: instante.slice(0, 10),
+      status: 'activa', disbursementStatus: 'desembolsado', disbursedByCollectorId: userId, disbursedByUserId: userId,
+      fechaDesembolso: instante.slice(0, 10), disbursedAt: instante, createdAt: instante, updatedAt: instante,
+    } as unknown as Sale)
+  } else {
+    await db.expenses.add({
+      id: `eb-${n}`, tenantId: T, routeId: R_NORTE, categoryId: 'cat-1', valor, fecha: instante.slice(0, 10),
+      userId, collectorId: userId, syncStatus: 'synced', createdAt: instante,
+    })
+  }
+}
+
+const ciclo = (desde: string, hasta: string, userId = JUAN.id) =>
+  getCollectorCashSummary({ routeId: R_NORTE, userId, desde, hasta, modelStart: '' })
+
+await spec('CASH-BOUNDARY-001', 'Fronteras', 'movimiento EXACTAMENTE en `hasta` de A entra en A', async () => {
+  await empresa()
+  await sembrarMovimiento('pago', TF, 100_000)
+  const a = await ciclo(T0, TF)
+  metric('A = (T0, 15:30:00.000]', `recaudado ${a.recaudado}`)
+  assert(a.recaudado === 100_000, 'el movimiento de la frontera no entró en el ciclo que termina en él')
+})
+
+await spec('CASH-BOUNDARY-002', 'Fronteras', 'el mismo movimiento NO entra en B cuando B.desde === A.hasta', async () => {
+  await empresa()
+  await sembrarMovimiento('pago', TF, 100_000)
+  const b = await ciclo(TF, T2)
+  metric('B = (15:30:00.000, T2]', `recaudado ${b.recaudado}`)
+  assert(b.recaudado === 0, 'el movimiento de la frontera se contó otra vez en B')
+})
+
+await spec('CASH-BOUNDARY-003', 'Fronteras', 'movimiento 1 ms DESPUÉS del cierre: no entra en A, sí en B', async () => {
+  await empresa()
+  await sembrarMovimiento('pago', msDe(TF, 1), 70_000)
+  const a = await ciclo(T0, TF)
+  const b = await ciclo(TF, T2)
+  metric('A / B', `${a.recaudado} / ${b.recaudado}`)
+  assert(a.recaudado === 0 && b.recaudado === 70_000, 'el movimiento posterior cayó en el ciclo equivocado')
+})
+
+await spec('CASH-BOUNDARY-004', 'Fronteras', 'movimiento 1 ms ANTES del cierre entra en A', async () => {
+  await empresa()
+  await sembrarMovimiento('pago', msDe(TF, -1), 40_000)
+  const a = await ciclo(T0, TF)
+  const b = await ciclo(TF, T2)
+  metric('A / B', `${a.recaudado} / ${b.recaudado}`)
+  assert(a.recaudado === 40_000 && b.recaudado === 0, 'el movimiento anterior cayó en el ciclo equivocado')
+})
+
+await spec('CASH-BOUNDARY-005', 'Fronteras', 'dos cierres REALES el mismo día no duplican ni pierden movimientos', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE)
+  const pagos = [100_000, 20_000, 35_000, 45_000]
+  await pagar(JUAN, sale, pagos[0])
+  await pagar(JUAN, sale, pagos[1])
+  const a = await cerrar(JUAN.id, 120_000)
+  await pagar(JUAN, sale, pagos[2])
+  await pagar(JUAN, sale, pagos[3])
+  const b = await cerrar(JUAN.id, 80_000)
+  // Cada pago real cae en EXACTAMENTE uno de los ciclos archivados.
+  const filas = (await db.payments.toArray()).filter(p => p.collectorId === JUAN.id)
+  const enCuantos = filas.map(p => [a, b].filter(c => inCycle(p.createdAt, c.desde, c.hasta)).length)
+  metric('A', `${a.desde} → ${a.hasta} · ${a.recaudado}`)
+  metric('B', `${b.desde} → ${b.hasta} · ${b.recaudado}`)
+  metric('ciclos por pago', enCuantos.join(', '))
+  assert(a.hasta.slice(0, 10) === b.hasta.slice(0, 10) && b.desde === a.hasta, 'los cierres deben ser consecutivos y del mismo día')
+  assert(enCuantos.every(n => n === 1), 'algún pago quedó en 0 o en 2 ciclos')
+  assert(a.recaudado + b.recaudado === pagos.reduce((s, v) => s + v, 0), 'la suma de los ciclos no coincide con los pagos')
+})
+
+await spec('CASH-BOUNDARY-006', 'Fronteras', 'pago, desembolso y gasto aplican la MISMA frontera', async () => {
+  const filas: string[] = []
+  for (const tipo of ['pago', 'desembolso', 'gasto'] as const) {
+    for (const [etiqueta, delta, esperadoA, esperadoB] of [['T−1ms', -1, 1, 0], ['T', 0, 1, 0], ['T+1ms', 1, 0, 1]] as const) {
+      await empresa()
+      await sembrarMovimiento(tipo, msDe(TF, delta), 10_000)
+      const [a, b] = [await ciclo(T0, TF), await ciclo(TF, T2)]
+      const campo = tipo === 'pago' ? 'recaudado' : tipo === 'desembolso' ? 'desembolsado' : 'gastos'
+      const enA = a[campo] === 10_000 ? 1 : 0
+      const enB = b[campo] === 10_000 ? 1 : 0
+      filas.push(`${tipo}@${etiqueta}: A=${enA} B=${enB}`)
+      assert(enA === esperadoA && enB === esperadoB, `${tipo} en ${etiqueta}: A=${enA} B=${enB}`)
+      assert(enA + enB === 1, `${tipo} en ${etiqueta} no cayó en exactamente un ciclo`)
+    }
+  }
+  metric('matriz', filas.join(' · '))
+  const motor = readSource('src/services/cashboxEngine.ts')
+  const usos = (motor.match(/inCycle\(/g) ?? []).length
+  metric('usos de inCycle en el motor', usos)
+  assert(usos === 3, 'los tres componentes deben filtrar con el MISMO helper')
+})
+
+await spec('CASH-BOUNDARY-007', 'Fronteras', 'un movimiento registrado JUSTO al cerrar (misma ms / otra pestaña) cae en un solo ciclo', async () => {
+  // Carrera real: cierres y cobros concurrentes, sin pausas. Ningún pago puede
+  // quedar fuera de todos los ciclos ni en dos.
+  await empresa()
+  const sale = await venta(R_NORTE, 20_000_000, 100)
+  let valorTotal = 0
+  const cerrados: CashSettlement[] = []
+  for (let i = 0; i < 12; i++) {
+    const valor = 1_000 + i
+    valorTotal += valor
+    const [, doc] = await Promise.all([
+      pagar(JUAN, sale, valor),
+      closeCashSettlement({ actor: ADMIN, tenantId: T, routeId: R_NORTE, userId: JUAN.id, entregado: 0, motivo: 'prueba de concurrencia de frontera' })
+        .catch(() => null),
+    ])
+    if (doc) cerrados.push(doc)
+    await pagar(JUAN, sale, 1).then(() => { valorTotal += 1 })   // inmediatamente después, sin pausa
+  }
+  const final = await previewCashSettlement({ actor: ADMIN, tenantId: T, routeId: R_NORTE, userId: JUAN.id })
+  const filas = (await db.payments.toArray()).filter(p => p.collectorId === JUAN.id)
+  const tramos = [...cerrados.map(c => ({ desde: c.desde, hasta: c.hasta })), { desde: final.desde, hasta: final.hasta }]
+  const perdidos = filas.filter(p => tramos.every(t => !inCycle(p.createdAt, t.desde, t.hasta)))
+  const dobles = filas.filter(p => tramos.filter(t => inCycle(p.createdAt, t.desde, t.hasta)).length > 1)
+  const sumaCiclos = cerrados.reduce((s, c) => s + c.recaudado, 0) + final.recaudado
+  metric('cierres / pagos', `${cerrados.length} / ${filas.length}`)
+  metric('pagos en ningún ciclo', perdidos.map(p => p.createdAt).join(', ') || 'ninguno')
+  metric('pagos en dos ciclos', dobles.length)
+  metric('Σ ciclos / Σ pagos', `${sumaCiclos} / ${valorTotal}`)
+  assert(perdidos.length === 0 && dobles.length === 0, 'la frontera perdió o duplicó movimientos')
+  assert(sumaCiclos === valorTotal, 'la suma de los ciclos no coincide con los pagos registrados')
+})
+
+await spec('CASH-BOUNDARY-008', 'Fronteras', 'escritor con bloqueo abierto mientras arranca el cierre: el movimiento entra en A', async () => {
+  // Interlocución DETERMINISTA: el gasto sella su instante dentro de su
+  // transacción y, antes de confirmarlo, arranca el cierre. El cierre debe esperar
+  // y contarlo (instante ≤ hasta), nunca dejarlo fuera de los dos ciclos.
+  await empresa()
+  await pagar(JUAN, await venta(R_NORTE), 100_000)
+  await tick()
+  let cierre: Promise<CashSettlement> | null = null
+  await db.transaction('rw', [db.expenses], async () => {
+    await db.expenses.get('bloqueo')
+    const sello = new Date().toISOString()
+    cierre = Dexie.ignoreTransaction(() => closeCashSettlement({
+      actor: ADMIN, tenantId: T, routeId: R_NORTE, userId: JUAN.id, entregado: 90_000, motivo: 'gasto en curso al cerrar',
+    }))
+    await db.expenses.add({
+      id: 'gasto-en-vuelo', tenantId: T, routeId: R_NORTE, categoryId: 'cat-1', valor: 10_000, fecha: HOY,
+      userId: JUAN.id, collectorId: JUAN.id, syncStatus: 'synced', createdAt: sello,
+    })
+  })
+  const doc = await cierre!
+  const gasto = (await db.expenses.get('gasto-en-vuelo'))!
+  const siguiente = await previewDe(JUAN.id)
+  metric('instante del gasto / hasta de A', `${gasto.createdAt} / ${doc.hasta}`)
+  metric('gastos en A / en B', `${doc.gastos} / ${siguiente.gastos}`)
+  assert(gasto.createdAt <= doc.hasta && doc.gastos === 10_000 && siguiente.gastos === 0,
+    'el gasto confirmado durante el cierre no quedó exactamente en A')
+})
+
+await spec('CASH-BOUNDARY-009', 'Fronteras', 'cierres concurrentes con pagos, desembolsos y gastos: cada movimiento en UN ciclo', async () => {
+  await empresa()
+  const sale = await venta(R_NORTE, 50_000_000, 200)
+  const esperado = { recaudado: 0, desembolsado: 0, gastos: 0 }
+  const cerrados: CashSettlement[] = []
+  for (let i = 0; i < 10; i++) {
+    const v = 1_000 + i
+    const pendiente = {
+      id: `sale-conc-${i}`, tenantId: T, routeId: R_NORTE, clientId: `cli-conc-${i}`, createdByUserId: JUAN.id,
+      valorVenta: v, tasaInteres: 0, valorInteres: 0, valorTotal: v, saldo: v, numeroCuotas: 1, valorCuota: v,
+      frecuenciaPago: 'diaria', fechaInicio: HOY, fechaFinalEstimada: HOY, status: 'activa', disbursementStatus: 'pendiente',
+      createdAt: new Date().toISOString(), updatedAt: '',
+    } as unknown as Sale
+    await db.sales.add(pendiente)
+    const [, , , doc] = await Promise.all([
+      pagar(JUAN, sale, v).then(() => { esperado.recaudado += v }),
+      confirmDisbursement(pendiente.id, JUAN).then(() => { esperado.desembolsado += v }),
+      addExpenseStamped({
+        id: `g-conc-${i}`, tenantId: T, routeId: R_NORTE, categoryId: 'cat-1', valor: v, fecha: HOY,
+        userId: JUAN.id, collectorId: JUAN.id, syncStatus: 'synced',
+      }).then(() => { esperado.gastos += v }),
+      closeCashSettlement({ actor: ADMIN, tenantId: T, routeId: R_NORTE, userId: JUAN.id, entregado: 0, motivo: 'cierre concurrente de prueba' })
+        .catch(() => null),
+    ])
+    if (doc) cerrados.push(doc)
+  }
+  const final = await previewDe(JUAN.id)
+  const suma = (k: 'recaudado' | 'desembolsado' | 'gastos') => cerrados.reduce((s, c) => s + c[k], 0) + final[k]
+  metric('cierres', cerrados.length)
+  metric('Σ ciclos vs registrado', `recaudado ${suma('recaudado')}/${esperado.recaudado} · desembolsado ${suma('desembolsado')}/${esperado.desembolsado} · gastos ${suma('gastos')}/${esperado.gastos}`)
+  assert(suma('recaudado') === esperado.recaudado, 'pagos perdidos o duplicados en la frontera')
+  assert(suma('desembolsado') === esperado.desembolsado, 'desembolsos perdidos o duplicados en la frontera')
+  assert(suma('gastos') === esperado.gastos, 'gastos perdidos o duplicados en la frontera')
+})
+
+await spec('CASH-BOUNDARY-010', 'Fronteras', 'contrato: cierre bajo bloqueo y escritores sellando bajo bloqueo', () => {
+  const svc = readSource('src/services/cashSettlementService.ts')
+  const cierreBloquea = svc.includes('[database.cashSettlements, database.payments, database.sales, database.expenses, database.tenants]')
+  const guarda = svc.includes('waitClockPast(hasta)')
+  const antes = Date.now()
+  waitClockPast(new Date(antes).toISOString())
+  const relojAvanza = Date.now() > antes
+  const disb = readSource('src/services/saleRequestService.ts')
+  const corr = readSource('src/services/paymentCorrectionService.ts')
+  const gastosPantalla = readSource('src/pages/collector/CollectorExpensesPage.tsx')
+  // Tolerante a finales de línea CRLF/LF.
+  const disbSella = /await db\.sales\.get\(saleId\)\s+const ahora = nowISO\(\)/.test(disb)
+  const corrSella = /await db\.payments\.get\(original\.id\)\s+const sello = nowISO\(\)/.test(corr)
+  metric('cierre en transacción sobre pagos/ventas/gastos', cierreBloquea)
+  metric('no suelta el bloqueo hasta superar `hasta`', guarda && relojAvanza)
+  metric('desembolso sella tras leer', disbSella)
+  metric('corrección sella tras leer', corrSella)
+  metric('gasto operativo usa addExpenseStamped', gastosPantalla.includes('await addExpenseStamped(expense)'))
+  assert(cierreBloquea && guarda && relojAvanza, 'el cierre no protege la frontera')
+  assert(disbSella, 'el desembolso sella antes del bloqueo')
+  assert(corrSella, 'la corrección sella antes del bloqueo')
+  assert(gastosPantalla.includes('await addExpenseStamped(expense)') && !gastosPantalla.includes('createdAt: nowISO()'), 'el gasto sella antes del bloqueo')
+})
+
+// ############################################################
+// FAMILIA — MOBILE-PARITY · SUPERVISOR Y COBRADOR, MISMA APP OPERATIVA
+// ------------------------------------------------------------
+// El Supervisor hace su recorrido con el teléfono: su experiencia operativa es la
+// del Cobrador. Mismas rutas, mismo layout, mismas páginas; las diferencias salen
+// de `can()`, no de copias ni de ramas por rol.
+// ############################################################
+const APP = () => readSource('src/app/App.tsx')
+const OPERATIVAS = () => {
+  const app = APP()
+  const cuerpo = app.slice(app.indexOf('function operationalRoutes()'), app.indexOf('export default function App()'))
+  return [...cuerpo.matchAll(/path="([^"]+)"/g)].map(m => m[1])
+}
+const PAGINAS_OPERATIVAS = () => fs.readdirSync('src/pages/collector').filter(f => f.endsWith('.tsx'))
+
+await spec('MOBILE-PARITY-001', 'Paridad móvil', 'Cobrador y Supervisor usan la MISMA familia de layout operativo', () => {
+  const app = APP()
+  const sup = readSource('src/components/layout/SupervisorLayout.tsx')
+  const bloque = (prefijo: string) => app.slice(app.indexOf(`<Route path="${prefijo}"`), app.indexOf('</Route>', app.indexOf(`<Route path="${prefijo}"`)))
+  const reexporta = /export \{ CollectorLayout as SupervisorLayout \} from '\.\/CollectorLayout'/.test(sup)
+  metric('SupervisorLayout = CollectorLayout', reexporta)
+  metric('/collector monta operationalRoutes()', bloque('/collector').includes('{operationalRoutes()}'))
+  metric('/supervisor monta operationalRoutes()', bloque('/supervisor').includes('{operationalRoutes()}'))
+  assert(reexporta, 'el Supervisor tiene un layout propio')
+  assert(bloque('/collector').includes('{operationalRoutes()}') && bloque('/supervisor').includes('{operationalRoutes()}'),
+    'las dos capas no comparten la misma definición de rutas')
+})
+
+await spec('MOBILE-PARITY-002', 'Paridad móvil', 'no existen duplicados de páginas operativas', () => {
+  const dirs = fs.readdirSync('src/pages')
+  const paginas = PAGINAS_OPERATIVAS()
+  const conSupervisor = paginas.filter(f => /supervisor/i.test(f))
+  const rutas = OPERATIVAS()
+  const repetidas = rutas.filter((r, i) => rutas.indexOf(r) !== i)
+  metric('carpetas de páginas', dirs.join(', '))
+  metric('páginas operativas', paginas.length)
+  metric('páginas "Supervisor*"', conSupervisor.join(', ') || 'ninguna')
+  metric('rutas repetidas', repetidas.join(', ') || 'ninguna')
+  assert(!dirs.includes('supervisor'), 'existe una carpeta de páginas propia del Supervisor')
+  assert(conSupervisor.length === 0 && repetidas.length === 0, 'hay páginas o rutas operativas duplicadas')
+})
+
+await spec('MOBILE-PARITY-003', 'Paridad móvil', 'el Supervisor tiene las mismas rutas operativas base que el Cobrador', () => {
+  const rutas = OPERATIVAS()
+  const base = ['select-route', 'home', 'route', 'clients/new', 'new-sale', 'disbursements', 'daily-report', 'cashclose',
+    'payment-history', 'payment/:saleId', 'client/:id', 'expenses', 'sync', 'account', 'worker-settlements']
+  const faltan = base.filter(r => !rutas.includes(r))
+  metric('rutas operativas (ambos roles)', rutas.join(' · '))
+  assert(faltan.length === 0, `faltan rutas operativas: ${faltan.join(', ')}`)
+})
+
+await spec('MOBILE-PARITY-004', 'Paridad móvil', 'las diferencias de acceso están gobernadas por capacidades', () => {
+  const fuentes = [...PAGINAS_OPERATIVAS().map(f => `src/pages/collector/${f}`), 'src/components/layout/CollectorLayout.tsx',
+    'src/components/settlement/WorkerCashSettlementPanel.tsx']
+  const ramas = fuentes.flatMap(f => readSource(f).split('\n').map((l, i) => ({ f, i: i + 1, l })))
+    .filter(x => /rol\s*===\s*'(supervisor|cobrador)'/.test(x.l) && !x.l.trim().startsWith('//'))
+  // Únicas ramas por rol admitidas: ETIQUETAS de texto (título y nombre del rol), nunca acceso.
+  const noEtiqueta = ramas.filter(x => !/roleTitle|'Supervisor' : 'Cobrador'/.test(x.l))
+  const gates = fuentes.reduce((n, f) => n + (readSource(f).match(/can\(user, '/g) ?? []).length, 0)
+  metric('ramas por rol encontradas', ramas.map(x => `${x.f.split('/').pop()}:${x.i}`).join(', '))
+  metric('ramas por rol que deciden acceso', noEtiqueta.length)
+  metric('guardas can(user, …) en la capa operativa', gates)
+  assert(noEtiqueta.length === 0, `hay decisiones de acceso por rol: ${noEtiqueta.map(x => x.l.trim()).join(' | ')}`)
+  assert(gates >= 6, 'las diferencias deberían expresarse con can()')
+})
+
+await spec('MOBILE-PARITY-005', 'Paridad móvil', 'el Supervisor registra el pago desde el MISMO flujo (PaymentPage → registerPayment)', async () => {
+  await empresa()
+  const p = await pagar(LAURA, await venta(R_NORTE), 60_000)
+  const page = readSource('src/pages/collector/PaymentPage.tsx')
+  metric('ruta payment/:saleId compartida', OPERATIVAS().includes('payment/:saleId'))
+  metric('PaymentPage llama a registerPayment', page.includes('await registerPayment({'))
+  metric('Payment', `${p.createdByUserId} / ${p.collectorId} / ${p.valor}`)
+  assert(page.includes('await registerPayment({') && p.collectorId === LAURA.id && p.createdByUserId === LAURA.id,
+    'el pago del Supervisor no sigue el flujo compartido o no quedó a su nombre')
+})
+
+await spec('MOBILE-PARITY-006', 'Paridad móvil', 'el Cobrador sigue SIN ver la Base', () => {
+  const puede = can(JUAN, 'cashbox.viewRoute', { routeId: R_NORTE, tenantId: T })
+  const tarjeta = readSource('src/pages/collector/CollectorSelectRoutePage.tsx')
+  const cierre = readSource('src/pages/collector/CollectorCashClosePage.tsx')
+  metric('cobrador · cashbox.viewRoute', puede)
+  assert(!puede, 'el Cobrador puede ver la caja de la ruta')
+  assert(tarjeta.includes('base: verBase ? await getRouteAvailableCapital(route.id) : undefined'), 'la tarjeta pide la Base sin guarda')
+  assert(cierre.includes('verCajaRuta ? await getRouteFinancialSummary(routeId) : null'), 'Mi efectivo pide la caja de ruta sin guarda')
+})
+
+await spec('MOBILE-PARITY-007', 'Paridad móvil', 'el Supervisor SÍ ve la Base (y separada de Mi efectivo)', () => {
+  const puede = can(LAURA, 'cashbox.viewRoute', { routeId: R_NORTE, tenantId: T })
+  const cierre = readSource('src/pages/collector/CollectorCashClosePage.tsx')
+  metric('supervisor · cashbox.viewRoute', puede)
+  assert(puede, 'el Supervisor no puede ver la Base')
+  assert(cierre.includes('no forma parte de tu efectivo'), 'la Base no está separada de Mi efectivo')
+})
+
+await spec('MOBILE-PARITY-008', 'Paridad móvil', 'el Supervisor abre "Cuadrar trabajadores" desde la experiencia móvil', () => {
+  const home = readSource('src/pages/collector/CollectorHomePage.tsx')
+  const mi = readSource('src/pages/collector/CollectorCashClosePage.tsx')
+  const desdeInicio = home.includes("can(user, 'cashSettlement.close'") && home.includes('to={`${base}/worker-settlements`}')
+  const desdeMiEfectivo = mi.includes('to={`${base}/worker-settlements`}')
+  metric('ruta operativa worker-settlements', OPERATIVAS().includes('worker-settlements'))
+  metric('acceso en Inicio (con capacidad)', desdeInicio)
+  metric('acceso en Mi efectivo', desdeMiEfectivo)
+  metric('supervisor · cashSettlement.close / cobrador', `${can(LAURA, 'cashSettlement.close', { routeId: R_NORTE, tenantId: T })} / ${can(JUAN, 'cashSettlement.close', { routeId: R_NORTE, tenantId: T })}`)
+  assert(OPERATIVAS().includes('worker-settlements') && desdeInicio && desdeMiEfectivo, 'el cuadre no es alcanzable desde el móvil')
+  assert(can(LAURA, 'cashSettlement.close', { routeId: R_NORTE, tenantId: T }) && !can(JUAN, 'cashSettlement.close', { routeId: R_NORTE, tenantId: T }),
+    'la capacidad no distingue Supervisor de Cobrador')
+  const panel = readSource('src/components/settlement/WorkerCashSettlementPanel.tsx')
+  assert(panel.includes('sm:hidden') && panel.includes('hidden sm:block'), 'el histórico no tiene tratamiento móvil')
+})
+
+await spec('MOBILE-PARITY-009', 'Paridad móvil', 'el Supervisor NO puede cerrar su propio cuadre (regla intacta)', async () => {
+  await empresa()
+  await pagar(LAURA, await venta(R_NORTE), 300_000)
+  const r = await rechazo(() => closeCashSettlement({ actor: LAURA, tenantId: T, routeId: R_NORTE, userId: LAURA.id, entregado: 300_000 }))
+  metric('Laura → su cuadre', r)
+  assert(/propio cuadre/.test(r), 'el Supervisor pudo cerrar su propio cuadre')
+})
+
+await spec('MOBILE-PARITY-010', 'Paridad móvil', 'ninguna pantalla operativa exige ir a /admin/* para completar el recorrido', () => {
+  const fuentes = [...PAGINAS_OPERATIVAS().map(f => `src/pages/collector/${f}`), 'src/components/layout/CollectorLayout.tsx',
+    'src/components/settlement/WorkerCashSettlementPanel.tsx']
+  const conAdmin = fuentes.filter(f => /['"`]\/admin/.test(readSource(f)))
+  const layout = readSource('src/components/layout/CollectorLayout.tsx')
+  const unaRuta = /if \(routes\.length === 1\) \{\s+return <div/.test(layout)
+  metric('pantallas operativas que enlazan a /admin', conAdmin.join(', ') || 'ninguna')
+  metric('una sola ruta entra directo (sin pasar por la selección)', unaRuta)
+  assert(conAdmin.length === 0, `hay enlaces operativos a /admin: ${conAdmin.join(', ')}`)
+  assert(unaRuta, 'con una sola ruta se vuelve a forzar la pantalla de selección')
+})
+
 await spec('SMOKE-S1', 'Smoke', 'Supervisor sin selector: Laura paga 300k con Juan activo', async () => {
   await empresa({ cobradoresActivosNorte: [JUAN.id] })
   const p = await pagar(LAURA, await venta(R_NORTE), 300_000)

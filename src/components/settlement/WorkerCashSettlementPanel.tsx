@@ -105,6 +105,9 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
       setConfirmando(false)
       setEntregado(0)
       setMotivo('')
+      // Vuelve a la selección: dejar al trabajador elegido mostraba un ciclo nuevo
+      // en $0 con "Cerrar cuadre" activo, invitando a cerrar un cuadre vacío.
+      setUserId('')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo cerrar el cuadre.')
     } finally { setCerrando(false) }
@@ -198,7 +201,33 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
       {historial.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-sm font-semibold text-gray-700">Cuadres de trabajadores en esta ruta</h3>
-          <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-x-auto">
+          {/* MÓVIL (Supervisor en recorrido): una tarjeta por cuadre, sin tabla de 8
+              columnas ni desplazamiento lateral. Desde `sm` se muestra la tabla. */}
+          <div className="sm:hidden space-y-2">
+            {historial.map(s => {
+              const puede = puedeReabrir && !reopenCashBlockedReason(s, historial)
+              return (
+                <div key={s.id} className={`rounded-xl border border-gray-100 bg-white px-3 py-2.5 text-xs ${s.status === 'reabierta' ? 'text-gray-400' : 'text-gray-700'}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold truncate">{nombreDe(s.userId)}</span>
+                    <span className={`font-semibold whitespace-nowrap ${s.diferencia < 0 ? 'text-red-600' : s.diferencia > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                      {s.diferencia === 0 ? 'Exacto' : s.diferencia < 0 ? `Faltante ${money(s.faltante)}` : `Sobrante ${money(s.sobrante)}`}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-gray-500">
+                    {formatDateTime(s.closedAt)} · v{s.version} · Esperado {money(s.esperado)} · Entregado {money(s.entregado)}
+                  </p>
+                  <p className="mt-0.5 text-gray-500 break-words">
+                    Cerró {nombreDe(s.closedByUserId)}{s.status === 'reabierta' ? ` · Reabierto: ${s.reopenReason ?? ''}` : s.motivo ? ` · ${s.motivo}` : ''}
+                  </p>
+                  {puede && (
+                    <button onClick={() => { setReabrir(s); setMotivoReabrir('') }} className="mt-1.5 text-amber-600 font-medium">Reabrir</button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          <div className="hidden sm:block bg-white rounded-2xl shadow-card border border-gray-100 overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-gray-50 text-gray-500">
                 <tr>

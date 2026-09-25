@@ -8,9 +8,10 @@ import { hasPersonalCashbox } from '@/lib/collectorAttribution'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { generateId } from '@/lib/utils'
-import { formatCurrency, formatCurrencyInput, parseCurrencyInput, getCurrencySymbol, formatDate, today, nowISO } from '@/lib/formatters'
+import { formatCurrency, formatCurrencyInput, parseCurrencyInput, getCurrencySymbol, formatDate, today } from '@/lib/formatters'
 import type { Expense, ExpenseCategory } from '@/models/types'
 import { assertRouteOperationalContext } from '@/services/officeService'
+import { addExpenseStamped } from '@/services/expenseService'
 
 export default function CollectorExpensesPage() {
   const { user } = useAuth()
@@ -46,7 +47,7 @@ export default function CollectorExpensesPage() {
       // (La consulta del histórico de esa ruta sigue disponible con normalidad.)
       await assertRouteOperationalContext(routeId)
       const route = await db.routes.get(routeId)
-      const expense: Expense = {
+      const expense: Omit<Expense, 'createdAt'> = {
         id: generateId(), tenantId: user.tenantId,
         routeId, categoryId: form.categoryId, valor: form.valor,
         descripcion: form.descripcion || undefined, receiptPhotoDataUrl: form.receiptPhotoDataUrl,
@@ -61,9 +62,10 @@ export default function CollectorExpensesPage() {
         // gasto que pagaba un SUPERVISOR de su bolsillo no se le descontaba a nadie.
         userId: user.id,
         collectorId: hasPersonalCashbox(user.rol) ? user.id : undefined,
-        syncStatus: navigator.onLine ? 'synced' : 'pending', createdAt: nowISO(),
+        syncStatus: navigator.onLine ? 'synced' : 'pending',
       }
-      await db.expenses.add(expense)
+      // El instante se sella BAJO BLOQUEO: frontera exacta del cuadre por trabajador.
+      await addExpenseStamped(expense)
       toast.success('Gasto registrado')
       setForm({ categoryId: '', valor: 0, descripcion: '', receiptPhotoDataUrl: undefined })
       setShowForm(false)

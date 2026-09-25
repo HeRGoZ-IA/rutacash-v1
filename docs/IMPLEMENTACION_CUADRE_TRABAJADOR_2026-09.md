@@ -232,6 +232,55 @@ pero la deuda que sigue viva es **positiva** y se **suma** a lo esperado.
 del modelo personal. `hasta` = instante del cierre. Ciclos (desde, hasta]: dos cierres
 el mismo día son dos ciclos distintos (`CASH-SETTLEMENT-019`).
 
+### 3.6.b Frontera temporal — convención única (actualizado 2026-09-24, ajuste previo a Fase 3)
+
+**Convención: `(desde, hasta]` — `desde` EXCLUSIVO, `hasta` INCLUSIVO.** Un único
+helper la aplica a los tres componentes:
+
+```ts
+// src/lib/cashSettlementRules.ts
+export function inCycle(instante: string, desde: string, hasta: string): boolean {
+  return instante > desde && instante <= hasta
+}
+// src/services/cashboxEngine.ts — getCollectorCashSummary
+//   pagos:       inCycle(x.instante, desde, hasta)            (createdAt)
+//   desembolsos: inCycle(disbursementInstant(s), desde, hasta) (disbursedAt)
+//   gastos:      inCycle(expenseInstant(e), desde, hasta)      (createdAt)
+```
+
+El ciclo B empieza exactamente en el `hasta` de A. Un movimiento en el instante T de
+la frontera entra **una sola vez**, en A:
+
+| Instante | Ciclo A `(…, T]` | Ciclo B `(T, T2]` |
+|---|---|---|
+| T − 1 ms | ✅ | — |
+| **T** | ✅ | — |
+| T + 1 ms | — | ✅ |
+
+**¿Podía contarse dos veces?** No: la convención ya era esta y ya era única.
+
+**¿Podía quedar en NINGÚN ciclo?** Sí, en teoría, y se corrigió. El cierre sellaba
+`hasta` y leía los movimientos **sin bloquear sus tablas**, y tres escritores sellaban su
+instante **antes** de obtener su bloqueo: el gasto (pantalla), la confirmación de
+desembolso y la corrección de pago. Un movimiento sellado ≤ `hasta` y confirmado justo
+después de la lectura del cierre (otra pestaña, mismo milisegundo) no entraba ni en A
+(no existía al leer) ni en B (instante ≤ `desde`). Las pruebas no llegaron a forzarlo,
+pero la ventana existía en el código.
+
+Corrección (la convención no cambió):
+
+1. `closeCashSettlement` calcula y escribe **dentro de una transacción** sobre
+   `cashSettlements, payments, sales, expenses, tenants`. Un movimiento en curso se
+   confirma antes de que el cierre lea, o espera a que el cierre termine.
+2. `hasta` se sella **después** de obtener el bloqueo (primera lectura).
+3. `waitClockPast(hasta)`: el cierre no suelta el bloqueo hasta que el reloj supera
+   `hasta` (≤ 1 ms). Todo lo que se selle después tiene instante estrictamente mayor.
+4. Los escritores sellan **bajo bloqueo**, tras una primera lectura dentro de su
+   transacción: `paymentService` (ya lo hacía), `confirmDisbursement`,
+   `executeCorrection` y el gasto operativo (`addExpenseStamped`, servicio nuevo).
+
+Pruebas `CASH-BOUNDARY-001..010` (§4).
+
 ### 3.7 Quién cierra
 
 | Rol | `view` | `viewOwn` | `close` | `reopen` |
@@ -317,6 +366,8 @@ producción sobre el singleton `db` real con `fake-indexeddb`.
 | Familia | Casos |
 |---|---|
 | `SUP-RESP-001..009` | Regla definitiva del Supervisor |
+| `CASH-BOUNDARY-001..010` | Frontera `(desde, hasta]`: T, T±1 ms, dos cierres el mismo día, pagos/desembolsos/gastos, escritor con bloqueo abierto durante el cierre, cierres concurrentes con los tres escritores, contrato de bloqueo |
+| `MOBILE-PARITY-001..010` | Paridad móvil Supervisor/Cobrador (ver `PARIDAD_MOVIL_SUPERVISOR_COBRADOR_2026-09.md`) |
 | `LOCAL-SYNC-000..016` | Misma base, Cobrador/Supervisor → Admin, sesión, alcance, reactividad, semántica |
 | `CASH-SETTLEMENT-001..032` | Cuadre, permisos, independencia, periodo, reapertura, inmutabilidad, correcciones, histórico, Mi efectivo, alertas, liquidación, capacidades |
 | `SMOKE-S1..S4`, `SMOKE-C1..C6` | Recorridos del socio |
@@ -336,7 +387,11 @@ Tests sustituidos por la regla nueva: ver `IMPLEMENTACION_SUPERVISOR_RESPONSABIL
   servicio.
 - **Reconciliación formal Route ↔ trabajadores:** no existe. La línea informativa en
   Liquidación no concilia.
-- **Domingo:** fuera de la semana operativa por defecto (§2.3).
-- **Instante de cierre:** un movimiento registrado en el mismo milisegundo que el
-  cierre, desde otra pestaña, podría quedar fuera de ambos ciclos. Despreciable en uso
-  real; anotado.
+- **Domingo:** fuera de la semana operativa por defecto (§2.3). **Pendiente confirmar
+  si las Routes operan/cobran los domingos.** No se tocaron `getWeekStart`,
+  `getWeekEnd`, `WeeklySettlement` ni los rangos o reportes semanales.
+- ~~**Instante de cierre:** un movimiento registrado en el mismo milisegundo que el
+  cierre podía quedar fuera de ambos ciclos.~~ **Resuelto** (§3.6.b).
+- **Gasto del panel de Administración** (`ExpensesPage`): sigue sellando fuera de
+  bloqueo, pero no tiene responsable de caja personal (`collectorId` vacío y `userId` de
+  un Admin), así que nunca entra en el cuadre de ningún trabajador.
