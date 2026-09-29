@@ -14,6 +14,7 @@ import { can } from '@/lib/permissions'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import { computeSaleFinancials, createDirectSale, createSaleRequest, findActiveSaleForClient, directSaleLimit, type SaleInputs } from '@/services/saleRequestService'
 import { useCapitalGuard } from '@/hooks/useCapitalGuard'
+import { decideSaleOrigination } from '@/lib/activeCredit'
 import type { Client, Sale, Route } from '@/models/types'
 
 const TASA_OPTIONS = [{ value: '10', label: '10%' }, { value: '20', label: '20%' }]
@@ -96,7 +97,14 @@ export default function CollectorNewSalePage() {
   // salvo que supere el límite de venta directa, en cuyo caso también solicita.
   const canDirect = can(user, 'sale.createDirect', { routeId: selectedClient?.routeId })
   const withinLimit = !hasEffectiveLimit || form.valorVenta <= effectiveLimit
-  const allowDirect = canDirect && withinLimit
+  // Regla central de crédito activo (la misma que aplica el servicio): un Cobrador
+  // con cliente con crédito activo SOLO puede solicitar, aunque tuviera venta directa.
+  const origen = user ? decideSaleOrigination({
+    actor: user, canCreateDirect: canDirect, activeCredits: activeSale ? 1 : 0,
+    canCreateRequest: can(user, 'sale.createRequest', { routeId: selectedClient?.routeId }),
+  }) : { kind: 'forbidden' as const }
+  const requiereAutorizacionPorCredito = origen.kind === 'authorization' && origen.reason === 'active-credit'
+  const allowDirect = origen.kind === 'direct' && withinLimit
 
   // La validación de capital se mantiene para todos los roles; el MONTO solo se
   // revela a quien puede ver la caja de la ruta (el Cobrador no lo necesita).
@@ -138,11 +146,11 @@ export default function CollectorNewSalePage() {
     }
     // Si el cliente ya tiene venta activa, pedir confirmación antes de crear otra.
     if (activeSale && confirmKind !== 'direct') { setConfirmKind('direct'); return }
-    const inputs = buildInputs(); if (!inputs) return
+    const inputs = buildInputs(); if (!inputs || !user) return
     setConfirmKind(null)
     setSaving(true)
     try {
-      await createDirectSale(inputs, user ?? undefined)
+      await createDirectSale(inputs, user)
       toast.success('Venta creada y activa para recaudo')
       navigate(`${base}/route`)
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Error al crear la venta') } finally { setSaving(false) }
@@ -151,11 +159,11 @@ export default function CollectorNewSalePage() {
   async function handleRequest() {
     if (!validate()) return
     if (activeSale && confirmKind !== 'request') { setConfirmKind('request'); return }
-    const inputs = buildInputs(); if (!inputs) return
+    const inputs = buildInputs(); if (!inputs || !user) return
     setConfirmKind(null)
     setSaving(true)
     try {
-      await createSaleRequest(inputs, user ?? undefined)
+      await createSaleRequest(inputs, user)
       toast.success('Solicitud de venta enviada al administrador')
       navigate(`${base}/home`)
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Error al enviar la solicitud') } finally { setSaving(false) }
@@ -263,7 +271,9 @@ export default function CollectorNewSalePage() {
               <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
               <div className="text-xs text-amber-700">
                 <p>
-                  {canDirect && !withinLimit
+                  {requiereAutorizacionPorCredito
+                    ? 'El cliente ya tiene un crédito activo: esta venta se enviará como solicitud de autorización.'
+                    : canDirect && !withinLimit
                     ? 'Esta venta supera el límite aprobado para venta directa. Se enviará como solicitud para aprobación.'
                     : 'Esta venta requiere autorización del administrador.'}
                 </p>

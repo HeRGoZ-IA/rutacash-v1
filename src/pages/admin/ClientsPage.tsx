@@ -18,6 +18,7 @@ import { ClientCreditHistory } from '@/components/ui/ClientCreditHistory'
 import { generateId } from '@/lib/utils'
 import { nowISO, formatDate, today, formatCurrency, normalizeDoc } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
+import { createDirectSale } from '@/services/saleRequestService'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
@@ -232,28 +233,15 @@ export default function ClientsPage() {
         await db.clients.update(editing.id, { ...form, updatedAt: nowISO() })
         toast.success('Cliente actualizado')
       } else if (addSale) {
-        // Cliente + venta + cuotas de forma atómica: si algo falla, no queda nada a medias
+        // Cliente + venta + cuotas de forma atómica y POR EL SERVICIO (incidente
+        // 2026-09): la venta se valida en dominio igual que en la App operativa.
+        if (!user) return
         const client: Client = { id: generateId(), tenantId, ...form, status: 'activo', createdAt: nowISO(), updatedAt: nowISO() }
-        const route = routes.find(r => r.id === form.routeId)
-        const saleId = generateId()
-        const { valorInteres, valorTotal } = calculateTotalWithInterest({ valorVenta: saleForm.valorVenta, tasaInteres: saleForm.tasaInteres })
-        const valorCuota = calculateInstallmentValue({ valorTotal, numeroCuotas: saleForm.numeroCuotas })
-        const fechaFinalEstimada = estimateFinalDate({ fechaInicio: saleForm.fechaInicio, numeroCuotas: saleForm.numeroCuotas, frecuencia: saleForm.frecuenciaPago, paymentDays: saleForm.paymentDays })
-        const installments = generateInstallments({ saleId, valorTotal, numeroCuotas: saleForm.numeroCuotas, valorCuota, frecuencia: saleForm.frecuenciaPago, fechaInicio: saleForm.fechaInicio, paymentDays: saleForm.paymentDays })
-        const sale: Sale = {
-          id: saleId, tenantId,
-          routeId: form.routeId, clientId: client.id, createdByUserId: user?.id ?? '',
-          valorVenta: saleForm.valorVenta, tasaInteres: saleForm.tasaInteres, valorInteres, valorTotal,
-          saldo: valorTotal, numeroCuotas: saleForm.numeroCuotas, valorCuota,
-          frecuenciaPago: saleForm.frecuenciaPago, paymentDays: saleForm.paymentDays,
-          fechaInicio: saleForm.fechaInicio, fechaFinalEstimada, status: 'activa',
-          createdAt: nowISO(), updatedAt: nowISO(),
-        }
-        await db.transaction('rw', db.clients, db.sales, db.installments, async () => {
-          await db.clients.add(client)
-          await db.sales.add(sale)
-          await db.installments.bulkAdd(installments)
-        })
+        await createDirectSale({
+          tenantId, routeId: form.routeId, clientId: client.id, createdByUserId: user.id,
+          valorVenta: saleForm.valorVenta, tasaInteres: saleForm.tasaInteres, numeroCuotas: saleForm.numeroCuotas,
+          frecuenciaPago: saleForm.frecuenciaPago, fechaInicio: saleForm.fechaInicio, paymentDays: saleForm.paymentDays,
+        }, user, { newClient: client })
         if (user) await logAction({ tenantId, userId: user.id, action: 'CREATE_CLIENT', entityType: 'Client', entityId: client.id, descripcion: `Cliente creado con crédito: ${client.nombre}` })
         toast.success('Cliente y crédito creados')
       } else {
@@ -263,7 +251,7 @@ export default function ClientsPage() {
       }
       closeModal()
       await load()
-    } catch { toast.error('Error al guardar') } finally { setSaving(false) }
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error al guardar') } finally { setSaving(false) }
   }
 
   async function requestDelete(client: Client) {

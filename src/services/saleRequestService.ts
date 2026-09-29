@@ -18,6 +18,7 @@ import type {
   Sale, Installment, SaleRequest, PaymentFrequency, DisbursementStatus, User, Client, Route,
 } from '@/models/types'
 import { assertRouteOperationalContext } from '@/services/officeService'
+import { activeCreditsOf, decideSaleOrigination, isActiveCredit } from '@/lib/activeCredit'
 
 export interface SaleInputs {
   tenantId: string
@@ -80,6 +81,25 @@ export class SaleRuleError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'SaleRuleError'
+  }
+}
+
+/**
+ * El cliente ya tiene un crédito activo y el actor (Cobrador) no puede otorgar otro
+ * directamente: debe enviarse como Solicitud de autorización.
+ */
+export class ActiveCreditAuthorizationRequiredError extends SaleRuleError {
+  constructor() {
+    super('Este cliente ya tiene un crédito activo: la venta debe enviarse como solicitud de autorización.')
+    this.name = 'ActiveCreditAuthorizationRequiredError'
+  }
+}
+
+/** Ya hay una solicitud pendiente para este cliente (doble envío o duplicado). */
+export class DuplicatePendingRequestError extends SaleRuleError {
+  constructor() {
+    super('Este cliente ya tiene una solicitud de venta pendiente. Espera a que se resuelva.')
+    this.name = 'DuplicatePendingRequestError'
   }
 }
 
@@ -158,35 +178,49 @@ async function assertSaleIntegrity(
  * misma regla que `confirmDisbursement`: si el actor tiene caja personal (Supervisor)
  * el desembolso se carga a SU efectivo; si no (Admin), es entrega administrativa.
  *
- * `actor` es opcional únicamente para semillas/pruebas internas.
+ * CRÉDITO ACTIVO (incidente 2026-09): la decisión directa/solicitud se toma con
+ * `decideSaleOrigination` DENTRO de la transacción, releyendo las ventas del
+ * cliente: un Cobrador nunca crea un segundo crédito directo, venga de la pantalla
+ * que venga. `actor` es OBLIGATORIO: antes era opcional "para semillas" y una
+ * llamada sin actor se saltaba TODAS las validaciones.
+ *
+ * LÍMITE DE VENTA DIRECTA: lo fija quien administra la ruta (`route.edit`) para la
+ * capa operativa; a ese mismo perfil no se le aplica (así operaban ya las pantallas
+ * de Administrador, que ahora pasan por este servicio).
  */
-export async function createDirectSale(input: SaleInputs, actor?: User, opts: { newClient?: Client } = {}): Promise<Sale> {
+export async function createDirectSale(input: SaleInputs, actor: User, opts: { newClient?: Client } = {}): Promise<Sale> {
+  if (!actor) throw new SaleRuleError('No autorizado: falta el usuario que registra la venta.')
   // Oficina inactiva → no se admiten ventas nuevas en sus rutas (la consulta sigue intacta).
   await assertRouteOperationalContext(input.routeId)
-  if (actor && !can(actor, 'sale.createDirect', { routeId: input.routeId, tenantId: input.tenantId })) {
+  const ctx = { routeId: input.routeId, tenantId: input.tenantId }
+  if (!can(actor, 'sale.createDirect', ctx)) {
     throw new Error('No autorizado: este perfil no puede crear ventas directas. La venta debe enviarse como solicitud.')
   }
-  if (actor) {
-    const { route } = await assertSaleIntegrity(input, { checkStartDate: true, newClient: opts.newClient })
-    const limite = directSaleLimit(route, actor)
-    if (input.valorVenta > limite) {
-      throw new SaleRuleError(`El valor supera el límite de venta directa (${limite}). Envíala como solicitud.`)
-    }
-    if (!(await hasCapitalForSale(input.routeId, input.valorVenta))) {
-      throw new SaleRuleError('La venta supera el capital disponible de la ruta.')
-    }
+  const { route } = await assertSaleIntegrity(input, { checkStartDate: true, newClient: opts.newClient })
+  const limite = can(actor, 'route.edit', ctx) ? Infinity : directSaleLimit(route, actor)
+  if (input.valorVenta > limite) {
+    throw new SaleRuleError(`El valor supera el límite de venta directa (${limite}). Envíala como solicitud.`)
+  }
+  if (!(await hasCapitalForSale(input.routeId, input.valorVenta))) {
+    throw new SaleRuleError('La venta supera el capital disponible de la ruta.')
   }
   const { sale, installments } = buildSaleWithInstallments(input, 'desembolsado')
   await db.transaction('rw', [db.sales, db.installments, db.clients], async () => {
-    if (actor) {
-      // Instante sellado dentro de la transacción (frontera del cuadre por trabajador).
-      await db.sales.get(sale.id)
-      const ahora = nowISO()
-      sale.disbursedByCollectorId = hasPersonalCashbox(actor.rol) ? actor.id : undefined
-      sale.disbursedByUserId = actor.id
-      sale.fechaDesembolso = today()
-      sale.disbursedAt = ahora
-    }
+    // Primera lectura: bloqueo de `sales` obtenido. Leer los créditos del cliente y
+    // escribir la venta en la MISMA transacción impide que dos intentos simultáneos
+    // vean "sin crédito" y creen dos ventas (IndexedDB serializa las transacciones
+    // de escritura sobre el mismo almacén).
+    const activos = activeCreditsOf(await db.sales.where('clientId').equals(input.clientId).toArray(), input.clientId, input.tenantId)
+    const decision = decideSaleOrigination({
+      actor, canCreateDirect: true, canCreateRequest: can(actor, 'sale.createRequest', ctx), activeCredits: activos.length,
+    })
+    if (decision.kind !== 'direct') throw new ActiveCreditAuthorizationRequiredError()
+    // Instante sellado dentro de la transacción (frontera del cuadre por trabajador).
+    const ahora = nowISO()
+    sale.disbursedByCollectorId = hasPersonalCashbox(actor.rol) ? actor.id : undefined
+    sale.disbursedByUserId = actor.id
+    sale.fechaDesembolso = today()
+    sale.disbursedAt = ahora
     if (opts.newClient) await db.clients.add(opts.newClient)
     await db.sales.add(sale)
     await db.installments.bulkAdd(installments)
@@ -215,16 +249,32 @@ export function buildSaleRequest(input: SaleInputs): SaleRequest {
 /**
  * Crea una Solicitud de venta (estado pending). VALIDA EN SERVICIO que el actor
  * tenga `sale.createRequest` sobre la ruta (fail-closed) y la integridad de la
- * venta solicitada cuando se pasa `actor`.
+ * venta solicitada.
+ *
+ * Dentro de la transacción: fotografía los créditos ACTIVOS del cliente
+ * (`activeCreditSaleIds`, para que el autorizador sepa que aprueba un crédito
+ * adicional) y rechaza una segunda solicitud PENDIENTE del mismo cliente — un doble
+ * toque no debe dejar dos solicitudes que, aprobadas por dos personas distintas,
+ * terminarían en dos créditos.
  */
-export async function createSaleRequest(input: SaleInputs, actor?: User, opts: { newClient?: Client } = {}): Promise<SaleRequest> {
+export async function createSaleRequest(input: SaleInputs, actor: User, opts: { newClient?: Client } = {}): Promise<SaleRequest> {
+  if (!actor) throw new SaleRuleError('No autorizado: falta el usuario que registra la solicitud.')
   await assertRouteOperationalContext(input.routeId)
-  if (actor) {
-    assertCan(actor, 'sale.createRequest', { routeId: input.routeId, tenantId: input.tenantId })
-    await assertSaleIntegrity(input, { checkStartDate: true, newClient: opts.newClient })
-  }
+  const ctx = { routeId: input.routeId, tenantId: input.tenantId }
+  assertCan(actor, 'sale.createRequest', ctx)
+  const { route } = await assertSaleIntegrity(input, { checkStartDate: true, newClient: opts.newClient })
   const request = buildSaleRequest(input)
-  await db.transaction('rw', [db.saleRequests, db.clients], async () => {
+  await db.transaction('rw', [db.saleRequests, db.clients, db.sales], async () => {
+    const pendiente = (await db.saleRequests.where('clientId').equals(input.clientId).toArray())
+      .some(r => r.status === 'pending' && r.tenantId === input.tenantId)
+    if (pendiente) throw new DuplicatePendingRequestError()
+    const activos = activeCreditsOf(await db.sales.where('clientId').equals(input.clientId).toArray(), input.clientId, input.tenantId)
+    const decision = decideSaleOrigination({
+      actor, canCreateDirect: can(actor, 'sale.createDirect', ctx), canCreateRequest: true, activeCredits: activos.length,
+    })
+    request.activeCreditSaleIds = activos.map(s => s.id)
+    request.authorizationReason = decision.kind === 'authorization' ? decision.reason
+      : input.valorVenta > directSaleLimit(route, actor) ? 'over-limit' : undefined
     if (opts.newClient) await db.clients.add(opts.newClient)
     await db.saleRequests.add(request)
   })
@@ -388,7 +438,7 @@ export async function countPendingDisbursements(routeId: string): Promise<number
 export async function findActiveSaleForClient(clientId: string): Promise<Sale | null> {
   if (!clientId) return null
   const sales = await db.sales.where('clientId').equals(clientId).toArray()
-  return sales.find(s => s.status === 'activa') ?? null
+  return sales.find(isActiveCredit) ?? null
 }
 
 /**

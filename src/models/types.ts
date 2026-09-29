@@ -401,6 +401,14 @@ export interface SaleRequest {
   /** Confirmación telefónica con el cliente (Secretario / autorizador). */
   phoneConfirmed?: boolean
   phoneConfirmationNote?: string
+  /**
+   * Créditos ACTIVOS del cliente en el instante de la solicitud (fotografía, leída
+   * dentro de la misma transacción). Informa al autorizador de que aprobar crea un
+   * crédito adicional. Solicitudes anteriores a 2026-09-29: ausente.
+   */
+  activeCreditSaleIds?: string[]
+  /** Por qué fue solicitud y no venta directa (ver `decideSaleOrigination`). */
+  authorizationReason?: 'active-credit' | 'no-direct-capability' | 'over-limit'
 }
 
 export interface Installment {

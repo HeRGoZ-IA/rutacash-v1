@@ -270,6 +270,9 @@ export default function CollectorAuthorizationsPage() {
                   Pendiente <ChevronRight className="w-3.5 h-3.5 text-gray-300" />
                 </span>
               </div>
+              {(r.activeCreditSaleIds?.length ?? 0) > 0 && (
+                <p className="mt-1 text-xs font-medium text-amber-700">Cliente con crédito activo · aprobar crea un crédito adicional</p>
+              )}
             </button>
           ))}
         </div>

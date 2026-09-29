@@ -8,3 +8,4 @@ tests/_out.migrations.mjs
 tests/_out.settlements.mjs
 tests/_out.platform.mjs
 tests/_out.workercash.mjs
+tests/_out.basecash.mjs

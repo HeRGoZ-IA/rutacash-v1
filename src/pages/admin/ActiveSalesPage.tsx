@@ -22,7 +22,7 @@ import {
 } from '@/services/installmentEngine'
 import { registerPayment, quickAmounts } from '@/services/paymentService'
 import { CollectorPicker } from '@/components/ui/CollectorPicker'
-import { findActiveSaleForClient } from '@/services/saleRequestService'
+import { createDirectSale, findActiveSaleForClient } from '@/services/saleRequestService'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
@@ -196,34 +196,22 @@ export default function ActiveSalesPage() {
 
   async function doCreateSale() {
     setConfirmSecondOpen(false)
+    if (!user) return
     setSaving(true)
     try {
-      const saleId = generateId()
-      const { valorInteres, valorTotal } = calculateTotalWithInterest({ valorVenta: form.valorVenta, tasaInteres: form.tasaInteres })
-      const valorCuota = calculateInstallmentValue({ valorTotal, numeroCuotas: form.numeroCuotas })
-      const fechaFinalEstimada = estimateFinalDate({ fechaInicio: form.fechaInicio, numeroCuotas: form.numeroCuotas, frecuencia: form.frecuenciaPago, paymentDays: form.paymentDays })
-      const installments = generateInstallments({ saleId, valorTotal, numeroCuotas: form.numeroCuotas, valorCuota, frecuencia: form.frecuenciaPago, fechaInicio: form.fechaInicio, paymentDays: form.paymentDays })
-      const route = routeMap.get(form.routeId)
-      const sale: Sale = {
-        id: saleId, tenantId,
-        routeId: form.routeId, clientId: form.clientId,
-        createdByUserId: user?.id ?? '', valorVenta: form.valorVenta,
-        tasaInteres: form.tasaInteres, valorInteres, valorTotal, saldo: valorTotal,
-        numeroCuotas: form.numeroCuotas, valorCuota, frecuenciaPago: form.frecuenciaPago,
-        paymentDays: form.paymentDays,
-        fechaInicio: form.fechaInicio, fechaFinalEstimada, status: 'activa',
-        createdAt: nowISO(), updatedAt: nowISO(),
-      }
-      await db.transaction('rw', [db.sales, db.installments], async () => {
-        await db.sales.add(sale)
-        await db.installments.bulkAdd(installments)
-      })
+      // Por el SERVICIO (incidente 2026-09): permiso, integridad, capital, regla de
+      // crédito activo y atribución del desembolso se validan en dominio, no aquí.
+      await createDirectSale({
+        tenantId, routeId: form.routeId, clientId: form.clientId, createdByUserId: user.id,
+        valorVenta: form.valorVenta, tasaInteres: form.tasaInteres, numeroCuotas: form.numeroCuotas,
+        frecuenciaPago: form.frecuenciaPago, fechaInicio: form.fechaInicio, paymentDays: form.paymentDays,
+      }, user)
       toast.success('Venta creada con cuotas generadas')
       setCreateOpen(false)
       setForm({ clientId: '', routeId: '', valorVenta: 0, tasaInteres: 20, numeroCuotas: 30, frecuenciaPago: 'diaria', fechaInicio: today(), paymentDays: [1, 2, 3, 4, 5, 6] })
       await load()
-    } catch {
-      toast.error('Error al crear la venta')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al crear la venta')
     } finally {
       setSaving(false)
     }
