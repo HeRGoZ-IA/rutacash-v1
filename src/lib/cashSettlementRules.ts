@@ -5,9 +5,18 @@
 // quedó", "qué se arrastra" y "qué cierre está vigente" vive aquí, verificable sin
 // base de datos. `cashSettlementService` solo lee, valida permisos y escribe.
 //
-// FÓRMULA (mientras NO exista Base personal):
+// FÓRMULA (v15, con Base física por persona):
 //
-//     esperado   = arrastreAnterior + recaudado − desembolsado − gastos
+//     esperado   = arrastreAnterior
+//                + baseRecibida      (Route → persona y persona → persona, a ella)
+//                − baseDevuelta      (persona → Route y persona → persona, de ella)
+//                + recaudado − desembolsado − gastos
+//
+//   Cada término sale de UNA fuente y de ninguna otra: la Base solo de
+//   `cashCustodyMovements`; recaudo, desembolso y gasto solo de pagos, ventas y
+//   gastos atribuidos a la persona. Un desembolso hecho con Base recibida resta
+//   UNA vez (como desembolso); la Base suma UNA vez (como entrega). Sin Base, la
+//   fórmula es exactamente la anterior (v14).
 //     diferencia = entregado − esperado
 //                    0 → cuadre exacto
 //                  < 0 → FALTANTE  (sigue debiéndose)
@@ -23,7 +32,7 @@
 // cuadre vigente (EXCLUSIVO) hasta el instante del cierre (INCLUSIVO). No hay
 // semana, ni medianoche, ni lunes: dos cierres el mismo día son dos ciclos.
 // ============================================================
-import type { CashSettlement, Expense, Payment, Sale } from '@/models/types'
+import type { CashCustodyMovement, CashSettlement, Expense, Payment, Sale } from '@/models/types'
 
 /** Motivo mínimo: misma regla que la reapertura de liquidaciones semanales. */
 export const MIN_CASH_REASON = 10
@@ -105,8 +114,32 @@ export function personalPaymentLedger(
 // ------------------------------------------------------------
 // Fórmula
 // ------------------------------------------------------------
-export function computeExpected(c: { arrastreAnterior: number; recaudado: number; desembolsado: number; gastos: number }): number {
-  return c.arrastreAnterior + c.recaudado - c.desembolsado - c.gastos
+export function computeExpected(c: {
+  arrastreAnterior: number; recaudado: number; desembolsado: number; gastos: number
+  baseRecibida?: number; baseDevuelta?: number
+}): number {
+  return c.arrastreAnterior + (c.baseRecibida ?? 0) - (c.baseDevuelta ?? 0) + c.recaudado - c.desembolsado - c.gastos
+}
+
+// ------------------------------------------------------------
+// Base física (custodia, v15)
+// ------------------------------------------------------------
+/**
+ * Base recibida y devuelta por `userId` en el ciclo (desde, hasta]. Un traspaso
+ * persona → persona es devolución para quien entrega y recepción para quien recibe.
+ */
+export function custodyInCycle(
+  movs: Pick<CashCustodyMovement, 'fromUserId' | 'toUserId' | 'amount' | 'createdAt'>[],
+  userId: string, desde: string, hasta: string,
+): { baseRecibida: number; baseDevuelta: number } {
+  let baseRecibida = 0
+  let baseDevuelta = 0
+  for (const m of movs) {
+    if (!inCycle(m.createdAt, desde, hasta)) continue
+    if (m.toUserId === userId) baseRecibida += m.amount
+    if (m.fromUserId === userId) baseDevuelta += m.amount
+  }
+  return { baseRecibida, baseDevuelta }
 }
 
 export function settlementOutcome(esperado: number, entregado: number): {

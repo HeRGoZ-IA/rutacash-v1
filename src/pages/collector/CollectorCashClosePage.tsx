@@ -100,6 +100,12 @@ export default function CollectorCashClosePage() {
               {ciclo.arrastreAnterior > 0 && (
                 <Row icon={<AlertTriangle className="w-4 h-4 text-amber-600" />} label="Faltante pendiente del cuadre anterior" value={`+${money(ciclo.arrastreAnterior)}`} color="text-amber-600" />
               )}
+              {ciclo.baseRecibida > 0 && (
+                <Row icon={<Wallet className="w-4 h-4 text-primary-600" />} label="Base recibida" value={`+${money(ciclo.baseRecibida)}`} color="text-primary-700" />
+              )}
+              {ciclo.baseDevuelta > 0 && (
+                <Row icon={<Wallet className="w-4 h-4 text-gray-500" />} label="Base devuelta / traspasada" value={`-${money(ciclo.baseDevuelta)}`} color="text-gray-600" />
+              )}
               <Row icon={<TrendingUp className="w-4 h-4 text-emerald-600" />} label="Recaudado por ti" value={`+${money(ciclo.recaudado)}`} color="text-emerald-600" />
               <Row icon={<Banknote className="w-4 h-4 text-primary-600" />} label="Desembolsado por ti" value={`-${money(ciclo.desembolsado)}`} color="text-primary-600" />
               <Row icon={<TrendingDown className="w-4 h-4 text-red-500" />} label="Tus gastos" value={`-${money(ciclo.gastos)}`} color="text-red-500" />
@@ -110,7 +116,7 @@ export default function CollectorCashClosePage() {
                 <Calculator className="w-4 h-4" /> Efectivo a entregar
               </div>
               <p className="text-3xl font-bold mt-1">{money(ciclo.esperado)}</p>
-              <p className="text-primary-200 text-xs mt-2">Faltante pendiente + recaudado − desembolsado − gastos, desde tu último cuadre</p>
+              <p className="text-primary-200 text-xs mt-2">Faltante pendiente + Base recibida − Base devuelta + recaudado − desembolsado − gastos, desde tu último cuadre</p>
             </div>
           </>
         )}

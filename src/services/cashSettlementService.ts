@@ -113,6 +113,9 @@ export interface CashSettlementPreview {
   origenDesde: CashSettlement['origenDesde']
   previousSettlementId?: string
   arrastreAnterior: number
+  /** Base física recibida / devuelta en el ciclo (v15). */
+  baseRecibida: number
+  baseDevuelta: number
   recaudado: number
   desembolsado: number
   gastos: number
@@ -121,29 +124,55 @@ export interface CashSettlementPreview {
   modelStart: string
 }
 
+/**
+ * POSICIÓN PERSONAL de efectivo: lo que `userId` debería tener en mano en `hasta`
+ * dentro de `routeId` (arrastre del último cuadre vigente + ciclo abierto). No
+ * valida permisos ni asignación: es el cálculo puro que comparten la vista previa,
+ * el cierre, la custodia de Base y la conciliación de la Route — una sola fórmula.
+ */
+export async function personalCashPosition(
+  params: { tenantId: string; routeId: string; userId: string; hasta: string },
+  database: RutaCashDB = db,
+): Promise<{
+  desde: string; hasta: string; modelStart: string; previo: CashSettlement | null; existentes: CashSettlement[]
+  arrastreAnterior: number; baseRecibida: number; baseDevuelta: number
+  recaudado: number; desembolsado: number; gastos: number; esperado: number
+}> {
+  const { tenantId, routeId, userId, hasta } = params
+  const modelStart = await cashModelStartOf(tenantId, database)
+  const existentes = await settlementsOf(routeId, userId, database)
+  const previo = lastActiveCashSettlement(existentes, routeId, userId)
+  const desde = previo?.hasta ?? modelStart
+  const arrastreAnterior = carryOverFrom(previo)
+  const mov = await getCollectorCashSummary({ routeId, userId, desde, hasta, modelStart }, database)
+  return {
+    desde, hasta, modelStart, previo, existentes, arrastreAnterior,
+    baseRecibida: mov.baseRecibida, baseDevuelta: mov.baseDevuelta,
+    recaudado: mov.recaudado, desembolsado: mov.desembolsado, gastos: mov.gastos,
+    esperado: computeExpected({ arrastreAnterior, ...mov }),
+  }
+}
+
 async function computeCycle(
   tenantId: string, route: Route, target: User, hasta: string, database: RutaCashDB,
 ): Promise<{ preview: CashSettlementPreview; existentes: CashSettlement[] }> {
-  const modelStart = await cashModelStartOf(tenantId, database)
-  const existentes = await settlementsOf(route.id, target.id, database)
-  const previo = lastActiveCashSettlement(existentes, route.id, target.id)
-  const desde = previo?.hasta ?? modelStart
-  const arrastreAnterior = carryOverFrom(previo)
-  const mov = await getCollectorCashSummary({ routeId: route.id, userId: target.id, desde, hasta, modelStart }, database)
+  const pos = await personalCashPosition({ tenantId, routeId: route.id, userId: target.id, hasta }, database)
   const preview: CashSettlementPreview = {
     tenantId, routeId: route.id, routeName: route.nombre,
     userId: target.id, userName: target.nombre, userRol: target.rol,
-    desde, hasta,
-    origenDesde: previo ? 'ultimo-cierre' : 'inicio-modelo',
-    previousSettlementId: previo?.id,
-    arrastreAnterior,
-    recaudado: mov.recaudado,
-    desembolsado: mov.desembolsado,
-    gastos: mov.gastos,
-    esperado: computeExpected({ arrastreAnterior, ...mov }),
-    modelStart,
+    desde: pos.desde, hasta,
+    origenDesde: pos.previo ? 'ultimo-cierre' : 'inicio-modelo',
+    previousSettlementId: pos.previo?.id,
+    arrastreAnterior: pos.arrastreAnterior,
+    baseRecibida: pos.baseRecibida,
+    baseDevuelta: pos.baseDevuelta,
+    recaudado: pos.recaudado,
+    desembolsado: pos.desembolsado,
+    gastos: pos.gastos,
+    esperado: pos.esperado,
+    modelStart: pos.modelStart,
   }
-  return { preview, existentes }
+  return { preview, existentes: pos.existentes }
 }
 
 /**
@@ -214,13 +243,14 @@ export async function closeCashSettlement(
   //     · no se suelta el bloqueo hasta que el reloj supera `hasta`: todo lo que se
   //       selle después tiene instante > `hasta` y cae en el ciclo siguiente.
   //   Los escritores sellan su instante dentro de su propia transacción, después de
-  //   una lectura (paymentService, confirmDisbursement, corrección, gastos).
+  //   una lectura (paymentService, confirmDisbursement, corrección, gastos y, desde
+  //   v15, la custodia de Base — por eso `cashCustodyMovements` entra al bloqueo).
   let documento!: CashSettlement
   let outcome!: ReturnType<typeof settlementOutcome>
   let sustituye: CashSettlement[] = []
   await database.transaction(
     'rw',
-    [database.cashSettlements, database.payments, database.sales, database.expenses, database.tenants],
+    [database.cashSettlements, database.payments, database.sales, database.expenses, database.tenants, database.cashCustodyMovements],
     async () => {
       const antes = await settlementsOf(routeId, userId, database)   // obtiene el bloqueo
       const hasta = nowISO()
@@ -253,6 +283,8 @@ export async function closeCashSettlement(
         origenDesde: preview.origenDesde,
         previousSettlementId: preview.previousSettlementId,
         arrastreAnterior: preview.arrastreAnterior,
+        baseRecibida: preview.baseRecibida,
+        baseDevuelta: preview.baseDevuelta,
         recaudado: preview.recaudado,
         desembolsado: preview.desembolsado,
         gastos: preview.gastos,
@@ -291,6 +323,7 @@ export async function closeCashSettlement(
         : outcome.resultado === 'faltante' ? `FALTANTE ${outcome.faltante}` : `SOBRANTE ${outcome.sobrante}`}.`,
     after: {
       desde: documento.desde, hasta: documento.hasta, arrastreAnterior: documento.arrastreAnterior,
+      baseRecibida: documento.baseRecibida, baseDevuelta: documento.baseDevuelta,
       recaudado: documento.recaudado, desembolsado: documento.desembolsado, gastos: documento.gastos,
       esperado: documento.esperado, entregado, diferencia: documento.diferencia, version,
     },

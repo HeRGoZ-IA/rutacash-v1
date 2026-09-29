@@ -11,14 +11,15 @@ import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
-import { createPartnerMovement } from '@/services/partnerCashService'
+import { useDataRevision } from '@/hooks/useDataRevision'
+import { registerTransfer } from '@/services/routeFundsService'
+import { custodianBlockedReason } from '@/services/cashCustodyService'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import { filterAccessibleRoutes, authorizedRouteIdsOf, isPartnerInScope, isTransferInScope } from '@/lib/permissions'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import type { Transfer, Route, User, TransferEntityType } from '@/models/types'
-import { assertRouteOperationalContext } from '@/services/officeService'
 
 // Entidad participante (ruta o socio) para la vista agrupada (Revisión 2).
 interface EntityGroup {
@@ -60,9 +61,11 @@ export default function TransfersPage() {
   const [tipoFiltro, setTipoFiltro] = useState<'all' | 'route' | 'partner'>('all')
   const [search, setSearch] = useState('')
   // Origen/destino codificados como `route:id` / `partner:id`
-  const [form, setForm] = useState({ origen: '', destino: '', valor: 0, descripcion: '', fecha: today() })
+  const [form, setForm] = useState({ origen: '', destino: '', valor: 0, descripcion: '', fecha: today(), entregarA: '' })
 
-  useEffect(() => { load() }, [tenantId, user])
+  // Reactiva: otra pestaña del mismo navegador registra y esta vista se entera sin F5.
+  const revision = useDataRevision()
+  useEffect(() => { load() }, [tenantId, user, revision])
 
   // Rutas del socio (relación socio↔ruta) para decidir alcance de transferencias/caja socios.
   const partnerRouteIds = (socioId: string) => authorizedRouteIdsOf(users.find(u => u.id === socioId))
@@ -105,6 +108,10 @@ export default function TransfersPage() {
     return 'Externo/Socio'
   }
 
+  // Entrega en mano: solo personas elegibles de la ruta destino (misma regla que el servicio).
+  const destinoRuta = decodeEndpoint(form.destino)?.type === 'route' ? decodeEndpoint(form.destino)!.id : ''
+  const receptores = destinoRuta ? users.filter(u => !custodianBlockedReason(u, destinoRuta, tenantId)) : []
+
   // Opciones del selector origen/destino: rutas y socios diferenciados.
   const endpointOptions = [
     ...routes.map(r => ({ value: encodeEndpoint('route', r.id), label: `Ruta: ${r.nombre}` })),
@@ -118,53 +125,19 @@ export default function TransfersPage() {
     if (!destino) { toast.error('Selecciona el destino'); return }
     if (form.valor <= 0) { toast.error('El valor debe ser mayor a 0'); return }
     if (form.origen === form.destino) { toast.error('Origen y destino no pueden ser iguales'); return }
-    const transferId = generateId()
-    const t: Transfer = {
-      id: transferId, tenantId,
-      origenType: origen.type, destinoType: destino.type,
-      routeOrigenId: origen.type === 'route' ? origen.id : '',
-      routeDestinoId: destino.type === 'route' ? destino.id : undefined,
-      socioOrigenId: origen.type === 'partner' ? origen.id : undefined,
-      socioDestinoId: destino.type === 'partner' ? destino.id : undefined,
-      valor: form.valor, descripcion: form.descripcion, fecha: form.fecha,
-      userId: user?.id ?? '', createdAt: nowISO(),
-    }
-    // Guard de datos: AMBAS entidades (origen y destino) deben estar en alcance.
-    if (!isTransferInScope(user, t, partnerRouteIds)) {
-      toast.error('No puedes transferir desde/hacia una ruta o socio fuera de tu alcance.')
-      return
-    }
     setSaving(true)
     try {
-      // Oficina inactiva → bloquea AMBOS extremos de tipo ruta. Una transferencia
-      // hacia o desde una ruta congelada es una operación nueva, no una consulta.
-      if (origen.type === 'route') await assertRouteOperationalContext(origen.id)
-      if (destino.type === 'route') await assertRouteOperationalContext(destino.id)
-      await db.transfers.add(t)
-
-      // Impacto en Caja socios: si un socio participa, se crea su movimiento.
-      const origenName = origen.type === 'route' ? `Ruta ${routeName(origen.id)}` : `Socio ${partnerName(origen.id)}`
-      const destinoName = destino.type === 'route' ? `Ruta ${routeName(destino.id)}` : `Socio ${partnerName(destino.id)}`
-      if (origen.type === 'partner') {
-        await createPartnerMovement({
-          tenantId, partnerId: origen.id, type: 'salida', category: 'transferencia',
-          amount: form.valor, description: `Transferencia a ${destinoName}${form.descripcion ? ` · ${form.descripcion}` : ''}`,
-          fecha: form.fecha, relatedTransferId: transferId, createdBy: user?.id,
-        })
-      }
-      if (destino.type === 'partner') {
-        await createPartnerMovement({
-          tenantId, partnerId: destino.id, type: 'ingreso', category: 'transferencia',
-          amount: form.valor, description: `Transferencia de ${origenName}${form.descripcion ? ` · ${form.descripcion}` : ''}`,
-          fecha: form.fecha, relatedTransferId: transferId, createdBy: user?.id,
-        })
-      }
-
+      // Alcance, Oficina activa, fondos del origen, Caja socios y entrega en mano:
+      // TODO en el servicio y en UNA transacción.
+      await registerTransfer({
+        actor: user, tenantId, origen, destino, valor: form.valor, descripcion: form.descripcion, fecha: form.fecha,
+        entregarA: destino.type === 'route' && form.entregarA ? { userId: form.entregarA } : undefined,
+      })
       toast.success('Transferencia registrada')
       setModalOpen(false)
-      setForm({ origen: '', destino: '', valor: 0, descripcion: '', fecha: today() })
+      setForm({ origen: '', destino: '', valor: 0, descripcion: '', fecha: today(), entregarA: '' })
       await load()
-    } catch { toast.error('Error') } finally { setSaving(false) }
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error') } finally { setSaving(false) }
   }
 
   // Transferencias dentro del rango de fecha (para totales y detalle).
@@ -307,9 +280,14 @@ export default function TransfersPage() {
           <div className="grid grid-cols-2 gap-3">
             <Select label="Origen" value={form.origen} onChange={e => setForm(f => ({ ...f, origen: e.target.value }))}
               options={endpointOptions} placeholder="Seleccionar origen" required />
-            <Select label="Destino" value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value }))}
+            <Select label="Destino" value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value, entregarA: '' }))}
               options={endpointOptions} placeholder="Seleccionar destino" required />
           </div>
+          {destinoRuta && (
+            <Select label="Entregar en mano a (opcional)" value={form.entregarA} onChange={e => setForm(f => ({ ...f, entregarA: e.target.value }))}
+              options={receptores.map(u => ({ value: u.id, label: `${u.nombre} · ${u.rol === 'supervisor' ? 'Supervisor' : 'Cobrador'}` }))}
+              placeholder="No: queda en la caja de la ruta" />
+          )}
           <p className="text-xs text-gray-400">Puedes transferir entre rutas y socios. Si participa un socio, se registra automáticamente en Caja socios.</p>
           <div className="grid grid-cols-2 gap-3">
             <MoneyInput label="Valor" currency={currency} value={form.valor} onValueChange={v => setForm(f => ({ ...f, valor: v }))} required />

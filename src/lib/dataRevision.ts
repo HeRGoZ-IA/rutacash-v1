@@ -20,7 +20,7 @@ import Dexie from 'dexie'
 export const OPERATIONAL_TABLES = [
   'payments', 'sales', 'installments', 'expenses', 'capitalMovements', 'transfers',
   'withdrawals', 'clients', 'routes', 'users', 'offices', 'weeklySettlements',
-  'cashSettlements', 'saleRequests',
+  'cashSettlements', 'saleRequests', 'cashCustodyMovements', 'partnerCashMovements',
 ] as const
 
 /**

@@ -105,6 +105,10 @@ export type Capability =
   | 'cashSettlement.viewOwn'  // ver el propio ciclo de efectivo (Mi efectivo)
   | 'cashSettlement.close'    // cerrar el cuadre de OTRO trabajador (nunca el propio)
   | 'cashSettlement.reopen'   // reabrir un cuadre con motivo
+  // Custodia de Base física (v15): entregar Base a una persona, recibir su
+  // devolución o traspasarla. Mueve RESPONSABILIDAD sobre efectivo de la Route; no
+  // crea capital. El Cobrador nunca la tiene (no administra la Base de la Route).
+  | 'cashCustody.manage'
   // Reportes / indicadores
   | 'report.view'
   | 'report.export'
@@ -142,6 +146,7 @@ const SUPERADMIN_CAPS: Capability[] = [
   'partnerCash.viewOwn', 'partnerCash.viewAll', 'partnerCash.registerMovement', 'transfer.create',
   'settlement.close', 'settlement.reopen',
   'cashSettlement.view', 'cashSettlement.close', 'cashSettlement.reopen',
+  'cashCustody.manage',
   'report.view', 'report.export', 'report.viewPortfolio', 'report.viewConsolidated',
   'audit.view',
 ]
@@ -166,6 +171,7 @@ const ADMIN_CAPS: Capability[] = [
   // Cierre de semana: el Administrador liquida SUS rutas autorizadas.
   'settlement.close', 'settlement.reopen',
   'cashSettlement.view', 'cashSettlement.close', 'cashSettlement.reopen',
+  'cashCustody.manage',
   'report.view', 'report.export', 'report.viewPortfolio', 'report.viewConsolidated',
   'audit.view',
 ]
@@ -200,6 +206,8 @@ const SUPERVISOR_CAPS: Capability[] = [
   'cashbox.viewRoute', 'cashbox.viewOwnCollection', 'cashbox.dailyClose',
   // Cuadre por trabajador: cuadra a OTROS de sus rutas; el propio lo cierra otro.
   'cashSettlement.view', 'cashSettlement.viewOwn', 'cashSettlement.close',
+  // Entrega y recibe Base física en sus rutas (en campo, frente a su equipo).
+  'cashCustody.manage',
   'report.view', 'report.export', 'report.viewPortfolio',
   'password.changeOwn',
 ]
@@ -273,6 +281,7 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     'transfer.create', 'partnerCash.registerMovement', 'partnerCash.viewAll',
     'settlement.close', 'settlement.reopen',
     'cashSettlement.view', 'cashSettlement.viewOwn', 'cashSettlement.close', 'cashSettlement.reopen',
+    'cashCustody.manage',
     'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
     'user.create', 'user.edit', 'user.block', 'user.setRole', 'user.grantCapabilities', 'user.resetPassword',
     'platform.access', 'company.create', 'company.edit', 'company.suspend',
@@ -304,6 +313,8 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     'settlement.close', 'settlement.reopen',
     // El Cobrador ve su ciclo, pero no cuadra a nadie ni reabre cuadres.
     'cashSettlement.view', 'cashSettlement.close', 'cashSettlement.reopen',
+    // Recibe Base (se le entrega), pero no administra la Base de la Route.
+    'cashCustody.manage',
     'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
     'user.create', 'user.edit', 'user.block', 'user.setRole', 'user.grantCapabilities', 'user.resetPassword',
     'platform.access', 'company.create', 'company.edit', 'company.suspend', 'settings.access', 'capital.manage',
@@ -317,6 +328,7 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     // El cierre es justamente lo que limita al Secretario: no puede levantarlo.
     'settlement.close', 'settlement.reopen',
     'cashSettlement.view', 'cashSettlement.viewOwn', 'cashSettlement.close', 'cashSettlement.reopen',
+    'cashCustody.manage',
     'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
     'user.create', 'user.edit', 'user.block', 'user.setRole', 'user.grantCapabilities', 'user.resetPassword',
     'platform.access', 'company.create', 'company.edit', 'company.suspend',
@@ -513,6 +525,7 @@ const ROUTE_SCOPED: ReadonlySet<Capability> = new Set<Capability>([
   'settlement.close', 'settlement.reopen',
   // Cuadre por trabajador: siempre contra una ruta autorizada.
   'cashSettlement.view', 'cashSettlement.viewOwn', 'cashSettlement.close', 'cashSettlement.reopen',
+  'cashCustody.manage',
 ])
 
 /**

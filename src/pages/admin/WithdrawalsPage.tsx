@@ -10,13 +10,14 @@ import { db } from '@/lib/db'
 import { getRouteAvailableCapital } from '@/services/cashboxEngine'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import type { Withdrawal, Route, User } from '@/models/types'
-import { assertRouteOperationalContext } from '@/services/officeService'
+import { registerWithdrawal, getRouteAvailableFunds } from '@/services/routeFundsService'
 
 // Revisión socio 25-jun — Retiros agrupados por ruta (presentación similar a Capital).
 // NO cambia la lógica contable de retiros: solo organiza la vista por ruta.
@@ -40,6 +41,8 @@ export default function WithdrawalsPage() {
   const [users, setUsers] = useState<User[]>([])
   // Base actual (saldo de caja) real por ruta, recalculada en cada carga.
   const [baseByRoute, setBaseByRoute] = useState<Record<string, number>>({})
+  // Retirable = caja NO asignada (lo que está en manos de trabajadores no se retira).
+  const [disponibleByRoute, setDisponibleByRoute] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -49,7 +52,9 @@ export default function WithdrawalsPage() {
   // Grupo de ruta seleccionado para ver el detalle de sus retiros.
   const [detailGroup, setDetailGroup] = useState<WithdrawalGroup | null>(null)
 
-  useEffect(() => { load() }, [tenantId, user])
+  // Reactiva: otra pestaña del mismo navegador registra y esta vista se entera sin F5.
+  const revision = useDataRevision()
+  useEffect(() => { load() }, [tenantId, user, revision])
 
   async function load() {
     setLoading(true)
@@ -64,8 +69,13 @@ export default function WithdrawalsPage() {
     setRoutes(scopedRts)
     setUsers(us)
     const base: Record<string, number> = {}
-    for (const r of scopedRts) base[r.id] = await getRouteAvailableCapital(r.id)
+    const disp: Record<string, number> = {}
+    for (const r of scopedRts) {
+      base[r.id] = await getRouteAvailableCapital(r.id)
+      disp[r.id] = await getRouteAvailableFunds(tenantId, r.id)
+    }
     setBaseByRoute(base)
+    setDisponibleByRoute(disp)
     setLoading(false)
   }
 
@@ -74,20 +84,13 @@ export default function WithdrawalsPage() {
     if (!canAccessRoute(user, form.routeId)) { toast.error('No tienes permiso sobre esa ruta.'); return }
     setSaving(true)
     try {
-      // Oficina inactiva → no se registran operaciones nuevas en sus rutas.
-      // (La consulta del histórico de esa ruta sigue disponible con normalidad.)
-      await assertRouteOperationalContext(form.routeId)
-      const w: Withdrawal = {
-        id: generateId(), tenantId,
-        routeId: form.routeId, valor: form.valor, descripcion: form.descripcion,
-        fecha: form.fecha, userId: user?.id ?? '', createdAt: nowISO(),
-      }
-      await db.withdrawals.add(w)
+      // Fondos disponibles (caja NO asignada), permiso, Oficina y autoría: en el SERVICIO.
+      await registerWithdrawal({ actor: user, tenantId, routeId: form.routeId, valor: form.valor, descripcion: form.descripcion, fecha: form.fecha })
       toast.success('Retiro registrado')
       setModalOpen(false)
       setForm({ routeId: '', valor: 0, descripcion: '', fecha: today() })
       await load()
-    } catch { toast.error('Error') } finally { setSaving(false) }
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error') } finally { setSaving(false) }
   }
 
   const getUserName = (id?: string) => users.find(u => u.id === id)?.nombre
@@ -207,6 +210,11 @@ export default function WithdrawalsPage() {
         <div className="space-y-4">
           <Select label="Ruta" value={form.routeId} onChange={e => setForm(f => ({ ...f, routeId: e.target.value }))}
             options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
+          {form.routeId && disponibleByRoute[form.routeId] !== undefined && (
+            <p className={`text-xs ${form.valor > disponibleByRoute[form.routeId] ? 'text-red-600' : 'text-gray-500'}`}>
+              Disponible para retiro (caja no asignada): <b>{formatCurrency(disponibleByRoute[form.routeId], currency)}</b>
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <MoneyInput label="Valor" currency={currency} value={form.valor} onValueChange={v => setForm(f => ({ ...f, valor: v }))} required />
             <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />

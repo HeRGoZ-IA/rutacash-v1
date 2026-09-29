@@ -120,6 +120,7 @@ export const CAPABILITY_METADATA: Record<Capability, CapabilityMeta> = {
   'cashSettlement.viewOwn': { key: 'cashSettlement.viewOwn', label: 'Ver mi ciclo de efectivo', description: 'Consultar el efectivo propio desde el último cuadre, incluido el faltante pendiente.', category: 'Pagos y caja' },
   'cashSettlement.close': { key: 'cashSettlement.close', label: 'Cerrar cuadre de trabajador', description: 'Registrar lo que entregó un trabajador y cerrar su cuadre. Nunca el propio.', category: 'Pagos y caja', risk: 'alto' },
   'cashSettlement.reopen': { key: 'cashSettlement.reopen', label: 'Reabrir cuadre de trabajador', description: 'Reabrir el último cuadre vigente de un trabajador indicando el motivo.', category: 'Pagos y caja', risk: 'alto' },
+  'cashCustody.manage': { key: 'cashCustody.manage', label: 'Entregar y recibir Base física', description: 'Registrar la Base en efectivo que se entrega a un trabajador, su devolución o su traspaso. No crea capital.', category: 'Pagos y caja', risk: 'alto' },
 
   // Reportes
   'report.view': { key: 'report.view', label: 'Ver reportes', description: 'Consultar reportes.', category: 'Reportes' },

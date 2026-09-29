@@ -1112,7 +1112,8 @@ await spec('CASH-BOUNDARY-009', 'Fronteras', 'cierres concurrentes con pagos, de
 
 await spec('CASH-BOUNDARY-010', 'Fronteras', 'contrato: cierre bajo bloqueo y escritores sellando bajo bloqueo', () => {
   const svc = readSource('src/services/cashSettlementService.ts')
-  const cierreBloquea = svc.includes('[database.cashSettlements, database.payments, database.sales, database.expenses, database.tenants]')
+  // v15: la custodia de Base también sella instantes → su tabla entra al bloqueo.
+  const cierreBloquea = svc.includes('[database.cashSettlements, database.payments, database.sales, database.expenses, database.tenants, database.cashCustodyMovements]')
   const guarda = svc.includes('waitClockPast(hasta)')
   const antes = Date.now()
   waitClockPast(new Date(antes).toISOString())

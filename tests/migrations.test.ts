@@ -105,7 +105,7 @@ async function crearBaseV1(): Promise<void> {
  * nueva no obligue a perseguir números sueltos por todo el archivo: lo que estos
  * casos comprueban es que la base llega al esquema actual, no que sea la 11.
  */
-const VERSION_ACTUAL = 14
+const VERSION_ACTUAL = 15
 
 /** Abre la base con el esquema ACTUAL de producción (dispara v2 → actual). */
 async function abrirActual() {
@@ -1732,6 +1732,7 @@ async function esquemaActual(): Promise<Record<string, string>> {
 async function crearBaseV13ConOperacion(): Promise<void> {
   const esquema = await esquemaActual()
   delete esquema.cashSettlements
+  delete esquema.cashCustodyMovements   // v15: tampoco existía en la v13
   const v13 = new Dexie(DB_NAME)
   v13.version(13).stores(esquema)
   await v13.open()
@@ -1769,7 +1770,7 @@ await spec('MIG-CASH-001', 'Migración v14', 'v13 → v14 preserva todos los dat
     && JSON.stringify(await actual.expenses.toArray()) === gastosAntes
   metric('pagos, ventas y gastos idénticos', iguales)
   metric('liquidaciones', await actual.weeklySettlements.count())
-  assert(actual.verno === 14, `debía quedar en v14, quedó en v${actual.verno}`)
+  assert(actual.verno === VERSION_ACTUAL, `debía quedar en v${VERSION_ACTUAL}, quedó en v${actual.verno}`)
   assert(iguales, 'la migración v14 modificó movimientos')
   assert(await actual.weeklySettlements.count() === 1 && await actual.users.count() === 2, 'se perdieron datos')
   actual.close()
@@ -1827,6 +1828,75 @@ await spec('MIG-CASH-004', 'Migración v14', 'NO crea cuadres históricos: marca
   metric('primer ciclo de Juan (recaudado / gastos)', `${r.recaudado} / ${r.gastos}`)
   assert(r.recaudado === 0 && r.gastos === 0, 'el histórico previo a v14 entró al primer ciclo')
   db14.close()
+})
+
+// ############################################################
+// GRUPO — v15: BASE FÍSICA POR TRABAJADOR (Dexie real)
+// ------------------------------------------------------------
+// Base v14 REAL (con cuadres, sin `cashCustodyMovements`) abierta con el código
+// actual: Dexie ejecuta SOLO el `upgrade()` de la v15.
+// ############################################################
+async function crearBaseV14ConCuadre(): Promise<void> {
+  const esquema = await esquemaActual()
+  delete esquema.cashCustodyMovements
+  const v14 = new Dexie(DB_NAME)
+  v14.version(14).stores(esquema)
+  await v14.open()
+  await v14.table('tenants').add({ id: 't-1', nombre: 'Caribe', email: 'c@c.com', status: 'activa', plan: 'profesional', pais: 'Colombia', moneda: 'COP', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '', cashModelStartAt: '2026-09-24T12:00:00.000Z' })
+  await v14.table('routes').add({ id: 'r-1', tenantId: 't-1', nombre: 'Norte', codigo: 'N', status: 'activa', cobradorId: 'u-cob' })
+  await v14.table('users').add({ id: 'u-cob', tenantId: 't-1', email: 'cob@c.com', nombre: 'Juan', rol: 'cobrador', status: 'activo', authorizedRouteIds: ['r-1'] })
+  await v14.table('capitalMovements').add({ id: 'cap-1', tenantId: 't-1', routeId: 'r-1', tipo: 'ingresoCapital', valor: 5_000_000, fecha: '2026-09-01', userId: 'u-adm', createdAt: '' })
+  await v14.table('payments').add({ id: 'p-1', tenantId: 't-1', saleId: 's-1', clientId: 'c-1', routeId: 'r-1', collectorId: 'u-cob', createdByUserId: 'u-cob', valor: 300, fecha: '2026-09-25', syncStatus: 'synced', createdAt: '2026-09-25T10:00:00.000Z', state: 'active' })
+  await v14.table('cashSettlements').add({ id: 'cs-1', tenantId: 't-1', routeId: 'r-1', userId: 'u-cob', desde: '2026-09-24T12:00:00.000Z', hasta: '2026-09-25T18:00:00.000Z', origenDesde: 'inicio-modelo', arrastreAnterior: 0, recaudado: 300, desembolsado: 0, gastos: 0, esperado: 300, entregado: 300, diferencia: 0, faltante: 0, sobrante: 0, status: 'cerrada', version: 1, createdAt: '2026-09-25T18:00:00.000Z', closedAt: '2026-09-25T18:00:00.000Z', closedByUserId: 'u-adm' })
+  v14.close()
+}
+
+await spec('MIG-BASE-001', 'Migración v15', 'v14 → v15 preserva pagos, capital y cuadres sin tocarlos', async () => {
+  await crearBaseV14ConCuadre()
+  const antes = new Dexie(DB_NAME)
+  await antes.open()
+  const snap = async (d: Dexie) => JSON.stringify(await Promise.all(['payments', 'capitalMovements', 'cashSettlements', 'routes', 'users'].map(t => d.table(t).toArray())))
+  const previo = await snap(antes)
+  const verPartida = antes.verno
+  antes.close()
+  const actual = await abrirActual()
+  const iguales = (await snap(actual)) === previo
+  metric('versión', `${verPartida} → ${actual.verno}`)
+  metric('pagos, capital, cuadres, rutas y usuarios idénticos', iguales)
+  assert(verPartida === 14 && actual.verno === 15, 'la migración no fue 14 → 15')
+  assert(iguales, 'la migración v15 modificó datos existentes')
+  actual.close()
+})
+
+await spec('MIG-BASE-002', 'Migración v15', 'NO inventa Base histórica ni la atribuye a Route.cobradorId; marca el inicio de la custodia', async () => {
+  await crearBaseV14ConCuadre()
+  const antesDeMigrar = new Date().toISOString()
+  const actual = await abrirActual()
+  const tenant = await actual.tenants.get('t-1')
+  const idx = actual.cashCustodyMovements.schema.indexes.map(i => i.src)
+  metric('movimientos de custodia creados', await actual.cashCustodyMovements.count())
+  metric('baseCustodyStartAt', tenant?.baseCustodyStartAt)
+  metric('cashModelStartAt (intacto)', tenant?.cashModelStartAt)
+  metric('índices', idx.join(', '))
+  assert(await actual.cashCustodyMovements.count() === 0, 'la migración inventó Base histórica')
+  assert(Boolean(tenant?.baseCustodyStartAt) && tenant!.baseCustodyStartAt! >= antesDeMigrar, 'no se marcó el inicio de la custodia')
+  assert(tenant?.cashModelStartAt === '2026-09-24T12:00:00.000Z', 'se movió el inicio del modelo personal')
+  for (const k of ['tenantId', 'routeId', 'fromUserId', 'toUserId', 'createdAt']) assert(idx.includes(k), `falta el índice ${k}`)
+  actual.close()
+})
+
+await spec('MIG-BASE-003', 'Migración v15', 'un cuadre v14 (sin campos de Base) sigue siendo el arrastre válido', async () => {
+  await crearBaseV14ConCuadre()
+  const actual = await abrirActual()
+  actual.close()
+  const { RutaCashDB } = await import('../src/lib/db')
+  const db15 = new RutaCashDB()
+  const { personalCashPosition } = await import('../src/services/cashSettlementService')
+  const pos = await personalCashPosition({ tenantId: 't-1', routeId: 'r-1', userId: 'u-cob', hasta: new Date(Date.now() + 1000).toISOString() }, db15)
+  metric('ciclo siguiente de Juan', `desde ${pos.desde} · arrastre ${pos.arrastreAnterior} · Base ${pos.baseRecibida} · esperado ${pos.esperado}`)
+  assert(pos.previo?.id === 'cs-1' && pos.desde === '2026-09-25T18:00:00.000Z', 'el cuadre v14 dejó de ser el último vigente')
+  assert(pos.esperado === 0 && pos.baseRecibida === 0, 'se atribuyó Base o saldo inexistente')
+  db15.close()
 })
 
 // ############################################################

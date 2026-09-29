@@ -4,7 +4,7 @@ import type {
   Tenant, Office, Route, User, Client, Sale, Installment, Payment,
   NoPaymentVisit, ExpenseCategory, Expense, CapitalMovement, Transfer,
   Withdrawal, CashboxMovement, WeeklySettlement, AuditLog, SaleRequest,
-  PartnerCashMovement, PaymentAdjustmentRequest, CashSettlement,
+  PartnerCashMovement, PaymentAdjustmentRequest, CashSettlement, CashCustodyMovement,
 } from '@/models/types'
 import type {
   PlatformUser, CompanyControlRecord, SaaSPayment, ControlEvent,
@@ -33,6 +33,7 @@ export class RutaCashDB extends Dexie {
   paymentAdjustmentRequests!: Table<PaymentAdjustmentRequest>
   /** Cuadre real por trabajador (v14). Route + persona + periodo por instantes. */
   cashSettlements!: Table<CashSettlement>
+  cashCustodyMovements!: Table<CashCustodyMovement>
 
   // ------------------------------------------------------------
   // PLANO DE CONTROL SaaS (NIVEL PLATAFORMA — v13)
@@ -581,6 +582,30 @@ export class RutaCashDB extends Dexie {
         `[RutaCash][migración v14] Cuadre por trabajador habilitado. Inicio del modelo personal ` +
         `fijado en ${marcadas} empresa(s) a ${inicio}. No se crearon cuadres históricos.`,
       )
+    })
+
+    // ============================================================
+    // v15 (BASE FÍSICA POR TRABAJADOR): aditiva.
+    //
+    //   1) Tabla nueva `cashCustodyMovements`: entrega (Route → persona),
+    //      devolución (persona → Route) y traspaso (persona → persona) de efectivo
+    //      físico dentro de una Route. No altera el saldo contable de la Route.
+    //
+    //   2) NO SE INVENTA BASE HISTÓRICA. No se crea ningún movimiento para el
+    //      pasado ni se atribuye la Base anterior a nadie (tampoco a
+    //      `Route.cobradorId`). Se marca `baseCustodyStartAt` = instante de esta
+    //      actualización: desde ahí la Base en mano de cada persona es trazable.
+    //
+    // No se borra ni se modifica ningún pago, venta, gasto, cuadre ni liquidación.
+    // ============================================================
+    this.version(15).stores({
+      cashCustodyMovements: 'id, tenantId, routeId, tipo, fromUserId, toUserId, createdAt, relatedTransferId',
+    }).upgrade(async (tx) => {
+      const inicio = new Date().toISOString()
+      await tx.table('tenants').toCollection().modify((t: Tenant) => {
+        if (!t.baseCustodyStartAt) t.baseCustodyStartAt = inicio
+      })
+      console.log(`[RutaCash][migración v15] Custodia de Base por trabajador habilitada desde ${inicio}. Sin Base histórica reconstruida.`)
     })
   }
 }

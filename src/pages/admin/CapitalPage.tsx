@@ -9,13 +9,14 @@ import { db } from '@/lib/db'
 import { getRouteFinancialSummary } from '@/services/cashboxEngine'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import type { CapitalMovement, Route, Withdrawal, RouteFinancialSummary } from '@/models/types'
-import { assertRouteOperationalContext } from '@/services/officeService'
+import { registerCapital } from '@/services/routeFundsService'
 
 // Paquete 3 — Resumen de capital agrupado por ruta.
 interface CapitalGroup {
@@ -49,7 +50,9 @@ export default function CapitalPage() {
   // Grupo de ruta seleccionado para ver su detalle de movimientos.
   const [detailGroup, setDetailGroup] = useState<CapitalGroup | null>(null)
 
-  useEffect(() => { load() }, [tenantId, user])
+  // Reactiva: otra pestaña del mismo navegador registra y esta vista se entera sin F5.
+  const revision = useDataRevision()
+  useEffect(() => { load() }, [tenantId, user, revision])
 
   async function load() {
     setLoading(true)
@@ -77,20 +80,13 @@ export default function CapitalPage() {
     if (!canAccessRoute(user, form.routeId)) { toast.error('No tienes permiso sobre esa ruta.'); return }
     setSaving(true)
     try {
-      // Oficina inactiva → no se registran operaciones nuevas en sus rutas.
-      // (La consulta del histórico de esa ruta sigue disponible con normalidad.)
-      await assertRouteOperationalContext(form.routeId)
-      const mov: CapitalMovement = {
-        id: generateId(), tenantId,
-        routeId: form.routeId, tipo: form.tipo, valor: form.valor,
-        descripcion: form.descripcion, fecha: form.fecha, userId: user?.id ?? '', createdAt: nowISO(),
-      }
-      await db.capitalMovements.add(mov)
+      // Permiso, empresa, Oficina activa, monto, fecha y autoría: en el SERVICIO.
+      await registerCapital({ actor: user, tenantId, routeId: form.routeId, valor: form.valor, descripcion: form.descripcion, fecha: form.fecha })
       toast.success('Capital registrado')
       setModalOpen(false)
       setForm({ routeId: '', valor: 0, descripcion: '', fecha: today(), tipo: 'ingresoCapital' })
       await load()
-    } catch { toast.error('Error al guardar') } finally { setSaving(false) }
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error al guardar') } finally { setSaving(false) }
   }
 
   // ---- Agrupación por ruta (solo presentación; no recalcula saldos contables) ----

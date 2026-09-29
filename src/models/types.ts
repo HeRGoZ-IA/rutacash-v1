@@ -74,6 +74,13 @@ export type AuditAction =
   | 'SETTLEMENT_CLOSED'
   | 'CASH_SETTLEMENT_CLOSED'
   | 'CASH_SETTLEMENT_REOPENED'
+  // Custodia de Base física (v15) y movimientos de fondos por servicio.
+  | 'CASH_CUSTODY_BASE_ASSIGNMENT'
+  | 'CASH_CUSTODY_BASE_RETURN'
+  | 'CASH_CUSTODY_PERSON_TO_PERSON'
+  | 'CAPITAL_REGISTERED'
+  | 'TRANSFER_REGISTERED'
+  | 'WITHDRAWAL_REGISTERED'
   | 'SETTLEMENT_REOPENED'
   | 'CREATE_OFFICE'
   | 'UPDATE_OFFICE'
@@ -129,6 +136,11 @@ export interface Tenant {
    * antiguos. Empresas creadas después: se usa `createdAt`.
    */
   cashModelStartAt?: string
+  /**
+   * INICIO DE LA CUSTODIA DE BASE POR PERSONA (v15). Antes de este instante no
+   * existe registro de qué Base física tenía cada trabajador: no se reconstruye.
+   */
+  baseCustodyStartAt?: string
   createdAt: string
   updatedAt: string
 }
@@ -708,6 +720,12 @@ export interface CashSettlement {
   previousSettlementId?: string
 
   arrastreAnterior: number
+  /**
+   * Base física recibida / devuelta por la persona en el ciclo (v15, custodia de
+   * efectivo). Cuadres anteriores a v15: ausentes = 0.
+   */
+  baseRecibida?: number
+  baseDevuelta?: number
   recaudado: number
   desembolsado: number
   gastos: number
@@ -732,6 +750,43 @@ export interface CashSettlement {
   reopenedAt?: string
   reopenedByUserId?: string
   reopenReason?: string
+}
+
+/**
+ * CUSTODIA DE EFECTIVO (v15) — dónde está físicamente el efectivo de una Route.
+ *
+ * No crea ni destruye dinero de la Route: el saldo contable (`getCashboxSummary`)
+ * no cambia. Solo mueve la RESPONSABILIDAD sobre un efectivo que ya existe:
+ *
+ *   BASE_ASSIGNMENT   Route  → persona  (ROUTE_TO_PERSON: entrega de Base)
+ *   BASE_RETURN       persona → Route   (PERSON_TO_ROUTE: devolución)
+ *   PERSON_TO_PERSON  persona → persona (traspaso dentro de la misma Route)
+ *
+ * `fromUserId` ausente = caja no asignada de la Route; `toUserId` ausente = ídem.
+ * Suma en el cuadre de `toUserId` y resta en el de `fromUserId` (ver
+ * `cashSettlementRules`). Nunca se infiere de `Route.cobradorId`, del rol ni del
+ * usuario en sesión: siempre es un movimiento explícito.
+ */
+export type CashCustodyType = 'BASE_ASSIGNMENT' | 'BASE_RETURN' | 'PERSON_TO_PERSON'
+
+export interface CashCustodyMovement {
+  id: string
+  tenantId: string
+  routeId: string
+  tipo: CashCustodyType
+  amount: number
+  fromUserId?: string
+  toUserId?: string
+  /** De dónde salió el efectivo: la caja de la Route o una Transferencia entrante. */
+  origen: 'route-cash' | 'transfer'
+  /** Transferencia que entregó este efectivo en mano (origen 'transfer'). */
+  relatedTransferId?: string
+  motivo: string
+  /** Fecha contable local (yyyy-MM-dd). */
+  fecha: string
+  /** Instante sellado dentro de la transacción (frontera del cuadre). */
+  createdAt: string
+  createdByUserId: string
 }
 
 export interface WeeklySettlement {

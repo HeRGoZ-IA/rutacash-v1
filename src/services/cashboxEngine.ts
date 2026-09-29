@@ -5,11 +5,11 @@ import { db } from '@/lib/db'
 import { effectivePayments } from '@/lib/paymentState'
 import { today as todayLocal } from '@/lib/formatters'
 import {
-  personalPaymentLedger, disbursementInstant, expenseInstant, inCycle,
+  personalPaymentLedger, disbursementInstant, expenseInstant, inCycle, custodyInCycle,
 } from '@/lib/cashSettlementRules'
 import type {
   CashboxSummary, RouteFinancialSummary, CollectorCashSummary,
-  CapitalMovement, Expense, Payment, Sale, Transfer, Withdrawal,
+  CapitalMovement, CashCustodyMovement, Expense, Payment, Sale, Transfer, Withdrawal,
 } from '@/models/types'
 
 // ------------------------------------------------------------
@@ -232,6 +232,8 @@ export interface CollectorCashDatabase {
   payments: CashboxReadTable<Payment>
   sales: CashboxReadTable<Sale>
   expenses: CashboxReadTable<Expense>
+  /** Base física (v15). Opcional para bases inyectadas anteriores: ausente = sin Base. */
+  cashCustodyMovements?: CashboxReadTable<CashCustodyMovement>
 }
 
 /**
@@ -303,7 +305,10 @@ export interface CollectorCashRangeSummary {
   recaudado: number
   desembolsado: number
   gastos: number
-  /** recaudado − desembolsado − gastos (SIN arrastre). */
+  /** Base física recibida / devuelta en el rango (v15). */
+  baseRecibida: number
+  baseDevuelta: number
+  /** baseRecibida − baseDevuelta + recaudado − desembolsado − gastos (SIN arrastre). */
   neto: number
 }
 
@@ -312,14 +317,15 @@ export async function getCollectorCashSummary(
   database: CollectorCashDatabase = db,
 ): Promise<CollectorCashRangeSummary> {
   const { routeId, userId, desde, hasta } = params
-  const vacio: CollectorCashRangeSummary = { routeId, userId, desde, hasta, recaudado: 0, desembolsado: 0, gastos: 0, neto: 0 }
+  const vacio: CollectorCashRangeSummary = { routeId, userId, desde, hasta, recaudado: 0, desembolsado: 0, gastos: 0, baseRecibida: 0, baseDevuelta: 0, neto: 0 }
   // Fail-closed: sin persona, sin ruta o con un rango vacío no se calcula nada.
   if (!routeId || !userId || !(hasta > desde)) return vacio
 
-  const [payments, sales, expenses] = await Promise.all([
+  const [payments, sales, expenses, custodia] = await Promise.all([
     database.payments.where('routeId').equals(routeId).toArray(),
     database.sales.where('routeId').equals(routeId).toArray(),
     database.expenses.where('routeId').equals(routeId).toArray(),
+    database.cashCustodyMovements ? database.cashCustodyMovements.where('routeId').equals(routeId).toArray() : Promise.resolve([]),
   ])
 
   // Libro con signo, anclado al inicio del modelo (ver `personalPaymentLedger`).
@@ -337,7 +343,12 @@ export async function getCollectorCashSummary(
     .filter(e => (e.collectorId ?? e.userId) === userId && inCycle(expenseInstant(e), desde, hasta))
     .reduce((sum, e) => sum + e.valor, 0)
 
-  return { routeId, userId, desde, hasta, recaudado, desembolsado, gastos, neto: recaudado - desembolsado - gastos }
+  const { baseRecibida, baseDevuelta } = custodyInCycle(custodia, userId, desde, hasta)
+
+  return {
+    routeId, userId, desde, hasta, recaudado, desembolsado, gastos, baseRecibida, baseDevuelta,
+    neto: baseRecibida - baseDevuelta + recaudado - desembolsado - gastos,
+  }
 }
 
 /**

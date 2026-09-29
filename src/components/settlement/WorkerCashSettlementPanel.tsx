@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Lock, LockOpen, UserRound } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Lock, LockOpen, UserRound, Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -16,6 +16,8 @@ import {
   previewCashSettlement, reopenCashSettlement, type CashSettlementPreview,
 } from '@/services/cashSettlementService'
 import { db } from '@/lib/db'
+import { assignBaseToWorker, custodianBlockedReason, returnBaseFromWorker } from '@/services/cashCustodyService'
+import { RouteCashReconciliationCard } from '@/components/settlement/RouteCashReconciliationCard'
 import type { CashSettlement, User } from '@/models/types'
 
 /**
@@ -46,6 +48,13 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
   const [reabrir, setReabrir] = useState<CashSettlement | null>(null)
   const [motivoReabrir, setMotivoReabrir] = useState('')
   const [reabriendo, setReabriendo] = useState(false)
+
+  // Base física (v15): entregar / recibir devolución. Misma regla que el servicio.
+  const [baseAccion, setBaseAccion] = useState<'entregar' | 'devolver' | null>(null)
+  const [baseMonto, setBaseMonto] = useState(0)
+  const [baseMotivo, setBaseMotivo] = useState('')
+  const [baseGuardando, setBaseGuardando] = useState(false)
+  const puedeBase = can(user, 'cashCustody.manage', { routeId, tenantId })
 
   const puedeCerrar = can(user, 'cashSettlement.close', { routeId, tenantId })
   const puedeReabrir = can(user, 'cashSettlement.reopen', { routeId, tenantId })
@@ -126,6 +135,25 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
     } finally { setReabriendo(false) }
   }
 
+  async function guardarBase() {
+    if (!baseAccion || !userId) return
+    setBaseGuardando(true)
+    try {
+      if (baseAccion === 'entregar') {
+        await assignBaseToWorker({ actor: user, tenantId, routeId, recipientUserId: userId, amount: baseMonto, motivo: baseMotivo })
+        toast.success(`Base entregada a ${seleccionado?.user.nombre ?? 'la persona'}.`)
+      } else {
+        await returnBaseFromWorker({ actor: user, tenantId, routeId, fromUserId: userId, amount: baseMonto, motivo: baseMotivo })
+        toast.success(`Devolución de ${seleccionado?.user.nombre ?? 'la persona'} registrada.`)
+      }
+      setBaseAccion(null)
+      setBaseMonto(0)
+      setBaseMotivo('')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo registrar el movimiento de Base.')
+    } finally { setBaseGuardando(false) }
+  }
+
   const Row = ({ label, value, tone = 'text-gray-800' }: { label: string; value: string; tone?: string }) => (
     <div className="flex items-center justify-between px-4 py-2.5">
       <span className="text-sm text-gray-600">{label}</span>
@@ -135,6 +163,8 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
 
   return (
     <div className="space-y-5">
+      <RouteCashReconciliationCard routeId={routeId} />
+
       <Select
         label="Trabajador"
         value={userId}
@@ -163,6 +193,8 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
               <span>Hasta: <b className="text-gray-700">{formatDateTime(preview.hasta)}</b></span>
             </div>
             <Row label="Arrastre pendiente (faltante anterior)" value={money(preview.arrastreAnterior)} tone={preview.arrastreAnterior > 0 ? 'text-amber-600' : 'text-gray-800'} />
+            <Row label="(+) Base recibida" value={money(preview.baseRecibida)} tone="text-primary-700" />
+            {preview.baseDevuelta > 0 && <Row label="(−) Base devuelta / traspasada" value={money(preview.baseDevuelta)} tone="text-gray-600" />}
             <Row label="(+) Recaudado" value={money(preview.recaudado)} tone="text-emerald-600" />
             <Row label="(−) Desembolsado" value={money(preview.desembolsado)} tone="text-blue-600" />
             <Row label="(−) Gastos" value={money(preview.gastos)} tone="text-red-500" />
@@ -171,6 +203,22 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
               <span className="text-base font-bold text-primary-700">{money(preview.esperado)}</span>
             </div>
           </div>
+
+          {puedeBase && seleccionado && (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" icon={<Wallet className="w-4 h-4" />}
+                disabled={Boolean(custodianBlockedReason(seleccionado.user, routeId, tenantId))}
+                onClick={() => { setBaseAccion('entregar'); setBaseMonto(0); setBaseMotivo('Base del día') }}>
+                Entregar Base
+              </Button>
+              {!seleccionado.esPropio && (
+                <Button variant="secondary" icon={<Wallet className="w-4 h-4" />}
+                  onClick={() => { setBaseAccion('devolver'); setBaseMonto(0); setBaseMotivo('Devolución de Base') }}>
+                  Recibir devolución
+                </Button>
+              )}
+            </div>
+          )}
 
           {seleccionado?.esPropio ? (
             <p className="text-sm text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
@@ -302,6 +350,22 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
       </Modal>
 
       {/* ---------- REAPERTURA ---------- */}
+      <Modal open={Boolean(baseAccion)} onClose={() => setBaseAccion(null)}
+        title={baseAccion === 'entregar' ? `Entregar Base a ${seleccionado?.user.nombre ?? ''}` : `Devolución de ${seleccionado?.user.nombre ?? ''}`}
+        footer={<>
+          <Button variant="secondary" onClick={() => setBaseAccion(null)}>Cancelar</Button>
+          <Button onClick={guardarBase} loading={baseGuardando} disabled={baseMonto <= 0 || baseMotivo.trim().length < 3}>Registrar</Button>
+        </>}>
+        <div className="space-y-3">
+          <MoneyInput label={baseAccion === 'entregar' ? 'Efectivo entregado' : 'Efectivo recibido'} value={baseMonto} onValueChange={setBaseMonto} currency={currency} min={0} />
+          <div>
+            <label className="block text-xs text-gray-500 mb-1.5">Motivo</label>
+            <input value={baseMotivo} onChange={e => setBaseMotivo(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+          </div>
+        </div>
+      </Modal>
+
       <Modal open={Boolean(reabrir)} onClose={() => setReabrir(null)} title="Reabrir cuadre"
         footer={<div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setReabrir(null)}>Cancelar</Button>

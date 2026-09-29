@@ -37,6 +37,13 @@ const MARCADORES = [
   // Autoridad comercial del Supervisor.
   ['Solicitudes pendientes de la ruta', true, 'autorizaciones móviles del Supervisor (2026-09-24 c)'],
   ['Esta solicitud ya fue resuelta.', true, 'resolución única de solicitudes (2026-09-24 c)'],
+  // Entrega 2026-09-29: segundo crédito del Cobrador + Base física por trabajador.
+  ['Este cliente ya tiene un crédito activo: la venta debe enviarse como solicitud de autorización.', true, 'regla de crédito activo en dominio (2026-09-29)'],
+  ['Este cliente ya tiene una solicitud de venta pendiente. Espera a que se resuelva.', true, 'sin solicitudes duplicadas (2026-09-29)'],
+  ['cashCustodyMovements', true, 'tabla Dexie v15 de custodia de Base (2026-09-29)'],
+  ['Entregar Base', true, 'entrega de Base física a un trabajador (2026-09-29)'],
+  ['Sin asignar (caja de la ruta)', true, 'conciliación Route ↔ trabajadores (2026-09-29)'],
+  ['El retiro supera los fondos disponibles de la ruta', true, 'retiros por servicio con control de fondos (2026-09-29)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')
