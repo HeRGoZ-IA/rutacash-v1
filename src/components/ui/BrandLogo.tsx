@@ -3,8 +3,11 @@
 // ------------------------------------------------------------
 // La identidad comercial visible es ADEX Soluciones; el producto sigue llamándose
 // RutaCash internamente (base `RutaCashDB`, sesión `rutacash-auth`, paquete, docs).
-// Este componente es el único lugar que importa los PNG aprobados de
-// `src/assets/branding/adex/`: las pantallas eligen una variante, nunca un archivo.
+// Este componente es el único lugar que importa los logos: usa las versiones
+// OPTIMIZADAS de `src/assets/branding/adex/optimized/` (sin pérdida visible,
+// generadas con `scripts/optimize-brand-assets.py`). Los PNG aprobados de
+// `src/assets/branding/adex/` son la fuente maestra y no se sirven.
+// Las pantallas eligen una variante, nunca un archivo.
 //
 // Elegir la variante por el FONDO, no por el tamaño:
 //   · 'on-dark'  → letras claras: fondos azules u oscuros (sidebar, cabeceras,
@@ -16,12 +19,12 @@
 // intrínsecas van en `width`/`height` para que el navegador reserve el espacio
 // (sin salto de maquetación); el tamaño visible lo fija `className` (p. ej. `h-8`).
 // ============================================================
-import primary from '@/assets/branding/adex/adex-logo-horizontal-primary.png'
-import onDark from '@/assets/branding/adex/adex-logo-horizontal-on-dark.png'
-import wordmark from '@/assets/branding/adex/adex-wordmark-primary.png'
-import symbol from '@/assets/branding/adex/adex-symbol-primary.png'
-import stacked from '@/assets/branding/adex/adex-logo-stacked-primary.png'
-import monochrome from '@/assets/branding/adex/adex-logo-horizontal-monochrome-navy.png'
+import primary from '@/assets/branding/adex/optimized/adex-logo-horizontal-primary.png'
+import onDark from '@/assets/branding/adex/optimized/adex-logo-horizontal-on-dark.png'
+import wordmark from '@/assets/branding/adex/optimized/adex-wordmark-primary.png'
+import symbol from '@/assets/branding/adex/optimized/adex-symbol-primary.png'
+import stacked from '@/assets/branding/adex/optimized/adex-logo-stacked-primary.png'
+import monochrome from '@/assets/branding/adex/optimized/adex-logo-horizontal-monochrome-navy.png'
 import { cn } from '@/lib/utils'
 
 export const BRAND_NAME = 'ADEX Soluciones'

@@ -79,7 +79,7 @@ export function AdminLayout() {
       {/* Logo + rol real (nunca "Admin" fijo: refleja ROLE_LABELS del usuario) */}
       <div className="px-5 py-5 border-b border-primary-800/40">
         <div>
-          <BrandLogo variant="on-dark" className="h-10 -ml-1.5" />
+          <BrandLogo variant="on-dark" className="h-10 lg:h-12 -ml-1.5" />
           <p className="text-primary-300 text-xs opacity-70 mt-0.5">{roleLabel}</p>
         </div>
       </div>
