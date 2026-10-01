@@ -227,6 +227,18 @@ async function tarjeta(p = page) {
     faltanteJuan: v(`Faltante pendiente · ${JUAN}`),
   }
 }
+/** Marca visible: el logo ADEX (por su texto alternativo) dentro de la cabecera/sidebar. */
+const marcaADEX = (p = page) => p.evaluate(() => !!document.querySelector('header img[alt="ADEX Soluciones"], aside img[alt="ADEX Soluciones"]'))
+/** Sesión visible tras el login: marca, rol, actor, ruta activa y layout, cada uno por separado. */
+async function sesion({ rol, actor, ruta, layout }) {
+  const cab = await page.evaluate(() => (document.querySelector('header') ?? document.querySelector('aside'))?.innerText ?? '')
+  const cuerpo = await texto()
+  comprobar(`sesión ${actor}: marca ADEX visible`, true, await marcaADEX())
+  comprobar(`sesión ${actor}: rol "${rol}" visible`, true, cuerpo.includes(rol))
+  comprobar(`sesión ${actor}: actor visible`, true, cuerpo.includes(actor))
+  if (ruta) comprobar(`sesión ${actor}: ruta activa en la cabecera`, true, cab.includes(ruta))
+  comprobar(`sesión ${actor}: layout`, layout, new URL(page.url()).pathname.slice(0, layout.length))
+}
 const esperarTarjeta = (cond, desc, p = page) => hasta(async () => { const t = await tarjeta(p); return cond(t) ? t : false }, desc, { p })
 async function disponibleRetiro(p) {
   const m = (await texto(p)).match(/Disponible para retiro \(caja no asignada\):\s*(-?\$?\s*[\d.]+)/)
@@ -342,9 +354,7 @@ try {
   await movil()
   await login(mail('juan'), JUAN)
   paso('sesión Juan')
-  const cabJuan = await texto()
-  comprobar('sesión Juan: actor, rol, ruta y layout', true,
-    cabJuan.includes('RutaCash · Cobrador') && cabJuan.includes(JUAN) && cabJuan.includes(RUTA) && page.url().includes('/collector'))
+  await sesion({ rol: 'Cobrador', actor: JUAN, ruta: RUTA, layout: '/collector' })
   paso('nueva venta a Carlos (con Venta A activa)')
   await ir('/collector/new-sale')
   await elegir('Cliente', CARLOS)
@@ -376,8 +386,7 @@ try {
   escenario('B', 'Supervisor: ve y aprueba solicitudes, conserva el crédito directo')
   await login(mail('laura'), LAURA)
   paso('sesión Laura')
-  const cabLaura = await texto()
-  comprobar('sesión Laura: actor, rol y layout', true, cabLaura.includes('RutaCash · Supervisor') && cabLaura.includes(LAURA) && page.url().includes('/supervisor'))
+  await sesion({ rol: 'Supervisor', actor: LAURA, layout: '/supervisor' })
   paso('autorizaciones de la ruta')
   await ir('/supervisor/authorizations')
   await esperarTexto(CARLOS)
@@ -524,8 +533,7 @@ try {
   await desktop()
   await login(mail('andres'), ANDRES)
   paso('sesión Andrés')
-  const cabAdmin = await texto()
-  comprobar('sesión Andrés: actor, rol y layout', true, cabAdmin.includes(ANDRES) && cabAdmin.includes('Administrador') && page.url().includes('/admin'))
+  await sesion({ rol: 'Administrador', actor: ANDRES, layout: '/admin' })
   paso('Liquidación → Cuadre por trabajador')
   await ir('/admin/weekly-settlement')
   await click('Cuadre por trabajador')

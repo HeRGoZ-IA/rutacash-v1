@@ -6,6 +6,7 @@ import { CountBadge } from '@/components/ui/CountBadge'
 import { usePendingSaleRequests } from '@/hooks/usePendingBadges'
 import { cn } from '@/lib/utils'
 import { initials } from '@/lib/formatters'
+import { BrandLogo } from '@/components/ui/BrandLogo'
 
 /**
  * Layout del SECRETARIO. Acceso limitado a: Clientes (edición operativa),
@@ -43,11 +44,9 @@ export function SecretarioLayout() {
       <header className="bg-primary-900 text-white flex-shrink-0">
         <div className="px-4 md:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 bg-primary-600 rounded-xl flex items-center justify-center flex-shrink-0">
-              <span className="text-white font-bold text-sm">RC</span>
-            </div>
+            <BrandLogo variant="on-dark" className="h-9 flex-shrink-0 -ml-1" />
             <div className="min-w-0">
-              <p className="font-bold text-sm leading-tight">RutaCash · Secretario</p>
+              <p className="font-bold text-sm leading-tight">Secretario</p>
               <p className="text-primary-300 text-xs truncate">{tenant?.nombre ?? user?.nombre}</p>
             </div>
           </div>

@@ -234,7 +234,7 @@ export default function SettingsPage() {
 
         {/* Sobre RutaCash */}
         <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-5 space-y-4">
-          <h2 className="font-semibold text-gray-800">Sobre RutaCash</h2>
+          <h2 className="font-semibold text-gray-800">Sobre ADEX Soluciones</h2>
           <div className="space-y-2 text-sm text-gray-600">
             <p><span className="font-medium">Versión:</span> 1.0.0 (V1 Local)</p>
             <p><span className="font-medium">Almacenamiento:</span> IndexedDB (local)</p>
@@ -260,7 +260,7 @@ export default function SettingsPage() {
               </p>
               <p className="text-xs text-gray-500 mt-1">
                 Cada usuario nace con una contraseña inicial que puedes definir tú y que la
-                persona usa tal cual. RutaCash no crea ninguna cuenta por su cuenta.
+                persona usa tal cual. ADEX Soluciones no crea ninguna cuenta por su cuenta.
               </p>
               <button onClick={() => navigate('/admin/users')} className="mt-2 text-xs font-semibold text-primary-600 hover:underline">Ir a Usuarios →</button>
             </div>

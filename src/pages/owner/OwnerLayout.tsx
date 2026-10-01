@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, Building2, Receipt, Settings, LogOut, Info } from 'lucide-react'
 import { useOwnerAuth } from '@/hooks/useOwnerAuth'
 import { CONTROL_PLANE_IS_SHARED, CONTROL_PLANE_SCOPE_NOTICE } from '@/platform/controlPlane'
+import { BrandLogo } from '@/components/ui/BrandLogo'
 
 /**
  * MARCO DEL PORTAL OWNER.
@@ -27,14 +28,9 @@ export function OwnerLayout() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-gray-900 rounded-xl flex items-center justify-center">
-            <span className="text-white font-bold text-sm">RC</span>
-          </div>
-          <div>
-            <p className="font-bold text-gray-900 leading-tight">RutaCash</p>
-            <p className="text-xs text-gray-500">Gestión de la plataforma</p>
-          </div>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <BrandLogo variant="primary" className="h-9 -ml-1" />
+          <p className="text-xs text-gray-500 border-l border-gray-200 pl-3">Gestión de la plataforma</p>
         </div>
 
         <nav className="flex items-center gap-1">

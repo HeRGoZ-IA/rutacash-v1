@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { homePathForRole } from '@/lib/permissions'
 import { getLastLoginEmail } from '@/lib/lastLoginEmail'
 import type { UserRole } from '@/models/types'
+import { BrandLogo } from '@/components/ui/BrandLogo'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -55,14 +56,9 @@ export default function LoginPage() {
       <div className="relative w-full max-w-4xl grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
         {/* Left - Branding */}
         <div className="hidden lg:block text-white">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-12 h-12 bg-primary-500 rounded-2xl flex items-center justify-center">
-              <span className="text-white font-bold text-xl">RC</span>
-            </div>
-            <div>
-              <p className="font-bold text-xl">RutaCash</p>
-              <p className="text-primary-300 text-sm">Sistema de rutas y cobros</p>
-            </div>
+          <div className="mb-8">
+            <BrandLogo variant="on-dark" className="h-16 -ml-2" />
+            <p className="text-primary-300 text-sm mt-1">Sistema de rutas y cobros</p>
           </div>
 
           <h1 className="text-4xl font-bold mb-4 leading-tight">
@@ -95,11 +91,8 @@ export default function LoginPage() {
         {/* Right - Login form */}
         <div className="bg-white rounded-3xl shadow-2xl p-8">
           {/* Mobile logo */}
-          <div className="flex items-center gap-2 mb-6 lg:hidden">
-            <div className="w-8 h-8 bg-primary-600 rounded-xl flex items-center justify-center">
-              <span className="text-white font-bold text-sm">RC</span>
-            </div>
-            <p className="font-bold text-gray-900">RutaCash</p>
+          <div className="mb-6 lg:hidden">
+            <BrandLogo variant="primary" className="h-11 -ml-1" />
           </div>
 
           <h2 className="text-2xl font-bold text-gray-900 mb-1">Iniciar sesión</h2>

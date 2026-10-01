@@ -116,7 +116,7 @@ export default function OwnerSettingsPage() {
           </p>
           <div className="flex items-center justify-between p-3.5 bg-red-50 rounded-xl border border-red-100">
             <div className="min-w-0 pr-4">
-              <p className="text-sm font-medium text-red-800">Restablecer RutaCash a cero</p>
+              <p className="text-sm font-medium text-red-800">Restablecer ADEX Soluciones a cero</p>
               <p className="text-xs text-red-600 mt-0.5">
                 Elimina todos los datos locales, incluidos los Owners. La aplicación
                 volverá a pedir la creación del primer Owner.

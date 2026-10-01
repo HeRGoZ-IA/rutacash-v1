@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { Building2 } from 'lucide-react'
+import { BrandLogo } from '@/components/ui/BrandLogo'
 
 /**
  * INSTALACIÓN SIN EMPRESAS.
@@ -15,14 +16,9 @@ export function EmptyInstallationNotice() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#1E3A8A] via-gray-900 to-[#1E3A8A] flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        <div className="flex items-center gap-3 mb-6 justify-center">
-          <div className="w-11 h-11 bg-primary-500 rounded-2xl flex items-center justify-center">
-            <span className="text-white font-bold text-lg">RC</span>
-          </div>
-          <div className="text-white">
-            <p className="font-bold text-lg leading-tight">RutaCash</p>
-            <p className="text-primary-300 text-xs">Sistema de rutas y cobros</p>
-          </div>
+        <div className="flex flex-col items-center mb-6">
+          <BrandLogo variant="on-dark" className="h-14" />
+          <p className="text-primary-300 text-xs mt-1">Sistema de rutas y cobros</p>
         </div>
 
         <div className="bg-white rounded-3xl shadow-2xl p-8 text-center">

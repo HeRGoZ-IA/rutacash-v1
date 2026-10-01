@@ -20,7 +20,9 @@ const MARCADORES = [
   // [qué buscar, debe estar presente, a partir de qué entrega]
   ['Configuración', true, 'menú Owner con Configuración (6.1)'],
   ['/owner/configuracion', true, 'ruta de configuración del Owner (6.1)'],
-  ['Restablecer RutaCash a cero', true, 'restablecimiento de fábrica del Owner (6.1)'],
+  // Rebranding visible a ADEX Soluciones (2026-10-01): el texto de la acción cambia.
+  ['Restablecer ADEX Soluciones a cero', true, 'restablecimiento de fábrica del Owner (6.1 · marca ADEX)'],
+  ['Restablecer RutaCash a cero', false, 'texto del reset anterior al rebranding ADEX (≤2026-09-30)'],
   ['RESTABLECER', true, 'palabra de confirmación del reset (6.1)'],
   ['Restablecer RutaCash desde cero', false, 'reset retirado del portal de empresa (≤6.0)'],
   ['BORRAR TODO', false, 'confirmación antigua del reset (≤6.0)'],
@@ -44,6 +46,10 @@ const MARCADORES = [
   ['Entregar Base', true, 'entrega de Base física a un trabajador (2026-09-29)'],
   ['Sin asignar (caja de la ruta)', true, 'conciliación Route ↔ trabajadores (2026-09-29)'],
   ['El retiro supera los fondos disponibles de la ruta', true, 'retiros por servicio con control de fondos (2026-09-29)'],
+  // Rebranding visual ADEX Soluciones (2026-10-01).
+  ['Dashboard ADEX Soluciones', true, 'marca visible ADEX en el portal Owner (2026-10-01)'],
+  ['Sobre ADEX Soluciones', true, 'marca visible ADEX en Configuración (2026-10-01)'],
+  ['Dashboard RutaCash', false, 'marca visible anterior (≤2026-09-30)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')
@@ -90,6 +96,16 @@ async function main() {
   const rutaOk = ruta.status === 200
   if (!rutaOk) fallos++
   console.log(`  ${rutaOk ? 'OK  ' : 'MAL '} /owner/configuracion responde HTTP ${ruta.status}`)
+
+  // Favicons (2026-10-01): deben ser IMÁGENES reales. Con el rewrite SPA, un icono
+  // inexistente responde 200 con el index.html (así estuvo roto /favicon.svg).
+  for (const icono of ['/favicon-32x32.png', '/favicon-16x16.png', '/favicon.ico', '/apple-touch-icon.png']) {
+    const r = await fetch(`${url}${icono}`, { headers: { 'cache-control': 'no-cache' } })
+    const tipo = r.headers.get('content-type') ?? ''
+    const ok = r.status === 200 && tipo.startsWith('image/')
+    if (!ok) fallos++
+    console.log(`  ${ok ? 'OK  ' : 'MAL '} ${icono} → HTTP ${r.status} ${tipo}`)
+  }
 
   if (fallos > 0) {
     console.log(`\n  ${fallos} comprobación(es) fallida(s): el despliegue NO está sirviendo la entrega 6.1 o posterior.`)

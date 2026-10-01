@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, Loader2, Building2 } from 'lucide-react'
 import { useOwnerAuth } from '@/hooks/useOwnerAuth'
+import { BrandLogo } from '@/components/ui/BrandLogo'
 
 /**
  * LOGIN DEL PORTAL OWNER (`/owner/login`).
@@ -39,14 +40,9 @@ export default function OwnerLoginPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-[#0B1220] to-gray-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        <div className="flex items-center gap-3 mb-6 justify-center">
-          <div className="w-11 h-11 bg-white rounded-2xl flex items-center justify-center">
-            <span className="text-gray-900 font-bold text-lg">RC</span>
-          </div>
-          <div className="text-white">
-            <p className="font-bold text-lg leading-tight">RutaCash</p>
-            <p className="text-gray-400 text-xs">Gestión de la plataforma</p>
-          </div>
+        <div className="flex flex-col items-center mb-6">
+          <BrandLogo variant="on-dark" className="h-14" />
+          <p className="text-gray-400 text-xs mt-1">Gestión de la plataforma</p>
         </div>
 
         <div className="bg-white rounded-3xl shadow-2xl p-8">
@@ -55,7 +51,7 @@ export default function OwnerLoginPage() {
             <h1 className="text-2xl font-bold text-gray-900">Acceso Owner</h1>
           </div>
           <p className="text-gray-500 text-sm mb-6">
-            Portal de administración de RutaCash. Si eres cliente, entra por{' '}
+            Portal de administración de ADEX Soluciones. Si eres cliente, entra por{' '}
             <a href="/login" className="text-primary-600 font-medium hover:underline">/login</a>.
           </p>
 

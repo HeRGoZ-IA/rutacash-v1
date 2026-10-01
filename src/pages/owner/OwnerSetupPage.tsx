@@ -8,6 +8,7 @@ import {
   createFirstOwner, MIN_BOOTSTRAP_PASSWORD_LENGTH,
   type InstallationState,
 } from '@/services/platformBootstrapService'
+import { BrandLogo } from '@/components/ui/BrandLogo'
 
 /**
  * CONFIGURACIÓN INICIAL DE LA PLATAFORMA.
@@ -84,14 +85,9 @@ export function OwnerSetupPage({ state, onDone }: { state: InstallationState; on
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-[#0B1220] to-gray-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        <div className="flex items-center gap-3 mb-6 justify-center">
-          <div className="w-11 h-11 bg-white rounded-2xl flex items-center justify-center">
-            <span className="text-gray-900 font-bold text-lg">RC</span>
-          </div>
-          <div className="text-white">
-            <p className="font-bold text-lg leading-tight">RutaCash</p>
-            <p className="text-gray-400 text-xs">Gestión de la plataforma</p>
-          </div>
+        <div className="flex flex-col items-center mb-6">
+          <BrandLogo variant="on-dark" className="h-14" />
+          <p className="text-gray-400 text-xs mt-1">Gestión de la plataforma</p>
         </div>
 
         <div className="bg-white rounded-3xl shadow-2xl p-8">

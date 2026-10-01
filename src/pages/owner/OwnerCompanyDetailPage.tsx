@@ -268,7 +268,7 @@ export default function OwnerCompanyDetailPage() {
         </>}>
         <div className="space-y-4">
           <p className="text-xs text-gray-500">
-            Cobro de RutaCash a esta empresa. No tiene ninguna relación con la caja ni
+            Cobro de ADEX Soluciones a esta empresa. No tiene ninguna relación con la caja ni
             con los pagos de los clientes de la empresa.
           </p>
           <div className="grid grid-cols-2 gap-3">

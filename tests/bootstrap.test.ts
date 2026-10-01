@@ -561,6 +561,7 @@ await spec('TENANT-NO-RESET-002', 'Sin reset en empresa', 'Configuración de emp
   const TEXTOS_RETIRADOS = [
     'Zona de peligro',
     'Restablecer RutaCash desde cero',
+    'Restablecer ADEX Soluciones',   // misma prohibición con la marca visible actual
     'Restaurar datos demo',
     'Restaurar demo',
     'Confirmar restablecimiento',
@@ -584,7 +585,7 @@ await spec('TENANT-NO-RESET-003', 'Sin reset en empresa', 'el login de empresa n
   const login = readSource('src/pages/auth/LoginPage.tsx')
   const vacia = readSource('src/pages/auth/EmptyInstallationNotice.tsx')
   for (const [nombre, src] of [['LoginPage', login], ['EmptyInstallationNotice', vacia]] as Array<[string, string]>) {
-    for (const pr of ['resetLocalAppData', 'FullResetDialog', 'FactoryResetDialog', 'factoryReset', 'db.delete', 'Restablecer RutaCash']) {
+    for (const pr of ['resetLocalAppData', 'FullResetDialog', 'FactoryResetDialog', 'factoryReset', 'db.delete', 'Restablecer RutaCash', 'Restablecer ADEX Soluciones']) {
       metric(`${nombre} → ${pr}`, src.includes(pr) ? 'PRESENTE — ERROR' : 'ausente')
       assert(!src.includes(pr), `${nombre} conserva una salida destructiva (${pr})`)
     }

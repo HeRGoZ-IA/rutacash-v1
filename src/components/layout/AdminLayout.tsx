@@ -12,6 +12,7 @@ import { CountBadge } from '@/components/ui/CountBadge'
 import { usePendingSaleRequests, usePendingAdjustmentRequests } from '@/hooks/usePendingBadges'
 import { hasOperationalRoutes, ROLE_LABELS } from '@/lib/permissions'
 import { AdminNoRoutes } from '@/components/layout/AdminNoRoutes'
+import { BrandLogo } from '@/components/ui/BrandLogo'
 
 interface NavItem {
   path: string
@@ -77,14 +78,9 @@ export function AdminLayout() {
     <div className="flex flex-col h-full">
       {/* Logo + rol real (nunca "Admin" fijo: refleja ROLE_LABELS del usuario) */}
       <div className="px-5 py-5 border-b border-primary-800/40">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-primary-600 rounded-xl flex items-center justify-center">
-            <span className="text-white font-bold text-sm">RC</span>
-          </div>
-          <div>
-            <p className="text-white font-bold text-sm leading-tight">RutaCash</p>
-            <p className="text-primary-300 text-xs opacity-70">{roleLabel}</p>
-          </div>
+        <div>
+          <BrandLogo variant="on-dark" className="h-10 -ml-1.5" />
+          <p className="text-primary-300 text-xs opacity-70 mt-0.5">{roleLabel}</p>
         </div>
       </div>
 

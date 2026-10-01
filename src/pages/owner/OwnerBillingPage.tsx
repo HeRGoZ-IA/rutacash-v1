@@ -58,7 +58,7 @@ export default function OwnerBillingPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-bold text-gray-900">Cobros</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Facturación de RutaCash a las empresas cliente</p>
+        <p className="text-sm text-gray-500 mt-0.5">Facturación de ADEX Soluciones a las empresas cliente</p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">

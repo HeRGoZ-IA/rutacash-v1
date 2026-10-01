@@ -11,6 +11,7 @@ import { db } from '@/lib/db'
 import { cn } from '@/lib/utils'
 import { CountBadge } from '@/components/ui/CountBadge'
 import type { Route } from '@/models/types'
+import { BrandLogo } from '@/components/ui/BrandLogo'
 
 /**
  * Layout OPERATIVO compartido (App Cobrador y App Supervisor).
@@ -107,11 +108,9 @@ export function CollectorLayout() {
       {/* Header */}
       <header className="bg-primary-700 text-white px-4 py-2.5 flex items-center justify-between gap-2 flex-shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 bg-white/15 rounded-xl flex items-center justify-center flex-shrink-0">
-            <span className="text-white font-bold text-xs">RC</span>
-          </div>
+          <BrandLogo variant="on-dark" className="h-8 flex-shrink-0 -ml-1" />
           <div className="min-w-0">
-            <p className="font-semibold text-sm leading-tight">RutaCash · {roleTitle}</p>
+            <p className="font-semibold text-sm leading-tight">{roleTitle}</p>
             {activeRoute && !onSelectPage ? (
               <button onClick={() => navigate(`${base}/select-route`)} className="flex items-center gap-1 text-primary-100 text-xs leading-tight hover:text-white transition-colors">
                 <MapPin className="w-3 h-3 flex-shrink-0" />

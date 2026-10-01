@@ -309,10 +309,11 @@ await spec('OWNER-RESET-UI-001', 'Owner · Configuración', 'el Factory Reset se
   const settings = readSource('src/pages/owner/OwnerSettingsPage.tsx')
   metric('monta el diálogo', settings.includes('<FactoryResetDialog'))
   metric('sección', 'Zona de pruebas')
-  metric('acción', 'Restablecer RutaCash a cero')
+  // Texto visible tras el rebranding a ADEX Soluciones (el mecanismo no cambia).
+  metric('acción', 'Restablecer ADEX Soluciones a cero')
   assert(settings.includes('<FactoryResetDialog'), 'la configuración Owner debe montar el diálogo de restablecimiento')
   assert(settings.includes('Zona de pruebas'), 'falta la sección separada de restablecimiento')
-  assert(settings.includes('Restablecer RutaCash a cero'), 'falta la acción de restablecimiento')
+  assert(settings.includes('Restablecer ADEX Soluciones a cero'), 'falta la acción de restablecimiento')
 
   // Y es la ÚNICA pantalla de toda la aplicación que lo monta.
   const montan = archivosDe('src').filter(f => readSource(f).includes('<FactoryResetDialog'))

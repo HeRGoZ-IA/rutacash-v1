@@ -63,7 +63,7 @@ export function FactoryResetDialog({ open, onClose }: { open: boolean; onClose: 
     <Modal
       open={open}
       onClose={cerrar}
-      title="Restablecer RutaCash a cero"
+      title="Restablecer ADEX Soluciones a cero"
       footer={
         <>
           <Button variant="secondary" onClick={cerrar} disabled={borrando}>Cancelar</Button>
@@ -83,7 +83,7 @@ export function FactoryResetDialog({ open, onClose }: { open: boolean; onClose: 
           <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
           <div className="space-y-2 text-sm text-red-700">
             <p>
-              Se eliminarán todos los datos locales de RutaCash, incluidos Owners,
+              Se eliminarán todos los datos locales de ADEX Soluciones, incluidos Owners,
               empresas y operaciones. Esta acción no se puede deshacer.
             </p>
             <p className="font-semibold">
