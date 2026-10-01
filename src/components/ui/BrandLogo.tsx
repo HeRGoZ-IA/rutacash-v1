@@ -3,10 +3,11 @@
 // ------------------------------------------------------------
 // La identidad comercial visible es ADEX Soluciones; el producto sigue llamándose
 // RutaCash internamente (base `RutaCashDB`, sesión `rutacash-auth`, paquete, docs).
-// Este componente es el único lugar que importa los logos: usa las versiones
-// OPTIMIZADAS de `src/assets/branding/adex/optimized/` (sin pérdida visible,
-// generadas con `scripts/optimize-brand-assets.py`). Los PNG aprobados de
-// `src/assets/branding/adex/` son la fuente maestra y no se sirven.
+// Este componente es el único lugar que importa los logos: usa los derivados
+// RIGHT-SIZED de `src/assets/branding/adex/web/` (~3x el mayor tamaño de render,
+// generados con `scripts/generate-brand-web-assets.py` desde `optimized/`).
+// `src/assets/branding/adex/` (maestros) y `optimized/` (lossless, mismas
+// dimensiones) se conservan como fuente y no se sirven.
 // Las pantallas eligen una variante, nunca un archivo.
 //
 // Elegir la variante por el FONDO, no por el tamaño:
@@ -19,23 +20,23 @@
 // intrínsecas van en `width`/`height` para que el navegador reserve el espacio
 // (sin salto de maquetación); el tamaño visible lo fija `className` (p. ej. `h-8`).
 // ============================================================
-import primary from '@/assets/branding/adex/optimized/adex-logo-horizontal-primary.png'
-import onDark from '@/assets/branding/adex/optimized/adex-logo-horizontal-on-dark.png'
-import wordmark from '@/assets/branding/adex/optimized/adex-wordmark-primary.png'
-import symbol from '@/assets/branding/adex/optimized/adex-symbol-primary.png'
-import stacked from '@/assets/branding/adex/optimized/adex-logo-stacked-primary.png'
-import monochrome from '@/assets/branding/adex/optimized/adex-logo-horizontal-monochrome-navy.png'
+import primary from '@/assets/branding/adex/web/adex-logo-horizontal-primary.png'
+import onDark from '@/assets/branding/adex/web/adex-logo-horizontal-on-dark.png'
+import wordmark from '@/assets/branding/adex/web/adex-wordmark-primary.png'
+import symbol from '@/assets/branding/adex/web/adex-symbol-primary.png'
+import stacked from '@/assets/branding/adex/web/adex-logo-stacked-primary.png'
+import monochrome from '@/assets/branding/adex/web/adex-logo-horizontal-monochrome-navy.png'
 import { cn } from '@/lib/utils'
 
 export const BRAND_NAME = 'ADEX Soluciones'
 
 const VARIANTS = {
-  primary: { src: primary, width: 2172, height: 724 },
-  'on-dark': { src: onDark, width: 2172, height: 724 },
-  wordmark: { src: wordmark, width: 1774, height: 887 },
-  symbol: { src: symbol, width: 1254, height: 1254 },
-  stacked: { src: stacked, width: 1254, height: 1254 },
-  monochrome: { src: monochrome, width: 2172, height: 724 },
+  primary: { src: primary, width: 504, height: 168 },
+  'on-dark': { src: onDark, width: 504, height: 168 },
+  wordmark: { src: wordmark, width: 600, height: 300 },
+  symbol: { src: symbol, width: 512, height: 512 },
+  stacked: { src: stacked, width: 600, height: 600 },
+  monochrome: { src: monochrome, width: 504, height: 168 },
 } as const
 
 export type BrandLogoVariant = keyof typeof VARIANTS
