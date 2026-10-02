@@ -13,6 +13,10 @@ import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { useDataRevision } from '@/hooks/useDataRevision'
 import { registerTransfer } from '@/services/routeFundsService'
+import { canReverseTransfer, reverseTransfer } from '@/services/movementReversalService'
+import { pairReversals, reversalStateOf } from '@/lib/movementReversal'
+import { transferTotalsFor } from '@/lib/transferTotals'
+import { AnnulledBadge, ReversalDetail, ReverseButton, ReverseMovementModal, signedMoney } from '@/components/ui/MovementReversal'
 import { custodianBlockedReason } from '@/services/cashCustodyService'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
@@ -54,7 +58,10 @@ export default function TransfersPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [detailGroup, setDetailGroup] = useState<EntityGroup | null>(null)
+  // Clave de la entidad abierta: el detalle se DERIVA de los datos recargados
+  // (tras anular, el modal se actualiza sin cerrarse).
+  const [detailKey, setDetailKey] = useState<string | null>(null)
+  const [reversing, setReversing] = useState<Transfer | null>(null)
   // Filtros
   const [desde, setDesde] = useState('')
   const [hasta, setHasta] = useState('')
@@ -158,22 +165,30 @@ export default function TransfersPage() {
 
   // ---- Agrupación por entidad (rutas + socios) ----
   const groups: EntityGroup[] = (() => {
+    // Totales = efecto VIGENTE (original anulado + su reversión suman 0).
     const build = (type: TransferEntityType, id: string, nombre: string): EntityGroup => {
-      const isOrigin = (t: Transfer) => type === 'route' ? t.routeOrigenId === id : t.socioOrigenId === id
-      const isDest = (t: Transfer) => type === 'route' ? t.routeDestinoId === id : t.socioDestinoId === id
-      const mine = visibleTransfers.filter(t => isOrigin(t) || isDest(t))
-      const entrante = mine.filter(isDest).reduce((s, t) => s + t.valor, 0)
-      const saliente = mine.filter(isOrigin).reduce((s, t) => s + t.valor, 0)
+      const t = transferTotalsFor(visibleTransfers, type, id)
       return {
         key: encodeEndpoint(type, id), type, id, nombre,
-        entrante, saliente, neto: entrante - saliente,
-        cantidad: mine.length, ultimoMovimiento: mine[0]?.fecha, transfers: mine,
+        entrante: t.entrante, saliente: t.saliente, neto: t.neto,
+        cantidad: t.cantidad, ultimoMovimiento: t.transfers[0]?.fecha, transfers: t.transfers,
       }
     }
     const routeGroups = routes.map(r => build('route', r.id, r.nombre))
     const partnerGroups = partners.map(p => build('partner', p.id, p.nombre))
     return [...routeGroups, ...partnerGroups]
   })()
+
+  const detailGroup = detailKey ? groups.find(g => g.key === detailKey) ?? null : null
+
+  async function handleReverse(reason: string) {
+    if (!reversing) return
+    // Permiso, alcance, estado vigente, fondos y TODAS las patas: en el servicio, atómico.
+    await reverseTransfer({ actor: user, tenantId, movementId: reversing.id, reason })
+    toast.success('Transferencia anulada')
+    setReversing(null)
+    await load()
+  }
 
   const filteredGroups = groups.filter(g => {
     if (tipoFiltro !== 'all' && g.type !== tipoFiltro) return false
@@ -264,7 +279,7 @@ export default function TransfersPage() {
 
               <div className="flex items-center justify-between mt-3">
                 <p className="text-xs text-gray-400">{g.ultimoMovimiento ? `Último: ${formatDate(g.ultimoMovimiento)}` : 'Sin movimientos'}</p>
-                <Button variant="secondary" size="sm" disabled={g.cantidad === 0} onClick={() => setDetailGroup(g)} icon={<ChevronRight className="w-3.5 h-3.5" />}>
+                <Button variant="secondary" size="sm" disabled={g.cantidad === 0} onClick={() => setDetailKey(g.key)} icon={<ChevronRight className="w-3.5 h-3.5" />}>
                   Ver movimientos
                 </Button>
               </div>
@@ -298,8 +313,8 @@ export default function TransfersPage() {
       </Modal>
 
       {/* Detalle de movimientos de una entidad */}
-      <Modal open={!!detailGroup} onClose={() => setDetailGroup(null)} title={detailGroup ? `Movimientos · ${detailGroup.nombre}` : 'Movimientos'} size="lg"
-        footer={<Button variant="secondary" onClick={() => setDetailGroup(null)}>Cerrar</Button>}>
+      <Modal open={!!detailGroup} onClose={() => setDetailKey(null)} title={detailGroup ? `Movimientos · ${detailGroup.nombre}` : 'Movimientos'} size="lg"
+        footer={<Button variant="secondary" onClick={() => setDetailKey(null)}>Cerrar</Button>}>
         {detailGroup && (
           <div className="space-y-3">
             <div className="grid grid-cols-3 gap-2">
@@ -311,20 +326,31 @@ export default function TransfersPage() {
               <div className="flex justify-center py-8 text-gray-400 text-sm">Sin movimientos</div>
             ) : (
               <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
-                {detailGroup.transfers.map(t => {
+                {pairReversals(detailGroup.transfers).map(({ movement: t, reversal }) => {
                   const entrada = detailGroup.type === 'route' ? t.routeDestinoId === detailGroup.id : t.socioDestinoId === detailGroup.id
+                  const estado = reversalStateOf(t)
+                  const signo = entrada ? 1 : -1
                   return (
-                    <div key={t.id} className="flex items-center justify-between py-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center flex-shrink-0">
-                          <ArrowLeftRight className="w-4 h-4 text-blue-500" />
+                    <div key={t.id}>
+                      <div className="flex items-center justify-between gap-2 py-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                            <ArrowLeftRight className="w-4 h-4 text-blue-500" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-900 flex items-center gap-1.5 flex-wrap">
+                              {estado === 'reversion' ? 'Reversión · ' : ''}{originLabel(t)} → {destinoLabel(t)}
+                              {estado === 'anulado' && <AnnulledBadge />}
+                            </p>
+                            <p className="text-xs text-gray-400">{formatDate(t.fecha)}{userName(t.userId) ? ` · ${userName(t.userId)}` : ''}{t.descripcion ? ` · ${t.descripcion}` : ''}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{originLabel(t)} → {destinoLabel(t)}</p>
-                          <p className="text-xs text-gray-400">{formatDate(t.fecha)}{userName(t.userId) ? ` · ${userName(t.userId)}` : ''}{t.descripcion ? ` · ${t.descripcion}` : ''}</p>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          {canReverseTransfer(user, t, partnerRouteIds) && <ReverseButton onClick={() => setReversing(t)} />}
+                          <span className={`text-sm font-bold ${estado === 'anulado' ? 'text-gray-400 line-through' : signo * t.valor >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>{signedMoney(signo * t.valor, currency)}</span>
                         </div>
                       </div>
-                      <span className={`text-sm font-bold ${entrada ? 'text-emerald-600' : 'text-amber-600'}`}>{entrada ? '+' : '-'}{formatCurrency(t.valor, currency)}</span>
+                      {estado === 'anulado' && <ReversalDetail original={t} reversal={reversal} currency={currency} signo={signo} userName={userName} />}
                     </div>
                   )
                 })}
@@ -333,6 +359,9 @@ export default function TransfersPage() {
           </div>
         )}
       </Modal>
+
+      <ReverseMovementModal currency={currency} onCancel={() => setReversing(null)} onConfirm={handleReverse}
+        target={reversing && { tipo: 'Transferencia', valor: reversing.valor, fecha: reversing.fecha, detalle: `${originLabel(reversing)} → ${destinoLabel(reversing)}` }} />
     </div>
   )
 }

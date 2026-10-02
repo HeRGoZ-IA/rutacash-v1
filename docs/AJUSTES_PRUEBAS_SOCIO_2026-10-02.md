@@ -7,14 +7,15 @@ pendientes derivados (1.a, 1.b…) están resueltos.
 | Ronda | Estado |
 |---|---|
 | 1 | Cerrada y publicada (`c8bd1e1`; verify:deploy 32/32; smoke A–H PASS) |
-| 2 | Cerrada (commit local, pendiente de revisión antes de push/deploy) |
-| 3–9 | Sin iniciar |
+| 2 | Cerrada y publicada (`b3f2ab6`; verify:deploy 33/33; smoke A–H PASS) |
+| 3 | Cerrada (commit local, pendiente de revisión antes de push/deploy) |
+| 4–9 | Sin iniciar |
 
 ## Checklist maestro
 
 - [x] 1. Cobrador solo 20%; 10% vía Secretaría
 - [x] 2. Aviso de crédito activo en Secretaría
-- [ ] 3. Anulación/reversión auditable de movimientos financieros
+- [x] 3. Anulación/reversión auditable de movimientos financieros
 - [ ] 4. Base unificada entre módulos
 - [ ] 5. Auditoría del origen de Base en Supervisor
 - [ ] 6. Traspaso de efectivo entre trabajadores de una misma ruta
@@ -150,10 +151,109 @@ crédito cancelado.
 
 ---
 
+## 3. Anulación/reversión auditable de movimientos financieros — CERRADO
+
+**Diagnóstico**
+
+- Tipos existentes: `capitalMovements` (`ingresoCapital`; `ajusteCapital` existe en el
+  tipo pero nada lo crea), `withdrawals`, `transfers` (Ruta↔Ruta, Socio→Ruta,
+  Ruta→Socio, Socio↔Socio) y `partnerCashMovements`. Se crean solo desde
+  `routeFundsService` (y el capital inicial en `routeService.createRoute`).
+- Una transferencia tiene hasta tres patas en UNA transacción: la `Transfer`, 0–2
+  `PartnerCashMovement` (`relatedTransferId`) y, si se entregó en mano, una
+  `CashCustodyMovement` BASE_ASSIGNMENT (`relatedTransferId`).
+- Todos los agregados suman algebraicamente sin filtrar: `getCashboxSummary` (Base),
+  `computeRouteCashReconciliation`, liquidación semanal, Caja socios
+  (`buildPartnerSummaries`), custodia (`custodyInCycle`) y los totales de pantalla.
+- No existía ninguna edición ni borrado de estos movimientos (nada que bloquear).
+- El modal del socio ("Movimientos · Barreiro", Entrante/Saliente/Neto) es el de
+  **Transferencias**: los +21.000 / +21.500 eran aportes Socio → Barreiro.
+
+**Modelo de reversión** (`MovementReversalFields`, campos opcionales sin índice)
+
+- Original: `reversalId`, `reversedAt`, `reversedByUserId`, `reversalReason` → ANULADO.
+- Reversión: asiento espejo (mismo tipo, mismos extremos, importe NEGADO, fecha de
+  la anulación) con `reversesId` → original y el mismo motivo.
+- Registros antiguos sin campos = vigentes. **Sin migración** (Dexie sigue en v15).
+
+**Estrategia contable (única):** el libro conserva original y reversión; los
+agregados los suman (neto 0). El estado ANULADO es solo auditoría/presentación:
+ningún agregador filtra por estado (no hay doble corrección). Ningún agregador se
+modificó. La reversión lleva la fecha de HOY: no reescribe periodos ya liquidados.
+
+**Servicio** `movementReversalService` (`reverseCapitalMovement`, `reverseWithdrawal`,
+`reverseTransfer`)
+
+- Una transacción Dexie por anulación; el original se relee dentro y se exige
+  vigente → doble anulación y doble clic concurrente dan una sola reversión.
+- Una reversión no es anulable (sin cadenas A→B→A).
+- Motivo obligatorio (recortado, máx. 200), persistido en original y reversión.
+- Transferencia: revierte la transferencia + sus patas de Caja socios + la custodia
+  en mano (devolución técnica BASE_RETURN de esa persona), todo o nada.
+- Si la anulación SACA dinero de una Route rige la regla del retiro: no puede
+  superar la caja no asignada. Lo entregado en mano solo se revierte si la persona
+  aún lo tiene; si no, se rechaza con mensaje claro.
+- Bitácora: `MOVEMENT_REVERSED` con motivo y vínculo.
+
+**Permisos:** la misma capacidad y alcance que para registrar ese movimiento —
+`capital.manage` + ruta autorizada (capital, retiros); `transfer.create` +
+`isTransferInScope` (transferencias). Hoy: Super Admin y Admin (en sus rutas).
+Supervisor, Cobrador, Secretario y Socio no pueden (incompatibles en la matriz).
+
+**UI:** Capital, Retiros y Transferencias → "Ver movimientos": acción "Anular" por
+fila (solo si el usuario puede y el movimiento es vigente), confirmación con tipo,
+valor, fecha, origen/destino y motivo obligatorio, botón bloqueado mientras procesa.
+El original queda tachado con etiqueta "Anulado" y debajo su reversión (valor,
+fecha, quién, motivo). Totales de tarjeta y modal = efecto vigente. Caja socios
+(Admin y Socio) muestra las patas revertidas con su signo y "Anulado".
+
+**Caso real reproducido:** aportes Socio → Barreiro 21.000 + 21.500 (Entrante y Neto
+42.500). Anular 21.500 → Entrante 21.000, Neto 21.000, el 21.500 sigue visible como
+anulado con su reversión, Caja socios del socio neteada.
+
+**Archivos**
+
+- `src/models/types.ts` (`MovementReversalFields`, acción `MOVEMENT_REVERSED`)
+- `src/lib/movementReversal.ts`, `src/lib/transferTotals.ts` (nuevos, puros)
+- `src/services/movementReversalService.ts` (nuevo)
+- `src/components/ui/MovementReversal.tsx` (nuevo)
+- `src/pages/admin/TransfersPage.tsx`, `CapitalPage.tsx`, `WithdrawalsPage.tsx`,
+  `PartnerCashPage.tsx`, `src/pages/socio/SocioPartnerCashPage.tsx`
+- `tests/financialreversal.test.ts` (nuevo) · `package.json` · `.gitignore` ·
+  `scripts/verify-deploy.mjs` (marcador R3)
+
+**Tests:** `npm run test:financialreversal`, FIN-REV-001 … 015, 15/15 PASS.
+Mutaciones: sin la validación de estado fallan 005 y 011; sin el control de fondos
+falla 015. Verificado en la app real (1280 px y 420 px): caso Barreiro, motivo
+obligatorio (botón deshabilitado), doble clic → 1 reversión, anulado visible,
+Admin con otra ruta no ve Barreiro, Socio no entra al panel.
+
+**Límites (decisiones, no inconsistencias)**
+
+- Anular dinero que ya no está en la caja no asignada (prestado o entregado como
+  Base) se rechaza, igual que un retiro. Primero debe volver a la caja.
+- Con filtro de fechas que excluya el día de la anulación, la vista muestra el
+  original (anulado) sin su reversión; sin filtro, el efecto vigente.
+- Movimientos creados directamente en Caja socios (no por transferencia) no se
+  anulan en esta ronda: no son capital/retiro/transferencia.
+
+**Pendientes derivados:** ninguno.
+
+---
+
 ## Hallazgos registrados para rondas posteriores (sin implementar)
 
-- Fuera del backlog: la pantalla de autorizaciones del Admin (`SaleAuthorizationsPage`)
+- **Punto 4/5 (Base):** conviven dos "Base": el libro (`getCashboxSummary.saldoActual`,
+  que muestran Capital y Retiros como "Base actual") y la caja no asignada
+  (`computeRouteCashReconciliation.disponible`, que limita retiros y anulaciones).
+  `Route.capitalActual` está deprecado pero sigue persistido.
+- **Punto 6:** ya existe `transferBaseBetweenWorkers` (custodia PERSON_TO_PERSON) en
+  `cashCustodyService`; revisar si falta solo la UI.
+- **Punto 7:** los pagos usan otra convención de reversión (`state`
+  'reversed'/'reversal', y los reportes FILTRAN ambos). `getCashboxSummary` suma los
+  pagos en bruto: equivale solo mientras la reversión tenga importe negado y caiga
+  en el mismo rango de fechas que el original. Revisar al tratar la reversión de pagos.
+- (Ronda 2) Fuera del backlog: la pantalla de autorizaciones del Admin (`SaleAuthorizationsPage`)
   y el detalle móvil del Supervisor (`CollectorAuthorizationsPage`) podrían reutilizar
   `ActiveCreditNotice`/`getActiveCreditContext`; hoy el Admin no ve el aviso y el
   Supervisor solo ve una línea en el listado. No se tocó (el punto 2 es Secretaría).
-- Sin hallazgos nuevos para los puntos 3–9 en esta ronda.

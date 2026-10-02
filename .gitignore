@@ -12,3 +12,4 @@ tests/_out.basecash.mjs
 tmp/
 tests/_out.interestrate.mjs
 tests/_out.activecredit.mjs
+tests/_out.financialreversal.mjs

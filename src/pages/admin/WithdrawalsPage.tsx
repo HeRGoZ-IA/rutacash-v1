@@ -18,6 +18,9 @@ import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import type { Withdrawal, Route, User } from '@/models/types'
 import { registerWithdrawal, getRouteAvailableFunds } from '@/services/routeFundsService'
+import { canReverseRouteFund, reverseWithdrawal } from '@/services/movementReversalService'
+import { pairReversals, reversalStateOf } from '@/lib/movementReversal'
+import { AnnulledBadge, ReversalDetail, ReverseButton, ReverseMovementModal, signedMoney } from '@/components/ui/MovementReversal'
 
 // Revisión socio 25-jun — Retiros agrupados por ruta (presentación similar a Capital).
 // NO cambia la lógica contable de retiros: solo organiza la vista por ruta.
@@ -50,7 +53,9 @@ export default function WithdrawalsPage() {
   const [hasta, setHasta] = useState('')
   const [form, setForm] = useState({ routeId: '', valor: 0, descripcion: '', fecha: today() })
   // Grupo de ruta seleccionado para ver el detalle de sus retiros.
-  const [detailGroup, setDetailGroup] = useState<WithdrawalGroup | null>(null)
+  // Ruta cuyo detalle está abierto: el grupo se DERIVA de los datos recargados.
+  const [detailRouteId, setDetailRouteId] = useState<string | null>(null)
+  const [reversing, setReversing] = useState<Withdrawal | null>(null)
 
   // Reactiva: otra pestaña del mismo navegador registra y esta vista se entera sin F5.
   const revision = useDataRevision()
@@ -108,8 +113,9 @@ export default function WithdrawalsPage() {
       const ws = visibleWithdrawals.filter(w => w.routeId === routeId) // ya vienen ordenados desc por fecha
       return {
         routeId, nombre, codigo, baseActual,
+        // Efecto vigente: un retiro anulado y su reversión suman 0.
         totalRetirado: ws.reduce((s, w) => s + w.valor, 0),
-        cantidad: ws.length,
+        cantidad: pairReversals(ws).length,
         ultimoRetiro: ws[0]?.fecha,
         withdrawals: ws,
       }
@@ -129,6 +135,17 @@ export default function WithdrawalsPage() {
     }
     return list
   })()
+
+  const detailGroup = detailRouteId ? groups.find(g => g.routeId === detailRouteId) ?? null : null
+
+  async function handleReverse(reason: string) {
+    if (!reversing) return
+    // Permiso, ruta y estado vigente: en el servicio, atómico.
+    await reverseWithdrawal({ actor: user, tenantId, movementId: reversing.id, reason })
+    toast.success('Retiro anulado')
+    setReversing(null)
+    await load()
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -195,7 +212,7 @@ export default function WithdrawalsPage() {
                 <p className="text-xs text-gray-400">
                   {g.ultimoRetiro ? `Último: ${formatDate(g.ultimoRetiro)}` : 'Sin retiros'}
                 </p>
-                <Button variant="secondary" size="sm" disabled={g.cantidad === 0} onClick={() => setDetailGroup(g)} icon={<ChevronRight className="w-3.5 h-3.5" />}>
+                <Button variant="secondary" size="sm" disabled={g.cantidad === 0} onClick={() => setDetailRouteId(g.routeId)} icon={<ChevronRight className="w-3.5 h-3.5" />}>
                   Ver retiros
                 </Button>
               </div>
@@ -224,8 +241,8 @@ export default function WithdrawalsPage() {
       </Modal>
 
       {/* Detalle de retiros de una ruta */}
-      <Modal open={!!detailGroup} onClose={() => setDetailGroup(null)} title={detailGroup ? `Retiros · ${detailGroup.nombre}` : 'Retiros'} size="lg"
-        footer={<Button variant="secondary" onClick={() => setDetailGroup(null)}>Cerrar</Button>}>
+      <Modal open={!!detailGroup} onClose={() => setDetailRouteId(null)} title={detailGroup ? `Retiros · ${detailGroup.nombre}` : 'Retiros'} size="lg"
+        footer={<Button variant="secondary" onClick={() => setDetailRouteId(null)}>Cerrar</Button>}>
         {detailGroup && (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
@@ -236,25 +253,40 @@ export default function WithdrawalsPage() {
               <div className="flex justify-center py-8 text-gray-400 text-sm">Esta ruta no tiene retiros</div>
             ) : (
               <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
-                {detailGroup.withdrawals.map(w => (
-                  <div key={w.id} className="flex items-center justify-between py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-amber-50 rounded-xl flex items-center justify-center flex-shrink-0">
-                        <Wallet className="w-4 h-4 text-amber-600" />
+                {pairReversals(detailGroup.withdrawals).map(({ movement: w, reversal }) => {
+                  const estado = reversalStateOf(w)
+                  return (
+                    <div key={w.id}>
+                      <div className="flex items-center justify-between gap-2 py-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 bg-amber-50 rounded-xl flex items-center justify-center flex-shrink-0">
+                            <Wallet className="w-4 h-4 text-amber-600" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-900 flex items-center gap-1.5 flex-wrap">
+                              {estado === 'reversion' ? 'Reversión de retiro' : w.descripcion || 'Retiro'}
+                              {estado === 'anulado' && <AnnulledBadge />}
+                            </p>
+                            <p className="text-xs text-gray-400">{formatDate(w.fecha)}{getUserName(w.userId) ? ` · ${getUserName(w.userId)}` : ''}{estado === 'reversion' && w.reversalReason ? ` · Motivo: ${w.reversalReason}` : ''}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          {canReverseRouteFund(user, w) && <ReverseButton onClick={() => setReversing(w)} />}
+                          <span className={`text-sm font-bold ${estado === 'anulado' ? 'text-gray-400 line-through' : w.valor >= 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{signedMoney(-w.valor, currency)}</span>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">{w.descripcion || 'Retiro'}</p>
-                        <p className="text-xs text-gray-400">{formatDate(w.fecha)}{getUserName(w.userId) ? ` · ${getUserName(w.userId)}` : ''}</p>
-                      </div>
+                      {estado === 'anulado' && <ReversalDetail original={w} reversal={reversal} currency={currency} signo={-1} userName={getUserName} />}
                     </div>
-                    <span className="text-sm font-bold text-amber-600">-{formatCurrency(w.valor, currency)}</span>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
         )}
       </Modal>
+
+      <ReverseMovementModal currency={currency} onCancel={() => setReversing(null)} onConfirm={handleReverse}
+        target={reversing && { tipo: 'Retiro', valor: reversing.valor, fecha: reversing.fecha, detalle: [routes.find(r => r.id === reversing.routeId)?.nombre, reversing.descripcion].filter(Boolean).join(' · ') }} />
     </div>
   )
 }

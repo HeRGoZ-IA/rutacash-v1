@@ -54,6 +54,8 @@ const MARCADORES = [
   ['El Cobrador solo puede crear créditos al', true, 'tasa del Cobrador validada en dominio (2026-10-02 R1)'],
   // Ronda 2: contexto de crédito activo en las autorizaciones del Secretario.
   ['Solicitada con crédito activo · hoy ya no está activo', true, 'crédito activo visible en Secretaría (2026-10-02 R2)'],
+  // Ronda 3: anulación auditable de capital, retiros y transferencias.
+  ['Una reversión no se puede anular.', true, 'anulación auditable de movimientos de fondos (2026-10-02 R3)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

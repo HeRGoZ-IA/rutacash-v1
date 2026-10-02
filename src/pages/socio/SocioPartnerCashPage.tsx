@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatDate } from '@/lib/formatters'
+import { AnnulledBadge, signedMoney } from '@/components/ui/MovementReversal'
 import type { PartnerCashMovement } from '@/models/types'
 
 /**
@@ -67,11 +68,11 @@ export default function SocioPartnerCashPage() {
                 ? <ArrowDownCircle className="w-5 h-5 text-emerald-500 flex-shrink-0" />
                 : <ArrowUpCircle className="w-5 h-5 text-red-400 flex-shrink-0" />}
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-gray-900 truncate">{m.description ?? m.category}</p>
+                <p className="text-sm font-medium text-gray-900 truncate flex items-center gap-1.5">{m.description ?? m.category}{m.reversalId && <AnnulledBadge />}</p>
                 <p className="text-xs text-gray-400">{formatDate(m.fecha)} · <Badge variant="gray" size="sm">{m.category}</Badge></p>
               </div>
-              <p className={`text-sm font-semibold flex-shrink-0 ${m.type === 'ingreso' ? 'text-emerald-600' : 'text-red-500'}`}>
-                {m.type === 'ingreso' ? '+' : '−'}{formatCurrency(m.amount, currency)}
+              <p className={`text-sm font-semibold flex-shrink-0 ${m.reversalId ? 'text-gray-400 line-through' : (m.type === 'ingreso' ? 1 : -1) * m.amount >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                {signedMoney((m.type === 'ingreso' ? 1 : -1) * m.amount, currency)}
               </p>
             </div>
           ))}

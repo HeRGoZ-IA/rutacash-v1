@@ -81,6 +81,7 @@ export type AuditAction =
   | 'CAPITAL_REGISTERED'
   | 'TRANSFER_REGISTERED'
   | 'WITHDRAWAL_REGISTERED'
+  | 'MOVEMENT_REVERSED'
   | 'SETTLEMENT_REOPENED'
   | 'CREATE_OFFICE'
   | 'UPDATE_OFFICE'
@@ -598,7 +599,29 @@ export interface Expense {
   createdAt: string
 }
 
-export interface CapitalMovement {
+/**
+ * ANULACIÓN AUDITABLE (ajustes del socio 2026-10-02, punto 3). Un movimiento de
+ * fondos nunca se borra ni se edita: se ANULA con un asiento espejo (storno) del
+ * mismo tipo y dirección con el importe NEGADO. Todos los agregados suman
+ * algebraicamente, así que original + reversión = 0 sin filtrar nada.
+ *
+ *  · En el ORIGINAL (anulado): `reversalId` + quién, cuándo y por qué.
+ *  · En la REVERSIÓN: `reversesId` → el original. Una reversión no es anulable.
+ *
+ * Campos opcionales y sin índice: los registros anteriores se leen como vigentes.
+ */
+export interface MovementReversalFields {
+  /** Original: id de su reversión. Presente = ANULADO. */
+  reversalId?: string
+  reversedAt?: string
+  reversedByUserId?: string
+  /** Motivo: en el original y copiado en la reversión. */
+  reversalReason?: string
+  /** Reversión: id del movimiento que anula. */
+  reversesId?: string
+}
+
+export interface CapitalMovement extends MovementReversalFields {
   id: string
   tenantId: string
   routeId: string
@@ -616,7 +639,7 @@ export interface CapitalMovement {
  */
 export type TransferEntityType = 'route' | 'partner'
 
-export interface Transfer {
+export interface Transfer extends MovementReversalFields {
   id: string
   tenantId: string
   /**
@@ -644,7 +667,7 @@ export interface Transfer {
   createdAt: string
 }
 
-export interface Withdrawal {
+export interface Withdrawal extends MovementReversalFields {
   id: string
   tenantId: string
   routeId: string
@@ -675,7 +698,7 @@ export type PartnerCashCategory =
   | 'transferencia'    // generado desde el módulo Transferencias
   | 'otro'
 
-export interface PartnerCashMovement {
+export interface PartnerCashMovement extends MovementReversalFields {
   id: string
   tenantId: string
   /** Usuario con rol 'socio' dueño del movimiento. */
@@ -783,7 +806,7 @@ export interface CashSettlement {
  */
 export type CashCustodyType = 'BASE_ASSIGNMENT' | 'BASE_RETURN' | 'PERSON_TO_PERSON'
 
-export interface CashCustodyMovement {
+export interface CashCustodyMovement extends MovementReversalFields {
   id: string
   tenantId: string
   routeId: string

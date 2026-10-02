@@ -18,6 +18,7 @@ import {
   type PartnerCashSummary,
 } from '@/services/partnerCashService'
 import { isPartnerInScope, authorizedRouteIdsOf } from '@/lib/permissions'
+import { AnnulledBadge, signedMoney } from '@/components/ui/MovementReversal'
 import type { PartnerCashMovement, PartnerCashCategory, PartnerCashType, User } from '@/models/types'
 
 // Categorías por tipo (Revisión 2).
@@ -216,14 +217,16 @@ export default function PartnerCashPage() {
                       </div>
                       <div>
                         <p className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
-                          {CATEGORY_LABEL[m.category] ?? m.category}
+                          {m.reversesId ? 'Reversión · ' : ''}{CATEGORY_LABEL[m.category] ?? m.category}
                           {m.relatedTransferId && <Link2 className="w-3 h-3 text-gray-400" aria-label="Origen: transferencia" />}
+                          {m.reversalId && <AnnulledBadge />}
                         </p>
                         <p className="text-xs text-gray-400">{formatDate(m.fecha)}{m.description ? ` · ${m.description}` : ''}{m.relatedTransferId ? ' · desde Transferencias' : ''}</p>
                       </div>
                     </div>
-                    <span className={`text-sm font-bold ${m.type === 'ingreso' ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {m.type === 'ingreso' ? '+' : '-'}{formatCurrency(m.amount, currency)}
+                    {/* Patas anuladas (storno): importe negado; se muestra el efecto con su signo. */}
+                    <span className={`text-sm font-bold ${m.reversalId ? 'text-gray-400 line-through' : (m.type === 'ingreso' ? 1 : -1) * m.amount >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                      {signedMoney((m.type === 'ingreso' ? 1 : -1) * m.amount, currency)}
                     </span>
                   </div>
                 ))}

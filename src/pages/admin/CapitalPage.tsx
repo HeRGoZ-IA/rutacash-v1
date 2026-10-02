@@ -15,8 +15,11 @@ import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
-import type { CapitalMovement, Route, Withdrawal, RouteFinancialSummary } from '@/models/types'
+import type { CapitalMovement, Route, Withdrawal, RouteFinancialSummary, User } from '@/models/types'
 import { registerCapital } from '@/services/routeFundsService'
+import { canReverseRouteFund, reverseCapitalMovement } from '@/services/movementReversalService'
+import { pairReversals, reversalStateOf } from '@/lib/movementReversal'
+import { AnnulledBadge, ReversalDetail, ReverseButton, ReverseMovementModal, signedMoney } from '@/components/ui/MovementReversal'
 
 // Paquete 3 — Resumen de capital agrupado por ruta.
 interface CapitalGroup {
@@ -47,8 +50,10 @@ export default function CapitalPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ routeId: '', valor: 0, descripcion: '', fecha: today(), tipo: 'ingresoCapital' as const })
-  // Grupo de ruta seleccionado para ver su detalle de movimientos.
-  const [detailGroup, setDetailGroup] = useState<CapitalGroup | null>(null)
+  // Ruta cuyo detalle está abierto: el grupo se DERIVA de los datos recargados.
+  const [detailRouteId, setDetailRouteId] = useState<string | null>(null)
+  const [reversing, setReversing] = useState<CapitalMovement | null>(null)
+  const [users, setUsers] = useState<User[]>([])
 
   // Reactiva: otra pestaña del mismo navegador registra y esta vista se entera sin F5.
   const revision = useDataRevision()
@@ -56,11 +61,13 @@ export default function CapitalPage() {
 
   async function load() {
     setLoading(true)
-    const [rawMovs, rawRts, rawWds] = await Promise.all([
+    const [rawMovs, rawRts, rawWds, us] = await Promise.all([
       db.capitalMovements.where('tenantId').equals(tenantId).toArray(),
       db.routes.where('tenantId').equals(tenantId).toArray(),
       db.withdrawals.where('tenantId').equals(tenantId).toArray(),
+      db.users.where('tenantId').equals(tenantId).toArray(),
     ])
+    setUsers(us)
     // RESTRICCIÓN POR RUTAS: movimientos, rutas y retiros limitados a los autorizados.
     const movs = filterByAccessibleRoute(user, rawMovs)
     const rts = filterAccessibleRoutes(user, rawRts)
@@ -103,9 +110,10 @@ export default function CapitalPage() {
       return {
         routeId, nombre, codigo, capitalInicial, capitalActual, carteraEnCalle,
         totalControlado: summary?.totalControlado ?? capitalActual,
+        // Efecto vigente: un capital anulado y su reversión suman 0.
         totalInyectado: movs.reduce((s, m) => s + m.valor, 0),
         totalRetirado: wdByRoute.get(routeId) ?? 0,
-        cantidad: movs.length,
+        cantidad: pairReversals(movs).length,
         ultimoMovimiento: movs[0]?.fecha, // movements vienen ordenados desc por fecha
         movements: movs,
       }
@@ -134,6 +142,18 @@ export default function CapitalPage() {
     }
     return list
   })()
+
+  const detailGroup = detailRouteId ? groups.find(g => g.routeId === detailRouteId) ?? null : null
+  const userName = (id?: string) => users.find(u => u.id === id)?.nombre
+
+  async function handleReverse(reason: string) {
+    if (!reversing) return
+    // Permiso, ruta, estado vigente y fondos: en el servicio, atómico.
+    await reverseCapitalMovement({ actor: user, tenantId, movementId: reversing.id, reason })
+    toast.success('Movimiento anulado')
+    setReversing(null)
+    await load()
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -206,7 +226,7 @@ export default function CapitalPage() {
                 <p className="text-xs text-gray-400">
                   {g.ultimoMovimiento ? `Último: ${formatDate(g.ultimoMovimiento)}` : 'Sin movimientos'}
                 </p>
-                <Button variant="secondary" size="sm" onClick={() => setDetailGroup(g)} icon={<ChevronRight className="w-3.5 h-3.5" />}>
+                <Button variant="secondary" size="sm" onClick={() => setDetailRouteId(g.routeId)} icon={<ChevronRight className="w-3.5 h-3.5" />}>
                   Ver movimientos
                 </Button>
               </div>
@@ -228,8 +248,8 @@ export default function CapitalPage() {
       </Modal>
 
       {/* Detalle de movimientos de una ruta */}
-      <Modal open={!!detailGroup} onClose={() => setDetailGroup(null)} title={detailGroup ? `Movimientos · ${detailGroup.nombre}` : 'Movimientos'} size="lg"
-        footer={<Button variant="secondary" onClick={() => setDetailGroup(null)}>Cerrar</Button>}>
+      <Modal open={!!detailGroup} onClose={() => setDetailRouteId(null)} title={detailGroup ? `Movimientos · ${detailGroup.nombre}` : 'Movimientos'} size="lg"
+        footer={<Button variant="secondary" onClick={() => setDetailRouteId(null)}>Cerrar</Button>}>
         {detailGroup && (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
@@ -240,25 +260,40 @@ export default function CapitalPage() {
               <div className="flex justify-center py-8 text-gray-400 text-sm">Esta ruta no tiene inyecciones de capital</div>
             ) : (
               <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
-                {detailGroup.movements.map(m => (
-                  <div key={m.id} className="flex items-center justify-between py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-primary-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                        <DollarSign className="w-4 h-4 text-primary-600" />
+                {pairReversals(detailGroup.movements).map(({ movement: m, reversal }) => {
+                  const estado = reversalStateOf(m)
+                  return (
+                    <div key={m.id}>
+                      <div className="flex items-center justify-between gap-2 py-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 bg-primary-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                            <DollarSign className="w-4 h-4 text-primary-600" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-900 flex items-center gap-1.5 flex-wrap">
+                              {estado === 'reversion' ? 'Reversión de capital' : m.descripcion || (m.tipo === 'ingresoCapital' ? 'Inyección de capital' : 'Ajuste de capital')}
+                              {estado === 'anulado' && <AnnulledBadge />}
+                            </p>
+                            <p className="text-xs text-gray-400">{formatDate(m.fecha)}{estado === 'reversion' && m.reversalReason ? ` · Motivo: ${m.reversalReason}` : ''}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          {canReverseRouteFund(user, m) && <ReverseButton onClick={() => setReversing(m)} />}
+                          <span className={`text-sm font-bold ${estado === 'anulado' ? 'text-gray-400 line-through' : m.valor >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>{signedMoney(m.valor, currency)}</span>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">{m.descripcion || (m.tipo === 'ingresoCapital' ? 'Inyección de capital' : 'Ajuste de capital')}</p>
-                        <p className="text-xs text-gray-400">{formatDate(m.fecha)}</p>
-                      </div>
+                      {estado === 'anulado' && <ReversalDetail original={m} reversal={reversal} currency={currency} signo={1} userName={userName} />}
                     </div>
-                    <span className="text-sm font-bold text-emerald-600">+{formatCurrency(m.valor, currency)}</span>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
         )}
       </Modal>
+
+      <ReverseMovementModal currency={currency} onCancel={() => setReversing(null)} onConfirm={handleReverse}
+        target={reversing && { tipo: 'Inyección de capital', valor: reversing.valor, fecha: reversing.fecha, detalle: [routes.find(r => r.id === reversing.routeId)?.nombre, reversing.descripcion].filter(Boolean).join(' · ') }} />
     </div>
   )
 }
