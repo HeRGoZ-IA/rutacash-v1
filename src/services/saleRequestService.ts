@@ -20,6 +20,7 @@ import type {
 import { assertRouteOperationalContext } from '@/services/officeService'
 import { activeCreditsOf, decideSaleOrigination, isActiveCredit } from '@/lib/activeCredit'
 import { ALLOWED_INTEREST_RATES, originationRateError } from '@/lib/interestRatePolicy'
+import { buildActiveCreditContext, type ActiveCreditContext } from '@/lib/activeCreditContext'
 
 export interface SaleInputs {
   tenantId: string
@@ -287,6 +288,7 @@ export async function createSaleRequest(input: SaleInputs, actor: User, opts: { 
       actor, canCreateDirect: can(actor, 'sale.createDirect', ctx), canCreateRequest: true, activeCredits: activos.length,
     })
     request.activeCreditSaleIds = activos.map(s => s.id)
+    request.activeCreditSnapshot = activos.map(s => ({ saleId: s.id, saldo: s.saldo, valorTotal: s.valorTotal, status: s.status }))
     request.authorizationReason = decision.kind === 'authorization' ? decision.reason
       : input.valorVenta > directSaleLimit(route, actor) ? 'over-limit' : undefined
     if (opts.newClient) await db.clients.add(opts.newClient)
@@ -432,6 +434,26 @@ export async function rejectSaleRequest(requestOrId: SaleRequest | string, actor
       requestedBy: requesterOf(fresca),
     })
   })
+}
+
+/**
+ * Contexto de crédito activo de una solicitud para quien la autoriza (punto 2,
+ * ajustes del socio 2026-10-02): créditos activos AL SOLICITAR (fotografía) y su
+ * estado AHORA. Solo lectura; no cambia ninguna regla de autorización.
+ *
+ * AISLAMIENTO: la solicitud se relee de la base; debe ser de la empresa del actor y
+ * el actor debe tener `authorization.access` sobre su ruta. Las ventas se filtran
+ * por la empresa de la solicitud y el detalle financiero se recorta a las rutas que
+ * el actor puede ver (`sale.viewActive`): de otra ruta solo consta que existe.
+ */
+export async function getActiveCreditContext(requestOrId: SaleRequest | string, actor: User): Promise<ActiveCreditContext | null> {
+  const id = typeof requestOrId === 'string' ? requestOrId : requestOrId.id
+  const request = await db.saleRequests.get(id)
+  if (!request || request.tenantId !== actor.tenantId) throw new SaleRuleError('La solicitud no existe.')
+  assertCan(actor, 'authorization.access', { routeId: request.routeId, tenantId: request.tenantId })
+  const ventas = await db.sales.where('clientId').equals(request.clientId).toArray()
+  return buildActiveCreditContext(request, ventas,
+    routeId => can(actor, 'sale.viewActive', { routeId, tenantId: request.tenantId }))
 }
 
 /**

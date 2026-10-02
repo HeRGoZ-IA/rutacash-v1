@@ -419,8 +419,22 @@ export interface SaleRequest {
    * crédito adicional. Solicitudes anteriores a 2026-09-29: ausente.
    */
   activeCreditSaleIds?: string[]
+  /**
+   * Fotografía mínima de esos mismos créditos en el instante de la solicitud
+   * (2026-10-02). Permite al autorizador distinguir "cómo estaba al solicitar" de
+   * "cómo está ahora". Solicitudes anteriores: ausente (solo hay IDs).
+   */
+  activeCreditSnapshot?: ActiveCreditSnapshot[]
   /** Por qué fue solicitud y no venta directa (ver `decideSaleOrigination`). */
   authorizationReason?: 'active-credit' | 'no-direct-capability' | 'over-limit'
+}
+
+/** Estado de un crédito activo del cliente fotografiado al crear una solicitud. */
+export interface ActiveCreditSnapshot {
+  saleId: string
+  saldo: number
+  valorTotal: number
+  status: SaleStatus
 }
 
 export interface Installment {

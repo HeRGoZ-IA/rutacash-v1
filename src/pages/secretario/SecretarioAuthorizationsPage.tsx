@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { ClipboardCheck, CheckCircle, XCircle, Phone } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Select, Textarea } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { ActiveCreditNotice } from '@/components/ui/ActiveCreditNotice'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
@@ -12,7 +13,8 @@ import { useTenant } from '@/hooks/useTenant'
 import { useAccessibleRoutes } from '@/hooks/useAccessibleRoutes'
 import { can } from '@/lib/permissions'
 import { formatCurrency, formatDate } from '@/lib/formatters'
-import { approveSaleRequest, rejectSaleRequest } from '@/services/saleRequestService'
+import { approveSaleRequest, getActiveCreditContext, rejectSaleRequest } from '@/services/saleRequestService'
+import type { ActiveCreditContext } from '@/lib/activeCreditContext'
 import { logAction } from '@/services/auditService'
 import type { SaleRequest, Client, Route, PaymentFrequency, Sale } from '@/models/types'
 
@@ -41,6 +43,9 @@ export default function SecretarioAuthorizationsPage() {
   const [loading, setLoading] = useState(true)
   const [detail, setDetail] = useState<SaleRequest | null>(null)
   const [clientSales, setClientSales] = useState<Sale[]>([])
+  const [creditContext, setCreditContext] = useState<ActiveCreditContext | null>(null)
+  // Solicitud cuyo detalle se está cargando: descarta respuestas de una anterior.
+  const openingId = useRef<string | null>(null)
   const [working, setWorking] = useState(false)
   const [rejecting, setRejecting] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
@@ -75,8 +80,20 @@ export default function SecretarioAuthorizationsPage() {
     setRejecting(false); setRejectReason('')
     setTasa(req.interestRate); setFreq(req.frequency); setDays(req.paymentDays ?? [])
     setPhoneConfirmed(!!req.phoneConfirmed); setPhoneNote(req.phoneConfirmationNote ?? '')
-    const sales = await db.sales.where('clientId').equals(req.clientId).toArray()
-    setClientSales(sales.sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+    // Nada de la solicitud anterior mientras carga la nueva.
+    setClientSales([]); setCreditContext(null)
+    openingId.current = req.id
+    if (!user) return
+    const [sales, contexto] = await Promise.all([
+      db.sales.where('clientId').equals(req.clientId).toArray(),
+      getActiveCreditContext(req.id, user).catch(() => null),
+    ])
+    if (openingId.current !== req.id) return
+    // Misma empresa y solo rutas que el Secretario puede ver (igual que el aviso).
+    setClientSales(sales
+      .filter(s => s.tenantId === req.tenantId && can(user, 'sale.viewActive', { routeId: s.routeId, tenantId: req.tenantId }))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+    setCreditContext(contexto)
   }
 
   function toggleDay(d: number) {
@@ -196,6 +213,8 @@ export default function SecretarioAuthorizationsPage() {
               <div><p className="text-xs text-gray-500">Valor solicitado</p><p className="font-bold text-gray-900">{formatCurrency(detail.amount, currency)}</p></div>
               <div><p className="text-xs text-gray-500">N° parcelas</p><p className="font-bold text-gray-900">{detail.installmentsCount}</p></div>
             </div>
+
+            <ActiveCreditNotice context={creditContext} currency={currency} routeName={id => routeMap.get(id)?.nombre} />
 
             {!rejecting && (
               <>

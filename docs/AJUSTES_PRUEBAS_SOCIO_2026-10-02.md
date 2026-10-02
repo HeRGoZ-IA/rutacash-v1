@@ -6,13 +6,14 @@ pendientes derivados (1.a, 1.b…) están resueltos.
 
 | Ronda | Estado |
 |---|---|
-| 1 | Cerrada (commit local, pendiente de revisión antes de push/deploy) |
-| 2–9 | Sin iniciar |
+| 1 | Cerrada y publicada (`c8bd1e1`; verify:deploy 32/32; smoke A–H PASS) |
+| 2 | Cerrada (commit local, pendiente de revisión antes de push/deploy) |
+| 3–9 | Sin iniciar |
 
 ## Checklist maestro
 
 - [x] 1. Cobrador solo 20%; 10% vía Secretaría
-- [ ] 2. Aviso de crédito activo en Secretaría
+- [x] 2. Aviso de crédito activo en Secretaría
 - [ ] 3. Anulación/reversión auditable de movimientos financieros
 - [ ] 4. Base unificada entre módulos
 - [ ] 5. Auditoría del origen de Base en Supervisor
@@ -80,8 +81,79 @@ Prueba de mutación: con la validación de servicio desactivada fallan TASA-002,
 
 ---
 
+## 2. Aviso de crédito activo en Secretaría — CERRADO
+
+**Diagnóstico**
+
+- La solicitud guardaba `activeCreditSaleIds` (IDs de los créditos activos, leídos
+  en la misma transacción) y `authorizationReason: 'active-credit'`. **No** guardaba
+  saldo ni estado de esos créditos: con eso solo se podía mostrar el estado actual.
+- `SecretarioAuthorizationsPage` (modal "Solicitud de venta") no usaba esos campos.
+  Sí cargaba las ventas del cliente para un "Historial", pero sin filtrar por empresa
+  ni por ruta, y sin limpiar el estado al abrir otra solicitud (podía mostrar un
+  instante el historial del cliente anterior).
+- Solo el listado móvil del Supervisor (`CollectorAuthorizationsPage`) mostraba una
+  línea "Cliente con crédito activo".
+
+**Solución**
+
+- Fotografía mínima al solicitar: `SaleRequest.activeCreditSnapshot`
+  (`saleId`, `saldo`, `valorTotal`, `status`), escrita en `createSaleRequest` dentro
+  de la misma transacción que ya leía los créditos. Campo opcional y sin índice:
+  **sin cambio de esquema** (Dexie sigue en v15). No cambia ninguna regla.
+- `src/lib/activeCreditContext.ts` (puro): combina **al solicitar** (IDs + fotografía)
+  con **ahora** (ventas leídas en vivo). Incluye también créditos activos aparecidos
+  después de la solicitud. Excluye la venta nacida de la propia solicitud. Devuelve
+  `null` si no hay nada que mostrar.
+- `getActiveCreditContext(requestId, actor)` en `saleRequestService`: relee la
+  solicitud; exige misma empresa y `authorization.access` sobre su ruta; filtra
+  ventas por empresa; de rutas sin `sale.viewActive` solo informa que el crédito existe.
+- `ActiveCreditNotice` en el detalle de la solicitud, debajo del valor solicitado y
+  antes de Condiciones / Aprobar / Rechazar (también visible en modo rechazo).
+
+**Snapshot vs estado actual (decisión)**
+
+- Cada crédito se muestra con su estado **actual** (monto, ruta, estado, saldo de
+  total, fecha de inicio).
+- El valor **al solicitar** solo aparece cuando difiere ("al solicitar: saldo X"); si
+  coincide no se duplica.
+- Crédito activo al solicitar y ya no activo ahora: cabecera gris "Solicitada con
+  crédito activo · hoy ya no está activo" + estado real (p. ej. Finalizado). El
+  motivo histórico (`authorizationReason`, IDs, fotografía) no se modifica.
+- Varios créditos: "Cliente con N créditos activos" y una fila por crédito, sin límite.
+- Solicitudes anteriores a esta ronda (solo IDs): estado actual, sin inventar valores
+  del pasado.
+
+**Pendiente derivado resuelto en la ronda**
+
+- 2.a Historial del cliente del mismo modal: ahora filtrado por empresa y por las
+  rutas visibles del Secretario (igual que el aviso), y vaciado al cambiar de
+  solicitud (se descartan respuestas tardías de la anterior).
+
+**Archivos**
+
+- `src/models/types.ts` (`ActiveCreditSnapshot`, `SaleRequest.activeCreditSnapshot`)
+- `src/services/saleRequestService.ts` (fotografía + `getActiveCreditContext`)
+- `src/lib/activeCreditContext.ts` (nuevo)
+- `src/components/ui/ActiveCreditNotice.tsx` (nuevo)
+- `src/pages/secretario/SecretarioAuthorizationsPage.tsx`
+- `tests/activecredit.test.ts` (nuevo) · `package.json` (`test:activecredit` en `npm test`) · `.gitignore`
+- `scripts/verify-deploy.mjs` (marcador R2)
+
+**Tests**: `npm run test:activecredit`, CREDITO-ACTIVO-SEC-001 … 010, 10/10 PASS.
+Mutación: sin fotografía o sin recorte por ruta fallan 003, 005, 006 y 007.
+Verificado además en la app real (Chrome headless, 420 px): sin crédito → sin aviso
+(también justo después de abrir uno con aviso); abono posterior; dos créditos;
+crédito cancelado.
+
+**Pendientes derivados:** ninguno abierto.
+
+---
+
 ## Hallazgos registrados para rondas posteriores (sin implementar)
 
-- **Punto 2:** `SaleRequest.activeCreditSaleIds` y `authorizationReason: 'active-credit'`
-  ya se guardan al crear la solicitud, y existe `findActiveSaleForClient`. Son la base
-  natural para el aviso en `SecretarioAuthorizationsPage`.
+- Fuera del backlog: la pantalla de autorizaciones del Admin (`SaleAuthorizationsPage`)
+  y el detalle móvil del Supervisor (`CollectorAuthorizationsPage`) podrían reutilizar
+  `ActiveCreditNotice`/`getActiveCreditContext`; hoy el Admin no ve el aviso y el
+  Supervisor solo ve una línea en el listado. No se tocó (el punto 2 es Secretaría).
+- Sin hallazgos nuevos para los puntos 3–9 en esta ronda.
