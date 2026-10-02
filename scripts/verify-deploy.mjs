@@ -50,6 +50,8 @@ const MARCADORES = [
   ['Dashboard ADEX Soluciones', true, 'marca visible ADEX en el portal Owner (2026-10-01)'],
   ['Sobre ADEX Soluciones', true, 'marca visible ADEX en Configuración (2026-10-01)'],
   ['Dashboard RutaCash', false, 'marca visible anterior (≤2026-09-30)'],
+  // Ajustes del socio 2026-10-02 · Ronda 1: el Cobrador solo origina al 20%.
+  ['El Cobrador solo puede crear créditos al', true, 'tasa del Cobrador validada en dominio (2026-10-02 R1)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

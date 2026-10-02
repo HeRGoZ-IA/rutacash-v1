@@ -10,3 +10,4 @@ tests/_out.platform.mjs
 tests/_out.workercash.mjs
 tests/_out.basecash.mjs
 tmp/
+tests/_out.interestrate.mjs

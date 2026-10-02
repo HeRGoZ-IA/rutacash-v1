@@ -12,13 +12,13 @@ import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { getAuthorizedRouteIds } from '@/lib/roles'
 import { can } from '@/lib/permissions'
+import { ALLOWED_INTEREST_RATES, originationRateError, originationRatesFor } from '@/lib/interestRatePolicy'
 import { generateId } from '@/lib/utils'
 import { nowISO, normalizeDoc, formatCurrency, formatDate, today } from '@/lib/formatters'
 import { computeSaleFinancials, createDirectSale, createSaleRequest, directSaleLimit, type SaleInputs } from '@/services/saleRequestService'
 import { useCapitalGuard } from '@/hooks/useCapitalGuard'
 import type { Client, Route, Sale } from '@/models/types'
 
-const TASA_OPTIONS = [{ value: '10', label: '10%' }, { value: '20', label: '20%' }]
 const FREQ_OPTIONS = [
   { value: 'diaria', label: 'Diaria' }, { value: 'semanal', label: 'Semanal' },
   { value: 'quincenal', label: 'Quincenal' }, { value: 'mensual', label: 'Mensual' },
@@ -33,6 +33,8 @@ export default function CollectorNewClientPage() {
   const base = useOpBase()
   const [params] = useSearchParams()
   const { user } = useAuth()
+  // Tasas que ESTE usuario puede originar (Cobrador: solo 20%; el 10% se aplica al autorizar).
+  const tasas = user ? originationRatesFor(user.rol) : ALLOWED_INTEREST_RATES
   const { currency } = useTenant()
   const { activeRouteId } = useCollectorRoute()
   const [routes, setRoutes] = useState<Route[]>([])
@@ -112,7 +114,8 @@ export default function CollectorNewClientPage() {
     if (addSale) {
       if (saleForm.valorVenta <= 0) { toast.error('El valor de la venta debe ser mayor a 0'); return }
       if (saleForm.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return }
-      if (![10, 20].includes(saleForm.tasaInteres)) { toast.error('La tasa debe ser 10% o 20%'); return }
+      const errorTasa = user ? originationRateError(user.rol, saleForm.tasaInteres) : null
+      if (errorTasa) { toast.error(errorTasa); return }
       if (saleForm.fechaInicio < today()) { toast.error('La fecha de inicio no puede ser anterior a hoy'); return }
       if (saleForm.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
       // Venta directa no puede superar el capital disponible (la solicitud sí puede enviarse).
@@ -240,7 +243,10 @@ export default function CollectorNewClientPage() {
             <div className="mt-4 space-y-4 border-t border-gray-100 pt-4">
               <MoneyInput label="Valor de la venta" currency={currency} value={saleForm.valorVenta} onValueChange={v => setSaleForm(f => ({ ...f, valorVenta: v }))} required />
               <div className="grid grid-cols-2 gap-3">
-                <Select label="Tasa interés" value={String(saleForm.tasaInteres)} onChange={e => setSaleForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={TASA_OPTIONS} />
+                {/* Una sola tasa posible → campo fijo; si no, selector (Supervisor: 10/20). */}
+                {tasas.length === 1
+                  ? <Input label="Tasa de interés" value={`${tasas[0]}%`} readOnly tabIndex={-1} className="bg-gray-50" />
+                  : <Select label="Tasa interés" value={String(saleForm.tasaInteres)} onChange={e => setSaleForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={tasas.map(t => ({ value: String(t), label: `${t}%` }))} />}
                 <Select label="Forma de pago" value={saleForm.frecuenciaPago} onChange={e => setSaleForm(f => ({ ...f, frecuenciaPago: e.target.value as Sale['frecuenciaPago'] }))} options={FREQ_OPTIONS} />
               </div>
               <div className="grid grid-cols-2 gap-3">

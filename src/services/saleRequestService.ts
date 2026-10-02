@@ -19,6 +19,7 @@ import type {
 } from '@/models/types'
 import { assertRouteOperationalContext } from '@/services/officeService'
 import { activeCreditsOf, decideSaleOrigination, isActiveCredit } from '@/lib/activeCredit'
+import { ALLOWED_INTEREST_RATES, originationRateError } from '@/lib/interestRatePolicy'
 
 export interface SaleInputs {
   tenantId: string
@@ -111,8 +112,8 @@ export class SaleRequestResolvedError extends SaleRuleError {
   }
 }
 
-/** Tasas de interés admitidas por el negocio (mismas que ofrecen las pantallas). */
-export const ALLOWED_INTEREST_RATES = [10, 20] as const
+/** Tasas de interés admitidas por el negocio (fuente: `@/lib/interestRatePolicy`). */
+export { ALLOWED_INTEREST_RATES }
 const FRECUENCIAS: PaymentFrequency[] = ['diaria', 'semanal', 'quincenal', 'mensual', 'personalizada']
 
 /**
@@ -163,6 +164,17 @@ async function assertSaleIntegrity(
 }
 
 /**
+ * Tasa por ROL DE QUIEN ORIGINA (punto 1, ajustes del socio 2026-10-02): el Cobrador
+ * solo origina al 20%; el 10% lo fija el autorizador al aprobar. Se valida aquí y no
+ * en `assertSaleIntegrity` porque la aprobación revalida la integridad con el
+ * Cobrador como `createdByUserId` y la tasa FINAL del autorizador (que sí puede ser 10%).
+ */
+function assertOriginationRate(input: SaleInputs, actor: User): void {
+  const error = originationRateError(actor.rol, input.tasaInteres)
+  if (error) throw new SaleRuleError(error)
+}
+
+/**
  * Venta DIRECTA: el crédito se otorga sin solicitud y queda DESEMBOLSADO en el acto
  * (así funcionaba ya para Administrador y Super Admin, y así se conserva).
  *
@@ -196,6 +208,7 @@ export async function createDirectSale(input: SaleInputs, actor: User, opts: { n
   if (!can(actor, 'sale.createDirect', ctx)) {
     throw new Error('No autorizado: este perfil no puede crear ventas directas. La venta debe enviarse como solicitud.')
   }
+  assertOriginationRate(input, actor)
   const { route } = await assertSaleIntegrity(input, { checkStartDate: true, newClient: opts.newClient })
   const limite = can(actor, 'route.edit', ctx) ? Infinity : directSaleLimit(route, actor)
   if (input.valorVenta > limite) {
@@ -262,6 +275,7 @@ export async function createSaleRequest(input: SaleInputs, actor: User, opts: { 
   await assertRouteOperationalContext(input.routeId)
   const ctx = { routeId: input.routeId, tenantId: input.tenantId }
   assertCan(actor, 'sale.createRequest', ctx)
+  assertOriginationRate(input, actor)
   const { route } = await assertSaleIntegrity(input, { checkStartDate: true, newClient: opts.newClient })
   const request = buildSaleRequest(input)
   await db.transaction('rw', [db.saleRequests, db.clients, db.sales], async () => {
