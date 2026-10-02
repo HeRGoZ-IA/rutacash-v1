@@ -219,7 +219,7 @@ async function tarjeta(p = page) {
   const v = pref => { const k = Object.keys(f).find(k => k.startsWith(pref)); return k === undefined ? null : num(f[k]) }
   const t = await texto(p)
   return {
-    libro: v('Libro de la ruta'), juan: v(`En manos de ${JUAN}`), laura: v(`En manos de ${LAURA}`) ?? 0,
+    libro: v('Base de la ruta'), juan: v(`En manos de ${JUAN}`), laura: v(`En manos de ${LAURA}`) ?? 0,
     sinAsignar: v('Sin asignar (caja de la ruta)'), cartera: v('Cartera en calle'), cuadra: t.includes('Cuadra'),
     esperado: v('Esperado a entregar'), arrastre: v('Arrastre pendiente'), base: v('(+) Base recibida'),
     estructural: v('Capital + transferencias'), noPersonal: v('(+) Operación no atribuida'), baseNeta: v('(−) Base entregada neta'),

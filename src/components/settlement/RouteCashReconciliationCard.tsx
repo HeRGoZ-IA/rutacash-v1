@@ -9,7 +9,7 @@ import {
 } from '@/services/routeCashReconciliation'
 
 /**
- * ¿DÓNDE ESTÁ EL EFECTIVO DE LA RUTA? Libro = no asignado + Σ personas.
+ * ¿DÓNDE ESTÁ EL EFECTIVO DE LA RUTA? Base de la ruta = sin asignar + Σ personas.
  * Todo el cálculo sale de `routeCashReconciliation`; aquí solo se presenta.
  * La cartera (deuda de clientes) se muestra aparte: no es efectivo.
  */
@@ -50,10 +50,10 @@ export function RouteCashReconciliationCard({ routeId }: { routeId: string }) {
           ? <span className="flex items-center gap-1 text-xs font-medium text-emerald-600"><CheckCircle2 className="w-3.5 h-3.5" /> Cuadra</span>
           : <span className="flex items-center gap-1 text-xs font-medium text-red-600"><AlertTriangle className="w-3.5 h-3.5" /> Revisar</span>}
       </div>
-      <Linea label="Libro de la ruta" value={money(r.libro.saldo)} strong />
+      <Linea label="Base de la ruta" value={money(r.libro.saldo)} strong />
       {r.personas.filter(p => p.posicion !== 0 || p.baseRecibida > 0).map(p => (
         <Linea key={p.userId}
-          label={`En manos de ${p.nombre}${p.baseRecibida ? ` (Base ${money(p.baseRecibida - p.baseDevuelta)})` : ''}`}
+          label={`En manos de ${p.nombre}${p.baseRecibida ? ` (Base entregada ${money(p.baseRecibida - p.baseDevuelta)})` : ''}`}
           value={money(p.posicion)} tone={p.posicion < 0 ? 'text-red-600' : 'text-gray-800'} />
       ))}
       <Linea label="Sin asignar (caja de la ruta)" value={money(r.noAsignado)} tone="text-primary-700" strong />

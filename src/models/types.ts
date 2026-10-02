@@ -207,14 +207,13 @@ export interface Route {
    * (= `capitalInicial`) y nunca se recalcula: no lo actualiza ningún cobro, gasto,
    * transferencia ni retiro. Leerlo como "capital disponible" da una cifra falsa.
    *
-   * La FUENTE REAL de la Base es el motor financiero:
-   *   · `getCashboxSummary(routeId).saldoActual`
-   *   · `getRouteAvailableCapital(routeId)`
-   *   · `getRouteFinancialSummary(routeId).baseActual`
+   * La FUENTE ÚNICA de la Base es `getRouteBase(routeId)` (cashboxEngine); ver allí
+   * la definición oficial (punto 4 de los ajustes del socio 2026-10-02).
    *
-   * Se conserva el campo porque `routeService.createRoute` lo escribe y existen
-   * rutas persistidas con él; eliminarlo exigiría una migración de esquema sin
-   * ninguna ganancia funcional. No añadir lecturas nuevas.
+   * Auditoría 2026-10-02: se ESCRIBE solo en `routeService.createRoute` y NO se lee
+   * en ninguna pantalla ni servicio. Se conserva por compatibilidad: rutas ya
+   * persistidas lo tienen y quitarlo exigiría una migración sin ganancia funcional.
+   * No añadir lecturas nuevas (una prueba estática lo vigila).
    */
   capitalActual: number
   cobradorId?: string
@@ -912,8 +911,10 @@ export interface AuditLog {
 
 // --- TIPOS CALCULADOS Y HELPERS ---
 
+/** Tipo sin consumidores (auditoría 2026-10-02). `capitalActual` aquí NO es la Base. */
 export interface RouteMetrics {
   routeId: string
+  /** @deprecated sin uso; la Base sale de `getRouteBase`. */
   capitalActual: number
   carteraActiva: number
   cobradoHoy: number
@@ -939,7 +940,8 @@ export interface CashboxSummary {
 /**
  * Resumen financiero por ruta (revisión socio 25-jun).
  * Separa dos conceptos que el socio pidió distinguir:
- *  - baseActual: dinero disponible REAL de la ruta (saldo de caja).
+ *  - baseActual: BASE DE LA RUTA (`getRouteBase`): efectivo de la ruta, en caja o
+ *    en manos de sus trabajadores. No es lo "Disponible para retiro".
  *  - carteraEnCalle: lo prestado en la calle pendiente por cobrar (capital + interés)
  *    en ventas activas YA desembolsadas.
  */

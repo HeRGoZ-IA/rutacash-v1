@@ -88,11 +88,11 @@ export default function DashboardPage() {
       {/* KPI Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
-          title="Base actual"
+          title="Base total"
           value={formatCurrency(data.baseActualTotal)}
           icon={<DollarSign className="w-5 h-5" />}
           color="blue"
-          subtitle="Disponible en rutas"
+          subtitle="Efectivo de las rutas"
         />
         <KPICard
           title="Cartera Activa"

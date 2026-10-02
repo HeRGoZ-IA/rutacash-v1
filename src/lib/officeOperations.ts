@@ -209,7 +209,7 @@ export interface RouteCashLike {
 export interface OfficeFinanceTotals extends RouteCashLike {
   /** Suma de `carteraEnCalle` de las rutas visibles. */
   carteraEnCalle: number
-  /** Suma de `baseActual` (saldo de caja disponible). */
+  /** Base total = Σ Base de la ruta (`getRouteBase`). No es lo disponible para retiro. */
   baseActual: number
   /** baseActual + carteraEnCalle. */
   totalControlado: number

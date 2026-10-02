@@ -390,7 +390,7 @@ export default function RoutesPage() {
 
 
   // Filtro por fecha de creación de la ruta. No afecta los cálculos financieros
-  // (Base actual / Cartera Activa son saldos a la fecha), solo qué rutas se listan.
+  // (Base de la ruta / Cartera Activa son saldos a la fecha), solo qué rutas se listan.
   const visibleRoutes = filterRoutesByOffice(routes, officeFilter).filter(r => {
     const fecha = (r.createdAt ?? '').slice(0, 10)
     return (!desde || fecha >= desde) && (!hasta || fecha <= hasta)
@@ -479,11 +479,11 @@ export default function RoutesPage() {
                 </div>
               </div>
 
-              {/* Revisión socio 25-jun — Base actual vs Cartera en calle por ruta */}
+              {/* Base de la ruta (getRouteBase) vs Cartera en calle — punto 4, 2026-10-02 */}
               <div className="grid grid-cols-2 gap-2">
                 <div className="bg-primary-50 rounded-xl p-3">
-                  <p className="text-sm font-bold text-primary-700 truncate">{formatCurrency(summaryByRoute[route.id]?.baseActual ?? route.capitalInicial, currency)}</p>
-                  <p className="text-xs text-gray-400">Base actual</p>
+                  <p className="text-sm font-bold text-primary-700 truncate">{summaryByRoute[route.id] ? formatCurrency(summaryByRoute[route.id].baseActual, currency) : '—'}</p>
+                  <p className="text-xs text-gray-400">Base de la ruta</p>
                 </div>
                 <div className="bg-indigo-50 rounded-xl p-3">
                   <p className="text-sm font-bold text-indigo-600 truncate">{formatCurrency(summaryByRoute[route.id]?.carteraEnCalle ?? 0, currency)}</p>

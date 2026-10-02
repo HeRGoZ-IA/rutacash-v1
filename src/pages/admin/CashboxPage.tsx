@@ -113,7 +113,7 @@ export default function CashboxPage() {
             </div>
             <div className="px-4 py-4 bg-primary-50 border-t-2 border-primary-200">
               <div className="flex justify-between items-center">
-                <span className="font-bold text-gray-900">SALDO ACTUAL</span>
+                <span className="font-bold text-gray-900">SALDO AL CIERRE DEL PERIODO</span>
                 <span className={`text-xl font-bold ${summary.saldoActual >= 0 ? 'text-primary-700' : 'text-red-600'}`}>
                   {formatCurrency(summary.saldoActual)}
                 </span>

@@ -83,7 +83,7 @@ export default function CollectorNewClientPage() {
   const withinLimit = !maxAmount || saleForm.valorVenta <= maxAmount
   const allowDirect = canDirect && withinLimit
 
-  // Capital disponible de la ruta seleccionada (bloquea venta directa si se supera).
+  // Base de la ruta seleccionada (bloquea venta directa si se supera).
   // Igual que en Nueva venta: la regla de capital se conserva; el monto solo se
   // revela a quien puede ver la caja de la ruta.
   const { exceeded, available: capDisponible, canSeeAmount: verCapital } =
@@ -118,11 +118,11 @@ export default function CollectorNewClientPage() {
       if (errorTasa) { toast.error(errorTasa); return }
       if (saleForm.fechaInicio < today()) { toast.error('La fecha de inicio no puede ser anterior a hoy'); return }
       if (saleForm.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
-      // Venta directa no puede superar el capital disponible (la solicitud sí puede enviarse).
+      // Venta directa no puede superar la Base de la ruta (la solicitud sí puede enviarse).
       if (allowDirect && capExcedido) {
         toast.error(verCapital
-          ? `La venta supera el capital disponible de la ruta (${formatCurrency(capDisponible ?? 0, currency)})`
-          : 'La venta supera el capital disponible actualmente. Reduce el monto o solicita una inyección de capital.')
+          ? `La venta supera la Base de la ruta (${formatCurrency(capDisponible ?? 0, currency)})`
+          : 'La venta supera la Base de la ruta. Reduce el monto o solicita una inyección de capital.')
         return
       }
     }
@@ -269,13 +269,13 @@ export default function CollectorNewClientPage() {
               </div>
               {verCapital && capDisponible != null && (
                 <div className={`rounded-xl p-3 text-sm border ${capExcedido ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>
-                  Capital disponible de la ruta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
-                  {capExcedido && <p className="text-xs mt-1 font-medium">Supera el capital disponible. {allowDirect ? 'Reduce el monto o inyecta capital.' : 'Se enviará como solicitud al administrador.'}</p>}
+                  Base de la ruta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
+                  {capExcedido && <p className="text-xs mt-1 font-medium">Supera la Base de la ruta. {allowDirect ? 'Reduce el monto o inyecta capital.' : 'Se enviará como solicitud al administrador.'}</p>}
                 </div>
               )}
               {!verCapital && capExcedido && (
                 <div className="rounded-xl p-3 text-sm border bg-red-50 border-red-200 text-red-700">
-                  La venta supera el capital disponible actualmente. {allowDirect ? 'Reduce el monto o solicita una inyección de capital.' : 'Se enviará como solicitud al administrador.'}
+                  La venta supera la Base de la ruta. {allowDirect ? 'Reduce el monto o solicita una inyección de capital.' : 'Se enviará como solicitud al administrador.'}
                 </div>
               )}
               {saleCalc && (

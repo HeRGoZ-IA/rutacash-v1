@@ -60,7 +60,7 @@ export async function getAdminDashboardData(
   const allSales = (await db.sales.where('tenantId').equals(tenantId).toArray()).filter(s => scope.has(s.routeId))
   const ventasActivas = allSales.filter(s => s.status === 'activa')
 
-  // Base actual vs Cartera en calle (consolidado). Mismo helper por ruta que el
+  // Base total (Σ Base de la ruta) vs Cartera en calle. Mismo helper por ruta que el
   // resto de pantallas para no tener cálculos distintos por vista.
   let baseActualTotal = 0
   let carteraEnCalle = 0

@@ -29,9 +29,9 @@ interface CapitalGroup {
   capitalInicial: number
   totalInyectado: number
   totalRetirado: number
-  capitalActual: number   // Base actual (saldo de caja)
+  base: number            // Base de la ruta (getRouteBase vía getRouteFinancialSummary)
   carteraEnCalle: number  // Pendiente por cobrar en la calle
-  totalControlado: number // Base actual + cartera en calle
+  totalControlado: number // Base de la ruta + cartera en calle
   cantidad: number
   ultimoMovimiento?: string
   movements: CapitalMovement[]
@@ -44,7 +44,7 @@ export default function CapitalPage() {
   const [movements, setMovements] = useState<CapitalMovement[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([])
-  // Resumen financiero REAL por ruta (Base actual + Cartera en calle), recalculado en cada carga.
+  // Resumen financiero REAL por ruta (Base de la ruta + Cartera en calle), recalculado en cada carga.
   const [summaryByRoute, setSummaryByRoute] = useState<Record<string, RouteFinancialSummary>>({})
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
@@ -75,7 +75,7 @@ export default function CapitalPage() {
     setMovements(movs.sort((a, b) => b.fecha.localeCompare(a.fecha)))
     setRoutes(rts)
     setWithdrawals(wds)
-    // Resumen financiero real por ruta: Base actual (saldo de caja) y Cartera en calle.
+    // Resumen financiero real por ruta: Base de la ruta (getRouteBase) y Cartera en calle.
     const sum: Record<string, RouteFinancialSummary> = {}
     for (const r of rts) sum[r.id] = await getRouteFinancialSummary(r.id)
     setSummaryByRoute(sum)
@@ -105,11 +105,11 @@ export default function CapitalPage() {
 
     const buildGroup = (routeId: string, nombre: string, codigo: string, capitalInicial: number, summary?: RouteFinancialSummary): CapitalGroup => {
       const movs = movementsView.filter(m => m.routeId === routeId)
-      const capitalActual = summary?.baseActual ?? 0
+      const base = summary?.baseActual ?? 0
       const carteraEnCalle = summary?.carteraEnCalle ?? 0
       return {
-        routeId, nombre, codigo, capitalInicial, capitalActual, carteraEnCalle,
-        totalControlado: summary?.totalControlado ?? capitalActual,
+        routeId, nombre, codigo, capitalInicial, base, carteraEnCalle,
+        totalControlado: summary?.totalControlado ?? base,
         // Efecto vigente: un capital anulado y su reversión suman 0.
         totalInyectado: movs.reduce((s, m) => s + m.valor, 0),
         totalRetirado: wdByRoute.get(routeId) ?? 0,
@@ -134,7 +134,7 @@ export default function CapitalPage() {
     if (orphan.length > 0) {
       list.push({
         routeId: '__none__', nombre: 'Sin ruta', codigo: '—',
-        capitalInicial: 0, capitalActual: 0, carteraEnCalle: 0, totalControlado: 0,
+        capitalInicial: 0, base: 0, carteraEnCalle: 0, totalControlado: 0,
         totalInyectado: orphan.reduce((s, m) => s + m.valor, 0),
         totalRetirado: 0, cantidad: orphan.length,
         ultimoMovimiento: orphan[0]?.fecha, movements: orphan,
@@ -199,8 +199,8 @@ export default function CapitalPage() {
 
               <div className="grid grid-cols-2 gap-2 mt-3">
                 <div className="bg-primary-50 rounded-xl p-2.5">
-                  <p className="text-xs text-gray-400">Base actual</p>
-                  <p className="text-sm font-bold text-primary-700">{g.routeId === '__none__' ? '—' : formatCurrency(g.capitalActual, currency)}</p>
+                  <p className="text-xs text-gray-400">Base de la ruta</p>
+                  <p className="text-sm font-bold text-primary-700">{g.routeId === '__none__' ? '—' : formatCurrency(g.base, currency)}</p>
                 </div>
                 <div className="bg-indigo-50 rounded-xl p-2.5">
                   <p className="text-xs text-gray-400">Cartera Activa</p>

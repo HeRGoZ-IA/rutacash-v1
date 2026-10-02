@@ -39,13 +39,10 @@ import { hasPersonalCashbox } from '@/lib/collectorAttribution'
 import { getAssignedRouteIds } from '@/lib/roles'
 import { isActiveCashSettlement, pendingShortages } from '@/lib/cashSettlementRules'
 import { assertCan } from '@/services/authz'
-import { getCashboxSummary, getCollectorCashSummary } from '@/services/cashboxEngine'
+import { getCollectorCashSummary, getRouteLedger } from '@/services/cashboxEngine'
 import { cashModelStartOf, personalCashPosition } from '@/services/cashSettlementService'
 import type { CapitalMovement, CashCustodyMovement, Transfer, User, Withdrawal } from '@/models/types'
 
-/** Libro sin cortes de fecha: todo lo registrado (también ventas con inicio futuro). */
-const DESDE_SIEMPRE = '0000-01-01'
-const SIN_TOPE = '9999-12-31'
 
 export interface PersonCashPosition {
   userId: string
@@ -130,7 +127,8 @@ export async function computeRouteCashReconciliation(
   const tenant = await database.tenants.get(tenantId)
   const modelStart = await cashModelStartOf(tenantId, database)
 
-  const libroRaw = await getCashboxSummary(routeId, DESDE_SIEMPRE, SIN_TOPE, database)
+  // Libro = BASE DE LA RUTA: misma fuente que `getRouteBase` (sin cortes de fecha).
+  const libroRaw = await getRouteLedger(routeId, database)
   const libro = {
     capital: libroRaw.ingresoCapital,
     transferenciasEntrada: libroRaw.transferenciasEntradas,
@@ -221,6 +219,50 @@ export async function computeRouteCashReconciliation(
     },
     custodia: custodiaEmpresa.sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
   }
+}
+
+/**
+ * DESGLOSE CANÓNICO DE LA BASE (punto 4, ajustes del socio 2026-10-02).
+ * Proyección de la conciliación, sin fórmulas propias:
+ *
+ *   base            = Base de la ruta (libro completo = `getRouteBase`)
+ *   enTrabajadores  = Σ efectivo en manos de cada trabajador (su posición)
+ *   sinAsignar      = base − enTrabajadores  ("Sin asignar (caja de la ruta)")
+ *   disponible      = "Disponible para retiro" = max(0, min(base, sinAsignar))
+ *
+ * Identidad: base = sinAsignar + enTrabajadores (siempre, por construcción).
+ * La palabra "Base" sola se reserva para `base`; "Base entregada/recibida" es la
+ * parte de esa Base que un trabajador recibió en custodia.
+ */
+export interface RouteBaseBreakdown {
+  routeId: string
+  base: number
+  sinAsignar: number
+  enTrabajadores: number
+  porTrabajador: { userId: string; nombre: string; monto: number; baseEntregadaNeta: number }[]
+  disponible: number
+  carteraEnCalle: number
+  totalControlado: number
+}
+
+export function routeBaseBreakdown(r: RouteCashReconciliation): RouteBaseBreakdown {
+  return {
+    routeId: r.routeId,
+    base: r.libro.saldo,
+    sinAsignar: r.noAsignado,
+    enTrabajadores: r.enPersonas,
+    porTrabajador: r.personas.map(p => ({ userId: p.userId, nombre: p.nombre, monto: p.posicion, baseEntregadaNeta: p.baseRecibida - p.baseDevuelta })),
+    disponible: r.disponible,
+    carteraEnCalle: r.cartera.carteraEnCalle,
+    totalControlado: r.libro.saldo + r.cartera.carteraEnCalle,
+  }
+}
+
+/** Desglose de la Base sin permisos (servicios y pruebas). La UI usa la conciliación con permiso. */
+export async function computeRouteBaseBreakdown(
+  params: { tenantId: string; routeId: string }, database: RutaCashDB = db,
+): Promise<RouteBaseBreakdown> {
+  return routeBaseBreakdown(await computeRouteCashReconciliation(params, database))
 }
 
 /**

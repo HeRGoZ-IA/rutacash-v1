@@ -80,7 +80,7 @@ export default function CollectorNewSalePage() {
     }))
   }
 
-  // Capital disponible de la ruta del cliente seleccionado.
+  // Base de la ruta del cliente seleccionado.
   const selectedClient = clients.find(c => c.id === form.clientId)
 
   // ---- Límite efectivo de venta directa (Ajustes post-Revisión 2) ----
@@ -143,8 +143,8 @@ export default function CollectorNewSalePage() {
     if (!validate()) return
     if (capExcedido) {
       toast.error(verCapital
-        ? `La venta supera el capital disponible de la ruta (${formatCurrency(capDisponible ?? 0, currency)})`
-        : 'La venta supera el capital disponible actualmente. Reduce el monto o solicita una inyección de capital.')
+        ? `La venta supera la Base de la ruta (${formatCurrency(capDisponible ?? 0, currency)})`
+        : 'La venta supera la Base de la ruta. Reduce el monto o solicita una inyección de capital.')
       return
     }
     // Si el cliente ya tiene venta activa, pedir confirmación antes de crear otra.
@@ -249,13 +249,13 @@ export default function CollectorNewSalePage() {
             capital financiero, y solo cuando lo supera: la regla sigue vigente. */}
         {selectedClient && verCapital && capDisponible != null && (
           <div className={`rounded-xl p-3 text-sm border ${capExcedido ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>
-            Capital disponible de la ruta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
-            {capExcedido && <p className="text-xs mt-1 font-medium">El valor supera el capital disponible. Reduce el monto o inyecta capital a la ruta.</p>}
+            Base de la ruta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
+            {capExcedido && <p className="text-xs mt-1 font-medium">El valor supera la Base de la ruta. Reduce el monto o inyecta capital a la ruta.</p>}
           </div>
         )}
         {selectedClient && !verCapital && capExcedido && (
           <div className="rounded-xl p-3 text-sm border bg-red-50 border-red-200 text-red-700">
-            La venta supera el capital disponible actualmente. Reduce el monto o solicita una inyección de capital al administrador.
+            La venta supera la Base de la ruta. Reduce el monto o solicita una inyección de capital al administrador.
           </div>
         )}
 

@@ -10,7 +10,7 @@ import { getAuthorizedRouteIds } from '@/lib/roles'
 import { can } from '@/lib/permissions'
 import { formatCurrency } from '@/lib/formatters'
 import { isSaleDisbursed } from '@/services/installmentEngine'
-import { getRouteAvailableCapital } from '@/services/cashboxEngine'
+import { carteraEnCalleOf, getRouteAvailableCapital } from '@/services/cashboxEngine'
 import { groupRoutesByOffice } from '@/lib/officeGrouping'
 import type { Office, Route } from '@/models/types'
 
@@ -58,7 +58,7 @@ export default function CollectorSelectRoutePage() {
         route,
         clientes: new Set(sales.map(s => s.clientId)).size,
         ventasActivas: sales.length,
-        cartera: sales.reduce((sum, s) => sum + s.saldo, 0),
+        cartera: carteraEnCalleOf(sales),
         base: verBase ? await getRouteAvailableCapital(route.id) : undefined,
       })
     }
@@ -131,7 +131,7 @@ export default function CollectorSelectRoutePage() {
                   ) : (
                     <div className="bg-primary-50 rounded-xl p-2 text-center">
                       <p className="text-[clamp(11px,3.4vw,14px)] font-bold text-primary-700 leading-tight break-all">{formatCurrency(base, currency)}</p>
-                      <p className="text-xs text-primary-500">Base</p>
+                      <p className="text-xs text-primary-500">Base de la ruta</p>
                     </div>
                   )}
                 </div>

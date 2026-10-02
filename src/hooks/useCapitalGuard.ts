@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react'
-import { getRouteAvailableCapital } from '@/services/cashboxEngine'
+import { getRouteBase } from '@/services/cashboxEngine'
 import { can } from '@/lib/permissions'
 import { useAuth } from '@/hooks/useAuth'
 
 /**
  * GUARDA DE CAPITAL PARA UNA VENTA NUEVA.
  *
- * La regla de negocio "una venta no puede superar el capital disponible de la ruta"
+ * La regla de negocio "una venta no puede superar la Base de la ruta" (`getRouteBase`)
  * se conserva intacta para TODOS los roles. Lo que cambia es cuánto se revela:
  *
  *  · Con `cashbox.viewRoute` (Administrador, Supervisor, Super Admin) → se devuelve
@@ -27,7 +27,7 @@ export function useCapitalGuard(routeId: string | undefined | null, valorVenta: 
     let alive = true
     if (!routeId) { setCapital(null); return }
     setLoading(true)
-    getRouteAvailableCapital(routeId)
+    getRouteBase(routeId)
       .then(v => { if (alive) setCapital(v) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
@@ -36,9 +36,9 @@ export function useCapitalGuard(routeId: string | undefined | null, valorVenta: 
   const exceeded = capital != null && valorVenta > capital
 
   return {
-    /** true si la venta supera el capital disponible de la ruta. */
+    /** true si la venta supera la Base de la ruta. */
     exceeded,
-    /** Monto disponible SOLO si el usuario puede conocer la caja de la ruta. */
+    /** Base de la ruta SOLO si el usuario puede conocer la caja de la ruta. */
     available: puedeVerMonto ? capital : null,
     /** ¿La UI puede mostrar la cifra? */
     canSeeAmount: puedeVerMonto,

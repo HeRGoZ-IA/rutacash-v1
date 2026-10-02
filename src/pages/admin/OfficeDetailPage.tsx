@@ -367,7 +367,7 @@ export default function OfficeDetailPage() {
           <h2 className="text-sm font-semibold text-gray-700">Resumen financiero</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
             <Card className="py-3">
-              <p className="text-xs text-gray-400">Base actual</p>
+              <p className="text-xs text-gray-400">Base total</p>
               <p className="text-sm font-bold text-primary-700 truncate">{formatCurrency(finance.baseActual, currency)}</p>
             </Card>
             <Card className="py-3">

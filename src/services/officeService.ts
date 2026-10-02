@@ -409,7 +409,7 @@ import {
 } from '@/lib/officeOperations'
 import { routeAdmins } from '@/lib/routeAdmins'
 import { officeActivity, type OfficeActivityEntry } from '@/lib/officeExecutive'
-import { getCashboxSummary } from '@/services/cashboxEngine'
+import { getRouteLedger } from '@/services/cashboxEngine'
 import { today as hoyISO } from '@/lib/formatters'
 import { can } from '@/lib/permissions'
 
@@ -537,7 +537,8 @@ export async function getOfficeManagementSummary(
   let finance: OfficeFinanceTotals | null = null
   if (puedeVerFinanzas && accessibleOfficeRoutes.length > 0) {
     try {
-      const cajas = await Promise.all(accessibleOfficeRoutes.map(r => getCashboxSummary(r.id)))
+      // Libro completo (misma fuente que la Base): los flujos cuadran con `baseActual`.
+      const cajas = await Promise.all(accessibleOfficeRoutes.map(r => getRouteLedger(r.id)))
       const financieros = accessibleOfficeRoutes.map(r => {
         const fin = (resumenes as Record<string, { baseActual?: number; carteraEnCalle?: number }>)[r.id]
         return { baseActual: fin?.baseActual ?? 0, carteraEnCalle: fin?.carteraEnCalle ?? 0 }

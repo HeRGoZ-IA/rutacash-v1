@@ -74,7 +74,7 @@ export default function ActiveSalesPage() {
     paymentDays: [1, 2, 3, 4, 5, 6] as number[], // Lun-Sáb por defecto
   })
 
-  // Capital disponible de la ruta seleccionada (no se permite vender por encima).
+  // Base de la ruta seleccionada (no se permite vender por encima).
   const { available: capDisponible } = useRouteCapital(form.routeId)
   const capExcedido = capDisponible != null && form.valorVenta > capDisponible
 
@@ -184,7 +184,7 @@ export default function ActiveSalesPage() {
     const client = clientMap.get(form.clientId)
     if (!client || client.routeId !== form.routeId) { toast.error('El cliente seleccionado no pertenece a la ruta'); return }
     if (form.valorVenta <= 0) { toast.error('El valor de la venta debe ser mayor a 0'); return }
-    if (capDisponible != null && form.valorVenta > capDisponible) { toast.error(`La venta supera el capital disponible de la ruta (${formatCurrency(capDisponible, currency)})`); return }
+    if (capDisponible != null && form.valorVenta > capDisponible) { toast.error(`La venta supera la Base de la ruta (${formatCurrency(capDisponible, currency)})`); return }
     if (form.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return }
     if (![10, 20].includes(form.tasaInteres)) { toast.error('La tasa de interés debe ser 10% o 20%'); return }
     if (form.fechaInicio < today()) { toast.error('La fecha de inicio de cobro no puede ser anterior a hoy'); return }
@@ -385,8 +385,8 @@ export default function ActiveSalesPage() {
           </div>
           {form.routeId && capDisponible != null && (
             <div className={`rounded-xl p-3 text-sm border ${capExcedido ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>
-              Capital disponible de la ruta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
-              {capExcedido && <p className="text-xs mt-1 font-medium">El valor supera el capital disponible. Reduce el monto o inyecta capital a la ruta.</p>}
+              Base de la ruta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
+              {capExcedido && <p className="text-xs mt-1 font-medium">El valor supera la Base de la ruta. Reduce el monto o inyecta capital a la ruta.</p>}
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">

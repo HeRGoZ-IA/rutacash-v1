@@ -8,15 +8,16 @@ pendientes derivados (1.a, 1.b…) están resueltos.
 |---|---|
 | 1 | Cerrada y publicada (`c8bd1e1`; verify:deploy 32/32; smoke A–H PASS) |
 | 2 | Cerrada y publicada (`b3f2ab6`; verify:deploy 33/33; smoke A–H PASS) |
-| 3 | Cerrada (commit local, pendiente de revisión antes de push/deploy) |
-| 4–9 | Sin iniciar |
+| 3 | Cerrada y publicada (`fb63398`; verify:deploy 34/34; smoke A–H PASS) |
+| 4 | Cerrada (commit local, pendiente de revisión antes de push/deploy) |
+| 5–9 | Sin iniciar |
 
 ## Checklist maestro
 
 - [x] 1. Cobrador solo 20%; 10% vía Secretaría
 - [x] 2. Aviso de crédito activo en Secretaría
 - [x] 3. Anulación/reversión auditable de movimientos financieros
-- [ ] 4. Base unificada entre módulos
+- [x] 4. Base unificada entre módulos
 - [ ] 5. Auditoría del origen de Base en Supervisor
 - [ ] 6. Traspaso de efectivo entre trabajadores de una misma ruta
 - [ ] 7. Reversión de pagos y recálculo completo
@@ -241,9 +242,135 @@ Admin con otra ruta no ve Barreiro, Socio no entra al panel.
 
 ---
 
+## 4. Base unificada entre módulos — CERRADO
+
+### Definición oficial (derivada del motor existente; no es un modelo nuevo)
+
+| Magnitud | Definición | Fuente |
+|---|---|---|
+| **Base de la ruta** | Todo el EFECTIVO de la ruta, esté en la caja o en manos de sus trabajadores. No incluye cartera. | `getRouteBase(routeId)` (cashboxEngine) |
+| **Base total** | Σ Base de la ruta de varias rutas (Dashboard, Oficina, Socio). | suma de `getRouteBase` |
+| **Sin asignar (caja de la ruta)** | Parte de la Base que no está en manos de nadie. | `routeBaseBreakdown(...).sinAsignar` |
+| **En manos de trabajadores** | Σ posición de cada trabajador (faltante arrastrado + Base recibida − devuelta + recaudado − desembolsado − gastos del ciclo). | `routeBaseBreakdown(...).enTrabajadores` |
+| **Base entregada / recibida** | Parte de la Base que un trabajador recibió en custodia (flujo). Es lo que el Cobrador ve como "Base recibida". | custodia (`cashCustodyMovements`) |
+| **Disponible para retiro** | `max(0, min(Base, Sin asignar))`. Límite de retiros, entregas y anulaciones. | `routeBaseBreakdown(...).disponible` |
+| **Cartera en calle** | Σ saldo (≥ 0) de ventas activas desembolsadas. No es efectivo. | `carteraEnCalleOf` |
+| **Total controlado** | Base + Cartera. | `getRouteFinancialSummary` |
+
+**Ecuación canónica (libro completo, sin cortes de fecha):**
+
+```
+Base = Σ capital (con sus reversiones)
+     + Σ transferencias entrantes − Σ transferencias salientes   (con reversiones)
+     − Σ retiros                                                 (con reversiones)
+     + Σ cobros − Σ préstamos desembolsados − Σ gastos
+
+Base = Sin asignar + En manos de trabajadores        (identidad, por construcción)
+```
+
+Las ventas pendientes de desembolso no restan. La custodia (entregar/devolver
+Base) no cambia la Base. Socio↔Socio no toca ninguna ruta. Liquidaciones y cuadres
+no son movimientos del libro: el cuadre mueve efectivo de "en manos" a "sin
+asignar". Las anulaciones (punto 3) son storno: original + reversión = 0.
+
+### Diagnóstico
+
+- Había UNA fórmula (`getCashboxSummary.saldoActual`) pero cinco entradas y cinco
+  nombres: "Base actual" (Capital, Rutas, Retiros, Oficina, Dashboard, Socio),
+  "Base de la ruta" (Mi efectivo del Supervisor), "Base" (tarjeta de ruta del
+  Supervisor), "Libro de la ruta" (conciliación/cuadres) y "Saldo actual" (reporte
+  del Socio). `getRouteAvailableCapital` devolvía la Base total pese a su nombre, y
+  los avisos de venta la llamaban "capital disponible".
+- **Inconsistencia de valor real:** la conciliación usaba el libro completo y el
+  resto de pantallas el libro "hasta hoy". Una venta desembolsada hoy con inicio
+  futuro no restaba de la "Base actual" del Admin (ni del control de capital para
+  nuevas ventas) hasta su fecha de inicio, pero sí del libro de la conciliación.
+- La conciliación usaba "(Base N)" para la Base entregada a una persona.
+- `RoutesPage` mostraba `capitalInicial` como Base mientras cargaba.
+- El Cobrador nunca vio la Base de la ruta (no tiene `cashbox.viewRoute`): su
+  "Base recibida" es su parte en custodia, otro concepto.
+
+### Solución
+
+- `cashboxEngine`: `getRouteLedger` (libro completo) y `getRouteBase` (fuente única).
+  `getRouteAvailableCapital` (alias conservado por las guardas existentes),
+  `getRoutesCurrentBalance`, `getRouteFinancialSummary` y `hasCapitalForSale`
+  delegan en `getRouteBase`. `carteraEnCalleOf` unifica la cartera.
+  `routeCashReconciliation` usa el mismo libro y expone `routeBaseBreakdown` /
+  `computeRouteBaseBreakdown`. Oficina y el reporte del Socio leen `getRouteLedger`.
+- **Único cambio de valor:** los préstamos con inicio futuro restan de la Base desde
+  que se desembolsan (igual que ya hacía la conciliación). Las vistas por periodo
+  (Caja con fechas → "Saldo al cierre del periodo", Liquidación semanal) no cambian.
+- Etiquetas: "Base de la ruta" (una ruta) y "Base total" (varias) en todas las
+  pantallas; "Disponible" solo para la caja no asignada; "(Base entregada N)" en la
+  conciliación; avisos de venta "supera la Base de la ruta".
+
+### Route.capitalActual
+
+Se escribe solo en `routeService.createRoute`; **ninguna lectura** en `src` (prueba
+estática BASE-015). Se conserva por compatibilidad (sin migración, Dexie v15).
+`RouteMetrics.capitalActual` es un tipo sin consumidores, marcado @deprecated.
+
+### Matriz de operaciones (verificada en `test:routebase`)
+
+| Operación | Base | Sin asignar | En manos |
+|---|---|---|---|
+| Ingreso de capital | sube | sube | no cambia |
+| Retiro | baja | baja | no cambia |
+| Transferencia entrante (Socio→Ruta, destino Ruta→Ruta) | sube | sube | no cambia |
+| Transferencia saliente (Ruta→Socio, origen Ruta→Ruta) | baja | baja | no cambia |
+| Entrega de Base a trabajador | no cambia | baja | sube |
+| Devolución del trabajador | no cambia | sube | baja |
+| Desembolso administrativo | baja | baja | no cambia |
+| Desembolso de un trabajador (desde su efectivo) | baja | no cambia | baja |
+| Cobro de cuota en campo | sube | no cambia | sube |
+| Reversión de capital | baja | baja | no cambia |
+| Reversión de retiro | sube | sube | no cambia |
+| Reversión de transferencia | inversa de la original en cada ruta | | |
+
+### Archivos
+
+- `src/services/cashboxEngine.ts`, `routeCashReconciliation.ts`, `officeService.ts`,
+  `saleRequestService.ts` (mensaje), `adminDashboardService.ts` (docs);
+  `src/lib/officeOperations.ts` (docs); `src/models/types.ts` (docs)
+- `src/hooks/useCapitalGuard.ts`, `src/hooks/useRouteCapital.ts`
+- Pantallas: Capital, Rutas, Retiros, Oficina, Dashboard, Caja, Ventas activas,
+  Clientes (Admin); Elegir ruta, Nueva venta, Nuevo cliente (operativa); Dashboard
+  y Reportes (Socio); tarjeta de conciliación (cuadres)
+- `tests/routebase.test.ts` (nuevo) · `package.json` · `.gitignore`
+- `scripts/verify-deploy.mjs` (marcadores R4) · `scripts/prod-smoke.mjs` (lee
+  "Base de la ruta" en lugar de "Libro de la ruta"; requiere el despliegue de R4)
+
+### Tests
+
+`npm run test:routebase`: BASE-001 … BASE-020 + BASE-CROSS, 21/21 PASS. Cada caso
+consulta la ruta desde los servicios de cada pantalla (Admin, Supervisor tarjeta y
+Mi efectivo, Retiros, Dashboard, Oficina, Cuadres) y exige el mismo valor y la
+identidad Base = Sin asignar + En manos. Mutación: con el libro "hasta hoy" falla
+BASE-009. Verificado en la app real (1366 px Admin/Oficina/Cuadres; 412 px
+Supervisor y Cobrador): Base 91.000 en todas las pantallas, Sin asignar 51.000 +
+Fabio 40.000; el Cobrador ve "Base recibida 40.000" = "En manos de Fabio".
+
+**Pendientes derivados:** ninguno.
+
+---
+
 ## Hallazgos registrados para rondas posteriores (sin implementar)
 
-- **Punto 4/5 (Base):** conviven dos "Base": el libro (`getCashboxSummary.saldoActual`,
+- **Punto 5 (Supervisor):**
+  - Consumidores de la Base SIN `useDataRevision` (no se recalculan solos):
+    `CollectorSelectRoutePage` (tarjeta "Base de la ruta" del Supervisor),
+    `RoutesPage`, `SocioDashboardPage`, `useCapitalGuard` y `useRouteCapital`
+    (usados por Nueva venta/Nuevo cliente del Supervisor). Causa probable de
+    "Supervisor muestra un valor viejo".
+  - Hasta esta ronda, la Base del Admin/Supervisor y el libro de los cuadres podían
+    diferir por préstamos con inicio futuro (corregido aquí); revisar si explica
+    casos reales del socio.
+  - En un mismo navegador, cambiar de usuario en la misma pestaña tras una sesión
+    de Supervisor dejó el formulario de login reiniciándose al escribir (prueba
+    visual). Revisar el cierre de sesión / estado obsoleto.
+
+- **(Resuelto en Ronda 4)** Punto 4/5 (Base): conviven dos "Base": el libro (`getCashboxSummary.saldoActual`,
   que muestran Capital y Retiros como "Base actual") y la caja no asignada
   (`computeRouteCashReconciliation.disponible`, que limita retiros y anulaciones).
   `Route.capitalActual` está deprecado pero sigue persistido.

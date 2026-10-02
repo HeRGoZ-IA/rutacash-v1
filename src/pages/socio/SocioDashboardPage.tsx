@@ -10,7 +10,7 @@ import type { RouteFinancialSummary, Route } from '@/models/types'
 
 /**
  * Resumen consolidado del SOCIO (solo lectura) para sus rutas autorizadas.
- * Base actual, cartera en calle, total controlado, ventas y clientes activos,
+ * Base de la ruta, cartera en calle, total controlado, ventas y clientes activos,
  * interés por cobrar estimado. Sin acciones operativas.
  */
 export default function SocioDashboardPage() {
@@ -67,7 +67,7 @@ export default function SocioDashboardPage() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Kpi icon={<Wallet className="w-4 h-4" />} label="Base actual (caja)" value={formatCurrency(totals.base, currency)} color="emerald" />
+        <Kpi icon={<Wallet className="w-4 h-4" />} label="Base total" value={formatCurrency(totals.base, currency)} color="emerald" />
         <Kpi icon={<TrendingUp className="w-4 h-4" />} label="Cartera en calle" value={formatCurrency(totals.cartera, currency)} color="amber" />
         <Kpi icon={<CreditCard className="w-4 h-4" />} label="Total controlado" value={formatCurrency(totals.total, currency)} color="primary" />
         <Kpi icon={<Users className="w-4 h-4" />} label="Clientes activos" value={String(totals.clientes)} color="primary" />
@@ -98,7 +98,7 @@ export default function SocioDashboardPage() {
                 </div>
                 {s ? (
                   <div className="grid grid-cols-2 gap-2 text-sm">
-                    <Line label="Base actual" value={formatCurrency(s.baseActual, currency)} />
+                    <Line label="Base de la ruta" value={formatCurrency(s.baseActual, currency)} />
                     <Line label="Cartera en calle" value={formatCurrency(s.carteraEnCalle, currency)} />
                     <Line label="Total controlado" value={formatCurrency(s.totalControlado, currency)} />
                     <Line label="Interés x cobrar" value={formatCurrency(s.interesPorCobrarEstimado, currency)} />

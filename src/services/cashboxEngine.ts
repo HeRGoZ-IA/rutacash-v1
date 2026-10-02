@@ -1,5 +1,30 @@
 // ============================================================
 // Motor de caja - calcula saldos desde movimientos
+// ------------------------------------------------------------
+// BASE DE LA RUTA — DEFINICIÓN OFICIAL (ajustes del socio 2026-10-02, punto 4)
+//
+//   Base de la ruta = todo el EFECTIVO que pertenece a la ruta, esté donde esté
+//                     (en la caja o en manos de sus trabajadores). NO incluye la
+//                     cartera (lo prestado pendiente de cobro).
+//
+//   Base = capital (aportes, con sus reversiones)
+//        + transferencias entrantes − transferencias salientes
+//        − retiros
+//        + cobros − préstamos desembolsados − gastos
+//
+//   Cada término es Σ de su tabla (las anulaciones del punto 3 son asientos con
+//   importe negado: original + reversión = 0). Las ventas aprobadas pendientes de
+//   desembolso no restan. La custodia (entregar/devolver Base a un trabajador) NO
+//   cambia la Base: solo mueve quién la tiene.
+//
+//   Desglose (`routeCashReconciliation` → `routeBaseBreakdown`):
+//     Base = Sin asignar (caja de la ruta) + En manos de trabajadores
+//     Disponible para retiro = max(0, min(Base, Sin asignar))
+//   Total controlado = Base + Cartera en calle.
+//
+// FUENTE ÚNICA: `getRouteBase(routeId)`. Toda pantalla que diga "Base de la
+// ruta" (o "Base total" = Σ de varias rutas) sale de aquí. `Route.capitalActual`
+// NO es la Base (ver su @deprecated en types.ts) y no se lee en ningún sitio.
 // ============================================================
 import { db } from '@/lib/db'
 import { effectivePayments } from '@/lib/paymentState'
@@ -144,45 +169,75 @@ export async function getCashboxSummary(
 }
 
 /**
- * Capital disponible de una ruta para entregar nuevos préstamos.
- * Es el saldo actual de caja (capital + cobros + transferencias entrantes
- * - préstamos entregados - gastos - transferencias salientes - retiros).
- * Una venta nueva no puede superar este valor.
+ * LIBRO COMPLETO de la ruta: todo lo registrado, sin cortes de fecha.
+ *
+ * Sin tope superior a propósito: una venta desembolsada HOY con inicio futuro ya
+ * sacó el dinero de la ruta. Con el tope "hoy" (comportamiento de
+ * `getCashboxSummary` sin rango) ese préstamo no restaba hasta su fecha de inicio
+ * y la Base de Admin difería del libro de la conciliación (auditoría 2026-10-02).
+ * Las vistas POR PERIODO (Caja con fechas, Liquidación) siguen usando su rango.
  */
-export async function getRouteAvailableCapital(routeId: string): Promise<number> {
-  const summary = await getCashboxSummary(routeId)
-  return summary.saldoActual
+export const LEDGER_DESDE = '0000-01-01'
+export const LEDGER_HASTA = '9999-12-31'
+
+export function getRouteLedger(routeId: string, database: CashboxDatabase = db): Promise<CashboxSummary> {
+  return getCashboxSummary(routeId, LEDGER_DESDE, LEDGER_HASTA, database)
 }
 
+/**
+ * BASE DE LA RUTA — fuente única (ver la definición al inicio del archivo).
+ * Saldo del libro completo. Una venta nueva no puede superarla.
+ */
+export async function getRouteBase(routeId: string, database: CashboxDatabase = db): Promise<number> {
+  return (await getRouteLedger(routeId, database)).saldoActual
+}
+
+/**
+ * Alias histórico de `getRouteBase`: MISMO valor. El nombre ("available") es
+ * engañoso — no es lo "Disponible para retiro" (caja no asignada), es la Base
+ * total. Se conserva porque las guardas fail-closed existentes lo invocan.
+ */
+export async function getRouteAvailableCapital(routeId: string): Promise<number> {
+  return getRouteBase(routeId)
+}
+
+/** Base de varias rutas (clave = routeId), desde `getRouteBase`. */
 export async function getRoutesCurrentBalance(routeIds: string[]): Promise<Record<string, number>> {
   const result: Record<string, number> = {}
-  for (const routeId of routeIds) {
-    const summary = await getCashboxSummary(routeId)
-    result[routeId] = summary.saldoActual
-  }
+  for (const routeId of routeIds) result[routeId] = await getRouteBase(routeId)
   return result
 }
 
 /**
+ * CARTERA EN CALLE — fuente única: Σ saldo (≥ 0) de ventas ACTIVAS ya
+ * desembolsadas. No es efectivo: nunca forma parte de la Base.
+ */
+export function carteraEnCalleOf(sales: Pick<Sale, 'status' | 'disbursementStatus' | 'saldo'>[]): number {
+  return sales
+    .filter(s => s.status === 'activa' && s.disbursementStatus !== 'pendiente')
+    .reduce((sum, s) => sum + Math.max(0, s.saldo), 0)
+}
+
+/**
  * Resumen financiero por ruta (revisión socio 25-jun): helper reutilizable que
- * separa "Base actual" (dinero disponible en caja) de "Cartera en calle" (lo
+ * separa la "Base de la ruta" (efectivo de la ruta) de la "Cartera en calle" (lo
  * prestado pendiente por cobrar). Usar en todas las pantallas para evitar
  * cálculos distintos por vista.
  *
- *  - baseActual:      saldo de caja (reusa getRouteAvailableCapital / motor de caja).
+ *  - baseActual:      Base de la ruta (`getRouteBase`). No es lo disponible para retiro.
  *  - carteraEnCalle:  Σ saldo de ventas activas YA desembolsadas (capital + interés).
  *                     NO incluye ventas pendientes de desembolso ni perdidas/cerradas.
  *  - totalControlado: baseActual + carteraEnCalle.
  *  - interesPorCobrarEstimado: estimación proporcional (saldo × interés / total).
  */
 export async function getRouteFinancialSummary(routeId: string): Promise<RouteFinancialSummary> {
-  const baseActual = (await getCashboxSummary(routeId)).saldoActual
+  const baseActual = await getRouteBase(routeId)
 
   const sales = await db.sales.where('routeId').equals(routeId).toArray()
   // Solo ventas activas y desembolsadas (las 'pendiente' aún no salieron a la calle).
   const activas = sales.filter(s => s.status === 'activa' && s.disbursementStatus !== 'pendiente')
 
-  const carteraEnCalle = activas.reduce((sum, s) => sum + Math.max(0, s.saldo), 0)
+  const carteraEnCalle = carteraEnCalleOf(sales)
 
   // Interés por cobrar estimado: proporción del interés dentro del saldo de cada venta.
   const interesPorCobrarEstimado = Math.round(activas.reduce((sum, s) => {
@@ -362,6 +417,5 @@ export async function getCollectorCashSummary(
 export async function hasCapitalForSale(routeId: string, valorVenta: number): Promise<boolean> {
   if (!routeId) return false
   if (!Number.isFinite(valorVenta) || valorVenta <= 0) return true
-  const { saldoActual } = await getCashboxSummary(routeId)
-  return valorVenta <= saldoActual
+  return valorVenta <= await getRouteBase(routeId)
 }

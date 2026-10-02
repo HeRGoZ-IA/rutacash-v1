@@ -56,6 +56,9 @@ const MARCADORES = [
   ['Solicitada con crédito activo · hoy ya no está activo', true, 'crédito activo visible en Secretaría (2026-10-02 R2)'],
   // Ronda 3: anulación auditable de capital, retiros y transferencias.
   ['Una reversión no se puede anular.', true, 'anulación auditable de movimientos de fondos (2026-10-02 R3)'],
+  // Ronda 4: una sola "Base de la ruta" (getRouteBase) y etiquetas unificadas.
+  ['La venta supera la Base de la ruta: no hay capital suficiente.', true, 'Base de la ruta como fuente única (2026-10-02 R4)'],
+  ['Libro de la ruta', false, 'etiqueta retirada: la conciliación muestra "Base de la ruta" (≤2026-10-02 R3)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

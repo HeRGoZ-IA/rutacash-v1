@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { useTenant } from '@/hooks/useTenant'
 import { useAccessibleRoutes } from '@/hooks/useAccessibleRoutes'
-import { getCashboxSummary } from '@/services/cashboxEngine'
+import { getRouteLedger } from '@/services/cashboxEngine'
 import { formatCurrency } from '@/lib/formatters'
 import { toast } from '@/components/ui/Toast'
 import type { CashboxSummary } from '@/models/types'
@@ -23,7 +23,7 @@ export default function SocioReportsPage() {
     let alive = true
     if (routes.length === 0) { setRows([]); return }
     setLoading(true)
-    Promise.all(routes.map(async r => ({ nombre: r.nombre, s: await getCashboxSummary(r.id) }))).then(list => {
+    Promise.all(routes.map(async r => ({ nombre: r.nombre, s: await getRouteLedger(r.id) }))).then(list => {
       if (alive) { setRows(list); setLoading(false) }
     })
     return () => { alive = false }
@@ -31,7 +31,7 @@ export default function SocioReportsPage() {
 
   function exportCsv() {
     if (rows.length === 0) return
-    const headers = ['Ruta', 'Saldo anterior', 'Ingreso capital', 'Cobros', 'Prestamos', 'Gastos', 'Transf. entradas', 'Transf. salidas', 'Retiros', 'Saldo actual']
+    const headers = ['Ruta', 'Saldo anterior', 'Ingreso capital', 'Cobros', 'Prestamos', 'Gastos', 'Transf. entradas', 'Transf. salidas', 'Retiros', 'Base de la ruta']
     const lines = rows.map(({ nombre, s }) => [nombre, s.saldoAnterior, s.ingresoCapital, s.cobros, s.prestamosEntregados, s.gastos, s.transferenciasEntradas, s.transferenciasSalidas, s.retiros, s.saldoActual].join(','))
     const csv = [headers.join(','), ...lines].join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -67,7 +67,7 @@ export default function SocioReportsPage() {
                 <th className="text-right px-4 py-3">Cobros</th>
                 <th className="text-right px-4 py-3">Préstamos</th>
                 <th className="text-right px-4 py-3">Gastos</th>
-                <th className="text-right px-4 py-3">Saldo actual</th>
+                <th className="text-right px-4 py-3">Base de la ruta</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">

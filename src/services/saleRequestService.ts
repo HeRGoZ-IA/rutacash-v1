@@ -216,7 +216,7 @@ export async function createDirectSale(input: SaleInputs, actor: User, opts: { n
     throw new SaleRuleError(`El valor supera el límite de venta directa (${limite}). Envíala como solicitud.`)
   }
   if (!(await hasCapitalForSale(input.routeId, input.valorVenta))) {
-    throw new SaleRuleError('La venta supera el capital disponible de la ruta.')
+    throw new SaleRuleError('La venta supera la Base de la ruta: no hay capital suficiente.')
   }
   const { sale, installments } = buildSaleWithInstallments(input, 'desembolsado')
   await db.transaction('rw', [db.sales, db.installments, db.clients], async () => {

@@ -7,7 +7,7 @@ import { Modal } from '@/components/ui/Modal'
 import { DateRangeFilter } from '@/components/ui/DateRangeFilter'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
-import { getRouteAvailableCapital } from '@/services/cashboxEngine'
+import { getRouteBase } from '@/services/cashboxEngine'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { useDataRevision } from '@/hooks/useDataRevision'
@@ -42,7 +42,7 @@ export default function WithdrawalsPage() {
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
   const [users, setUsers] = useState<User[]>([])
-  // Base actual (saldo de caja) real por ruta, recalculada en cada carga.
+  // Base de la ruta (getRouteBase) por ruta, recalculada en cada carga.
   const [baseByRoute, setBaseByRoute] = useState<Record<string, number>>({})
   // Retirable = caja NO asignada (lo que está en manos de trabajadores no se retira).
   const [disponibleByRoute, setDisponibleByRoute] = useState<Record<string, number>>({})
@@ -76,7 +76,7 @@ export default function WithdrawalsPage() {
     const base: Record<string, number> = {}
     const disp: Record<string, number> = {}
     for (const r of scopedRts) {
-      base[r.id] = await getRouteAvailableCapital(r.id)
+      base[r.id] = await getRouteBase(r.id)
       disp[r.id] = await getRouteAvailableFunds(tenantId, r.id)
     }
     setBaseByRoute(base)
@@ -101,7 +101,7 @@ export default function WithdrawalsPage() {
   const getUserName = (id?: string) => users.find(u => u.id === id)?.nombre
 
   // Retiros dentro del rango de fecha (los totales agrupados lo respetan;
-  // Base actual es un saldo a la fecha y no depende del filtro).
+  // la Base de la ruta es un saldo a la fecha y no depende del filtro).
   const withdrawalsEnAlcance = officeFilter.filterRows(withdrawals)
   const visibleWithdrawals = withdrawalsEnAlcance.filter(w =>
     (!desde || w.fecha >= desde) && (!hasta || w.fecha <= hasta)
@@ -203,7 +203,7 @@ export default function WithdrawalsPage() {
                   <p className="text-sm font-bold text-amber-600">{formatCurrency(g.totalRetirado, currency)}</p>
                 </div>
                 <div className="bg-primary-50 rounded-xl p-2.5">
-                  <p className="text-xs text-gray-400">Base actual</p>
+                  <p className="text-xs text-gray-400">Base de la ruta</p>
                   <p className="text-sm font-bold text-primary-700">{g.routeId === '__none__' ? '—' : formatCurrency(g.baseActual, currency)}</p>
                 </div>
               </div>
@@ -247,7 +247,7 @@ export default function WithdrawalsPage() {
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
               <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs text-gray-400">Total retirado</p><p className="font-bold text-amber-600">{formatCurrency(detailGroup.totalRetirado, currency)}</p></div>
-              <div className="bg-primary-50 rounded-xl p-3"><p className="text-xs text-gray-400">Base actual</p><p className="font-bold text-primary-700">{detailGroup.routeId === '__none__' ? '—' : formatCurrency(detailGroup.baseActual, currency)}</p></div>
+              <div className="bg-primary-50 rounded-xl p-3"><p className="text-xs text-gray-400">Base de la ruta</p><p className="font-bold text-primary-700">{detailGroup.routeId === '__none__' ? '—' : formatCurrency(detailGroup.baseActual, currency)}</p></div>
             </div>
             {detailGroup.withdrawals.length === 0 ? (
               <div className="flex justify-center py-8 text-gray-400 text-sm">Esta ruta no tiene retiros</div>
