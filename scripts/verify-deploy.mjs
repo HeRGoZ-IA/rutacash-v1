@@ -65,6 +65,8 @@ const MARCADORES = [
   ['Traspasar a otro trabajador', true, 'traspaso interno entre trabajadores (2026-10-02 R6)'],
   // Ronda 7: anulación de pagos con recálculo del crédito y control de efectivo.
   ['Pago anulado. El crédito se recalculó.', true, 'anulación de pagos con recálculo del crédito (2026-10-02 R7)'],
+  // Ronda 8: sincronización de anulaciones (monotonía del pago + Sync del Cobrador con estados).
+  ['no puede volver a otro estado.', true, 'anulación monótona y sincronización causal (2026-10-02 R8)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

@@ -16,7 +16,7 @@ import { can } from '@/lib/permissions'
 import { usePendingRouteSaleRequests } from '@/hooks/usePendingBadges'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import { isSaleDueToday, isSaleDisbursed } from '@/services/installmentEngine'
-import { effectivePayments } from '@/lib/paymentState'
+import { effectivePayments, pendingPaymentSyncCount } from '@/lib/paymentState'
 import type { Route } from '@/models/types'
 
 export default function CollectorHomePage() {
@@ -55,7 +55,8 @@ export default function CollectorHomePage() {
     const misPagosHoy = effectivePayments(payments)
       .filter(p => p.fecha === todayStr && p.collectorId === user?.id)
     const cobradoHoy = misPagosHoy.reduce((s, p) => s + p.valor, 0)
-    const pendientesSync = payments.filter(p => p.syncStatus === 'pending').length
+    // Una fila por pago (la reversión técnica de un anulado no cuenta aparte).
+    const pendientesSync = pendingPaymentSyncCount(payments)
     // Las parcelas ya cobradas HOY salen de la lista pendiente aunque las haya
     // cobrado otro compañero de la misma ruta: el cliente ya pagó.
     const salePaidToday = new Set(effectivePayments(payments).filter(p => p.fecha === todayStr).map(p => p.saleId))

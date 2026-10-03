@@ -1,14 +1,18 @@
 import { useState, useEffect } from 'react'
 import { RefreshCw, CheckCircle, Clock, Wifi, WifiOff, Info } from 'lucide-react'
 import { SyncStatusBadge } from '@/components/ui/Badge'
+import { PaymentStateBadge } from '@/components/ui/PaymentAnnulment'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
+import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
+import { useDataRevision } from '@/hooks/useDataRevision'
+import { paymentDisplayStateOf, paymentHistoryRows, pendingPaymentSyncCount } from '@/lib/paymentState'
 import { syncPendingItems } from '@/services/syncService'
 import { formatCurrency, formatDateTime } from '@/lib/formatters'
-import type { Payment } from '@/models/types'
+import type { Payment, SyncStatus } from '@/models/types'
 
 /**
  * Estado de sincronización de la RUTA ACTIVA.
@@ -20,37 +24,55 @@ import type { Payment } from '@/models/types'
  * NOTA SOBRE "SINCRONIZAR": hoy NO existe backend. `syncPendingItems` solo marca
  * los registros locales como enviados dentro de la MISMA base del navegador. Los
  * datos NO viajan a otro dispositivo. Ver §24 de la auditoría.
+ *
+ * ANULACIONES (punto 8, 2026-10-02): una fila por pago, nunca el asiento técnico de
+ * reversión. Un pago anulado se muestra "Anulado" (no como cobro pendiente) y la
+ * lista se relee sola cuando otra pestaña anula o confirma (`useDataRevision`).
  */
 export default function CollectorSyncPage() {
   const { user } = useAuth()
+  const { tenantId, currency } = useTenant()
   const { activeRouteId } = useCollectorRoute()
   const isOnline = useOnlineStatus()
-  const [pendingPayments, setPendingPayments] = useState<Payment[]>([])
+  const revision = useDataRevision(['payments'])
+  const [payments, setPayments] = useState<Payment[]>([])
   const [syncing, setSyncing] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const routeId = activeRouteId ?? user?.routeId ?? null
 
-  useEffect(() => { loadPending() }, [user, routeId])
-
-  async function loadPending() {
-    if (!routeId) { setPendingPayments([]); setLoading(false); return }
-    const pending = await db.payments.where('routeId').equals(routeId).toArray()
-    setPendingPayments(pending.sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
-    setLoading(false)
-  }
+  useEffect(() => {
+    let vigente = true
+    ;(async () => {
+      if (!routeId || !tenantId) { setPayments([]); setLoading(false); return }
+      const ps = (await db.payments.where('routeId').equals(routeId).toArray()).filter(p => p.tenantId === tenantId)
+      if (!vigente) return
+      setPayments(ps.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)))
+      setLoading(false)
+    })()
+    return () => { vigente = false }
+  }, [tenantId, routeId, revision])
 
   async function handleSync() {
     if (!isOnline) { toast.warning('Sin conexión, no se puede sincronizar'); return }
+    if (!routeId || !tenantId) return
     setSyncing(true)
-    const { synced, errors } = await syncPendingItems()
-    toast.success(`${synced} registro(s) confirmado(s) en este dispositivo${errors > 0 ? `, ${errors} error(es)` : ''}`)
-    await loadPending()
-    setSyncing(false)
+    try {
+      const { synced, errors } = await syncPendingItems({ tenantId, routeIds: [routeId] })
+      if (errors > 0) toast.warning(`${synced} registro(s) confirmado(s); ${errors} con error, revísalo con la oficina`)
+      else toast.success(`${synced} registro(s) confirmado(s) en este dispositivo`)
+    } finally { setSyncing(false) }
   }
 
-  const pendingCount = pendingPayments.filter(p => p.syncStatus === 'pending').length
-  const syncedCount = pendingPayments.filter(p => p.syncStatus === 'synced').length
+  const filas = paymentHistoryRows(payments)
+  const pendingCount = pendingPaymentSyncCount(payments)
+  // El estado de una fila combina el del pago y el de su anulación: un pago anulado
+  // cuya anulación aún no se confirmó sigue "Pendiente".
+  const syncDeFila = (r: { payment: Payment; reversal?: Payment }): SyncStatus => {
+    const s = [r.payment.syncStatus, r.reversal?.syncStatus]
+    return s.includes('error') ? 'error' : s.includes('pending') ? 'pending' : 'synced'
+  }
+  const syncedCount = filas.filter(r => syncDeFila(r) === 'synced').length
 
   return (
     <div className="p-4 space-y-4">
@@ -102,19 +124,28 @@ export default function CollectorSyncPage() {
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Historial de pagos</p>
         {loading ? (
           <div className="flex justify-center py-8"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
-        ) : pendingPayments.length === 0 ? (
+        ) : filas.length === 0 ? (
           <div className="text-center py-8 text-gray-400 text-sm">No hay pagos registrados</div>
         ) : (
           <div className="space-y-2">
-            {pendingPayments.slice(0, 20).map(p => (
-              <div key={p.id} className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-700">{formatCurrency(p.valor)}</p>
-                  <p className="text-xs text-gray-400">{formatDateTime(p.createdAt)}</p>
+            {filas.slice(0, 20).map(r => {
+              const estado = paymentDisplayStateOf(r.payment)
+              const fuera = estado !== 'vigente'
+              return (
+                <div key={r.payment.id} data-payment-row={estado} className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className={`text-sm font-medium ${fuera ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                      Pago {formatCurrency(r.payment.valor, currency)}
+                    </p>
+                    <p className="text-xs text-gray-400">{formatDateTime(r.payment.createdAt)}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <PaymentStateBadge state={estado} />
+                    <SyncStatusBadge status={syncDeFila(r)} />
+                  </div>
                 </div>
-                <SyncStatusBadge status={p.syncStatus} />
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

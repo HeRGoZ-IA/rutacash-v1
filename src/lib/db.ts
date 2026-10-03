@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie'
-import { lastEffectivePaymentDate } from '@/lib/paymentState'
+import { assertPaymentTransitionAllowed, lastEffectivePaymentDate } from '@/lib/paymentState'
 import type {
   Tenant, Office, Route, User, Client, Sale, Installment, Payment,
   NoPaymentVisit, ExpenseCategory, Expense, CapitalMovement, Transfer,
@@ -606,6 +606,18 @@ export class RutaCashDB extends Dexie {
         if (!t.baseCustodyStartAt) t.baseCustodyStartAt = inicio
       })
       console.log(`[RutaCash][migración v15] Custodia de Base por trabajador habilitada desde ${inicio}. Sin Base histórica reconstruida.`)
+    })
+
+    // ============================================================
+    // MONOTONÍA DE PAGOS (ajustes del socio 2026-10-02, punto 8)
+    // Un pago anulado no vuelve a 'active' y una reversión no cambia de estado ni de
+    // original, la escriba quien la escriba (update, modify o put de una copia vieja,
+    // p. ej. otra pestaña o una sincronización tardía). Lanzar aquí aborta la
+    // transacción entera: nunca queda un estado intermedio.
+    // ============================================================
+    this.payments.hook('updating', (changes, _key, current) => {
+      assertPaymentTransitionAllowed(current as Payment, changes as Partial<Record<keyof Payment, unknown>>)
+      return undefined
     })
   }
 }

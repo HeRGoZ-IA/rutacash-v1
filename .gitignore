@@ -17,3 +17,4 @@ tests/_out.routebase.mjs
 tests/_out.supervisorbase.mjs
 tests/_out.workertransfer.mjs
 tests/_out.paymentreversal.mjs
+tests/_out.paymentsync.mjs

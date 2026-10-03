@@ -12,8 +12,9 @@ pendientes derivados (1.a, 1.b…) están resueltos.
 | 4 | Cerrada y publicada (`b1bfcf7`) |
 | 5 | Cerrada y publicada (`9ed4c33`) |
 | 6 | Cerrada y publicada (`38a3f6f`; verify:deploy 38/38; smoke A–H PASS; publicada 2026-10-03) |
-| 7 | Cerrada (commit local, sin push; verify:deploy esperado 39/39) |
-| 8–9 | Sin iniciar |
+| 7 | Cerrada y publicada (`a9083ba`; verify:deploy 39/39; smoke A–H PASS; publicada 2026-10-03) |
+| 8 | Cerrada (commit local, sin push; verify:deploy esperado 40/40) |
+| 9 | Sin iniciar |
 
 ## Checklist maestro
 
@@ -24,7 +25,7 @@ pendientes derivados (1.a, 1.b…) están resueltos.
 - [x] 5. Auditoría del origen de Base en Supervisor
 - [x] 6. Traspaso de efectivo entre trabajadores de una misma ruta
 - [x] 7. Reversión de pagos y recálculo completo
-- [ ] 8. Sincronización de anulaciones
+- [x] 8. Sincronización de anulaciones
 - [ ] 9. Clasificación de gastos
 
 ---
@@ -806,6 +807,147 @@ $120.000→$144.000, parcelas 5/10→4/10, histórico "Anulado") y Admin a 1366 
 
 ---
 
+## 8. Sincronización de anulaciones de pagos — CERRADO
+
+### Problema del socio
+
+El Admin anula un pago y el Cobrador sigue viéndolo vigente. Ronda 7 corrigió el
+modelo y la reactividad. Esta ronda audita y sanea la **sincronización**: cómo viaja
+(o no) una anulación entre contextos, `syncStatus`, pagos offline, orden, duplicados,
+reentrada y conflictos.
+
+### Arquitectura real (auditada en el código, no supuesta)
+
+| Pieza | Existe | Qué es |
+|---|---|---|
+| Backend / API remota | **No** | Ningún `fetch`, Supabase ni servidor. `syncService` lo dice: "simula sync en V1 local". |
+| Service worker / PWA offline queue | **No** | Solo `factoryReset` desregistra SW si los hubiera. |
+| Outbox / cola | **No** como tabla | La "cola" es el índice `syncStatus = 'pending'` de `payments`, `noPaymentVisits` y `expenses`. |
+| Push | Simulado | `syncPendingItems` cambia `pending → synced` **en la misma IndexedDB**. |
+| Pull / lastSync | **No** | Nada se descarga; no hay marca de última sincronización. |
+| Multi-tab | **Sí** | Una sola IndexedDB `RutaCashDB` por perfil; Dexie emite `storagemutated` y lo reenvía a las otras pestañas (BroadcastChannel) → `useDataRevision` / `watchQuery`. |
+| Multi-perfil / multi-dispositivo | **No** | Otro perfil, otro navegador, incógnito u otro teléfono = otra base que nunca converge. |
+| Offline | **Sí, local** | Todo se guarda en IndexedDB; sin red, `PaymentPage` marca el pago `pending`. |
+| Export | Solo lectura | Backup JSON en Configuración; no hay importación. |
+| Reintentos / backoff | No había | Ahora: reintento manual en cada "Confirmar pendientes" (incluye los `error`); sin bucles ni temporizadores. |
+
+**Autoridad final:** la IndexedDB `RutaCashDB` del perfil del navegador es el único
+libro. Todas las pestañas leen y escriben la misma copia; el estado del crédito se
+deriva siempre de los pagos vigentes con `recomputeSale`.
+
+### `syncStatus`
+
+Valores: `'synced' | 'pending' | 'error'`.
+
+| Registro | Antes | Ahora |
+|---|---|---|
+| Pago del Cobrador | `pending` si `navigator.onLine` es falso al registrar, si no `synced` | igual |
+| Reversión de anulación | siempre `synced` (aunque el original estuviera `pending`) | **hereda**: `pending` si el original no está `synced` (`dependentSyncStatus`) |
+| Reversión + reemplazo de corrección | siempre `synced` | **heredan** del original, leído bajo bloqueo |
+| `error` | solo si fallaba el propio `update` | estado imposible detectado; se reintenta en cada confirmación |
+
+### Diagnóstico
+
+- **Causa exacta del síntoma entre contextos:** en el mismo navegador la anulación
+  sí llega (misma base); lo que quedaba viejo era la vista. Ronda 7 resolvió casi
+  todas las pantallas; `CollectorSyncPage` seguía cargando solo al montar y listaba
+  los pagos en bruto: el pago anulado aparecía como un pago normal y la reversión
+  como otro "pago" de −X. Entre dispositivos distintos no llega nada porque no hay
+  backend.
+- `syncPendingItems` no tenía alcance: "Confirmar pendientes" de un Cobrador
+  confirmaba pendientes de **todas** las empresas y rutas del navegador.
+- Confirmación fila a fila sin transacción ni orden causal: una reversión podía
+  quedar confirmada antes que su original (de hecho nacía confirmada).
+- Un fallo marcaba `error` para siempre (nunca se reintentaba).
+- Nada impedía, a nivel de base, que una copia vieja `active` sobrescribiera un pago
+  ya `reversed` (hoy ningún servicio lo hacía, pero no estaba garantizado).
+- Contadores de pendientes (Inicio del Cobrador, Dashboard) contaban la reversión
+  como un pago más.
+
+### Estrategia
+
+- **Monotonía (guarda en Dexie):** hook `updating` de `db.payments` →
+  `assertPaymentTransitionAllowed`. `reversed` y `reversal` no cambian de estado;
+  `reversesPaymentId` y `reversalPaymentId` ya fijados no se reapuntan. Cubre
+  `update`, `modify` y `put`; lanzar aborta la transacción entera.
+- **Causalidad:** el dependiente (reversión o reemplazo) nace `pending` si su
+  original lo está, y la confirmación solo lo marca `synced` cuando su original ya
+  lo está (punto fijo: cubre reemplazo que a su vez se anuló).
+- **Atomicidad por crédito:** `syncPendingItems` confirma por venta, en una
+  transacción que relee el libro bajo bloqueo; si falla, todo sigue pendiente.
+- **Idempotencia:** solo toca `syncStatus` (nunca `state`, importes ni enlaces);
+  repetir la confirmación no cambia nada. Ids primarios: el mismo pago o la misma
+  reversión no pueden existir dos veces.
+- **Estados imposibles** (`paymentLedgerAnomalies`): original anulado sin reversión,
+  reversión huérfana o sin `reversesPaymentId`, reversión con original aún vigente,
+  dos reversiones del mismo pago, `reversalPaymentId` que apunta a otra fila. Se
+  marcan `error`, se cuentan como pendientes en pantalla y no se confirman; tras
+  reparar los datos, la siguiente confirmación los acepta. Los datos antiguos sin
+  `reversalPaymentId` no son anomalía.
+- **Alcance:** `syncPendingItems({ tenantId, routeIds })`; la Sync del Cobrador
+  confirma solo su empresa y su ruta activa.
+- **Convergencia:** el estado del crédito sale de `recomputeSale` sobre el conjunto
+  de pagos vigentes (orden `createdAt` + `id`); nunca de importes copiados. El mismo
+  conjunto de filas en cualquier orden de llegada produce el mismo crédito, Base y
+  efectivo (PAY-SYNC-030).
+
+### Casos offline (comportamiento real)
+
+- **Pago pendiente:** queda en la base local con `pending`; cuenta contablemente de
+  inmediato (es dinero recibido).
+- **Anulación de un pago aún no confirmado:** en el mismo navegador el Admin lo ve
+  y puede anularlo; la reversión nace `pending` y ambos se confirman juntos. Con
+  dispositivos distintos el Admin **no puede verlo**: el pago nunca sale del
+  teléfono.
+- **Anulación offline del Admin:** no hay modo offline propio del Admin; si la
+  pestaña no tiene red igual escribe en la base local (no hay nada remoto que
+  esperar). No se inventó soporte.
+- **Vuelta online:** el Cobrador pulsa "Confirmar pendientes" (no hay
+  confirmación automática).
+- **Fallo a mitad:** la transacción de ese crédito se revierte; queda pendiente y se
+  reintenta en la siguiente confirmación, sin duplicar.
+
+### `CollectorSyncPage`
+
+Una fila por pago (sin el asiento técnico de reversión), `Pago $X` con
+`Anulado`/`Corregido` tachado cuando corresponde, y estado de confirmación
+combinado (pago + su anulación): `Pendiente`, `Sincronizado` o `Error`. Se relee
+sola con `useDataRevision(['payments'])` (otra pestaña anula o confirma → cambia sin
+F5). Filtra por empresa; contador "pendientes" = filas, no registros técnicos. Sin
+UUIDs ni detalles de payload.
+
+### Tests
+
+`npm run test:paymentsync` (Dexie real; "otra pestaña" = segunda conexión
+`RutaCashDB` sobre la misma IndexedDB): PAY-SYNC-001 … 030 + caso del socio, 31/31
+PASS. Convergencia probada con 6 órdenes (incluidas copias viejas tardías).
+
+Prueba en Chrome real, dos pestañas del mismo perfil (`tmp/pay-sync-e2e/run.mjs`):
+10/10, sin errores de página. Cobrador a 412/420 px **sin conexión** registra
++24.000 (saldo 120.000, parcela 6, "1 pendiente"); en otra pestaña el Admin a
+1366 px anula con clic real "Pago duplicado"; la Sync del Cobrador, **sin F5**,
+muestra "Pago $24.000 · Anulado · Pendiente" sin fila negativa; Ruta: saldo
+144.000, 4/10, último abono 01/10, Abonar visible; Base y efectivo de Fabio
+restaurados; al volver la red, "Confirmar pendientes" deja todo sincronizado.
+
+### Archivos
+
+- `src/lib/paymentState.ts` (`dependentSyncStatus`, `assertPaymentTransitionAllowed`,
+  `paymentLedgerAnomalies`, `pendingPaymentSyncCount`)
+- `src/lib/db.ts` (hook de monotonía en `payments`; sin cambio de esquema, sigue v15)
+- `src/services/syncService.ts` (alcance, transacción por crédito, causalidad,
+  anomalías, reintento)
+- `src/services/paymentCorrectionService.ts` (herencia de `syncStatus` en anulación
+  y corrección)
+- `src/pages/collector/CollectorSyncPage.tsx`, `CollectorHomePage.tsx` ·
+  `src/services/adminDashboardService.ts`
+- `tests/paymentsync.test.ts` (nuevo) · `package.json` · `.gitignore` ·
+  `scripts/verify-deploy.mjs` (marcador R8)
+
+**Pendientes derivados:** ninguno.
+
+---
+
 ## Hallazgos registrados para rondas posteriores (sin implementar)
 
 - **(Resuelto en Ronda 5)** Punto 5 (Supervisor): consumidores de la Base sin
@@ -849,10 +991,24 @@ $120.000→$144.000, parcelas 5/10→4/10, histórico "Anulado") y Admin a 1366 
 - (Ronda 7) **Sigue pendiente, decisión de negocio:** `approveSaleRequest` /
   `confirmDisbursement` no validan la Base al desembolsar (ver hallazgo de Ronda 5).
   La anulación de pagos sí exige que la Base no quede negativa.
-- (Ronda 7 → Ronda 8) Sincronización de anulaciones: la reversión se crea con
+- **(Resuelto en Ronda 8)** (Ronda 7 → Ronda 8) Sincronización de anulaciones: la reversión se crea con
   `syncStatus: 'synced'`; falta definir propagación entre dispositivos, anulación de
   un pago aún pendiente de sincronizar, reentrada y conflictos. `CollectorSyncPage`
-  lista los pagos en bruto (original y reversión).
+  lista los pagos en bruto (original y reversión). → Ver Punto 8.
+- (Ronda 8) **No hay sincronización entre dispositivos**: no existe backend, API,
+  service worker ni pull. Dos teléfonos (o dos perfiles/navegadores, o una ventana
+  incógnito) son bases independientes que nunca convergen. Es un límite de producto,
+  no un defecto de esta ronda; el contrato que debe respetar un backend futuro está
+  en el Punto 8.
+- (Ronda 8) "Confirmar pendientes" es manual; al recuperar la red no se confirma
+  solo. Visitas sin pago y gastos conservan su confirmación simple (ahora con
+  alcance de empresa/ruta); sin cambios de clasificación (Ronda 9).
+- (Ronda 8) Una reversión huérfana (datos corruptos) queda en `error` y visible, pero
+  el libro de la Base suma pagos con signo, así que su −X sí afecta a la Base hasta
+  que la oficina repare los datos. No se cambió la lógica financiera cerrada.
+- (Ronda 8) `syncStatus` se decide con `navigator.onLine` al registrar (PaymentPage,
+  NoPaymentPage, gastos del Cobrador): con red inestable puede quedar 'synced' algo
+  registrado justo al perder la conexión. Sin efecto contable.
 - (Ronda 7) Anular un pago de una liquidación semanal CERRADA (permitido a quien
   aprueba ajustes) recalcula los totales vivos, pero el registro guardado de esa
   liquidación conserva sus cifras del cierre — mismo comportamiento que ya tenían las

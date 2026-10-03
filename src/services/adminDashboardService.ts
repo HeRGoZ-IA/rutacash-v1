@@ -20,6 +20,7 @@ import { es } from 'date-fns/locale'
 import { db } from '@/lib/db'
 import { getRouteFinancialSummary } from '@/services/cashboxEngine'
 import { filterAccessibleRoutes } from '@/lib/permissions'
+import { pendingPaymentSyncCount } from '@/lib/paymentState'
 import { getWeekEnd, getWeekStart } from '@/lib/formatters'
 import type { User } from '@/models/types'
 
@@ -91,7 +92,7 @@ export async function getAdminDashboardData(
     .reduce((s, e) => s + e.valor, 0)
 
   // Pending sync (de los pagos en alcance)
-  const pagosPendientesSync = allPayments.filter(p => p.syncStatus === 'pending').length
+  const pagosPendientesSync = pendingPaymentSyncCount(allPayments)
 
   // Rutas con mora
   const installments = await db.installments.toArray()

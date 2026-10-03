@@ -22,7 +22,7 @@ import { AuthzError } from '@/services/authz'
 import { reconciliationTables } from '@/services/cashCustodyService'
 import { computeRouteCashReconciliation, type RouteCashReconciliation } from '@/services/routeCashReconciliation'
 import { recalculateSaleFromPayments, calculateSaleBalance } from '@/services/installmentEngine'
-import { effectivePayments as onlyEffective, isPaymentAnnullable, lastEffectivePaymentDate } from '@/lib/paymentState'
+import { dependentSyncStatus, effectivePayments as onlyEffective, isPaymentAnnullable, lastEffectivePaymentDate } from '@/lib/paymentState'
 import { resolveSealedCompletionDate } from '@/lib/creditHistory'
 import { protectingClosureFor } from '@/lib/settlementPeriods'
 import type { Payment, PaymentAdjustmentRequest, Sale, User, WeeklySettlement } from '@/models/types'
@@ -169,10 +169,13 @@ async function executeCorrection(original: Payment, actor: User, input: Correcti
     // Instante sellado BAJO BLOQUEO (primera lectura dentro de la transacción): la
     // reversión y la corrección nunca quedan detrás de la frontera de un cuadre por
     // trabajador que se esté cerrando a la vez (ver `closeCashSettlement`).
-    await db.payments.get(original.id)
+    const fresco = await db.payments.get(original.id)
     const sello = nowISO()
     reversal.createdAt = reversal.correctedAt = sello
     corrected.createdAt = corrected.correctedAt = sello
+    // CAUSALIDAD DE SINCRONIZACIÓN (punto 8): si el original aún no está confirmado,
+    // la reversión y el reemplazo nacen pendientes y se confirman con él, nunca antes.
+    reversal.syncStatus = corrected.syncStatus = dependentSyncStatus(fresco ?? original)
     await db.payments.update(original.id, {
       state: 'reversed', correctedByPaymentId: correctedId, reversalPaymentId: reversalId,
       correctionReason: input.reason, correctedBy: actor.id, correctedAt: sello,
@@ -453,7 +456,9 @@ export async function annulPayment(
       collectorId: p.collectorId, createdByUserId: actor.id,
       valor: -p.valor, fecha: p.fecha, tipo: p.tipo,
       observacion: `Anulación del pago ${p.id}`,
-      syncStatus: 'synced', createdAt: sello,
+      // Hereda la confirmación del original (punto 8): la reversión de un pago aún
+      // pendiente queda pendiente y se confirma junto con él, nunca antes.
+      syncStatus: dependentSyncStatus(p), createdAt: sello,
       state: 'reversal', reversesPaymentId: p.id,
       correctionReason: motivo, correctedBy: actor.id, correctedAt: sello,
     }
