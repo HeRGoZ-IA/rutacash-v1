@@ -21,8 +21,10 @@
 // ============================================================
 import { effectivePayments } from '@/services/paymentCorrectionService'
 import { formatDate } from '@/lib/formatters'
+import { EXPENSE_SCOPE_LABEL, expenseAttribution } from '@/lib/expenseAttribution'
+import { hasPersonalCashbox } from '@/lib/collectorAttribution'
 import type {
-  Client, Expense, ExpenseCategory, Payment, Route, Sale,
+  Client, Expense, ExpenseCategory, Payment, Route, Sale, User,
 } from '@/models/types'
 
 export type ReportType = 'pagos' | 'ventas' | 'gastos' | 'caja_diaria'
@@ -56,6 +58,12 @@ export interface ReportFilters {
   routeIds: Set<string>
   fechaDesde: string
   fechaHasta: string
+  /**
+   * Incluir los gastos de EMPRESA (sin ruta) en el reporte de Gastos. Solo con
+   * "todas las rutas" (sin Oficina ni ruta) y para quien ve el consolidado: no
+   * pertenecen a ninguna ruta ni Oficina. Nunca entran en "Caja diaria por ruta".
+   */
+  includeCompanyExpenses?: boolean
 }
 
 /** Datos crudos de la empresa; el servicio se encarga de recortarlos. */
@@ -66,6 +74,8 @@ export interface ReportSources {
   clients: Client[]
   routes: Route[]
   categories: ExpenseCategory[]
+  /** Para nombrar al trabajador de un gasto atribuido (opcional). */
+  users?: User[]
 }
 
 export type ReportRow = Record<string, unknown>
@@ -73,8 +83,8 @@ export type ReportRow = Record<string, unknown>
 const inRange = (fecha: string, f: ReportFilters) => fecha >= f.fechaDesde && fecha <= f.fechaHasta
 
 /** Recorta cualquier registro con `routeId` al conjunto de rutas efectivas. */
-function scopeRows<T extends { routeId: string }>(rows: T[], routeIds: Set<string>): T[] {
-  return rows.filter(r => routeIds.has(r.routeId))
+function scopeRows<T extends { routeId?: string }>(rows: T[], routeIds: Set<string>): T[] {
+  return rows.filter(r => !!r.routeId && routeIds.has(r.routeId))
 }
 
 function nameMaps(src: ReportSources) {
@@ -147,17 +157,27 @@ export function buildVentasReport(src: ReportSources, f: ReportFilters): ReportR
 // ------------------------------------------------------------
 // GASTOS
 // ------------------------------------------------------------
+// Cada gasto aparece UNA vez con su atribución (punto 9): Empresa, Ruta o
+// Trabajador (+ quién). Nunca se reparte ni se duplica entre niveles.
 export function buildGastosReport(src: ReportSources, f: ReportFilters): ReportRow[] {
   const { routeName, catName } = nameMaps(src)
-  return scopeRows(src.expenses, f.routeIds)
+  const userName = (id?: string) => src.users?.find(u => u.id === id)?.nombre ?? id ?? ''
+  const conCaja = (id: string) => { const u = src.users?.find(x => x.id === id); return !!u && hasPersonalCashbox(u.rol) }
+  const empresa = f.includeCompanyExpenses ? src.expenses.filter(e => !e.routeId) : []
+  return [...scopeRows(src.expenses, f.routeIds), ...empresa]
     .filter(e => inRange(e.fecha, f))
-    .map(e => ({
-      Fecha: formatDate(e.fecha),
-      Ruta: routeName(e.routeId),
-      Categoría: catName(e.categoryId),
-      Valor: e.valor,
-      Descripción: e.descripcion ?? '',
-    }))
+    .map(e => {
+      const a = expenseAttribution(e, conCaja)
+      return {
+        Fecha: formatDate(e.fecha),
+        Tipo: EXPENSE_SCOPE_LABEL[a.scope],
+        Ruta: e.routeId ? routeName(e.routeId) : '—',
+        Trabajador: a.scope === 'trabajador' ? userName(a.cashHolderId) : '—',
+        Categoría: catName(e.categoryId),
+        Valor: e.valor,
+        Descripción: e.descripcion ?? '',
+      }
+    })
 }
 
 // ------------------------------------------------------------

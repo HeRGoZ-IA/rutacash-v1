@@ -28,6 +28,7 @@
 // ============================================================
 import { db } from '@/lib/db'
 import { effectivePayments } from '@/lib/paymentState'
+import { isExpenseOf } from '@/lib/expenseAttribution'
 import { today as todayLocal } from '@/lib/formatters'
 import {
   personalPaymentLedger, disbursementInstant, expenseInstant, inCycle, custodyInCycle,
@@ -298,9 +299,10 @@ export interface CollectorCashDatabase {
  *                 misma semántica canónica que la corrección controlada).
  *  · desembolsado Σ ventas que ÉL desembolsó ese día (`disbursedByCollectorId`),
  *                 por FECHA DE DESEMBOLSO, no por fecha de creación de la venta.
- *  · gastos       Σ gastos cargados a SU caja (`collectorId`), con compatibilidad
- *                 hacia atrás: los gastos anteriores a la separación solo llevan
- *                 `userId`, y se aceptan cuando ese usuario es él mismo.
+ *  · gastos       Σ gastos cargados a SU caja según la atribución económica
+ *                 (`isExpenseOf`, punto 9): los de trabajador con `collectorId` = él;
+ *                 nunca los de empresa o de ruta, aunque los haya registrado él.
+ *                 Los históricos sin clasificar conservan su regla (`collectorId ?? userId`).
  */
 export async function getCollectorDailyCashSummary(
   params: { routeId: string; collectorId: string; fecha: string },
@@ -330,7 +332,7 @@ export async function getCollectorDailyCashSummary(
     .reduce((sum, s) => sum + s.valorVenta, 0)
 
   const gastos = expenses
-    .filter(e => e.fecha === fecha && (e.collectorId ?? e.userId) === collectorId)
+    .filter(e => e.fecha === fecha && isExpenseOf(e, collectorId))
     .reduce((sum, e) => sum + e.valor, 0)
 
   return {
@@ -395,7 +397,7 @@ export async function getCollectorCashSummary(
     .reduce((sum, s) => sum + s.valorVenta, 0)
 
   const gastos = expenses
-    .filter(e => (e.collectorId ?? e.userId) === userId && inCycle(expenseInstant(e), desde, hasta))
+    .filter(e => isExpenseOf(e, userId) && inCycle(expenseInstant(e), desde, hasta))
     .reduce((sum, e) => sum + e.valor, 0)
 
   const { baseRecibida, baseDevuelta } = custodyInCycle(custodia, userId, desde, hasta)

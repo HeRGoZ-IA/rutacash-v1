@@ -61,8 +61,9 @@ export function visibleRouteIds(params: {
 }
 
 /** Recorta cualquier fila con `routeId` al conjunto visible. */
-export function filterRowsByVisibleRoutes<T extends { routeId: string }>(rows: T[], visibles: Set<string>): T[] {
-  return rows.filter(r => visibles.has(r.routeId))
+export function filterRowsByVisibleRoutes<T extends { routeId?: string }>(rows: T[], visibles: Set<string>): T[] {
+  // Una fila sin ruta (p. ej. un gasto de empresa) no pertenece a ninguna: fuera.
+  return rows.filter(r => !!r.routeId && visibles.has(r.routeId))
 }
 
 /**

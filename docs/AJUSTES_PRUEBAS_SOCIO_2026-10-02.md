@@ -13,8 +13,8 @@ pendientes derivados (1.a, 1.b…) están resueltos.
 | 5 | Cerrada y publicada (`9ed4c33`) |
 | 6 | Cerrada y publicada (`38a3f6f`; verify:deploy 38/38; smoke A–H PASS; publicada 2026-10-03) |
 | 7 | Cerrada y publicada (`a9083ba`; verify:deploy 39/39; smoke A–H PASS; publicada 2026-10-03) |
-| 8 | Cerrada (commit local, sin push; verify:deploy esperado 40/40) |
-| 9 | Sin iniciar |
+| 8 | Cerrada y publicada (`fa2b2f1`; verify:deploy 40/40; smoke A–H PASS; publicada 2026-10-03) |
+| 9 | Cerrada (commit local, sin push; verify:deploy esperado 41/41) |
 
 ## Checklist maestro
 
@@ -26,7 +26,7 @@ pendientes derivados (1.a, 1.b…) están resueltos.
 - [x] 6. Traspaso de efectivo entre trabajadores de una misma ruta
 - [x] 7. Reversión de pagos y recálculo completo
 - [x] 8. Sincronización de anulaciones
-- [ ] 9. Clasificación de gastos
+- [x] 9. Clasificación de gastos
 
 ---
 
@@ -948,6 +948,156 @@ restaurados; al volver la red, "Confirmar pendientes" deja todo sincronizado.
 
 ---
 
+## 9. Clasificación de gastos — CERRADO
+
+### Problema del socio
+
+En Gastos de la App Cobrador de Fabio aparecían gastos registrados por el Admin
+(Transporte $11.000, Papelería $300). La petición inicial ("ocultar los gastos
+creados por Admin") **no** se implementó literalmente: un Admin puede registrar un
+gasto que sí es de Fabio. La regla adoptada: la visibilidad y el efecto de un gasto
+dependen de **a quién se atribuye económicamente**, nunca de quién lo registró.
+
+### Modelo previo (auditado)
+
+`Expense` (Dexie v15): `id, tenantId, routeId` (obligatorio), `categoryId, valor,
+descripcion?, receiptPhotoDataUrl?, fecha, userId` (quién registró), `collectorId?`
+(caja personal a la que se carga; v10 lo rellenó para gastos de cobradores),
+`syncStatus, createdAt`. No existía edición ni borrado (`expense.correct` solo
+declarado). Creaban gastos: Cobrador/Supervisor (`CollectorExpensesPage`, siempre a
+su propia caja) y Admin/Super Admin (`ExpensesPage`, siempre con ruta y nunca con
+`collectorId`).
+
+- Base (`getRouteLedger`): Σ de todos los gastos de la ruta.
+- Caja personal / cuadre (`getCollectorCashSummary`, diaria e informe del día):
+  `collectorId ?? userId` = la persona.
+- Sin asignar = Base − En manos, así que un gasto sin persona salía de Sin asignar.
+
+### Causa exacta (varias, no solo UI)
+
+1. **Visibilidad**: `CollectorExpensesPage` listaba `where('routeId')` — **todos** los
+   gastos de la ruta — y su "Hoy" los sumaba. Por eso Fabio veía el Transporte y la
+   Papelería del Admin. Financieramente no se le descontaban (su `userId` era el Admin).
+2. **El Admin no podía atribuir** un gasto a un trabajador: el formulario no tenía
+   selector y nunca escribía `collectorId`.
+3. **No existía gasto de empresa**: la Papelería debía asignarse a una ruta y restaba
+   su Base (y su Sin asignar).
+4. **El creador decidía**: con `collectorId ?? userId`, un gasto "de la ruta" sin
+   persona registrado por quien tiene caja (Supervisor) se le cargaba a él.
+5. Ningún gasto validaba fondos: podía dejar una posición negativa.
+
+### Clasificación adoptada
+
+Campo nuevo, explícito y no indexado `Expense.scope: 'empresa' | 'ruta' | 'trabajador'`
+(`routeId` pasa a ser opcional, solo ausente en empresa). Se reutiliza `collectorId`
+como "trabajador que pagó". Forma obligatoria (`expenseShapeError`):
+
+| scope | routeId | collectorId | Base de la ruta | Sin asignar | En manos | Trabajador |
+|---|---|---|---|---|---|---|
+| empresa | — | — | no cambia (ninguna ruta) | no cambia | no cambia | no lo ve, no le resta |
+| ruta | sí | — | ↓ | ↓ | igual | nadie |
+| trabajador | sí | sí | ↓ | igual | ↓ esa persona | lo ve, le resta, entra en su cuadre |
+
+Estados ambiguos imposibles: trabajador sin persona, empresa con ruta o persona,
+ruta con persona, sin tipo → rechazo. `Base = Sin asignar + En manos` se mantiene.
+
+**Creador ≠ responsable**: `userId` solo registra quién lo digitó. La regla única es
+`src/lib/expenseAttribution.ts` (`expenseAttribution`, `isExpenseOf`), usada por el
+motor de caja, el cuadre, el informe del día, las pantallas y los reportes.
+
+### Gasto de empresa sin ruta
+
+No existía. El modelo financiero no tiene una "caja de empresa" (el dinero sale de las
+rutas por retiros), así que el gasto de empresa se registra fuera de las rutas: no
+resta ninguna Base y aparece en Gastos del Admin y en el reporte de Gastos con "todas
+las rutas". No se creó ninguna ruta ficticia.
+
+### Validación en servicio (`createExpense`, única puerta de las pantallas)
+
+- Empresa del actor, categoría de la empresa, valor > 0, forma válida.
+- empresa → `expense.register` + `cashbox.viewConsolidated` (Admin, Super Admin).
+- ruta → `expense.register` + `cashCustody.manage` sobre la ruta (Admin, Super Admin,
+  Supervisor); ruta de la empresa y Oficina activa.
+- trabajador → `expense.register` sobre la ruta; la persona debe poder tener efectivo
+  en ella (`custodianBlockedReason`: misma empresa, activa, con caja, asignada).
+  Cargarlo a **otra** persona exige `cashCustody.manage`: el Cobrador solo registra
+  los suyos; Supervisor y Admin pueden indicar a quién.
+- Fondos releídos dentro de la transacción (bloqueo de la conciliación): un gasto de
+  trabajador no supera su efectivo en manos (`transferableCash`, sin arrastre de
+  faltantes); uno de ruta no supera lo Sin asignar. Nunca posición negativa silenciosa.
+- Instante sellado bajo bloqueo (frontera del cuadre, igual que `addExpenseStamped`) y
+  auditoría `CREATE_EXPENSE`.
+
+### UI
+
+- **Admin/Super Admin** (`ExpensesPage`): "¿A quién corresponde este gasto?"
+  (Empresa / Ruta / Trabajador, obligatorio) con una línea que explica el efecto;
+  Ruta y "Trabajador que pagó" solo cuando aplican. Lista con etiqueta de tipo y
+  "Ruta · Trabajador"; filtro "Todos los tipos". Los de empresa solo se muestran sin
+  filtro de Oficina/Ruta y a quien ve el consolidado.
+- **Cobrador** (`CollectorExpensesPage`): solo sus gastos por atribución (incluido el
+  que el Admin le cargó), sin selector; registra siempre a su cargo.
+- **Supervisor** (misma pantalla): "¿Con qué efectivo se pagó?" — Mi efectivo
+  (por defecto) / Efectivo de otro trabajador de la ruta / Caja de la ruta. Ve los
+  gastos de la ruta y de sus trabajadores, cada uno con "A tu cargo / A cargo de X /
+  Caja de la ruta". Nunca los de empresa ni otras rutas.
+- Reactividad: `useDataRevision(['expenses', …])` en ambas pantallas; sin polling.
+
+### Cuadres, liquidación, Oficina, reportes, sync
+
+- Cuadre del trabajador y "Mi efectivo": solo gastos atribuidos a él.
+- Liquidación semanal (`getCashboxSummary` por ruta): ruta + trabajador de esa ruta,
+  cada gasto una vez; empresa fuera (no pertenece a ninguna ruta).
+- Oficina y dashboard: gastos de sus rutas; empresa no se atribuye a ninguna Oficina
+  (`filterRowsByVisibleRoutes` descarta filas sin ruta).
+- Reporte Gastos / CSV: columnas **Tipo** y **Trabajador**; empresa solo con "todas
+  las oficinas/rutas" y `cashbox.viewConsolidated`. "Caja diaria por ruta" no incluye
+  empresa.
+- Sync: sin cambios de contrato; el alcance por ruta nunca toca gastos de empresa;
+  `CollectorSyncPage` no lista gastos; pending → synced no altera la clasificación.
+
+### Históricos y migración
+
+Sin migración: `scope` no se indexa y `routeId` indexado tolera `undefined`; el
+esquema sigue en **v15**. Los gastos sin `scope` **no se reinterpretan**: conservan
+exactamente la regla con la que se registraron (`collectorId ?? userId`), así que no
+cambia ningún cuadre ni posición. Con `collectorId` → trabajador; sin él → ruta, cargado
+a `userId` solo si ese usuario tenía caja (un Admin no la tiene: el Transporte
+histórico del socio es de la ruta y Fabio deja de verlo). Para mostrarlos, Admin y
+reportes etiquetan como Trabajador el histórico cuyo registrante tenía caja.
+
+### Tests
+
+`npm run test:expenseclassification` — 31/31 (EXP-CLASS-001…030 + caso exacto del
+socio). Regresión: las 16 suites previas en verde; `CASH-BOUNDARY-010` ahora
+comprueba que la pantalla delega en `createExpense` y que este sella bajo bloqueo.
+
+Prueba en Chrome real (`tmp/exp-class-e2e/run.mjs`), mismo perfil, 17/17 sin errores
+de página: Admin 1366 px registra con clics Papelería (Empresa, $300) y Transporte
+(Ruta, $11.000) → Base 300.000→289.000, Sin asignar −11.000, Fabio intacto; Fabio
+412 px, sin F5, no ve ninguno y su efectivo sigue en 100.000; el Admin registra
+"Transporte operativo Fabio" (Trabajador) → Fabio lo ve sin F5, "Tus gastos 11.000",
+entrega 89.000; Supervisora 420 px elige "Efectivo de Carlos" → Carlos 43.000, Fabio
+no lo ve; reporte de Gastos con Tipo y Trabajador.
+
+### Archivos
+
+- `src/models/types.ts` (`ExpenseScope`, `Expense.scope`, `routeId?`)
+- `src/lib/expenseAttribution.ts` (nuevo, regla única)
+- `src/services/expenseService.ts` (`createExpense`, `canRegisterExpenseScope`)
+- `src/services/cashboxEngine.ts`, `src/pages/collector/CollectorDailyReportPage.tsx`
+- `src/pages/admin/ExpensesPage.tsx`, `src/pages/collector/CollectorExpensesPage.tsx`
+- `src/services/reportService.ts`, `src/pages/admin/ReportsPage.tsx`,
+  `src/services/adminDashboardService.ts`, `src/lib/officeRouteFilter.ts`,
+  `src/hooks/useOfficeRouteFilter.ts`
+- `tests/expenseclassification.test.ts` (nuevo) · `tests/workercash.test.ts`
+  (contrato de sellado) · `tests/migrations.test.ts` (tipo del helper) ·
+  `package.json` · `.gitignore` · `scripts/verify-deploy.mjs` (marcador R9)
+
+**Pendientes derivados:** ninguno.
+
+---
+
 ## Hallazgos registrados para rondas posteriores (sin implementar)
 
 - **(Resuelto en Ronda 5)** Punto 5 (Supervisor): consumidores de la Base sin
@@ -1003,6 +1153,15 @@ restaurados; al volver la red, "Confirmar pendientes" deja todo sincronizado.
 - (Ronda 8) "Confirmar pendientes" es manual; al recuperar la red no se confirma
   solo. Visitas sin pago y gastos conservan su confirmación simple (ahora con
   alcance de empresa/ruta); sin cambios de clasificación (Ronda 9).
+- (Ronda 9) Los gastos siguen sin edición ni anulación (`expense.correct` está
+  declarado pero no implementado): un gasto mal clasificado no puede reclasificarse.
+  Si el socio lo necesita, sería un ajuste nuevo (anulación auditable + nuevo gasto).
+- (Ronda 9) El gasto de empresa no descuenta ninguna caja: no existe una "caja de
+  empresa" en el modelo (el dinero sale de las rutas por retiros). Si el socio quiere
+  controlar ese efectivo, sería un módulo nuevo de tesorería de empresa.
+- (Ronda 9) La validación de fondos de los gastos usa el efectivo registrado: un
+  Cobrador sin Base ni cobros no puede registrar un gasto pagado de su bolsillo (no se
+  modela deuda de la empresa con el trabajador).
 - (Ronda 8) Una reversión huérfana (datos corruptos) queda en `error` y visible, pero
   el libro de la Base suma pagos con signo, así que su −X sí afecta a la Base hasta
   que la oficina repare los datos. No se cambió la lógica financiera cerrada.

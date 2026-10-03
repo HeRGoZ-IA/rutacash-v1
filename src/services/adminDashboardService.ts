@@ -85,8 +85,9 @@ export async function getAdminDashboardData(
   const allClients = (await db.clients.where('tenantId').equals(tenantId).toArray()).filter(c => scope.has(c.routeId))
   const clientesActivos = allClients.filter(c => c.status === 'activo').length
 
-  // Expenses (solo de rutas autorizadas)
-  const allExpenses = (await db.expenses.where('tenantId').equals(tenantId).toArray()).filter(e => scope.has(e.routeId))
+  // Expenses (solo de rutas autorizadas: de ruta y de trabajador). Los de EMPRESA
+  // no tienen ruta y no forman parte de la operación de las rutas (punto 9).
+  const allExpenses = (await db.expenses.where('tenantId').equals(tenantId).toArray()).filter(e => !!e.routeId && scope.has(e.routeId))
   const gastosSemana = allExpenses
     .filter(e => e.fecha >= weekStart && e.fecha <= weekEnd)
     .reduce((s, e) => s + e.valor, 0)

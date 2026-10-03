@@ -15,6 +15,7 @@ import { ALL_OFFICES, NO_OFFICE, filterRoutesByOffice, narrowRouteIdsByOffice, o
 import { resolveOfficeParam } from '@/lib/officeRouteFilter'
 import { useSearchParams } from 'react-router-dom'
 import { getAccessibleRouteIdSet } from '@/lib/scope'
+import { can } from '@/lib/permissions'
 import {
   buildReport, resolveReportRouteIds, REPORT_OPTIONS,
   type ReportType, type ReportRow,
@@ -112,19 +113,25 @@ export default function ReportsPage() {
       }
 
       // 3) Datos de la empresa; el servicio aplica rutas efectivas y rango de fechas.
-      const [payments, sales, expenses, clients, allRoutes, categories] = await Promise.all([
+      const [payments, sales, expenses, clients, allRoutes, categories, users] = await Promise.all([
         db.payments.where('tenantId').equals(tenantId).toArray(),
         db.sales.where('tenantId').equals(tenantId).toArray(),
         db.expenses.where('tenantId').equals(tenantId).toArray(),
         db.clients.where('tenantId').equals(tenantId).toArray(),
         db.routes.where('tenantId').equals(tenantId).toArray(),
         db.expenseCategories.where('tenantId').equals(tenantId).toArray(),
+        db.users.where('tenantId').equals(tenantId).toArray(),
       ])
+
+      // Gastos de EMPRESA (sin ruta, punto 9): solo con "todas las rutas" y para
+      // quien ve el consolidado. Una Oficina o una ruta elegida no los incluye.
+      const includeCompanyExpenses = officeId === ALL_OFFICES && !routeId
+        && !!user && can(user, 'cashbox.viewConsolidated', { tenantId })
 
       const data = buildReport(
         reportType,
-        { payments, sales, expenses, clients, routes: allRoutes, categories },
-        { routeIds, fechaDesde, fechaHasta },
+        { payments, sales, expenses, clients, routes: allRoutes, categories, users },
+        { routeIds, fechaDesde, fechaHasta, includeCompanyExpenses },
       )
 
       setRows(data)

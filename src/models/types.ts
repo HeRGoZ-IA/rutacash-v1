@@ -583,10 +583,30 @@ export interface ExpenseCategory {
   activa: boolean
 }
 
+/**
+ * A QUIÉN SE ATRIBUYE ECONÓMICAMENTE un gasto (ajustes del socio 2026-10-02,
+ * punto 9). Responde "¿qué efectivo esperado reduce este gasto?" y NO depende de
+ * quién lo registró (`userId`):
+ *
+ *   · 'empresa'    → gasto general/administrativo. SIN `routeId` ni `collectorId`:
+ *                    no resta la Base de ninguna ruta ni el efectivo de nadie.
+ *   · 'ruta'       → gasto de la ruta pagado con su caja. `routeId`, SIN
+ *                    `collectorId`: Base ↓ y Sin asignar ↓; nadie en particular.
+ *   · 'trabajador' → pagado con el efectivo de una persona. `routeId` +
+ *                    `collectorId`: Base ↓ y En manos de esa persona ↓.
+ *
+ * Ausente = gasto HISTÓRICO anterior a la clasificación: conserva su regla de
+ * entonces (ver `expenseAttribution`), sin reinterpretarse.
+ */
+export type ExpenseScope = 'empresa' | 'ruta' | 'trabajador'
+
 export interface Expense {
   id: string
   tenantId: string
-  routeId: string
+  /** Ruta a cuyo libro (Base) pertenece. `undefined` solo en gastos de 'empresa'. */
+  routeId?: string
+  /** Atribución económica explícita (punto 9). `undefined` = histórico. */
+  scope?: ExpenseScope
   categoryId: string
   valor: number
   descripcion?: string
@@ -596,10 +616,10 @@ export interface Expense {
   /** Usuario que REGISTRÓ el gasto. */
   userId: string
   /**
-   * COBRADOR a cuya caja personal se carga el gasto (quien puso el dinero).
-   * `undefined` = gasto de la RUTA, no atribuible a la caja de ningún cobrador
-   * (p. ej. un gasto administrativo). En gastos anteriores a esta separación se
-   * infiere del `userId` cuando ese usuario es cobrador (comportamiento legacy).
+   * TRABAJADOR (Cobrador o Supervisor) a cuya caja personal se carga el gasto
+   * (quien puso el dinero). Obligatorio si `scope === 'trabajador'` y prohibido en
+   * los demás. En gastos históricos sin `scope` y sin `collectorId` se conserva la
+   * regla legacy: se cargaba a `userId` (ver `expenseAttribution`).
    */
   collectorId?: string
   syncStatus: SyncStatus

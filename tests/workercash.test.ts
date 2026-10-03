@@ -1121,6 +1121,10 @@ await spec('CASH-BOUNDARY-010', 'Fronteras', 'contrato: cierre bajo bloqueo y es
   const disb = readSource('src/services/saleRequestService.ts')
   const corr = readSource('src/services/paymentCorrectionService.ts')
   const gastosPantalla = readSource('src/pages/collector/CollectorExpensesPage.tsx')
+  // Punto 9: la pantalla delega en `createExpense`, que sella bajo bloqueo igual
+  // que `addExpenseStamped` (primera lectura dentro de la transacción, luego el instante).
+  const gastosSvc = readSource('src/services/expenseService.ts')
+  const gastoSella = /await database\.expenses\.get\(fila\.id\)[^\n]*\n\s+const ahora = nowISO\(\)/.test(gastosSvc)
   // Tolerante a finales de línea CRLF/LF.
   const disbSella = /await db\.sales\.get\(saleId\)\s+const ahora = nowISO\(\)/.test(disb)
   const corrSella = /await db\.payments\.get\(original\.id\)\s+const sello = nowISO\(\)/.test(corr)
@@ -1128,11 +1132,11 @@ await spec('CASH-BOUNDARY-010', 'Fronteras', 'contrato: cierre bajo bloqueo y es
   metric('no suelta el bloqueo hasta superar `hasta`', guarda && relojAvanza)
   metric('desembolso sella tras leer', disbSella)
   metric('corrección sella tras leer', corrSella)
-  metric('gasto operativo usa addExpenseStamped', gastosPantalla.includes('await addExpenseStamped(expense)'))
+  metric('gasto operativo usa createExpense (sella bajo bloqueo)', gastosPantalla.includes('await createExpense(') && gastoSella)
   assert(cierreBloquea && guarda && relojAvanza, 'el cierre no protege la frontera')
   assert(disbSella, 'el desembolso sella antes del bloqueo')
   assert(corrSella, 'la corrección sella antes del bloqueo')
-  assert(gastosPantalla.includes('await addExpenseStamped(expense)') && !gastosPantalla.includes('createdAt: nowISO()'), 'el gasto sella antes del bloqueo')
+  assert(gastosPantalla.includes('await createExpense(') && gastoSella && !gastosPantalla.includes('createdAt: nowISO()'), 'el gasto sella antes del bloqueo')
 })
 
 // ############################################################

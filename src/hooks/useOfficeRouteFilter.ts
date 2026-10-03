@@ -96,7 +96,7 @@ export function useOfficeRouteFilter() {
     visibleRouteIds: visibles,
     /** Recorta filas con `routeId` al conjunto visible. */
     filterRows: useCallback(
-      <T extends { routeId: string }>(rows: T[]) => filterRowsByVisibleRoutes(rows, visibles),
+      <T extends { routeId?: string }>(rows: T[]) => filterRowsByVisibleRoutes(rows, visibles),
       [visibles],
     ),
     /** ¿Ofrecer el grupo "Sin Oficina"? Solo si el usuario tiene rutas así. */

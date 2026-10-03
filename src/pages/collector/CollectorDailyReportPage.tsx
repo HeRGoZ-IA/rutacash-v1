@@ -8,6 +8,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { formatCurrency, today } from '@/lib/formatters'
 import { effectivePayments } from '@/lib/paymentState'
+import { isExpenseOf } from '@/lib/expenseAttribution'
 import type { Client } from '@/models/types'
 
 interface Movement {
@@ -61,7 +62,7 @@ export default function CollectorDailyReportPage() {
       && s.disbursedByCollectorId === user.id
       && s.fechaDesembolso === todayStr
     )
-    const misGastos = expenses.filter(e => (e.collectorId ?? e.userId) === user.id)
+    const misGastos = expenses.filter(e => isExpenseOf(e, user.id))
 
     const movs: Movement[] = []
     for (const p of misAbonos) movs.push({ hora: hora(p.createdAt), cliente: clientMap.get(p.clientId)?.nombre ?? 'Cliente', concepto: 'Abono', valor: p.valor, tipo: 'abono' })

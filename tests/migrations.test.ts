@@ -958,7 +958,7 @@ async function filtroDesde(db: Awaited<ReturnType<typeof baseLimpia>>, actor: Us
     officeId,
     routesInOffice: routesInOfficeFilter(accesibles, officeId),
     visibles: visibleRouteIds({ accessibleRoutes: accesibles, officeId }),
-    filtrar: <T extends { routeId: string }>(rows: T[]) =>
+    filtrar: <T extends { routeId?: string }>(rows: T[]) =>
       filterRowsByVisibleRoutes(rows, visibleRouteIds({ accessibleRoutes: accesibles, officeId })),
   }
 }

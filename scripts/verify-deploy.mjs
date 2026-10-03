@@ -67,6 +67,8 @@ const MARCADORES = [
   ['Pago anulado. El crédito se recalculó.', true, 'anulación de pagos con recálculo del crédito (2026-10-02 R7)'],
   // Ronda 8: sincronización de anulaciones (monotonía del pago + Sync del Cobrador con estados).
   ['no puede volver a otro estado.', true, 'anulación monótona y sincronización causal (2026-10-02 R8)'],
+  // Ronda 9: gastos clasificados por atribución económica (empresa / ruta / trabajador).
+  ['¿A quién corresponde este gasto?', true, 'clasificación y atribución de gastos (2026-10-02 R9)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

@@ -10,7 +10,7 @@
     "lint": "eslint . --ext ts,tsx",
     "test:permissions": "npx --yes esbuild tests/permissions.test.ts --bundle --format=esm --platform=node --outfile=tests/_out.mjs && node tests/_out.mjs",
     "test:financial": "npx --yes esbuild tests/payments.test.ts --bundle --format=esm --platform=node --alias:@=./src --outfile=tests/_out.financial.mjs && node tests/_out.financial.mjs",
-    "test": "npm run test:permissions && npm run test:financial && npm run test:bootstrap && npm run test:platform && npm run test:settlements && npm run test:migrations && npm run test:workercash && npm run test:basecash && npm run test:interestrate && npm run test:activecredit && npm run test:financialreversal && npm run test:routebase && npm run test:supervisorbase && npm run test:workertransfer && npm run test:paymentreversal && npm run test:paymentsync",
+    "test": "npm run test:permissions && npm run test:financial && npm run test:bootstrap && npm run test:platform && npm run test:settlements && npm run test:migrations && npm run test:workercash && npm run test:basecash && npm run test:interestrate && npm run test:activecredit && npm run test:financialreversal && npm run test:routebase && npm run test:supervisorbase && npm run test:workertransfer && npm run test:paymentreversal && npm run test:paymentsync && npm run test:expenseclassification",
     "test:platform": "npx --yes esbuild tests/platform.test.ts --bundle --format=esm --platform=node --alias:@=./src --outfile=tests/_out.platform.mjs && node tests/_out.platform.mjs",
     "test:migrations": "npx --yes esbuild tests/migrations.test.ts --bundle --format=esm --platform=node --alias:@=./src --external:fake-indexeddb --outfile=tests/_out.migrations.mjs && node tests/_out.migrations.mjs",
     "test:workercash": "npx --yes esbuild tests/workercash.test.ts --bundle --format=esm --platform=node --alias:@=./src --external:fake-indexeddb --outfile=tests/_out.workercash.mjs && node tests/_out.workercash.mjs",
@@ -25,6 +25,7 @@
     "test:workertransfer": "npx --yes esbuild tests/workertransfer.test.ts --bundle --format=esm --platform=node --alias:@=./src --external:fake-indexeddb --outfile=tests/_out.workertransfer.mjs && node tests/_out.workertransfer.mjs",
     "test:paymentreversal": "npx --yes esbuild tests/paymentreversal.test.ts --bundle --format=esm --platform=node --alias:@=./src --external:fake-indexeddb --outfile=tests/_out.paymentreversal.mjs && node tests/_out.paymentreversal.mjs",
     "test:paymentsync": "npx --yes esbuild tests/paymentsync.test.ts --bundle --format=esm --platform=node --alias:@=./src --external:fake-indexeddb --outfile=tests/_out.paymentsync.mjs && node tests/_out.paymentsync.mjs",
+    "test:expenseclassification": "npx --yes esbuild tests/expenseclassification.test.ts --bundle --format=esm --platform=node --alias:@=./src --external:fake-indexeddb --outfile=tests/_out.expenseclassification.mjs && node tests/_out.expenseclassification.mjs",
     "smoke:prod": "node scripts/prod-smoke.mjs"
   },
   "keywords": [],
