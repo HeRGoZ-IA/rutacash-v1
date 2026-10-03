@@ -9,8 +9,11 @@ pendientes derivados (1.a, 1.b…) están resueltos.
 | 1 | Cerrada y publicada (`c8bd1e1`; verify:deploy 32/32; smoke A–H PASS) |
 | 2 | Cerrada y publicada (`b3f2ab6`; verify:deploy 33/33; smoke A–H PASS) |
 | 3 | Cerrada y publicada (`fb63398`; verify:deploy 34/34; smoke A–H PASS) |
-| 4 | Cerrada (commit local, pendiente de revisión antes de push/deploy) |
-| 5–9 | Sin iniciar |
+| 4 | Cerrada y publicada (`b1bfcf7`) |
+| 5 | Cerrada y publicada (`9ed4c33`) |
+| 6 | Cerrada y publicada (`38a3f6f`; verify:deploy 38/38; smoke A–H PASS; publicada 2026-10-03) |
+| 7 | Cerrada (commit local, sin push; verify:deploy esperado 39/39) |
+| 8–9 | Sin iniciar |
 
 ## Checklist maestro
 
@@ -20,7 +23,7 @@ pendientes derivados (1.a, 1.b…) están resueltos.
 - [x] 4. Base unificada entre módulos
 - [x] 5. Auditoría del origen de Base en Supervisor
 - [x] 6. Traspaso de efectivo entre trabajadores de una misma ruta
-- [ ] 7. Reversión de pagos y recálculo completo
+- [x] 7. Reversión de pagos y recálculo completo
 - [ ] 8. Sincronización de anulaciones
 - [ ] 9. Clasificación de gastos
 
@@ -605,6 +608,204 @@ traspaso desde otra pestaña visto sin F5 → cambio a Centro) y Supervisor a 41
 
 ---
 
+## PRE-R7 — Saneamiento del gate FIN-REV-012 (no es un punto del checklist)
+
+- **Reproducción:** 5 fallos en 30 ejecuciones de `test:financialreversal`, siempre
+  FIN-REV-012.
+- **Causa exacta:** la prueba ordenaba los aportes `a` y `b` solo por `createdAt`
+  (milisegundos). Cuando ambos caen en el mismo milisegundo, `Array.sort` (estable)
+  los deja en el orden de `toArray()`, es decir, por clave primaria: un UUID
+  aleatorio. La aserción `filas[0] === a` presuponía un orden de inserción que el
+  modelo no registra.
+- **Corrección:** comparador estable compartido `compareByCreation` (`createdAt` y,
+  en empate, `id`) en `src/lib/eventOrder.ts`. FIN-REV-012 y FIN-REV-013 identifican
+  las filas por `id` y comprueban además que el orden coincide con el determinista.
+  Ninguna aserción válida se relajó: siguen exigiendo 2 filas, el vigente sin
+  reversión, el anulado con su reversión −21.500 y las pantallas con "Anular".
+- **Cambio funcional:** ninguno (solo prueba + utilidad pura).
+- **Resultado:** 0 fallos en 40 ejecuciones tras el cambio y 0 en 25 sobre el código
+  final de la Ronda 7.
+
+---
+
+## 7. Reversión de pagos y recálculo completo del crédito — CERRADO
+
+### Problema del socio
+
+Un Cobrador registra un pago y un Admin/SuperAdmin lo "elimina". En la App del
+Cobrador el abono seguía, la cuota seguía pagada y el crédito no volvía a su estado.
+
+### Modelo encontrado (auditado, no supuesto)
+
+- **Persistencia:** `payments` (Dexie, sin cambio de esquema; sigue v15). Un único
+  punto de alta, `registerPayment` (`paymentService.ts`), que en una transacción
+  guarda el pago y **muta** `installments` (`pagado/saldo/status`) y `sales`
+  (`saldo`, `status`, `fechaFinalizacion`). La parcela actual y la "última
+  pagada" se **derivan** de las parcelas (`calculateCurrentInstallment`,
+  `getLastPaidInstallmentNumber`). `Finalizada` se **guarda** en `sale.status`.
+- **Reversión existente:** solo la *corrección* del Secretario
+  (`paymentCorrectionService`): original `state:'reversed'` + asiento `'reversal'`
+  (−X, misma `fecha`) + pago de reemplazo, y `recomputeSale` reconstruye parcelas,
+  saldo, estado y fecha de finalización **desde los pagos vigentes**. No existía
+  ninguna anulación sin reemplazo ni UI para que un Admin anulara un pago; la
+  capacidad `payment.reverse` ("Anular pagos") estaba declarada pero ningún `can()`
+  la usaba. **Nada borra pagos físicamente.**
+- **Lectores:** Base/libro (`getRouteLedger`, `getCashboxSummary`, liquidación
+  semanal, conciliación, dashboard) suman con signo; reportes, Oficina, historial de
+  crédito, Inicio/Reporte diario del Cobrador filtran vigentes (`effectivePayments`);
+  la caja personal (cuadre) usa el libro con signo **por instante**
+  (`personalPaymentLedger`).
+- **Problemas encontrados:**
+  1. No había forma de anular un pago sin crear otro (el `newValor` debe ser > 0).
+  2. `CollectorRoutePage` leía los pagos en bruto: un pago anulado (y su reversión,
+     de la misma fecha) seguía marcando la venta como "pagó hoy". Además "Último
+     abono" comparaba el `createdAt` de un pago con la `fecha` del anterior.
+  3. "Abonos recientes" del Admin (Clientes) listaba el original y la reversión
+     negativa como `+valor`.
+  4. El histórico del Cobrador ocultaba el anulado sin explicación.
+  5. El recálculo ordenaba pagos solo por `createdAt` (empates no deterministas).
+  6. Varias pantallas del Cobrador solo cargaban al montar.
+
+### Estrategia contable única
+
+| | Pago | Anulación |
+|---|---|---|
+| Libro (efecto económico) | +X | asiento `state:'reversal'`, −X, **misma fecha contable y mismo responsable** |
+| Original | queda en `payments` | `state:'reversed'`, `reversalPaymentId`, `correctionReason`, `correctedBy`, `correctedAt` |
+| Reversión | — | `reversesPaymentId`, autor (`createdByUserId`) = quien anula, `createdAt` = instante de la anulación |
+| Crédito | — | `recomputeSale(saleId)` desde los pagos vigentes |
+
+Es la convención que el sistema ya usaba en las correcciones (no se reutiliza la de
+Ronda 3, cuya reversión lleva la fecha de hoy): así ningún lector cambia de criterio.
+`isPaymentAnnullable` / `paymentDisplayStateOf` (`lib/paymentState.ts`) distinguen
+**vigente / anulado / corregido / reversión**.
+
+### Recálculo canónico
+
+`recomputeSale(saleId, database)` (exportada; la usan corrección y anulación):
+reinicia las parcelas y re-aplica los pagos vigentes en orden **createdAt + id**
+con el mismo motor en cascada de `registerPayment`. De ahí salen saldo, estado de
+cada cuota (pagada/parcial/pendiente/vencida), parcela actual, `activa ↔ finalizada`
+(una venta `perdida`/`refinanciada` no cambia) y `fechaFinalizacion`
+(`resolveSealedCompletionDate`: se limpia al reabrir). No se "deshace" campo a
+campo: la misma lista de pagos vigentes produce siempre el mismo estado. Nota: la
+cascada depende solo del acumulado, así que el resultado es independiente del orden;
+el desempate determinista protege además la atribución de parcelas
+(`installmentsCoveredBy`) y la reproducibilidad.
+
+### Servicio `annulPayment` (`paymentCorrectionService.ts`)
+
+Una transacción sobre las tablas de la conciliación + `installments` +
+`weeklySettlements`: (1) lee el pago bajo bloqueo, (2) existe y es de la empresa,
+(3) no está anulado ni es una reversión, (4–5) `can(actor, 'payment.reverse',
+{ routeId, tenantId, periodClosed })` sobre la ruta real del pago, (6) escribe
+reversión + marca del original + `recomputeSale`, (7) recalcula la conciliación y
+valida el efectivo físico; cualquier fallo revierte todo. Motivo obligatorio
+(normalizado; vacío o espacios se rechazan). Doble anulación y anulación de la
+reversión: rechazadas (también bajo concurrencia). Auditoría `ANNUL_PAYMENT` fuera
+de la transacción (como el resto del sistema); la traza mínima ya queda atómica en
+los propios pagos.
+
+### Base, efectivo del trabajador y casos de fondos ya movidos
+
+- **Base:** baja X por el libro (+X −X = 0). Nunca por ajuste paralelo.
+- **En manos:** el −X se carga al responsable del pago (`collectorId`) en el ciclo
+  de cuadre en que se anula; un cuadre cerrado nunca se reescribe.
+- **Regla adoptada** (la misma de Ronda 3: "el dinero entregado en mano solo se
+  revierte si esa persona aún lo tiene"), validada antes/después dentro de la
+  transacción:
+  - la Base no puede quedar negativa;
+  - si el −X cae en una persona, esa persona debe tener aún ese efectivo en manos;
+  - si cae en la caja de la ruta (pago sin caja personal), no puede superar lo sin
+    asignar;
+  - la conciliación debe seguir cuadrando.
+- **Pago ya cuadrado** (Fabio entregó los 100.000; están en Sin asignar): se
+  rechaza con mensaje explícito — "Fabio ya no tiene en manos el efectivo de este
+  pago (en manos: $0). Antes de anular, entrégale Base desde la caja de la ruta
+  por $100.000." Tras "Entregar Base" la anulación procede: Base −100.000, Sin
+  asignar −100.000, Fabio 0. Si el pago era ficticio y el cuadre dejó un faltante,
+  el arrastre cubre el −X y la anulación cancela el faltante.
+- **Efectivo ya usado** (cobra 100.000 y desembolsa 80.000): rechazo explícito
+  ("en manos: $20.000 … por $80.000"), sin ningún cambio. Nunca se produce una
+  posición negativa silenciosa.
+
+### Reportes y fechas
+
+Convención existente, conservada y ahora coherente en todos los lectores: el efecto
+vigente se imputa a la **fecha contable del pago**.
+
+| Consulta | Pago 01/10 +100.000, anulado el 03/10 |
+|---|---|
+| Reporte del 01/10 (Pagos, Caja diaria, motor de caja, dashboard) | 0 (antes de anular: 100.000) |
+| Reporte del 03/10 | 0 (no aparece un cobro negativo) |
+| Rango 01/10–03/10 | neto vigente |
+| Cuadre del trabajador | el −X cae en el ciclo de la anulación (instante) |
+| Auditoría / historial | el original sigue visible como ANULADO con su reversión |
+
+Oficina (`routeOpsFacts`), Liquidación semanal, conciliación y cartera usan la misma
+regla. Un pago en una liquidación semanal CERRADA solo lo anula quien puede aprobar
+ajustes (`payment.reverse` + periodo cerrado ⇒ `payment.approveAdjustment`, igual
+que la corrección).
+
+### Permisos
+
+`payment.reverse` (ya existía): SuperAdmin y Admin con la ruta autorizada. Supervisor,
+Secretario (corrige, no anula), Cobrador y Socio: no. Admin de otra ruta y empresa
+ajena: rechazados. No hay `rol === 'admin'` en el código.
+
+### UI
+
+- **Admin — Ventas activas → Detalle de venta:** nueva sección "Pagos (N vigentes)"
+  con cada pago (fecha, cobrador, valor), botón **Anular** solo si
+  `canAnnulPayment`. Modal "Anular pago": cliente, valor, fecha, crédito, parcela(s)
+  cubierta(s), cobrador y ruta; motivos sugeridos (Pago duplicado, Valor digitado
+  incorrectamente, Pago asignado al cliente equivocado, Registro accidental) y
+  Motivo obligatorio. El detalle se relee de la base tras anular y con
+  `useDataRevision`.
+- **Anulado visible:** valor tachado, insignia "Anulado" y línea "Reversión −$X ·
+  fecha · quién · Motivo" en el detalle de venta, la ficha del cliente y el
+  histórico del Cobrador. El asiento técnico no se lista como abono.
+- **Cobrador:** Ruta (filtra vigentes, "Último abono" correcto), Inicio, Reporte
+  diario, Detalle de cliente, Pago e Histórico se releen con `useDataRevision`
+  (sin polling).
+
+### Separación con la Ronda 8
+
+Ronda 7 deja el **modelo y el estado derivado** correctos en la base local y su
+reactividad en el mismo navegador. Queda para la Ronda 8: propagación entre
+dispositivos, estado de sincronización de la anulación (`syncStatus` de la
+reversión), cola offline, anulación de un pago aún no sincronizado, reentrada y
+conflictos, y la pantalla de Sincronización del Cobrador (hoy lista filas en bruto).
+
+### Tests
+
+`npm run test:paymentreversal` (Dexie real): PAY-REV-001 … 030 + 010b, 31/31 PASS.
+Prueba en Chrome real (`tmp/pay-rev-e2e/run.mjs`): 13/13, sin errores de página —
+Cobrador a 412/420 px (pago vigente → reconsulta tras anular: Abonados 1→0, saldo
+$120.000→$144.000, parcelas 5/10→4/10, histórico "Anulado") y Admin a 1366 px
+(detalle → Anular pago → motivo → detalle anulado, cuota #5 Pendiente).
+
+### Archivos
+
+- `src/services/paymentCorrectionService.ts` (`annulPayment`, `canAnnulPayment`,
+  `recomputeSale` exportada y parametrizable, `reversalPaymentId` en correcciones)
+- `src/lib/paymentState.ts` (`paymentDisplayStateOf`, `isPaymentAnnullable`,
+  `paymentHistoryRows`) · `src/lib/eventOrder.ts` (nuevo)
+- `src/services/installmentEngine.ts` (orden determinista, `installmentsCoveredBy`)
+- `src/lib/permissions.ts` (periodo cerrado también para `payment.reverse`)
+- `src/models/types.ts` (`reversalPaymentId`, acción `ANNUL_PAYMENT`)
+- `src/components/ui/PaymentAnnulment.tsx` (nuevo)
+- `src/pages/admin/ActiveSalesPage.tsx`, `ClientsPage.tsx`
+- `src/pages/collector/CollectorRoutePage.tsx`, `CollectorPaymentHistoryPage.tsx`,
+  `CollectorHomePage.tsx`, `CollectorDailyReportPage.tsx`, `ClientDetailPage.tsx`,
+  `PaymentPage.tsx`
+- `tests/paymentreversal.test.ts` (nuevo), `tests/financialreversal.test.ts`
+  (PRE-R7) · `package.json` · `scripts/verify-deploy.mjs` (marcador R7)
+
+**Pendientes derivados:** ninguno.
+
+---
+
 ## Hallazgos registrados para rondas posteriores (sin implementar)
 
 - **(Resuelto en Ronda 5)** Punto 5 (Supervisor): consumidores de la Base sin
@@ -632,16 +833,33 @@ traspaso desde otra pestaña visto sin F5 → cambio a Centro) y Supervisor a 41
   Transferencia anulada). Un traspaso erróneo se corrige con el traspaso inverso,
   también auditado. Si el socio quiere "Anular" explícito para movimientos de
   custodia, sería un ajuste nuevo.
-- (Ronda 6) Test inestable previo: `FIN-REV-012` ordena dos aportes por
+- **(Resuelto en PRE-R7)** (Ronda 6) Test inestable previo: `FIN-REV-012` ordena dos aportes por
   `createdAt`; si ambos caen en el mismo milisegundo, el orden se invierte y falla
   (≈1 de 6 ejecuciones; servicios sin cambios en esta ronda). Falta un desempate
   estable en la prueba (no se modificó).
 - (Ronda 6) La línea "En manos de X (Base entregada N)" de la conciliación cuenta
   los traspasos recibidos/entregados dentro de "Base entregada" (es custodia neta).
-- **Punto 7:** los pagos usan otra convención de reversión (`state`
+- **(Resuelto en Ronda 7)** Punto 7: los pagos usan otra convención de reversión (`state`
   'reversed'/'reversal', y los reportes FILTRAN ambos). `getCashboxSummary` suma los
   pagos en bruto: equivale solo mientras la reversión tenga importe negado y caiga
   en el mismo rango de fechas que el original. Revisar al tratar la reversión de pagos.
+  → Auditado: toda reversión de pago lleva el importe negado y la MISMA fecha
+  contable que el original (corrección y anulación), así que libro y reportes
+  coinciden en cualquier rango. La caja personal usa instantes a propósito.
+- (Ronda 7) **Sigue pendiente, decisión de negocio:** `approveSaleRequest` /
+  `confirmDisbursement` no validan la Base al desembolsar (ver hallazgo de Ronda 5).
+  La anulación de pagos sí exige que la Base no quede negativa.
+- (Ronda 7 → Ronda 8) Sincronización de anulaciones: la reversión se crea con
+  `syncStatus: 'synced'`; falta definir propagación entre dispositivos, anulación de
+  un pago aún pendiente de sincronizar, reentrada y conflictos. `CollectorSyncPage`
+  lista los pagos en bruto (original y reversión).
+- (Ronda 7) Anular un pago de una liquidación semanal CERRADA (permitido a quien
+  aprueba ajustes) recalcula los totales vivos, pero el registro guardado de esa
+  liquidación conserva sus cifras del cierre — mismo comportamiento que ya tenían las
+  correcciones aprobadas. Si el socio quiere un aviso o reapertura obligatoria, sería
+  un ajuste nuevo.
+- (Ronda 7) No existe "restaurar pago": si una anulación fue un error, se registra el
+  pago de nuevo (queda auditado). Sin cadenas de reversión.
 - (Ronda 2) Fuera del backlog: la pantalla de autorizaciones del Admin (`SaleAuthorizationsPage`)
   y el detalle móvil del Supervisor (`CollectorAuthorizationsPage`) podrían reutilizar
   `ActiveCreditNotice`/`getActiveCreditContext`; hoy el Admin no ve el aviso y el

@@ -26,6 +26,8 @@ import {
   calculateTotalWithInterest, calculateInstallmentValue,
   estimateFinalDate, generateInstallments,
 } from '@/services/installmentEngine'
+import { paymentDisplayStateOf, paymentHistoryRows } from '@/lib/paymentState'
+import { PaymentAnnulmentDetail, PaymentStateBadge } from '@/components/ui/PaymentAnnulment'
 import type { Client, Route, Sale, Payment } from '@/models/types'
 
 // Tasa fija seleccionable (igual que en Ventas Activas): solo 10% o 20%
@@ -579,15 +581,23 @@ export default function ClientsPage() {
                   <p className="text-xs text-gray-400">Sin abonos registrados.</p>
                 ) : (
                   <div className="space-y-1.5 max-h-44 overflow-y-auto">
-                    {detailPayments.slice(0, 12).map(p => {
+                    {/* Sin asientos técnicos de reversión: el anulado se muestra tachado con su motivo. */}
+                    {paymentHistoryRows(detailPayments).slice(0, 12).map(({ payment: p, reversal }) => {
                       const sale = saleById.get(p.saleId)
+                      const estado = paymentDisplayStateOf(p)
                       return (
-                        <div key={p.id} className="flex items-center justify-between px-3 py-2 rounded-lg border border-gray-100">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-gray-800">{formatDate(p.fecha)}</p>
-                            <p className="text-xs text-gray-400 truncate">Venta {sale ? formatCurrency(sale.valorVenta, currency) : '—'}{p.observacion ? ` · ${p.observacion}` : ''}</p>
+                        <div key={p.id} className="px-3 py-2 rounded-lg border border-gray-100">
+                          <div className="flex items-center justify-between">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-gray-800">{formatDate(p.fecha)}</p>
+                              <p className="text-xs text-gray-400 truncate">Venta {sale ? formatCurrency(sale.valorVenta, currency) : '—'}{p.observacion ? ` · ${p.observacion}` : ''}</p>
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                              <PaymentStateBadge state={estado} />
+                              <span className={`text-sm font-bold ${estado === 'vigente' ? 'text-emerald-600' : 'text-gray-400 line-through'}`}>+{formatCurrency(p.valor, currency)}</span>
+                            </div>
                           </div>
-                          <span className="text-sm font-bold text-emerald-600 flex-shrink-0 ml-2">+{formatCurrency(p.valor, currency)}</span>
+                          {estado === 'anulado' && <PaymentAnnulmentDetail original={p} reversal={reversal} currency={currency} />}
                         </div>
                       )
                     })}

@@ -5,6 +5,7 @@ import {
   MapPin, HandCoins, Users, Wallet, RefreshCw, Wifi, WifiOff,
 } from 'lucide-react'
 import { db } from '@/lib/db'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { CountBadge } from '@/components/ui/CountBadge'
 import { useAuth } from '@/hooks/useAuth'
@@ -33,7 +34,9 @@ export default function CollectorHomePage() {
   const puedeAutorizar = Boolean(activeRouteId) && can(user, 'authorization.access', { routeId: activeRouteId!, tenantId })
   const pendientesAutorizar = usePendingRouteSaleRequests(user, tenantId, activeRouteId)
 
-  useEffect(() => { if (activeRouteId) load(activeRouteId) }, [activeRouteId, user?.id])
+  // Un pago registrado o anulado en otra pestaña cambia saldo y parcelas: se relee.
+  const revision = useDataRevision()
+  useEffect(() => { if (activeRouteId) load(activeRouteId) }, [activeRouteId, user?.id, revision])
 
   async function load(routeId: string) {
     setLoading(true)

@@ -4,6 +4,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { parseISO, addDays, addWeeks, addMonths, format, differenceInDays, isAfter } from 'date-fns'
 import type { Installment, PaymentFrequency, Payment, InstallmentStatus } from '@/models/types'
+import { compareByCreation } from '@/lib/eventOrder'
 
 // ------------------------------------------------------------
 // Días de pago (paymentDays): 0=domingo, 1=lunes ... 6=sábado
@@ -211,9 +212,9 @@ export function recalculateSaleFromPayments(
     diasMora: 0,
   }))
 
-  const sortedPayments = [...payments].sort(
-    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-  )
+  // Orden determinista (createdAt + id): el mismo conjunto de pagos produce
+  // siempre el mismo estado, aunque dos pagos compartan milisegundo.
+  const sortedPayments = [...payments].sort(compareByCreation)
 
   for (const payment of sortedPayments) {
     const result = applyPaymentToInstallments(reset, payment.valor)
@@ -315,4 +316,37 @@ export function getCollectionStatus(installments: Installment[], today = new Dat
   if (dias <= 0) return 'verde'
   if (dias <= 3) return 'amarillo'
   return 'rojo'
+}
+
+/**
+ * Parcelas que cubrió un pago VIGENTE, según la misma cascada que el motor
+ * (parcelas por `numero`, pagos vigentes en orden createdAt + id). Los abonos no
+ * guardan la parcela afectada: se deriva. `[]` si el pago no está en la lista.
+ */
+export function installmentsCoveredBy(
+  installments: Pick<Installment, 'numero' | 'valor'>[],
+  effectivePayments: Pick<Payment, 'id' | 'valor' | 'createdAt'>[],
+  paymentId: string,
+): number[] {
+  const pagos = [...effectivePayments].sort(compareByCreation)
+  const idx = pagos.findIndex(p => p.id === paymentId)
+  if (idx < 0) return []
+  const desde = pagos.slice(0, idx).reduce((s, p) => s + p.valor, 0)
+  const hasta = desde + pagos[idx].valor
+  const cubiertas: number[] = []
+  let acumulado = 0
+  for (const inst of [...installments].sort((a, b) => a.numero - b.numero)) {
+    const inicio = acumulado
+    acumulado += inst.valor
+    if (acumulado > desde && inicio < hasta) cubiertas.push(inst.numero)
+  }
+  return cubiertas
+}
+
+/** "Parcela #3" / "Parcelas #3–#5" (vacío si no hay). */
+export function installmentRangeLabel(numeros: number[]): string {
+  if (numeros.length === 0) return ''
+  const a = Math.min(...numeros)
+  const b = Math.max(...numeros)
+  return a === b ? `Parcela #${a}` : `Parcelas #${a}–#${b}`
 }

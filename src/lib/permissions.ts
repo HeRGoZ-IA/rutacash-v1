@@ -563,8 +563,8 @@ export function can(user: User | null | undefined, capability: Capability, ctx?:
     if (!canManageUser(user, ctx.targetUser)) return false
   }
 
-  // Corrección de pago en periodo cerrado: solo quien puede aprobar ajustes.
-  if (capability === 'payment.correct' && ctx?.periodClosed) {
+  // Corrección o anulación de pago en periodo cerrado: solo quien puede aprobar ajustes.
+  if ((capability === 'payment.correct' || capability === 'payment.reverse') && ctx?.periodClosed) {
     return can(user, 'payment.approveAdjustment', { routeId: ctx.routeId, tenantId: ctx.tenantId })
   }
 

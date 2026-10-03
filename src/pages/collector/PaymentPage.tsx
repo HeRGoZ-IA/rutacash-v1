@@ -4,6 +4,7 @@ import { useOpBase } from '@/hooks/useOpBase'
 import { CheckCircle, MapPin, MessageSquare } from 'lucide-react'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatCurrencyInput, parseCurrencyInput, getCurrencySymbol } from '@/lib/formatters'
@@ -35,6 +36,10 @@ export default function PaymentPage() {
   const [appliedAmount, setAppliedAmount] = useState(0)
 
   useEffect(() => { load() }, [saleId])
+  // Un pago anulado en otra pestaña cambia saldo y parcela: se relee la venta sin
+  // tocar el importe que se está digitando (el servicio revalida igualmente).
+  const revision = useDataRevision()
+  useEffect(() => { if (revision > 0) refreshFromDb() }, [revision])  // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Relee venta y parcelas de Dexie. El estado React es SOLO presentación. */
   async function refreshFromDb(): Promise<{ sale: Sale; insts: Installment[] } | null> {

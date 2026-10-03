@@ -7,7 +7,10 @@ import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
-import { effectivePayments } from '@/lib/paymentState'
+import { useDataRevision } from '@/hooks/useDataRevision'
+import { effectivePayments, paymentDisplayStateOf, paymentHistoryRows } from '@/lib/paymentState'
+import { compareByCreation } from '@/lib/eventOrder'
+import { PaymentAnnulmentDetail, PaymentStateBadge } from '@/components/ui/PaymentAnnulment'
 import { formatCurrency, formatDate } from '@/lib/formatters'
 import type { Client, Sale, Payment } from '@/models/types'
 
@@ -24,11 +27,12 @@ import type { Client, Sale, Payment } from '@/models/types'
  * Ahora clientes, ventas y abonos se recortan por la RUTA ACTIVA, igual que el
  * resto de la app operativa.
  *
- * SEMÁNTICA DE PAGOS: se listan los abonos VIGENTES (`effectivePayments`). Un pago
- * corregido aparecía tres veces —original, reversión negativa y corrección—, que es
- * el detalle contable, no el histórico que el cobrador necesita para hablar con el
- * cliente. La trazabilidad completa sigue disponible en Auditoría y en la pantalla
- * administrativa de corrección de pagos.
+ * SEMÁNTICA DE PAGOS: cuentan solo los abonos VIGENTES (`effectivePayments`). Un
+ * pago corregido aparecía tres veces —original, reversión negativa y corrección—,
+ * que es el detalle contable, no el histórico que el cobrador necesita para hablar
+ * con el cliente. Un pago ANULADO por la administración (punto 7, 2026-10-03) sí se
+ * lista, tachado y con su motivo, para que el cobrador sepa por qué ya no cuenta;
+ * nunca suma al total. El asiento técnico de reversión no se muestra.
  */
 export default function CollectorPaymentHistoryPage() {
   const { saleId: paramSaleId } = useParams<{ saleId?: string }>()
@@ -45,6 +49,15 @@ export default function CollectorPaymentHistoryPage() {
   const routeId = activeRouteId ?? user?.routeId ?? null
 
   useEffect(() => { init() }, [user, routeId])
+
+  // Una anulación (o un pago) hecha en otra pestaña relee la venta abierta: saldo y
+  // abonos no pueden quedarse con la foto tomada al seleccionarla.
+  const revision = useDataRevision()
+  useEffect(() => {
+    if (revision === 0 || !clientId) return
+    loadSalesOfClient(clientId).then(setSales)
+    if (saleId) loadPayments(saleId)
+  }, [revision])  // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Ventas de un cliente DENTRO de la ruta activa, más recientes primero. */
   async function loadSalesOfClient(clientId: string): Promise<Sale[]> {
@@ -90,12 +103,15 @@ export default function CollectorPaymentHistoryPage() {
 
   async function loadPayments(sid: string) {
     const ps = await db.payments.where('saleId').equals(sid).toArray()
-    // Solo abonos VIGENTES: un pago corregido no debe aparecer tres veces.
-    setPayments(effectivePayments(ps).sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
+    // Abonos VIGENTES (un pago corregido no aparece tres veces) + los ANULADOS con
+    // su asiento de reversión, que `paymentHistoryRows` adjunta y nunca lista como fila.
+    const anulados = ps.filter(p => { const e = paymentDisplayStateOf(p); return e === 'anulado' || e === 'reversion' })
+    setPayments([...effectivePayments(ps), ...anulados].sort(compareByCreation))
   }
 
   const selectedSale = sales.find(s => s.id === saleId)
-  const totalAbonado = payments.reduce((s, p) => s + p.valor, 0)
+  const totalAbonado = effectivePayments(payments).reduce((s, p) => s + p.valor, 0)
+  const filas = paymentHistoryRows(payments)
 
   const saleLabel = (s: Sale) => `${formatCurrency(s.valorVenta, currency)} · ${formatDate(s.fechaInicio)} · ${s.status}`
 
@@ -127,19 +143,26 @@ export default function CollectorPaymentHistoryPage() {
       )}
 
       {saleId && (
-        payments.length === 0 ? (
+        filas.length === 0 ? (
           <EmptyState icon={<History className="w-8 h-8" />} title="Sin abonos registrados" />
         ) : (
           <div className="bg-white rounded-2xl border border-gray-100 divide-y divide-gray-50">
-            {payments.map(p => (
-              <div key={p.id} className="px-4 py-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-gray-800">{formatDate(p.fecha)}</p>
-                  <span className="text-sm font-bold text-emerald-600">+{formatCurrency(p.valor, currency)}</span>
+            {filas.map(({ payment: p, reversal }) => {
+              const anulado = paymentDisplayStateOf(p) === 'anulado'
+              return (
+                <div key={p.id} className="px-4 py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-gray-800">{formatDate(p.fecha)}</p>
+                    <div className="flex items-center gap-2">
+                      <PaymentStateBadge state={paymentDisplayStateOf(p)} />
+                      <span className={`text-sm font-bold ${anulado ? 'text-gray-400 line-through' : 'text-emerald-600'}`}>+{formatCurrency(p.valor, currency)}</span>
+                    </div>
+                  </div>
+                  {p.observacion && <p className="text-xs text-gray-400 mt-0.5">{p.observacion}</p>}
+                  {anulado && <PaymentAnnulmentDetail original={p} reversal={reversal} currency={currency} />}
                 </div>
-                {p.observacion && <p className="text-xs text-gray-400 mt-0.5">{p.observacion}</p>}
-              </div>
-            ))}
+              )
+            })}
           </div>
         )
       )}

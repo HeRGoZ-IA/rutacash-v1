@@ -104,6 +104,7 @@ export type AuditAction =
   | 'CONFIRM_DISBURSEMENT'
   | 'CORRECT_PAYMENT'
   | 'REVERSE_PAYMENT'
+  | 'ANNUL_PAYMENT'
   | 'REQUEST_PAYMENT_ADJUSTMENT'
   | 'APPROVE_PAYMENT_ADJUSTMENT'
   | 'REJECT_PAYMENT_ADJUSTMENT'
@@ -505,6 +506,13 @@ export interface Payment {
   reversesPaymentId?: string
   /** En el pago original corregido: id del pago corregido que lo reemplaza. */
   correctedByPaymentId?: string
+  /**
+   * En el pago original ANULADO o corregido: id de su asiento de reversión. Sin
+   * `correctedByPaymentId` significa ANULACIÓN pura (sin reemplazo). Ausente en
+   * reversiones anteriores a 2026-10-03: el vínculo inverso `reversesPaymentId`
+   * del asiento sigue siendo la fuente para ellas.
+   */
+  reversalPaymentId?: string
   /** En el pago corregido: id del pago original al que corrige. */
   correctionOfPaymentId?: string
   /** Motivo de la corrección (obligatorio al corregir). */

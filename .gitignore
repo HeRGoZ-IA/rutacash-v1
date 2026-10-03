@@ -16,3 +16,4 @@ tests/_out.financialreversal.mjs
 tests/_out.routebase.mjs
 tests/_out.supervisorbase.mjs
 tests/_out.workertransfer.mjs
+tests/_out.paymentreversal.mjs

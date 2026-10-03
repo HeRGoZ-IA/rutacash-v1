@@ -18,15 +18,21 @@ import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
 import {
   generateInstallments, calculateTotalWithInterest,
   estimateFinalDate, calculateInstallmentValue,
-  getLastPaidInstallmentNumber,
+  getLastPaidInstallmentNumber, installmentsCoveredBy, installmentRangeLabel,
 } from '@/services/installmentEngine'
+import { annulPayment, canAnnulPayment } from '@/services/paymentCorrectionService'
+import { effectivePayments, paymentDisplayStateOf, paymentHistoryRows } from '@/lib/paymentState'
+import { compareByCreation } from '@/lib/eventOrder'
+import {
+  AnnulPaymentButton, AnnulPaymentModal, PaymentAnnulmentDetail, PaymentStateBadge, type AnnulPaymentTarget,
+} from '@/components/ui/PaymentAnnulment'
 import { registerPayment, quickAmounts } from '@/services/paymentService'
 import { CollectorPicker } from '@/components/ui/CollectorPicker'
 import { createDirectSale, findActiveSaleForClient } from '@/services/saleRequestService'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
-import type { Sale, Client, Route, Installment } from '@/models/types'
+import type { Sale, Client, Route, Installment, Payment, User } from '@/models/types'
 
 // Días de pago (1=lunes ... 6=sábado, 0=domingo)
 const WEEK_DAYS = [
@@ -55,6 +61,10 @@ export default function ActiveSalesPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [detailSale, setDetailSale] = useState<Sale | null>(null)
   const [detailInstallments, setDetailInstallments] = useState<Installment[]>([])
+  // Pagos del crédito abierto (vigentes y anulados) y nombres para mostrarlos.
+  const [detailPayments, setDetailPayments] = useState<Payment[]>([])
+  const [users, setUsers] = useState<User[]>([])
+  const [annulTarget, setAnnulTarget] = useState<(AnnulPaymentTarget & { paymentId: string }) | null>(null)
   const [lostOpen, setLostOpen] = useState(false)
   const [lostSale, setLostSale] = useState<Sale | null>(null)
   const [motivoPerdida, setMotivoPerdida] = useState('')
@@ -92,15 +102,23 @@ export default function ActiveSalesPage() {
   // Un abono registrado en otra pestaña (Cobrador/Supervisor, mismo navegador)
   // cambia saldos y parcelas: se recarga la lista sin spinner ni F5.
   const revision = useDataRevision()
-  useEffect(() => { if (revision > 0) load(true) }, [revision])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (revision === 0) return
+    load(true)
+    // El detalle abierto también se relee: un pago anulado en otra pestaña cambia
+    // saldo, parcelas y estado del crédito.
+    if (detailSale) refreshDetail(detailSale.id)
+  }, [revision])  // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load(silent = false) {
     if (!silent) setLoading(true)
-    const [rawSales, rawClients, rawRoutes] = await Promise.all([
+    const [rawSales, rawClients, rawRoutes, rawUsers] = await Promise.all([
       db.sales.where('tenantId').equals(tenantId).toArray(),
       db.clients.where('tenantId').equals(tenantId).toArray(),
       db.routes.where('tenantId').equals(tenantId).toArray(),
+      db.users.where('tenantId').equals(tenantId).toArray(),
     ])
+    setUsers(rawUsers)
     // RESTRICCIÓN POR RUTAS: ventas, clientes y rutas limitados a los autorizados.
     const allSales = filterByAccessibleRoute(user, rawSales)
     const allClients = filterByAccessibleRoute(user, rawClients)
@@ -219,8 +237,44 @@ export default function ActiveSalesPage() {
 
   async function openDetail(sale: Sale) {
     setDetailSale(sale)
-    const insts = await db.installments.where('saleId').equals(sale.id).toArray()
+    setDetailPayments([])
+    await refreshDetail(sale.id)
+  }
+
+  /** Relee venta, parcelas y pagos del detalle desde la base (fuente de verdad). */
+  async function refreshDetail(saleId: string) {
+    const [fresh, insts, pays] = await Promise.all([
+      db.sales.get(saleId),
+      db.installments.where('saleId').equals(saleId).toArray(),
+      db.payments.where('saleId').equals(saleId).toArray(),
+    ])
+    if (fresh) setDetailSale(fresh)
     setDetailInstallments(insts.sort((a, b) => a.numero - b.numero))
+    setDetailPayments(pays.sort(compareByCreation).reverse())
+  }
+
+  const userName = (id?: string) => (id ? users.find(u => u.id === id)?.nombre : undefined)
+
+  function openAnnul(p: Payment) {
+    if (!detailSale) return
+    const parcelas = installmentRangeLabel(installmentsCoveredBy(detailInstallments, effectivePayments(detailPayments), p.id))
+    setAnnulTarget({
+      paymentId: p.id,
+      cliente: clientMap.get(detailSale.clientId)?.nombre ?? 'Cliente',
+      credito: `${formatCurrency(detailSale.valorVenta, currency)} · ${formatDate(detailSale.fechaInicio)}`,
+      valor: p.valor, fecha: p.fecha,
+      cobrador: userName(p.collectorId), ruta: routeMap.get(p.routeId)?.nombre,
+      parcelas: parcelas || undefined,
+    })
+  }
+
+  async function confirmAnnul(reason: string) {
+    if (!annulTarget || !detailSale) return
+    await annulPayment({ actor: user, tenantId, paymentId: annulTarget.paymentId, reason })
+    toast.success('Pago anulado. El crédito se recalculó.')
+    setAnnulTarget(null)
+    await refreshDetail(detailSale.id)
+    await load(true)
   }
 
   // Registro de pago: TODA la lógica financiera vive en `paymentService`
@@ -470,9 +524,39 @@ export default function ActiveSalesPage() {
                 ))}
               </div>
             </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-700 mb-2">Pagos ({effectivePayments(detailPayments).length} vigentes)</p>
+              {detailPayments.length === 0 ? (
+                <p className="text-xs text-gray-400">Sin pagos registrados.</p>
+              ) : (
+                <div className="max-h-64 overflow-y-auto space-y-1.5">
+                  {paymentHistoryRows(detailPayments).map(({ payment: p, reversal }) => {
+                    const estado = paymentDisplayStateOf(p)
+                    return (
+                      <div key={p.id} className="px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs text-gray-700">{formatDate(p.fecha)}{userName(p.collectorId) ? ` · ${userName(p.collectorId)}` : ''}</p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className={`text-sm font-bold ${estado === 'vigente' ? 'text-emerald-600' : 'text-gray-400 line-through'}`}>+{formatCurrency(p.valor, currency)}</span>
+                            <PaymentStateBadge state={estado} />
+                            {canAnnulPayment(user, p) && <AnnulPaymentButton onClick={() => openAnnul(p)} />}
+                          </div>
+                        </div>
+                        {estado === 'anulado' && <PaymentAnnulmentDetail original={p} reversal={reversal} currency={currency} userName={userName} />}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </Modal>
       )}
+
+      <AnnulPaymentModal target={annulTarget} currency={currency}
+        onCancel={() => setAnnulTarget(null)} onConfirm={confirmAnnul} />
 
       {/* Confirmación: segunda venta activa del mismo cliente */}
       <Modal open={confirmSecondOpen} onClose={() => setConfirmSecondOpen(false)} title="Cliente con venta activa"

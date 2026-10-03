@@ -63,6 +63,8 @@ const MARCADORES = [
   ['La Base de la ruta cambió mientras completabas la venta.', true, 'Base viva + revalidación al vender (2026-10-02 R5)'],
   // Ronda 6: traspaso de efectivo entre trabajadores de una misma ruta (custodia).
   ['Traspasar a otro trabajador', true, 'traspaso interno entre trabajadores (2026-10-02 R6)'],
+  // Ronda 7: anulación de pagos con recálculo del crédito y control de efectivo.
+  ['Pago anulado. El crédito se recalculó.', true, 'anulación de pagos con recálculo del crédito (2026-10-02 R7)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

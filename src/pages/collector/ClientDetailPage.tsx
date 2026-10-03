@@ -4,6 +4,7 @@ import { useOpBase } from '@/hooks/useOpBase'
 import { ChevronLeft, MessageSquare, CreditCard } from 'lucide-react'
 import { InstallmentStatusBadge } from '@/components/ui/Badge'
 import { db } from '@/lib/db'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
@@ -46,7 +47,9 @@ export default function ClientDetailPage() {
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => { load() }, [id])
+  // Un pago registrado o anulado en otra pestaña cambia saldo y parcelas: se relee.
+  const revision = useDataRevision()
+  useEffect(() => { load() }, [id, revision])
 
   async function load() {
     if (!id) return

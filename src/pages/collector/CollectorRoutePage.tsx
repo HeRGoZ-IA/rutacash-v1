@@ -9,6 +9,9 @@ import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
+import { useDataRevision } from '@/hooks/useDataRevision'
+import { effectivePayments } from '@/lib/paymentState'
+import { compareByCreation } from '@/lib/eventOrder'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import {
   calculateCurrentInstallment, getLastPaidInstallmentNumber, isSaleDueToday, isSaleDisbursed,
@@ -50,7 +53,9 @@ export default function CollectorRoutePage() {
 
   const routeId = activeRouteId ?? user?.routeId ?? null
 
-  useEffect(() => { load() }, [user, routeId])
+  // Un pago registrado o ANULADO en otra pestaña cambia saldo, parcela y "pagó hoy".
+  const revision = useDataRevision()
+  useEffect(() => { load() }, [user, routeId, revision])
 
   async function load() {
     if (!routeId || !user) { setLoading(false); return }
@@ -60,15 +65,15 @@ export default function CollectorRoutePage() {
     const sales = allSales.filter(isSaleDisbursed)
     const clients = await db.clients.where('tenantId').equals(user.tenantId).toArray()
     const clientMap = new Map(clients.map(c => [c.id, c]))
-    const routePayments = await db.payments.where('routeId').equals(routeId).toArray()
+    // Solo pagos VIGENTES: un pago anulado (y su asiento de reversión, que lleva la
+    // misma fecha) no puede marcar la venta como "pagó hoy" ni como último abono.
+    const routePayments = effectivePayments(await db.payments.where('routeId').equals(routeId).toArray())
     const todayStr = today()
     const paidToday = new Set(routePayments.filter(p => p.fecha === todayStr).map(p => p.saleId))
-    // Último abono por venta
+    // Último abono VIGENTE por venta (orden createdAt + id; antes se comparaba el
+    // createdAt de un pago con la `fecha` guardada del anterior).
     const lastPaymentBySale = new Map<string, string>()
-    for (const p of routePayments) {
-      const prev = lastPaymentBySale.get(p.saleId)
-      if (!prev || p.createdAt > prev) lastPaymentBySale.set(p.saleId, p.fecha)
-    }
+    for (const p of [...routePayments].sort(compareByCreation)) lastPaymentBySale.set(p.saleId, p.fecha)
 
     const now = new Date()
     const result: RouteItem[] = []

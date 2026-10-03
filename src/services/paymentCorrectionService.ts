@@ -12,13 +12,17 @@
 //                    Administrador autorizado o el Super Admin; al aprobar se
 //                    ejecuta la misma reversión + reemplazo.
 // ============================================================
-import { db } from '@/lib/db'
+import { db, type RutaCashDB } from '@/lib/db'
 import { generateId } from '@/lib/utils'
-import { nowISO } from '@/lib/formatters'
+import { formatCurrency, nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { can } from '@/lib/permissions'
+import { normalizeReversalReason } from '@/lib/movementReversal'
+import { AuthzError } from '@/services/authz'
+import { reconciliationTables } from '@/services/cashCustodyService'
+import { computeRouteCashReconciliation, type RouteCashReconciliation } from '@/services/routeCashReconciliation'
 import { recalculateSaleFromPayments, calculateSaleBalance } from '@/services/installmentEngine'
-import { effectivePayments as onlyEffective, lastEffectivePaymentDate } from '@/lib/paymentState'
+import { effectivePayments as onlyEffective, isPaymentAnnullable, lastEffectivePaymentDate } from '@/lib/paymentState'
 import { resolveSealedCompletionDate } from '@/lib/creditHistory'
 import { protectingClosureFor } from '@/lib/settlementPeriods'
 import type { Payment, PaymentAdjustmentRequest, Sale, User, WeeklySettlement } from '@/models/types'
@@ -45,7 +49,7 @@ export interface ClosedPeriodDatabase {
  * La base es inyectable para poder probar la protección sin IndexedDB.
  */
 export async function isPaymentInClosedPeriod(
-  payment: Payment,
+  payment: Pick<Payment, 'routeId' | 'fecha'>,
   database: ClosedPeriodDatabase = db,
 ): Promise<boolean> {
   const settlements = await database.weeklySettlements.where('routeId').equals(payment.routeId).toArray()
@@ -63,7 +67,11 @@ export async function isPaymentInClosedPeriod(
 export { effectivePayments, isEffectivePayment, lastEffectivePaymentDate } from '@/lib/paymentState'
 
 /**
- * Recalcula parcelas y saldo/estado de la venta a partir de sus pagos efectivos.
+ * FUNCIÓN CANÓNICA DE RECÁLCULO DEL CRÉDITO. Reconstruye parcelas, saldo, estado
+ * y fecha de finalización de la venta DESDE CERO a partir de sus pagos vigentes
+ * (orden determinista createdAt + id). No "deshace" campo a campo: la misma lista
+ * de pagos vigentes produce siempre el mismo estado. La usan la corrección y la
+ * anulación de pagos.
  *
  * ATOMICIDAD: debe invocarse SIEMPRE dentro de la misma transacción que escribe los
  * pagos (`executeCorrection`). Antes se ejecutaba fuera, de modo que un fallo aquí
@@ -74,15 +82,15 @@ export { effectivePayments, isEffectivePayment, lastEffectivePaymentDate } from 
  * Se conserva intacta la semántica existente: una venta 'perdida' o 'refinanciada'
  * NUNCA cambia de estado al recomputar.
  */
-async function recomputeSale(saleId: string): Promise<void> {
-  const sale = await db.sales.get(saleId)
+export async function recomputeSale(saleId: string, database: RutaCashDB = db): Promise<void> {
+  const sale = await database.sales.get(saleId)
   if (!sale) return
-  const installments = await db.installments.where('saleId').equals(saleId).toArray()
-  const payments = await db.payments.where('saleId').equals(saleId).toArray()
+  const installments = await database.installments.where('saleId').equals(saleId).toArray()
+  const payments = await database.payments.where('saleId').equals(saleId).toArray()
   const vigentes = onlyEffective(payments)
   const recomputed = recalculateSaleFromPayments(installments, vigentes)
   for (const inst of recomputed) {
-    await db.installments.update(inst.id, { pagado: inst.pagado, saldo: inst.saldo, status: inst.status, diasMora: inst.diasMora })
+    await database.installments.update(inst.id, { pagado: inst.pagado, saldo: inst.saldo, status: inst.status, diasMora: inst.diasMora })
   }
   const newSaldo = calculateSaleBalance(recomputed)
   let status: Sale['status'] = sale.status
@@ -100,7 +108,7 @@ async function recomputeSale(saleId: string): Promise<void> {
     lastEffectivePaymentDate: lastEffectivePaymentDate(vigentes),
   })
 
-  await db.sales.update(saleId, {
+  await database.sales.update(saleId, {
     saldo: Math.max(0, newSaldo), status, fechaFinalizacion, updatedAt: nowISO(),
   })
 }
@@ -166,7 +174,7 @@ async function executeCorrection(original: Payment, actor: User, input: Correcti
     reversal.createdAt = reversal.correctedAt = sello
     corrected.createdAt = corrected.correctedAt = sello
     await db.payments.update(original.id, {
-      state: 'reversed', correctedByPaymentId: correctedId,
+      state: 'reversed', correctedByPaymentId: correctedId, reversalPaymentId: reversalId,
       correctionReason: input.reason, correctedBy: actor.id, correctedAt: sello,
     })
     await db.payments.add(reversal)
@@ -326,4 +334,152 @@ export async function countPendingAdjustmentRequestsForUser(
   return reqs.filter(r =>
     r.status === 'pending' && can(user, 'payment.approveAdjustment', { routeId: r.routeId, tenantId }),
   ).length
+}
+
+// ============================================================
+// ANULACIÓN ADMINISTRATIVA DE UN PAGO (ajustes del socio 2026-10-02, punto 7)
+// ------------------------------------------------------------
+// Un pago registrado por error (duplicado, valor mal digitado, cliente
+// equivocado, registro accidental) no se borra ni se edita: se ANULA.
+//
+//   original  → queda en `payments`, state 'reversed', con `reversalPaymentId`,
+//               motivo, quién y cuándo (`correctionReason/correctedBy/correctedAt`)
+//   reversión → asiento espejo state 'reversal', valor −X, `reversesPaymentId`,
+//               MISMA fecha contable y MISMO responsable (`collectorId`) que el
+//               original; `createdAt` = instante de la anulación
+//   crédito   → `recomputeSale`: parcelas, saldo, estado y fecha de finalización
+//               se reconstruyen desde los pagos vigentes (reabre si estaba saldado)
+//
+// Es la misma convención que ya usaba la corrección (reversión sin reemplazo):
+//   · Base de la ruta / motor de caja: suman con signo → +X −X = 0.
+//   · Reportes y vistas de cobro: excluyen el par (pagos vigentes).
+//   · Caja personal (cuadre): libro con signo POR INSTANTE → el −X cae en el ciclo
+//     en que se anula; un cuadre ya cerrado nunca se reescribe.
+//
+// EFECTIVO FÍSICO (revalidado dentro de la transacción, antes y después):
+//   · la Base de la ruta no puede quedar negativa;
+//   · si el −X cae en la caja de una persona, esa persona debe tener aún ese
+//     efectivo en manos (misma regla que la anulación de fondos, punto 3: el
+//     dinero entregado en mano solo se revierte si esa persona aún lo tiene).
+//     Si ya lo cuadró o lo usó, primero se le entrega Base por la diferencia;
+//   · si cae en la caja de la ruta (pago sin caja personal), no puede superar lo
+//     sin asignar;
+//   · la conciliación debe seguir cuadrando.
+// ============================================================
+export class PaymentAnnulmentError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PaymentAnnulmentError'
+  }
+}
+
+export interface AnnulPaymentParams {
+  actor: User | null | undefined
+  tenantId: string
+  paymentId: string
+  reason: string
+}
+
+/** ¿`actor` puede anular `payment`? La regla de periodo cerrado se revalida en el servicio. */
+export function canAnnulPayment(
+  actor: User | null | undefined,
+  payment: Pick<Payment, 'routeId' | 'tenantId' | 'state' | 'valor'>,
+): boolean {
+  return isPaymentAnnullable(payment) && can(actor, 'payment.reverse', { routeId: payment.routeId, tenantId: payment.tenantId })
+}
+
+function assertAnnulmentKeepsCashPossible(
+  antes: RouteCashReconciliation, despues: RouteCashReconciliation, responsableId: string, valor: number,
+): void {
+  if (despues.libro.saldo < 0 && despues.libro.saldo < antes.libro.saldo) {
+    throw new PaymentAnnulmentError(
+      `La Base de la ruta no alcanza para anular este pago (Base: ${formatCurrency(antes.libro.saldo)}).`,
+    )
+  }
+  const pA = antes.personas.find(p => p.userId === responsableId)
+  const pD = despues.personas.find(p => p.userId === responsableId)
+  if (pD && pD.posicion < 0 && pD.posicion < (pA?.posicion ?? 0)) {
+    const enManos = Math.max(0, pA?.posicion ?? 0)
+    throw new PaymentAnnulmentError(
+      `${pD.nombre} ya no tiene en manos el efectivo de este pago (en manos: ${formatCurrency(enManos)}). ` +
+      `Antes de anular, entrégale Base desde la caja de la ruta por ${formatCurrency(valor - enManos)}.`,
+    )
+  }
+  if (despues.noAsignado < 0 && despues.noAsignado < antes.noAsignado) {
+    throw new PaymentAnnulmentError(
+      `La caja de la ruta no tiene ese efectivo sin asignar (sin asignar: ${formatCurrency(Math.max(0, antes.noAsignado))}).`,
+    )
+  }
+  if (antes.cuadra && !despues.cuadra) {
+    throw new PaymentAnnulmentError('La anulación descuadraría la conciliación de la ruta. No se aplicó.')
+  }
+}
+
+export async function annulPayment(
+  params: AnnulPaymentParams, database: RutaCashDB = db,
+): Promise<{ original: Payment; reversal: Payment }> {
+  if (!params.actor) throw new AuthzError('Acción no autorizada: falta el usuario.')
+  const actor = params.actor
+  const motivo = normalizeReversalReason(params.reason)
+  if (!motivo) throw new PaymentAnnulmentError('Indica el motivo de la anulación.')
+  const { tenantId, paymentId } = params
+
+  let original!: Payment
+  let reversal!: Payment
+  let periodClosed = false
+  await database.transaction('rw', [...reconciliationTables(database), database.installments, database.weeklySettlements], async () => {
+    // 1–3. Lectura fresca bajo bloqueo: existe, es de la empresa, sigue vigente.
+    const p = await database.payments.get(paymentId)
+    if (!p || p.tenantId !== tenantId) throw new PaymentAnnulmentError('El pago no existe.')
+    if (p.state === 'reversal') throw new PaymentAnnulmentError('Una reversión no se puede anular.')
+    if (p.state === 'reversed') throw new PaymentAnnulmentError('Este pago ya fue anulado o corregido.')
+    if (!isPaymentAnnullable(p)) throw new PaymentAnnulmentError('Este pago no se puede anular.')
+    // 4–5. Capacidad y alcance sobre la ruta REAL del pago (y periodo cerrado).
+    periodClosed = await isPaymentInClosedPeriod(p, database)
+    if (!can(actor, 'payment.reverse', { routeId: p.routeId, tenantId, periodClosed })) {
+      throw new AuthzError('No tienes permiso para anular pagos de esta ruta.')
+    }
+    const sale = await database.sales.get(p.saleId)
+    if (!sale || sale.tenantId !== tenantId) throw new PaymentAnnulmentError('El crédito del pago no existe.')
+
+    const sello = nowISO()
+    const antes = await computeRouteCashReconciliation({ tenantId, routeId: p.routeId, hasta: sello }, database)
+
+    // 6–8. Asiento espejo + marca del original + recálculo canónico del crédito.
+    reversal = {
+      id: generateId(),
+      tenantId, saleId: p.saleId, clientId: p.clientId, routeId: p.routeId,
+      // Responsable heredado (se descuenta a quien recibió el dinero); autor = quien anula.
+      collectorId: p.collectorId, createdByUserId: actor.id,
+      valor: -p.valor, fecha: p.fecha, tipo: p.tipo,
+      observacion: `Anulación del pago ${p.id}`,
+      syncStatus: 'synced', createdAt: sello,
+      state: 'reversal', reversesPaymentId: p.id,
+      correctionReason: motivo, correctedBy: actor.id, correctedAt: sello,
+    }
+    original = {
+      ...p, state: 'reversed', reversalPaymentId: reversal.id,
+      correctionReason: motivo, correctedBy: actor.id, correctedAt: sello,
+    }
+    await database.payments.add(reversal)
+    await database.payments.put(original)
+    await recomputeSale(p.saleId, database)
+
+    // 9. Efectivo físico posible tras la anulación; si no, rollback completo.
+    const despues = await computeRouteCashReconciliation({ tenantId, routeId: p.routeId, hasta: sello }, database)
+    assertAnnulmentKeepsCashPossible(antes, despues, p.collectorId, p.valor)
+  })
+
+  // 10. Auditoría fuera de la transacción (`auditLogs` no está en su ámbito). La
+  // traza mínima —quién, cuándo, motivo, vínculos— ya quedó atómica en los pagos.
+  await logAction({
+    tenantId, userId: actor.id, userRole: actor.rol, routeId: original.routeId,
+    action: 'ANNUL_PAYMENT', entityType: 'Payment', entityId: original.id,
+    descripcion: `Pago anulado (${original.valor}): ${motivo}`, motivo,
+    before: { valor: original.valor, fecha: original.fecha, estado: 'vigente' },
+    after: { estado: 'anulado', reversalId: reversal.id },
+    metadata: { reversalId: reversal.id, saleId: original.saleId, collectorId: original.collectorId, periodClosed },
+  }).catch(() => undefined)
+
+  return { original, reversal }
 }

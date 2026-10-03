@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { ClipboardList } from 'lucide-react'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { db } from '@/lib/db'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
@@ -33,7 +34,9 @@ export default function CollectorDailyReportPage() {
 
   const routeId = activeRouteId ?? user?.routeId ?? null
 
-  useEffect(() => { load() }, [user, routeId])
+  // Un pago registrado o anulado en otra pestaña cambia saldo y parcelas: se relee.
+  const revision = useDataRevision()
+  useEffect(() => { load() }, [user, routeId, revision])
 
   async function load() {
     if (!user || !routeId) { setLoading(false); return }

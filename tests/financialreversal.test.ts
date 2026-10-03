@@ -24,6 +24,7 @@ import {
   canReverseRouteFund, canReverseTransfer, reverseCapitalMovement, reverseTransfer, reverseWithdrawal,
 } from '../src/services/movementReversalService'
 import { isReversible, pairReversals, reversalStateOf } from '../src/lib/movementReversal'
+import { compareByCreation } from '../src/lib/eventOrder'
 import { transferTotalsFor } from '../src/lib/transferTotals'
 import { authorizedRouteIdsOf } from '../src/lib/permissions'
 import type { Transfer, User } from '../src/models/types'
@@ -323,10 +324,17 @@ await spec('FIN-REV-012', 'UI/listado: el original sigue visible como anulado', 
   const a = await registerCapital({ actor: ADMIN, tenantId: T, routeId: R1, valor: 21_000 })
   const b = await registerCapital({ actor: ADMIN, tenantId: T, routeId: R1, valor: 21_500 })
   await reverseCapitalMovement({ actor: ADMIN, tenantId: T, movementId: b.id, reason: MOTIVO })
-  const filas = pairReversals((await db.capitalMovements.toArray()).sort((x, y) => x.createdAt.localeCompare(y.createdAt)))
+  // PRE-R7: `a` y `b` pueden crearse en el mismo milisegundo. El orden de las filas es
+  // el determinista createdAt + id; las filas se identifican por id, no por posición.
+  const movs = (await db.capitalMovements.toArray()).sort(compareByCreation)
+  const filas = pairReversals(movs)
   metric('filas', filas.map(f => `${f.movement.valor} ${reversalStateOf(f.movement)}${f.reversal ? ` (reversión ${f.reversal.valor})` : ''}`).join(' · '))
-  assert(filas.length === 2 && filas[0].movement.id === a.id && filas[1].movement.id === b.id, 'el original desapareció o la reversión salió suelta')
-  assert(reversalStateOf(filas[1].movement) === 'anulado' && filas[1].reversal?.valor === -21_500, 'el anulado no muestra su reversión')
+  const filaA = filas.find(f => f.movement.id === a.id)
+  const filaB = filas.find(f => f.movement.id === b.id)
+  assert(filas.length === 2 && !!filaA && !!filaB, 'el original desapareció o la reversión salió suelta')
+  assert(filas.map(f => f.movement.id).join() === movs.filter(m => !m.reversesId).map(m => m.id).join(), 'las filas no conservan el orden determinista')
+  assert(reversalStateOf(filaA!.movement) === 'vigente' && !filaA!.reversal, 'el vigente aparece anulado')
+  assert(reversalStateOf(filaB!.movement) === 'anulado' && filaB!.reversal?.valor === -21_500, 'el anulado no muestra su reversión')
   for (const p of ['src/pages/admin/TransfersPage.tsx', 'src/pages/admin/CapitalPage.tsx', 'src/pages/admin/WithdrawalsPage.tsx']) {
     const src = fs.readFileSync(p, 'utf8')
     const ok = src.includes('pairReversals(') && src.includes('<AnnulledBadge />') && src.includes('<ReversalDetail') && src.includes('<ReverseButton') && !/Eliminar/.test(src)
@@ -346,13 +354,13 @@ await spec('FIN-REV-013', 'caso real: Barreiro 21.000 + 21.500, anular 21.500', 
   const antes = await vista()
   await reverseTransfer({ actor: ADMIN, tenantId: T, movementId: mal.id, reason: 'Valor duplicado' })
   const despues = await vista()
-  const filas = pairReversals(despues.transfers.sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
+  const filas = pairReversals(despues.transfers.sort(compareByCreation))
   metric('antes', `entrante ${antes.entrante} · neto ${antes.neto} · ${antes.cantidad} mov.`)
   metric('después', `entrante ${despues.entrante} · saliente ${despues.saliente} · neto ${despues.neto} · ${despues.cantidad} mov.`)
   metric('historial', filas.map(f => `${f.movement.descripcion} ${f.movement.valor} ${reversalStateOf(f.movement)}`).join(' · '))
   assert(antes.entrante === 42_500 && antes.neto === 42_500, 'el estado inicial no coincide con el reportado')
   assert(despues.entrante === 21_000 && despues.neto === 21_000 && despues.saliente === 0, 'los totales no muestran el efecto vigente')
-  assert(despues.transfers.length === 3 && filas.length === 2 && reversalStateOf(filas[1].movement) === 'anulado', 'se perdió el historial del 21.500')
+  assert(despues.transfers.length === 3 && filas.length === 2 && reversalStateOf(filas.find(f => f.movement.id === mal.id)!.movement) === 'anulado', 'se perdió el historial del 21.500')
   assert(await saldo(R1) === 21_000 && await socioSaldo() === -21_000, 'Base o Caja socios no reflejan la anulación')
 })
 
