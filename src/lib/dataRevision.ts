@@ -24,6 +24,15 @@ export const OPERATIONAL_TABLES = [
 ] as const
 
 /**
+ * Tablas que mueven la BASE de la ruta: exactamente las que lee `getRouteLedger`.
+ * La custodia (`cashCustodyMovements`) y los cuadres no la cambian: solo dicen QUIÉN
+ * tiene el efectivo, así que no obligan a releer la Base.
+ */
+export const ROUTE_BASE_TABLES = [
+  'capitalMovements', 'payments', 'sales', 'expenses', 'transfers', 'withdrawals',
+] as const
+
+/**
  * Tablas tocadas en un aviso de Dexie. Las claves tienen la forma
  * `idb://<base>/<tabla>/<índice>`; se extrae `<tabla>`.
  */
@@ -55,4 +64,40 @@ export function subscribeDataChanges(
   }
   Dexie.on.storagemutated.subscribe(handler)
   return () => Dexie.on.storagemutated.unsubscribe(handler)
+}
+
+/**
+ * LECTURA VIVA (sin React): ejecuta `query` ya y la repite tras cada escritura
+ * confirmada en `tables`, con la misma señal y la misma agrupación de ráfagas que
+ * `useDataRevision`. Es lo que usa un hook cuyo único dato es UNA consulta (la Base
+ * de una ruta): así no hay estado capturado al montar que se quede viejo.
+ *
+ * Solo se publica la respuesta de la ÚLTIMA lectura lanzada: si una lectura anterior
+ * termina tarde (otra ruta, una revisión ya superada), se descarta. Tras llamar a la
+ * función devuelta no se publica nada más y la suscripción queda cancelada.
+ * Una lectura que falla conserva el último valor publicado.
+ */
+export function watchQuery<T>(
+  tables: readonly string[],
+  query: () => Promise<T>,
+  onValue: (value: T) => void,
+  debounceMs = 150,
+): () => void {
+  let seq = 0
+  let closed = false
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const run = () => {
+    const mine = ++seq
+    query().then(value => { if (!closed && mine === seq) onValue(value) }, () => {})
+  }
+  const unsubscribe = subscribeDataChanges(tables, () => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(run, debounceMs)
+  })
+  run()
+  return () => {
+    closed = true
+    if (timer) clearTimeout(timer)
+    unsubscribe()
+  }
 }

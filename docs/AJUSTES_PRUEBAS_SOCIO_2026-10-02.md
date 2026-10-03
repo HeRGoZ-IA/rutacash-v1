@@ -18,7 +18,7 @@ pendientes derivados (1.a, 1.b…) están resueltos.
 - [x] 2. Aviso de crédito activo en Secretaría
 - [x] 3. Anulación/reversión auditable de movimientos financieros
 - [x] 4. Base unificada entre módulos
-- [ ] 5. Auditoría del origen de Base en Supervisor
+- [x] 5. Auditoría del origen de Base en Supervisor
 - [ ] 6. Traspaso de efectivo entre trabajadores de una misma ruta
 - [ ] 7. Reversión de pagos y recálculo completo
 - [ ] 8. Sincronización de anulaciones
@@ -355,20 +355,153 @@ Fabio 40.000; el Cobrador ve "Base recibida 40.000" = "En manos de Fabio".
 
 ---
 
+## 5. Auditoría del origen de Base en Supervisor — CERRADO
+
+La Ronda 4 dejó una sola fórmula y una sola fuente (`getRouteBase`). Esta ronda no
+toca la semántica de Base: corrige **cuándo** se vuelve a leer y **con qué cifra**
+se autoriza una venta.
+
+### Mecanismo de refresco existente (se reutiliza; no hay uno nuevo)
+
+- `src/lib/dataRevision.ts`: `subscribeDataChanges` escucha `Dexie.on.storagemutated`,
+  que Dexie emite al confirmar CUALQUIER transacción de escritura y reenvía a las
+  demás pestañas del mismo origen (BroadcastChannel). Filtra por tabla.
+- `useDataRevision()` convierte la señal en un contador (ráfagas agrupadas 150 ms);
+  las pantallas lo ponen en las dependencias del efecto que carga datos.
+- Nadie incrementa la revisión a mano: la dispara cualquier escritura confirmada
+  (capital, retiros, transferencias, ventas, pagos, gastos, custodia, cuadres,
+  reversiones). No hay liveQuery, Redux, contextos ni polling; Zustand solo guarda la
+  sesión y la ruta activa.
+
+### Causa exacta (reproducida, no supuesta)
+
+Pantallas que leían la Base **una sola vez al montarse** y no escuchaban la señal:
+
+| Consumidor | Antes | Efecto |
+|---|---|---|
+| `CollectorSelectRoutePage` (tarjeta del Supervisor) | efecto con `[user]` | Base congelada con la pantalla abierta |
+| `useRouteCapital` / `useCapitalGuard` (Nueva venta, Nuevo cliente) | efecto con `[routeId]` | Base congelada: **bloqueaba ventas válidas** si la Base subía; mostraba una Base inexistente si bajaba |
+| `RoutesPage` (Admin) | efecto con `[tenantId]` | Base congelada |
+| `SocioDashboardPage` | efecto con `[routes]` | Base congelada |
+
+Navegar (volver al listado, "atrás", cambiar de ruta) sí refrescaba, porque la
+pantalla se vuelve a montar. El valor viejo aparecía con la pantalla ABIERTA mientras
+otro flujo escribía: el caso del socio, que prueba todos los roles en un solo
+navegador con varias pestañas (misma IndexedDB).
+
+Ya eran reactivas: Mi efectivo (`CollectorCashClosePage`) y Cuadrar trabajadores
+(`WorkerCashSettlementPanel`, `RouteCashReconciliationCard`). `CollectorHomePage` no
+muestra Base.
+
+En el servicio, `createDirectSale` comprobaba la Base **antes** de abrir la
+transacción de escritura: dos ventas simultáneas de 80.000 con Base 100.000 se
+aceptaban ambas (Base −60.000; reproducido con el código anterior en SUP-BASE-016).
+
+**Reproducción en Chrome real con el código de b1bfcf7** (dos pestañas del mismo
+perfil: el Supervisor con la pantalla abierta y otra pestaña que escribe con los
+servicios reales; `tmp/sup-base-e2e/run.mjs`): 14/26. La tarjeta de Barreiro siguió en
+1.000.000 tras +200.000 de capital, −100.000 de retiro, una transferencia y las
+anulaciones. Nueva venta siguió en 1.030.000 con la Base real en 1.530.000, y el
+botón "Crear venta" quedó bloqueado para una venta válida de 1.200.000. RoutesPage y
+Socio no cambiaron tras capital o retiro. Las diferencias por préstamos con inicio
+futuro ya se corrigieron en la Ronda 4 y no intervienen.
+
+### Solución
+
+- `watchQuery` (`dataRevision.ts`): la misma suscripción y agrupación que
+  `useDataRevision`, para hooks cuyo único dato es una consulta. Publica solo la
+  respuesta de la ÚLTIMA lectura (una tardía se descarta) y nada tras desmontar.
+  `ROUTE_BASE_TABLES` contiene las tablas del libro (la custodia no mueve la Base).
+- `useRouteCapital`: Base viva mediante `watchQuery`. El valor se guarda junto a su
+  `routeId` y solo se entrega si coincide (al pasar de A a B nunca muestra la Base
+  de A).
+- `useCapitalGuard`: reutiliza `useRouteCapital` (sin consulta duplicada) y expone
+  `recheck(valor)`, que lee `getRouteBase` en el momento de enviar.
+- Nueva venta y Nuevo cliente deciden el envío con `recheck` (Base vigente), no con
+  la cifra pintada. Si cambió, se muestra «La Base de la ruta cambió mientras
+  completabas la venta. …» (marcador R5).
+- `createDirectSale` revalida la Base **dentro** de la transacción `rw`, con las
+  tablas del libro en su alcance. IndexedDB serializa las escrituras: ningún retiro,
+  transferencia ni otra venta se cuela entre la lectura y la escritura.
+- `CollectorSelectRoutePage`, `RoutesPage` y `SocioDashboardPage`: `useDataRevision`
+  en las dependencias, recarga silenciosa (sin spinner) y descarte de cargas
+  superadas (`alive` o secuencia).
+- `CollectorCashClosePage` (Mi efectivo), que ya era reactiva: ahora descarta
+  respuestas superadas y muestra el spinner al CAMBIAR de ruta en vez de las cifras
+  de la anterior.
+- `RouteCashReconciliationCard` no pinta la conciliación de otra ruta mientras llega
+  la nueva.
+- Sin `setInterval`, polling ni `location.reload()`.
+
+### Validación de servicio
+
+| Caso | Resultado |
+|---|---|
+| Pantalla con 100.000; otra operación deja 20.000; venta de 80.000 | rechazada («supera la Base de la ruta») |
+| La Base sube de 20.000 a 120.000 tras abrir; venta de 80.000 | aceptada |
+| Dos ventas simultáneas de 80.000 con Base 100.000 | una aceptada y una rechazada; Base 20.000 |
+| Cliente + venta rechazada por Base | no queda cliente huérfano (misma transacción) |
+
+### Tests
+
+`npm run test:supervisorbase` (nuevo, Dexie real): SUP-BASE-001 … 020, 20/20 PASS.
+Cada pantalla se prueba como señal (`watchQuery` / `storagemutated`) más el servicio
+que llama, más su cableado estático (depende de la revisión y descarta respuestas
+superadas). Mutación: con el `saleRequestService` anterior falla SUP-BASE-016 (dos
+ventas simultáneas aceptadas, Base −60.000).
+
+### Prueba visual (Chrome headless, `tmp/sup-base-e2e/run.mjs`)
+
+Después del fix: 31/31, sin errores de página. 412 px (Supervisor), 420 px (Socio) y
+1366 px (Admin/Rutas). Tarjeta, Mi efectivo, Cuadrar, Nueva venta, RoutesPage y Socio
+se actualizan sin recargar tras capital, retiro, transferencia, anulaciones, entrega
+y devolución de Base. Al pasar A→B→A en Mi efectivo y en Nueva venta (cliente de otra
+ruta) nunca aparece la Base de la ruta anterior (muestreo cada 20–25 ms). Un clic en
+"Crear venta" dentro de la ventana de 150 ms tras otra venta se rechaza con la Base
+vigente (30.000) y la pantalla se pone al día.
+
+### Hallazgo de login (fuera del checklist)
+
+Investigado. La app no tiene ningún listener de sesión entre pestañas y el login no
+usa `useDataRevision`. Tras cerrar la sesión del Supervisor, el formulario se mantuvo
+estable 3 s mientras se escribía y el login de Admin funcionó. En headless, el
+"reinicio" se debió a clics que CDP no entregó al DOM tras cerrar sesión (artefacto de
+la herramienta). **No está relacionado con la Base**; queda como pendiente separado:
+pedir al socio los pasos exactos (navegador, si había otra pestaña abierta, si pulsó
+F5).
+
+### Archivos
+
+- `src/lib/dataRevision.ts` (`ROUTE_BASE_TABLES`, `watchQuery`)
+- `src/hooks/useRouteCapital.ts`, `src/hooks/useCapitalGuard.ts`
+- `src/services/saleRequestService.ts` (Base dentro de la transacción)
+- `src/pages/collector/CollectorSelectRoutePage.tsx`, `CollectorNewSalePage.tsx`,
+  `CollectorNewClientPage.tsx`, `CollectorCashClosePage.tsx`
+- `src/components/settlement/RouteCashReconciliationCard.tsx`
+- `src/pages/admin/RoutesPage.tsx`, `src/pages/socio/SocioDashboardPage.tsx`
+- `tests/supervisorbase.test.ts` (nuevo) · `package.json` · `.gitignore`
+- `scripts/verify-deploy.mjs` (marcador R5)
+
+**Pendientes derivados:** ninguno.
+
+---
+
 ## Hallazgos registrados para rondas posteriores (sin implementar)
 
-- **Punto 5 (Supervisor):**
-  - Consumidores de la Base SIN `useDataRevision` (no se recalculan solos):
-    `CollectorSelectRoutePage` (tarjeta "Base de la ruta" del Supervisor),
-    `RoutesPage`, `SocioDashboardPage`, `useCapitalGuard` y `useRouteCapital`
-    (usados por Nueva venta/Nuevo cliente del Supervisor). Causa probable de
-    "Supervisor muestra un valor viejo".
-  - Hasta esta ronda, la Base del Admin/Supervisor y el libro de los cuadres podían
-    diferir por préstamos con inicio futuro (corregido aquí); revisar si explica
-    casos reales del socio.
-  - En un mismo navegador, cambiar de usuario en la misma pestaña tras una sesión
-    de Supervisor dejó el formulario de login reiniciándose al escribir (prueba
-    visual). Revisar el cierre de sesión / estado obsoleto.
+- **(Resuelto en Ronda 5)** Punto 5 (Supervisor): consumidores de la Base sin
+  refresco y Base leída fuera de la transacción de venta. El hallazgo de login
+  resultó independiente (ver Punto 5, "Hallazgo de login").
+- (Ronda 5) **Decisión de negocio, sin implementar:** aprobar una solicitud
+  (`approveSaleRequest`) y confirmar su desembolso (`confirmDisbursement`) NO
+  consultan la Base: una solicitud aprobada puede desembolsarse aunque supere la
+  Base (y dejarla negativa). No es un valor obsoleto sino una regla no definida;
+  confirmar con el socio si el desembolso debe exigir Base suficiente.
+- (Ronda 5) Ventas activas y Clientes del Admin ya avisan con la Base viva, pero su
+  chequeo previo no relee al enviar (el servicio sí revalida dentro de la
+  transacción, así que no se puede vender por encima de la Base).
+- (Ronda 5) `CollectorHomePage` (KPIs del día, no Base) carga solo al montar, y la
+  vista previa de `WorkerCashSettlementPanel` puede mostrar un instante la ruta
+  anterior al cambiar de ruta en Liquidación del Admin. No afectan a la Base.
 
 - **(Resuelto en Ronda 4)** Punto 4/5 (Base): conviven dos "Base": el libro (`getCashboxSummary.saldoActual`,
   que muestran Capital y Retiros como "Base actual") y la caja no asignada

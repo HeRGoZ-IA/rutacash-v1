@@ -215,16 +215,25 @@ export async function createDirectSale(input: SaleInputs, actor: User, opts: { n
   if (input.valorVenta > limite) {
     throw new SaleRuleError(`El valor supera el límite de venta directa (${limite}). Envíala como solicitud.`)
   }
-  if (!(await hasCapitalForSale(input.routeId, input.valorVenta))) {
-    throw new SaleRuleError('La venta supera la Base de la ruta: no hay capital suficiente.')
-  }
   const { sale, installments } = buildSaleWithInstallments(input, 'desembolsado')
-  await db.transaction('rw', [db.sales, db.installments, db.clients], async () => {
+  // El libro completo de la ruta entra en la transacción: la Base se lee con el
+  // bloqueo de escritura ya obtenido (ver abajo).
+  await db.transaction('rw', [
+    db.sales, db.installments, db.clients,
+    db.capitalMovements, db.payments, db.expenses, db.transfers, db.withdrawals,
+  ], async () => {
     // Primera lectura: bloqueo de `sales` obtenido. Leer los créditos del cliente y
     // escribir la venta en la MISMA transacción impide que dos intentos simultáneos
     // vean "sin crédito" y creen dos ventas (IndexedDB serializa las transacciones
     // de escritura sobre el mismo almacén).
     const activos = activeCreditsOf(await db.sales.where('clientId').equals(input.clientId).toArray(), input.clientId, input.tenantId)
+    // CAPITAL con la Base VIGENTE (punto 5, 2026-10-02): se revalida aquí, no antes de
+    // abrir la transacción. Ningún retiro, transferencia ni otra venta (de esta u otra
+    // pestaña) puede colarse entre la lectura de la Base y la escritura de la venta,
+    // y la pantalla nunca decide con la cifra que tenía al abrirse.
+    if (!(await hasCapitalForSale(input.routeId, input.valorVenta))) {
+      throw new SaleRuleError('La venta supera la Base de la ruta: no hay capital suficiente.')
+    }
     const decision = decideSaleOrigination({
       actor, canCreateDirect: true, canCreateRequest: can(actor, 'sale.createRequest', ctx), activeCredits: activos.length,
     })

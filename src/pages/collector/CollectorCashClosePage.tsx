@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Calculator, TrendingUp, TrendingDown, Banknote, Wallet, MapPin, Landmark, Info, AlertTriangle, ChevronRight,
@@ -57,22 +57,37 @@ export default function CollectorCashClosePage() {
   const cuadraOtros = can(user, 'cashSettlement.close', { routeId: routeId ?? undefined, tenantId })
 
   // Un cobro, desembolso, gasto o cuadre confirmado en esta u otra pestaña recalcula.
+  // Punto 5 (2026-10-02): una carga superada (otra ruta u otra revisión) no publica
+  // (`vigente`), y al CAMBIAR de ruta se muestra el spinner en lugar de las cifras de
+  // la ruta anterior; las recargas de la misma ruta siguen siendo silenciosas.
   const revision = useDataRevision()
-  useEffect(() => { load(revision > 0) }, [user, routeId, verCajaRuta, revision])
+  const rutaCargada = useRef<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    load(() => alive)
+    return () => { alive = false }
+  }, [user, routeId, verCajaRuta, revision])
 
-  async function load(silent = false) {
+  async function load(vigente: () => boolean) {
     if (!user || !routeId) { setLoading(false); return }
-    if (!silent) setLoading(true)
+    if (rutaCargada.current !== routeId) setLoading(true)
+    let nuevoCiclo: CashSettlementPreview | null
     try {
-      setCiclo(await previewCashSettlement({ actor: user, tenantId: user.tenantId, routeId, userId: user.id }))
+      nuevoCiclo = await previewCashSettlement({ actor: user, tenantId: user.tenantId, routeId, userId: user.id })
     } catch {
-      setCiclo(null)
+      nuevoCiclo = null
     }
-    setHoy(await getCollectorDailyCashSummary({ routeId, collectorId: user.id, fecha: today() }))
-    setMisCuadres((await listCashSettlementsForUser(user, user.tenantId))
-      .filter(c => c.userId === user.id && c.routeId === routeId).slice(0, 5))
+    const nuevoHoy = await getCollectorDailyCashSummary({ routeId, collectorId: user.id, fecha: today() })
+    const cuadres = (await listCashSettlementsForUser(user, user.tenantId))
+      .filter(c => c.userId === user.id && c.routeId === routeId).slice(0, 5)
     // Fail-closed: si no tiene la capacidad, el dato financiero NO se pide.
-    setRoute(verCajaRuta ? await getRouteFinancialSummary(routeId) : null)
+    const ruta = verCajaRuta ? await getRouteFinancialSummary(routeId) : null
+    if (!vigente()) return
+    setCiclo(nuevoCiclo)
+    setHoy(nuevoHoy)
+    setMisCuadres(cuadres)
+    setRoute(ruta)
+    rutaCargada.current = routeId
     setLoading(false)
   }
 

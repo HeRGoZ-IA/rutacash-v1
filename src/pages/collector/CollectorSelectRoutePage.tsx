@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { getAuthorizedRouteIds } from '@/lib/roles'
 import { can } from '@/lib/permissions'
 import { formatCurrency } from '@/lib/formatters'
@@ -40,14 +41,23 @@ export default function CollectorSelectRoutePage() {
   const [offices, setOffices] = useState<Office[]>([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => { load() }, [user])
+  // Antes solo se cargaba al montar: con esta pantalla abierta, un capital, retiro,
+  // transferencia o anulación hecho en otra pestaña dejaba la Base congelada (punto 5,
+  // 2026-10-02). Ahora se recalcula en silencio (sin spinner) con cada escritura, y
+  // una carga superada por otra más nueva no pisa el resultado (`vigente`).
+  const revision = useDataRevision()
+  useEffect(() => {
+    let alive = true
+    load(() => alive)
+    return () => { alive = false }
+  }, [user, revision])
 
-  async function load() {
+  async function load(vigente: () => boolean) {
     if (!user) { setLoading(false); return }
     const ids = getAuthorizedRouteIds(user)
     const all = await db.routes.where('tenantId').equals(user.tenantId).toArray()
     const mine = all.filter(r => ids.includes(r.id))
-    setOffices(await db.offices.where('tenantId').equals(user.tenantId).toArray())
+    const oficinas = await db.offices.where('tenantId').equals(user.tenantId).toArray()
     const result: RouteSummary[] = []
     for (const route of mine) {
       const sales = (await db.sales.where('routeId').equals(route.id).and(s => s.status === 'activa').toArray()).filter(isSaleDisbursed)
@@ -62,6 +72,8 @@ export default function CollectorSelectRoutePage() {
         base: verBase ? await getRouteAvailableCapital(route.id) : undefined,
       })
     }
+    if (!vigente()) return
+    setOffices(oficinas)
     setSummaries(result)
     setLoading(false)
   }

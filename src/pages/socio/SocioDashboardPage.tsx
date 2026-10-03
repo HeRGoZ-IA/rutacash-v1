@@ -4,6 +4,7 @@ import { useAccessibleRoutes } from '@/hooks/useAccessibleRoutes'
 import { useAccessibleOffices } from '@/hooks/useAccessibleOffices'
 import { groupRoutesByOffice } from '@/lib/officeGrouping'
 import { useTenant } from '@/hooks/useTenant'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { getRouteFinancialSummary } from '@/services/cashboxEngine'
 import { formatCurrency } from '@/lib/formatters'
 import type { RouteFinancialSummary, Route } from '@/models/types'
@@ -22,10 +23,16 @@ export default function SocioDashboardPage() {
   const [summaries, setSummaries] = useState<Record<string, RouteFinancialSummary>>({})
   const [busy, setBusy] = useState(false)
 
+  // Reactivo (punto 5, 2026-10-02): antes solo se calculaba al montar y una operación
+  // hecha en otra pestaña no llegaba al consolidado. `alive` descarta una respuesta
+  // superada por otra más nueva.
+  const revision = useDataRevision()
   useEffect(() => {
     let alive = true
-    if (routes.length === 0) { setSummaries({}); return }
-    setBusy(true)
+    // Mientras las rutas cargan llega un `[]` nuevo en cada render: no se crea otro
+    // objeto vacío (re-render en bucle).
+    if (routes.length === 0) { setSummaries(s => Object.keys(s).length ? {} : s); return }
+    if (revision === 0) setBusy(true)
     Promise.all(routes.map(r => getRouteFinancialSummary(r.id))).then(list => {
       if (!alive) return
       const map: Record<string, RouteFinancialSummary> = {}
@@ -34,7 +41,7 @@ export default function SocioDashboardPage() {
       setBusy(false)
     })
     return () => { alive = false }
-  }, [routes])
+  }, [routes, revision])
 
   if (loading) return <Spinner />
 

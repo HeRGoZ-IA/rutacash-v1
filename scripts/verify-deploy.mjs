@@ -59,6 +59,8 @@ const MARCADORES = [
   // Ronda 4: una sola "Base de la ruta" (getRouteBase) y etiquetas unificadas.
   ['La venta supera la Base de la ruta: no hay capital suficiente.', true, 'Base de la ruta como fuente única (2026-10-02 R4)'],
   ['Libro de la ruta', false, 'etiqueta retirada: la conciliación muestra "Base de la ruta" (≤2026-10-02 R3)'],
+  // Ronda 5: Base del Supervisor viva y revalidada al enviar la venta.
+  ['La Base de la ruta cambió mientras completabas la venta.', true, 'Base viva + revalidación al vender (2026-10-02 R5)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

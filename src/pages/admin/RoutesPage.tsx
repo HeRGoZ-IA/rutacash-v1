@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Plus, MapPin, Users, DollarSign, Edit, ToggleLeft, ToggleRight, Trash2, AlertTriangle, Building2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -11,6 +11,7 @@ import { DateRangeFilter } from '@/components/ui/DateRangeFilter'
 import { ConfirmDiscardModal } from '@/components/ui/ConfirmDiscardModal'
 import { RouteAssignedUsers } from '@/components/ui/RouteAssignedUsers'
 import { useDirtyForm } from '@/hooks/useDirtyForm'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { syncRouteMetrics } from '@/platform/companyControlService'
@@ -93,7 +94,12 @@ export default function RoutesPage() {
     return `RT-${String(max + 1).padStart(3, '0')}`
   }
 
-  useEffect(() => { load() }, [tenantId])
+  // La Base de cada ruta se recalcula con cada escritura (esta u otra pestaña), sin
+  // spinner. Solo la carga MÁS RECIENTE publica: una anterior que termine tarde no
+  // pisa cifras nuevas (punto 5, 2026-10-02).
+  const revision = useDataRevision()
+  const loadSeq = useRef(0)
+  useEffect(() => { load(revision > 0) }, [tenantId, revision])
 
   /**
    * ENLACES PROFUNDOS desde el panel de una Oficina, para REUTILIZAR este mismo
@@ -131,20 +137,23 @@ export default function RoutesPage() {
     setSearchParams({}, { replace: true })
   }, [loading, routes, offices, searchParams])
 
-  async function load() {
-    setLoading(true)
+  async function load(silent = false) {
+    const seq = ++loadSeq.current
+    if (!silent) setLoading(true)
     const all = await db.routes.where('tenantId').equals(tenantId).toArray()
     // RESTRICCIÓN POR RUTAS: el Administrador solo ve sus rutas autorizadas.
     const rts = filterAccessibleRoutes(user, all)
-    setRoutes(rts)
-    setOffices(await db.offices.where('tenantId').equals(tenantId).toArray())
+    const ofs = await db.offices.where('tenantId').equals(tenantId).toArray()
     const us = await db.users.where('tenantId').equals(tenantId).toArray()
-    setAllUsers(us)
-    setCobradores(us.filter(u => u.rol === 'cobrador'))
     const sum: Record<string, RouteFinancialSummary> = {}
     for (const r of rts) {
       sum[r.id] = await getRouteFinancialSummary(r.id)
     }
+    if (seq !== loadSeq.current) return
+    setRoutes(rts)
+    setOffices(ofs)
+    setAllUsers(us)
+    setCobradores(us.filter(u => u.rol === 'cobrador'))
     setSummaryByRoute(sum)
     setLoading(false)
   }

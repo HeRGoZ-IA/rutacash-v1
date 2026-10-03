@@ -86,7 +86,7 @@ export default function CollectorNewClientPage() {
   // Base de la ruta seleccionada (bloquea venta directa si se supera).
   // Igual que en Nueva venta: la regla de capital se conserva; el monto solo se
   // revela a quien puede ver la caja de la ruta.
-  const { exceeded, available: capDisponible, canSeeAmount: verCapital } =
+  const { exceeded, available: capDisponible, canSeeAmount: verCapital, recheck: recheckCapital } =
     useCapitalGuard(addSale ? form.routeId : null, saleForm.valorVenta)
   const capExcedido = addSale && exceeded
 
@@ -119,10 +119,13 @@ export default function CollectorNewClientPage() {
       if (saleForm.fechaInicio < today()) { toast.error('La fecha de inicio no puede ser anterior a hoy'); return }
       if (saleForm.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
       // Venta directa no puede superar la Base de la ruta (la solicitud sí puede enviarse).
-      if (allowDirect && capExcedido) {
-        toast.error(verCapital
-          ? `La venta supera la Base de la ruta (${formatCurrency(capDisponible ?? 0, currency)})`
-          : 'La venta supera la Base de la ruta. Reduce el monto o solicita una inyección de capital.')
+      // Se decide con la Base VIGENTE, no con la cifra pintada en pantalla.
+      const capital = allowDirect ? await recheckCapital(saleForm.valorVenta) : null
+      if (capital?.exceeded) {
+        const motivo = verCapital
+          ? `La venta supera la Base de la ruta (${formatCurrency(capital.available ?? 0, currency)})`
+          : 'La venta supera la Base de la ruta. Reduce el monto o solicita una inyección de capital.'
+        toast.error(capExcedido ? motivo : `La Base de la ruta cambió mientras completabas la venta. ${motivo}`)
         return
       }
     }

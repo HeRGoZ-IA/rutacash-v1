@@ -14,3 +14,4 @@ tests/_out.interestrate.mjs
 tests/_out.activecredit.mjs
 tests/_out.financialreversal.mjs
 tests/_out.routebase.mjs
+tests/_out.supervisorbase.mjs

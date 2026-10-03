@@ -31,7 +31,8 @@ export function RouteCashReconciliationCard({ routeId }: { routeId: string }) {
     return () => { alive = false }
   }, [user, tenantId, routeId, revision, visible])
 
-  if (!visible || !r) return null
+  // Al cambiar de ruta no se pinta la conciliación de la anterior mientras llega la nueva.
+  if (!visible || !r || r.routeId !== routeId) return null
   const e = r.explicacionNoAsignado
   const Linea = ({ label, value, tone = 'text-gray-800', strong = false }: { label: string; value: string; tone?: string; strong?: boolean }) => (
     <div className="flex items-center justify-between px-4 py-2">

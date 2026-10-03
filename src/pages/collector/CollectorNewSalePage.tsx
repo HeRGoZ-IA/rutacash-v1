@@ -110,7 +110,7 @@ export default function CollectorNewSalePage() {
 
   // La validación de capital se mantiene para todos los roles; el MONTO solo se
   // revela a quien puede ver la caja de la ruta (el Cobrador no lo necesita).
-  const { exceeded: capExcedido, available: capDisponible, canSeeAmount: verCapital } =
+  const { exceeded: capExcedido, available: capDisponible, canSeeAmount: verCapital, recheck: recheckCapital } =
     useCapitalGuard(selectedClient?.routeId, form.valorVenta)
 
   const calc = form.valorVenta > 0 && form.numeroCuotas > 0
@@ -141,10 +141,13 @@ export default function CollectorNewSalePage() {
 
   async function handleDirectSale() {
     if (!validate()) return
-    if (capExcedido) {
-      toast.error(verCapital
-        ? `La venta supera la Base de la ruta (${formatCurrency(capDisponible ?? 0, currency)})`
-        : 'La venta supera la Base de la ruta. Reduce el monto o solicita una inyección de capital.')
+    // Base VIGENTE, no la cifra pintada: pudo cambiar mientras se llenaba el formulario.
+    const capital = await recheckCapital(form.valorVenta)
+    if (capital.exceeded) {
+      const motivo = verCapital
+        ? `La venta supera la Base de la ruta (${formatCurrency(capital.available ?? 0, currency)})`
+        : 'La venta supera la Base de la ruta. Reduce el monto o solicita una inyección de capital.'
+      toast.error(capExcedido ? motivo : `La Base de la ruta cambió mientras completabas la venta. ${motivo}`)
       return
     }
     // Si el cliente ya tiene venta activa, pedir confirmación antes de crear otra.
