@@ -103,7 +103,9 @@ export default function WeeklySettlementPage() {
    *    efectivo debía entregar cada PERSONA. Coexisten; ninguno sustituye al otro.
    */
   const puedeVerCuadres = can(user, 'cashSettlement.view', { tenantId })
-  const [vista, setVista] = useState<'ruta' | 'trabajadores'>('ruta')
+  // `?vista=trabajadores` abre directamente el cuadre por trabajador (acceso
+  // "Traspaso entre trabajadores" desde Transferencias).
+  const [vista, setVista] = useState<'ruta' | 'trabajadores'>(searchParams.get('vista') === 'trabajadores' ? 'trabajadores' : 'ruta')
   /** Cuadres de trabajadores de la ruta (sección informativa de la liquidación). */
   const [cuadresRuta, setCuadresRuta] = useState<CashSettlement[]>([])
 

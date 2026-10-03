@@ -19,7 +19,7 @@ pendientes derivados (1.a, 1.b…) están resueltos.
 - [x] 3. Anulación/reversión auditable de movimientos financieros
 - [x] 4. Base unificada entre módulos
 - [x] 5. Auditoría del origen de Base en Supervisor
-- [ ] 6. Traspaso de efectivo entre trabajadores de una misma ruta
+- [x] 6. Traspaso de efectivo entre trabajadores de una misma ruta
 - [ ] 7. Reversión de pagos y recálculo completo
 - [ ] 8. Sincronización de anulaciones
 - [ ] 9. Clasificación de gastos
@@ -486,6 +486,125 @@ F5).
 
 ---
 
+## 6. Traspaso de efectivo entre trabajadores de una misma ruta — CERRADO
+
+### Necesidad original
+
+En Transferencias, el socio eligió "Ruta Barreiro → Ruta Barreiro" para pasar
+efectivo de Fabio a Carlos y el sistema respondió «Origen y destino no pueden ser
+iguales». Lo que necesitaba no era mover dinero entre entidades, sino cambiar
+**quién** tiene el efectivo dentro de la misma ruta.
+
+### Por qué Ruta→Ruta no era la solución
+
+Una Transferencia (Ruta→Ruta, Socio↔Ruta) mueve dinero entre libros: cambia la Base
+de dos rutas o la Caja socios. Ruta A → Ruta A sería un asiento vacío que no dice
+quién entregó ni quién recibió. La regla «Origen y destino no pueden ser iguales» se
+mantiene. El traspaso es **custodia** (Ronda 4: la custodia no cambia la Base).
+
+### Servicio existente encontrado
+
+`cashCustodyService.transferBaseBetweenWorkers` (v15, tipo `PERSON_TO_PERSON`), sin
+ninguna pantalla que lo usara. Ya cumplía lo siguiente:
+
+- Misma ruta (`routeId`); origen ≠ destino; `cashCustody.manage`.
+- Ruta de la empresa; Oficina activa.
+- Destino elegible: misma empresa, activo, con caja personal y asignado a la ruta.
+- Nadie reduce su propia responsabilidad.
+- Fondos validados **dentro** de la transacción (`reconciliationTables`), así que
+  dos traspasos simultáneos se serializan.
+- Una sola fila con `fromUserId` + `toUserId`, `amount`, `routeId`, `fecha`,
+  `createdAt`, `createdByUserId` y `motivo`, más `auditLogs`
+  `CASH_CUSTODY_PERSON_TO_PERSON`.
+- No toca libro, transfers, Caja socios, capital ni retiros.
+
+### Carencias corregidas
+
+- **Origen sin validar contra la ruta:** solo se exigía que fuera de la empresa.
+  Ahora debe tener caja personal y estar asignado a la ruta. Un trabajador de otra
+  ruta no hace un traspaso interno: eso es una Transferencia entre rutas seguida de
+  una entrega de Base.
+- **Máximo traspasable:** era la posición completa (`esperado`), que incluye el
+  **arrastre de faltantes** de un cuadre anterior. Ese arrastre es una deuda, no
+  billetes en el bolsillo; traspasarlo movía la deuda a otra persona. Nuevo
+  `transferableCash` = posición del ciclo (Base recibida − devuelta/traspasada +
+  cobros − desembolsos − gastos), sin el arrastre. La devolución a la caja sigue
+  admitiendo el arrastre, porque así se salda.
+- Sin UI y sin historial de custodia visible.
+
+### Semántica (caso del socio, verificado)
+
+| | Antes | Después de Fabio → Carlos 100.000 |
+|---|---|---|
+| Base de la ruta | 300.000 | 300.000 |
+| Sin asignar / Disponible para retiro | 100.000 | 100.000 |
+| En manos total | 200.000 | 200.000 |
+| Fabio | 150.000 | 50.000 |
+| Carlos | 50.000 | 150.000 |
+| Caja socios / transfers / capital / retiros | sin movimientos | sin movimientos |
+
+### Permisos (derivados de `cashCustody.manage`; no se añadió ninguno)
+
+Pueden: Super Admin, Admin y el Supervisor de la ruta. No pueden: Supervisor de otra
+ruta, Cobrador, Secretario y Socio (capacidad incompatible con el rol). Tampoco puede
+la persona que entrega su propio efectivo.
+
+### UI
+
+- **Liquidación → Cuadre por trabajador** (Admin) y **Cuadrar trabajadores**
+  (Supervisor, móvil): se elige el trabajador origen y se pulsa «Traspasar a otro
+  trabajador». El modal muestra «En manos de X» (traspasable vivo), el destino (sin
+  el origen ni personas de otra ruta), el valor (aviso si supera lo disponible;
+  «Continuar» bloqueado) y el motivo. Después aparece una confirmación compacta
+  («Traspasar $ 100.000 · De Fabio a Carlos · Ruta Barreiro · No cambia la Base ni
+  la caja sin asignar…»).
+- **Transferencias:** botón «Traspaso entre trabajadores» que abre Liquidación en esa
+  pestaña (`?vista=trabajadores`). Ruta A → Ruta A sigue rechazada, ahora con la
+  pista hacia el traspaso.
+- **Historial «Entregas, devoluciones y traspasos de Base»** en el mismo panel: «Traspaso ·
+  Fabio → Carlos», importe, fecha/hora, quién registró y motivo (también entregas y
+  devoluciones).
+- Reactividad: la escritura Dexie normal dispara `storagemutated` →
+  `useDataRevision`; el panel, la conciliación y Mi efectivo se actualizan sin F5,
+  también desde otra pestaña. Al cambiar de ruta se cierra el modal y el disponible
+  queda ligado a ruta y persona.
+
+### Anulación
+
+La custodia no tiene anulación propia y no se conectó a la reversión de la Ronda 3
+(que cubre capital, retiros y transferencias). Un traspaso erróneo se corrige con el
+traspaso inverso, que también queda auditado. No hace falta derivado 6.a.
+
+### Tests
+
+`npm run test:workertransfer` (Dexie real): WORKER-XFER-001 … 022, 22/22 PASS.
+Cubre Base, Sin asignar y En manos idénticos; redistribución exacta; Caja socios y
+transfers sin cambios; rechazos (mismo trabajador, otra ruta, otra empresa, saldo
+insuficiente, valores inválidos, permisos, IDs manipulados); atomicidad (fallo
+forzado en la escritura sin dejar movimiento ni auditoría); concurrencia (dos
+traspasos de 80.000 sobre 100.000: uno aceptado, Fabio queda en 20.000); auditoría;
+reactividad; posición por ruta; efectivo compuesto; arrastre excluido; historial.
+
+Prueba en Chrome real (`tmp/worker-xfer-e2e/run.mjs`): 16/16, sin errores de página.
+Admin a 1366 px (Transferencias → traspaso → confirmación → resultado → historial →
+traspaso desde otra pestaña visto sin F5 → cambio a Centro) y Supervisor a 412 px
+(traspaso desde el móvil, sin desplazamiento horizontal).
+
+### Archivos
+
+- `src/services/cashCustodyService.ts` (`transferableCash`, `getTransferableCash`,
+  validación del origen)
+- `src/components/settlement/WorkerCashSettlementPanel.tsx` (acción, modal,
+  confirmación, historial)
+- `src/pages/admin/TransfersPage.tsx` (acceso + pista), `WeeklySettlementPage.tsx`
+  (`?vista=trabajadores`)
+- `tests/workertransfer.test.ts` (nuevo) · `package.json` · `.gitignore`
+- `scripts/verify-deploy.mjs` (marcador R6)
+
+**Pendientes derivados:** ninguno.
+
+---
+
 ## Hallazgos registrados para rondas posteriores (sin implementar)
 
 - **(Resuelto en Ronda 5)** Punto 5 (Supervisor): consumidores de la Base sin
@@ -507,8 +626,18 @@ F5).
   que muestran Capital y Retiros como "Base actual") y la caja no asignada
   (`computeRouteCashReconciliation.disponible`, que limita retiros y anulaciones).
   `Route.capitalActual` está deprecado pero sigue persistido.
-- **Punto 6:** ya existe `transferBaseBetweenWorkers` (custodia PERSON_TO_PERSON) en
-  `cashCustodyService`; revisar si falta solo la UI.
+- **(Resuelto en Ronda 6)** Punto 6: `transferBaseBetweenWorkers` existía sin UI;
+  ahora está expuesto y endurecido (ver Punto 6).
+- (Ronda 6) La custodia no tiene anulación propia (solo como pata de una
+  Transferencia anulada). Un traspaso erróneo se corrige con el traspaso inverso,
+  también auditado. Si el socio quiere "Anular" explícito para movimientos de
+  custodia, sería un ajuste nuevo.
+- (Ronda 6) Test inestable previo: `FIN-REV-012` ordena dos aportes por
+  `createdAt`; si ambos caen en el mismo milisegundo, el orden se invierte y falla
+  (≈1 de 6 ejecuciones; servicios sin cambios en esta ronda). Falta un desempate
+  estable en la prueba (no se modificó).
+- (Ronda 6) La línea "En manos de X (Base entregada N)" de la conciliación cuenta
+  los traspasos recibidos/entregados dentro de "Base entregada" (es custodia neta).
 - **Punto 7:** los pagos usan otra convención de reversión (`state`
   'reversed'/'reversal', y los reportes FILTRAN ambos). `getCashboxSummary` suma los
   pagos en bruto: equivale solo mientras la reversión tenga importe negado y caiga

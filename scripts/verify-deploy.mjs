@@ -61,6 +61,8 @@ const MARCADORES = [
   ['Libro de la ruta', false, 'etiqueta retirada: la conciliación muestra "Base de la ruta" (≤2026-10-02 R3)'],
   // Ronda 5: Base del Supervisor viva y revalidada al enviar la venta.
   ['La Base de la ruta cambió mientras completabas la venta.', true, 'Base viva + revalidación al vender (2026-10-02 R5)'],
+  // Ronda 6: traspaso de efectivo entre trabajadores de una misma ruta (custodia).
+  ['Traspasar a otro trabajador', true, 'traspaso interno entre trabajadores (2026-10-02 R6)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

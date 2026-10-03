@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Plus, ArrowLeftRight, ChevronRight, MapPin, Users, Search } from 'lucide-react'
+import { Plus, ArrowLeftRight, ArrowRightLeft, ChevronRight, MapPin, Users, Search } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -20,7 +21,7 @@ import { AnnulledBadge, ReversalDetail, ReverseButton, ReverseMovementModal, sig
 import { custodianBlockedReason } from '@/services/cashCustodyService'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
-import { filterAccessibleRoutes, authorizedRouteIdsOf, isPartnerInScope, isTransferInScope } from '@/lib/permissions'
+import { can, filterAccessibleRoutes, authorizedRouteIdsOf, isPartnerInScope, isTransferInScope } from '@/lib/permissions'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import type { Transfer, Route, User, TransferEntityType } from '@/models/types'
@@ -51,6 +52,12 @@ export default function TransfersPage() {
   const { tenantId, currency } = useTenant()
   const officeFilter = useOfficeRouteFilter()
   const { user } = useAuth()
+  const navigate = useNavigate()
+  // Punto 6: mover efectivo ENTRE TRABAJADORES de una misma ruta no es una
+  // Transferencia (Ruta→Ruta exige rutas distintas). Vive en el cuadre por
+  // trabajador; aquí solo se ofrece el acceso.
+  const puedeTraspasar = can(user, 'cashCustody.manage', { tenantId: user?.tenantId })
+  const irATraspaso = () => navigate('/admin/weekly-settlement?vista=trabajadores')
   const [transfers, setTransfers] = useState<Transfer[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
   const [partners, setPartners] = useState<User[]>([])
@@ -131,7 +138,12 @@ export default function TransfersPage() {
     if (!origen) { toast.error('Selecciona el origen'); return }
     if (!destino) { toast.error('Selecciona el destino'); return }
     if (form.valor <= 0) { toast.error('El valor debe ser mayor a 0'); return }
-    if (form.origen === form.destino) { toast.error('Origen y destino no pueden ser iguales'); return }
+    if (form.origen === form.destino) {
+      toast.error(origen.type === 'route' && puedeTraspasar
+        ? 'Origen y destino no pueden ser iguales. Para mover efectivo entre trabajadores de la misma ruta usa «Traspaso entre trabajadores».'
+        : 'Origen y destino no pueden ser iguales')
+      return
+    }
     setSaving(true)
     try {
       // Alcance, Oficina activa, fondos del origen, Caja socios y entrega en mano:
@@ -203,7 +215,12 @@ export default function TransfersPage() {
           <h1 className="text-xl font-bold text-gray-900">Transferencias</h1>
           <p className="text-sm text-gray-500 mt-0.5">{visibleTransfers.length} transferencia(s) · {routes.length} ruta(s) · {partners.length} socio(s)</p>
         </div>
-        <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>Nueva transferencia</Button>
+        <div className="flex flex-wrap justify-end gap-2">
+          {puedeTraspasar && (
+            <Button variant="secondary" onClick={irATraspaso} icon={<ArrowRightLeft className="w-4 h-4" />}>Traspaso entre trabajadores</Button>
+          )}
+          <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>Nueva transferencia</Button>
+        </div>
       </div>
 
       {/* Filtros (compacto, una sola fila en desktop) */}

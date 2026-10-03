@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Lock, LockOpen, UserRound, Wallet } from 'lucide-react'
+import { AlertTriangle, ArrowRightLeft, CheckCircle2, Lock, LockOpen, UserRound, Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -16,9 +16,11 @@ import {
   previewCashSettlement, reopenCashSettlement, type CashSettlementPreview,
 } from '@/services/cashSettlementService'
 import { db } from '@/lib/db'
-import { assignBaseToWorker, custodianBlockedReason, returnBaseFromWorker } from '@/services/cashCustodyService'
+import {
+  assignBaseToWorker, custodianBlockedReason, getTransferableCash, listCustodyMovements, returnBaseFromWorker, transferBaseBetweenWorkers,
+} from '@/services/cashCustodyService'
 import { RouteCashReconciliationCard } from '@/components/settlement/RouteCashReconciliationCard'
-import type { CashSettlement, User } from '@/models/types'
+import type { CashCustodyMovement, CashSettlement, User } from '@/models/types'
 
 /**
  * CUADRE POR TRABAJADOR — Ruta → Trabajador → Vista previa → Entregado → Confirmar.
@@ -55,6 +57,18 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
   const [baseMotivo, setBaseMotivo] = useState('')
   const [baseGuardando, setBaseGuardando] = useState(false)
   const puedeBase = can(user, 'cashCustody.manage', { routeId, tenantId })
+
+  // TRASPASO INTERNO (punto 6): efectivo de un trabajador a otro de la MISMA ruta.
+  // El origen es el trabajador seleccionado; el servicio revalida todo.
+  const [traspaso, setTraspaso] = useState<'form' | 'confirmar' | null>(null)
+  const [traspasoDestino, setTraspasoDestino] = useState('')
+  const [traspasoMonto, setTraspasoMonto] = useState(0)
+  const [traspasoMotivo, setTraspasoMotivo] = useState('')
+  const [traspasoGuardando, setTraspasoGuardando] = useState(false)
+  /** Efectivo traspasable del origen, asociado a SU ruta y persona. */
+  const [traspasable, setTraspasable] = useState<{ routeId: string; userId: string; monto: number } | null>(null)
+  /** Movimientos de custodia de la ruta (entregas, devoluciones, traspasos). */
+  const [movsBase, setMovsBase] = useState<CashCustodyMovement[]>([])
 
   const puedeCerrar = can(user, 'cashSettlement.close', { routeId, tenantId })
   const puedeReabrir = can(user, 'cashSettlement.reopen', { routeId, tenantId })
@@ -93,6 +107,30 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
     })
     return () => { alive = false }
   }, [user, tenantId, routeId, revision])
+
+  // Cambio de ruta: nada del traspaso de la ruta anterior sobrevive.
+  useEffect(() => { setTraspaso(null); setTraspasoDestino(''); setTraspasoMonto(0) }, [routeId])
+
+  useEffect(() => {
+    let alive = true
+    if (!traspaso || !userId) return
+    getTransferableCash({ tenantId, routeId, userId })
+      .then(monto => { if (alive) setTraspasable({ routeId, userId, monto }) })
+    return () => { alive = false }
+  }, [traspaso, tenantId, routeId, userId, revision])
+
+  useEffect(() => {
+    let alive = true
+    listCustodyMovements(routeId).then(list => {
+      if (alive) setMovsBase(list.filter(m => m.tenantId === tenantId).slice(0, 10))
+    })
+    return () => { alive = false }
+  }, [tenantId, routeId, revision])
+
+  const disponibleTraspaso = traspasable && traspasable.routeId === routeId && traspasable.userId === userId ? traspasable.monto : null
+  const destinosTraspaso = workers.filter(w => w.user.id !== userId && !custodianBlockedReason(w.user, routeId, tenantId))
+  const traspasoValido = Boolean(traspasoDestino) && traspasoMonto > 0 && disponibleTraspaso != null
+    && traspasoMonto <= disponibleTraspaso && traspasoMotivo.trim().length >= 3
 
   const outcome = useMemo(() => preview ? settlementOutcome(preview.esperado, entregado) : null, [preview, entregado])
   const motivoRequerido = Boolean(outcome && outcome.diferencia !== 0)
@@ -153,6 +191,28 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
       toast.error(e instanceof Error ? e.message : 'No se pudo registrar el movimiento de Base.')
     } finally { setBaseGuardando(false) }
   }
+
+  async function guardarTraspaso() {
+    if (!traspasoValido) return
+    setTraspasoGuardando(true)
+    try {
+      await transferBaseBetweenWorkers({
+        actor: user, tenantId, routeId, fromUserId: userId, toUserId: traspasoDestino, amount: traspasoMonto, motivo: traspasoMotivo,
+      })
+      toast.success(`Traspaso de ${money(traspasoMonto)} de ${seleccionado?.user.nombre ?? ''} a ${nombreDe(traspasoDestino)} registrado.`)
+      setTraspaso(null)
+      setTraspasoDestino('')
+      setTraspasoMonto(0)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo registrar el traspaso.')
+      setTraspaso('form')
+    } finally { setTraspasoGuardando(false) }
+  }
+
+  const etiquetaMov = (m: CashCustodyMovement) =>
+    m.tipo === 'PERSON_TO_PERSON' ? `Traspaso · ${nombreDe(m.fromUserId ?? '')} → ${nombreDe(m.toUserId ?? '')}`
+      : m.tipo === 'BASE_ASSIGNMENT' ? `Entrega de Base · caja de la ruta → ${nombreDe(m.toUserId ?? '')}`
+        : `Devolución · ${nombreDe(m.fromUserId ?? '')} → caja de la ruta`
 
   const Row = ({ label, value, tone = 'text-gray-800' }: { label: string; value: string; tone?: string }) => (
     <div className="flex items-center justify-between px-4 py-2.5">
@@ -217,6 +277,13 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
                   Recibir devolución
                 </Button>
               )}
+              {!seleccionado.esPropio && (
+                <Button variant="secondary" icon={<ArrowRightLeft className="w-4 h-4" />}
+                  disabled={destinosTraspaso.length === 0}
+                  onClick={() => { setTraspaso('form'); setTraspasoDestino(''); setTraspasoMonto(0); setTraspasoMotivo('Traspaso entre trabajadores') }}>
+                  Traspasar a otro trabajador
+                </Button>
+              )}
             </div>
           )}
 
@@ -242,6 +309,26 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
               </Button>
             </div>
           ) : null}
+        </div>
+      )}
+
+      {/* ---------- MOVIMIENTOS DE BASE (custodia) ---------- */}
+      {movsBase.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-gray-700">Entregas, devoluciones y traspasos de Base</h3>
+          <div className="bg-white rounded-2xl shadow-card border border-gray-100 divide-y divide-gray-50">
+            {movsBase.map(m => (
+              <div key={m.id} className="px-3 py-2.5 text-xs">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="font-semibold text-gray-800 break-words">{etiquetaMov(m)}</span>
+                  <span className="font-semibold text-gray-800 whitespace-nowrap">{money(m.amount)}</span>
+                </div>
+                <p className="mt-0.5 text-gray-500 break-words">
+                  {formatDateTime(m.createdAt)} · Registró {nombreDe(m.createdByUserId)} · {m.motivo}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -364,6 +451,45 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
           </div>
         </div>
+      </Modal>
+
+      {/* ---------- TRASPASO ENTRE TRABAJADORES (misma ruta) ---------- */}
+      <Modal open={Boolean(traspaso)} onClose={() => setTraspaso(null)}
+        title={traspaso === 'confirmar' ? 'Confirmar traspaso' : `Traspasar efectivo de ${seleccionado?.user.nombre ?? ''}`}
+        footer={traspaso === 'confirmar' ? <>
+          <Button variant="secondary" onClick={() => setTraspaso('form')} disabled={traspasoGuardando}>Volver</Button>
+          <Button onClick={guardarTraspaso} loading={traspasoGuardando}>Confirmar traspaso</Button>
+        </> : <>
+          <Button variant="secondary" onClick={() => setTraspaso(null)}>Cancelar</Button>
+          <Button onClick={() => setTraspaso('confirmar')} disabled={!traspasoValido}>Continuar</Button>
+        </>}>
+        {traspaso === 'confirmar' ? (
+          <div className="space-y-2 text-sm">
+            <p className="text-lg font-bold text-gray-900">Traspasar {money(traspasoMonto)}</p>
+            <p className="text-gray-700">De <b>{seleccionado?.user.nombre}</b> a <b>{nombreDe(traspasoDestino)}</b></p>
+            <p className="text-gray-500">Ruta {preview?.routeName ?? ''} · {traspasoMotivo.trim()}</p>
+            <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">No cambia la Base ni la caja sin asignar de la ruta: solo quién tiene el efectivo.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between rounded-xl bg-primary-50 px-3 py-2 text-sm">
+              <span className="text-gray-600">En manos de {seleccionado?.user.nombre}</span>
+              <span className="font-bold text-primary-700">{disponibleTraspaso == null ? '…' : money(disponibleTraspaso)}</span>
+            </div>
+            <Select label="Entregar a" value={traspasoDestino} onChange={e => setTraspasoDestino(e.target.value)}
+              options={destinosTraspaso.map(w => ({ value: w.user.id, label: `${w.user.nombre} · ${w.user.rol === 'supervisor' ? 'Supervisor' : 'Cobrador'}${w.esPropio ? ' (tú)' : ''}` }))}
+              placeholder="Selecciona quién recibe" />
+            <MoneyInput label="Valor" value={traspasoMonto} onValueChange={setTraspasoMonto} currency={currency} min={0} />
+            {disponibleTraspaso != null && traspasoMonto > disponibleTraspaso && (
+              <p className="text-xs text-red-600">Supera el efectivo en manos de {seleccionado?.user.nombre} ({money(disponibleTraspaso)}).</p>
+            )}
+            <div>
+              <label className="block text-xs text-gray-500 mb-1.5">Motivo</label>
+              <input value={traspasoMotivo} onChange={e => setTraspasoMotivo(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+          </div>
+        )}
       </Modal>
 
       <Modal open={Boolean(reabrir)} onClose={() => setReabrir(null)} title="Reabrir cuadre"

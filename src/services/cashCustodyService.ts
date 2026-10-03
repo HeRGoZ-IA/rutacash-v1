@@ -178,7 +178,41 @@ export async function returnBaseFromWorker(
   })
 }
 
-/** Persona → persona dentro de la misma Route (p. ej. un Supervisor refuerza a un Cobrador). */
+/**
+ * EFECTIVO QUE UNA PERSONA PUEDE TRASPASAR a un compañero de la misma Route: su
+ * posición del ciclo (Base recibida − devuelta/traspasada + cobros − desembolsos −
+ * gastos) SIN el arrastre de faltantes. El arrastre es una deuda pendiente de un
+ * cuadre anterior, no billetes en el bolsillo: traspasarlo movería una deuda a otra
+ * persona. (La DEVOLUCIÓN a la caja sí admite el arrastre: es como se salda.)
+ */
+export function transferableCash(pos: { esperado: number; arrastreAnterior: number }): number {
+  return Math.max(0, pos.esperado - pos.arrastreAnterior)
+}
+
+/** Lo que `fromUserId` puede traspasar HOY en `routeId` (pantallas). */
+export async function getTransferableCash(
+  params: { tenantId: string; routeId: string; userId: string }, database: RutaCashDB = db,
+): Promise<number> {
+  return transferableCash(await personalCashPosition({ ...params, hasta: nowISO() }, database))
+}
+
+/**
+ * TRASPASO INTERNO persona → persona dentro de la MISMA Route (punto 6, ajustes del
+ * socio 2026-10-02). No es una Transferencia (Ruta→Ruta, Socio↔Ruta): no toca el
+ * libro, la caja sin asignar, la Caja socios ni la tabla `transfers`; solo cambia
+ * quién responde por el efectivo. Una sola fila (`fromUserId` + `toUserId`) = una
+ * operación lógica: "Fabio entregó X a Carlos", con ruta, fecha, motivo y quién la
+ * registró.
+ *
+ * Todo se valida aquí (la pantalla no es autoridad):
+ *   · `cashCustody.manage` sobre la Route; Route de la empresa; Oficina activa.
+ *   · Origen ≠ destino; nadie reduce su propia responsabilidad.
+ *   · Origen: de la empresa, con caja personal y ASIGNADO a esta Route (un
+ *     trabajador de otra Route no hace un traspaso interno: eso es una Transferencia
+ *     entre rutas + entrega de Base). Destino: elegible (`custodianBlockedReason`).
+ *   · Fondos: `transferableCash` del origen EN ESTA Route, releído DENTRO de la
+ *     transacción: dos traspasos simultáneos no gastan el mismo efectivo.
+ */
 export async function transferBaseBetweenWorkers(
   params: CustodyParams & { fromUserId: string; toUserId: string },
   database: RutaCashDB = db,
@@ -193,12 +227,14 @@ export async function transferBaseBetweenWorkers(
   }
   const origen = await database.users.get(fromUserId)
   if (!origen || origen.tenantId !== tenantId) throw new CashCustodyError('La persona que entrega no existe en esta empresa.')
+  if (!hasPersonalCashbox(origen.rol)) throw new CashCustodyError('Solo Cobradores y Supervisores tienen efectivo a su cargo.')
+  if (!getAssignedRouteIds(origen).includes(routeId)) throw new CashCustodyError('La persona que entrega no está asignada a esta ruta.')
   const bloqueo = custodianBlockedReason(await database.users.get(toUserId), routeId, tenantId)
   if (bloqueo) throw new CashCustodyError(bloqueo)
   return registrar('PERSON_TO_PERSON', { ...params, fromUserId, toUserId }, database, async (hasta) => {
-    const pos = await personalCashPosition({ tenantId, routeId, userId: fromUserId, hasta }, database)
-    if (Number(params.amount) > pos.esperado) {
-      throw new CashCustodyError(`El traspaso supera el efectivo a cargo de ${origen.nombre} (${Math.max(0, pos.esperado)}).`)
+    const disponible = transferableCash(await personalCashPosition({ tenantId, routeId, userId: fromUserId, hasta }, database))
+    if (Number(params.amount) > disponible) {
+      throw new CashCustodyError(`El traspaso supera el efectivo en manos de ${origen.nombre} (${disponible}).`)
     }
   })
 }
