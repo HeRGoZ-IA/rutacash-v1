@@ -15,6 +15,7 @@
 // ============================================================
 import 'fake-indexeddb/auto'
 import { db } from '../src/lib/db'
+import { sembrarResponsables } from './financial/capitalFixture'
 import { today } from '../src/lib/formatters'
 import { can } from '../src/lib/permissions'
 import { OPERATIONAL_TABLES, subscribeDataChanges, watchQuery } from '../src/lib/dataRevision'
@@ -99,6 +100,9 @@ async function empresa() {
     ({ id, tenantId, officeId, nombre, codigo: id, status: 'activa', capitalInicial: 0, capitalActual: 0, tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 0, createdAt: '2026-09-01' })
   await db.routes.bulkAdd([ruta(R1, T, 'of-1', 'Barreiro'), ruta(R2, T, 'of-1', 'Centro'), ruta(RB, TB, 'of-b', 'Ajena')] as never[])
   await db.users.bulkAdd(TODOS)
+  // v16: Andrés (primer Admin de ambas rutas) es su responsable de capital, con bolsa.
+  await sembrarResponsables(db, T, { [R1]: ADMIN.id, [R2]: ADMIN.id })
+  await sembrarResponsables(db, TB, { [RB]: AJENO_ADMIN.id })
   await db.expenseCategories.bulkAdd([
     { id: CAT_TRANSPORTE, tenantId: T, nombre: 'Transporte', activa: true },
     { id: CAT_PAPELERIA, tenantId: T, nombre: 'Papelería', activa: true },
@@ -206,16 +210,21 @@ await spec('EXP-CLASS-004', 'gasto de ruta: Base ↓ y Sin asignar ↓; En manos
   assert(despues.enTrabajadores === antes.enTrabajadores, 'cambió el efectivo en manos')
 })
 
-await spec('EXP-CLASS-005', 'gasto de ruta no se atribuye a nadie (tampoco al Supervisor que lo registra)', async () => {
+await spec('EXP-CLASS-005', 'gasto de ruta no se atribuye a nadie; v16: lo paga la caja → solo su responsable (el Supervisor ya no)', async () => {
   await escenario()
   await entregar(LAURA, 30_000)
   const antes = { fabio: await posicion(FABIO), carlos: await posicion(CARLOS), laura: await posicion(LAURA) }
-  const e = await deRuta(20_000, LAURA)            // lo REGISTRA Laura, que tiene caja personal
+  // v16 (§8): un gasto de RUTA sale de la caja de la ruta → control estructural del
+  // Administrador responsable. Laura (Supervisora) ya no puede registrarlo.
+  const laura = await rechazo(() => deRuta(20_000, LAURA))
+  const e = await deRuta(20_000, ADMIN)
   const despues = { fabio: await posicion(FABIO), carlos: await posicion(CARLOS), laura: await posicion(LAURA) }
+  metric('Laura intenta registrarlo', laura)
   metric('registró', e.userId)
   metric('atribución', JSON.stringify(expenseAttribution(e)))
   metric('Fabio / Carlos / Laura', `${Object.values(antes).join('/')} → ${Object.values(despues).join('/')}`)
-  assert(e.userId === LAURA.id && expenseAttribution(e).cashHolderId === undefined, 'el gasto de ruta quedó a cargo de alguien')
+  assert(laura !== 'ACEPTADO', 'el Supervisor sigue pagando gastos con la caja de la ruta')
+  assert(e.userId === ADMIN.id && expenseAttribution(e).cashHolderId === undefined, 'el gasto de ruta quedó a cargo de alguien')
   assert(JSON.stringify(antes) === JSON.stringify(despues), 'el gasto de ruta se cargó a un trabajador')
   assert(!(await vistaOperativa(FABIO)).some(x => x.id === e.id), 'Fabio ve el gasto de ruta como suyo')
 })
@@ -553,12 +562,14 @@ await spec('EXP-CLASS-027', 'históricos sin clasificación: se muestran y conse
   assert(etiquetas.join() === ['Ruta/—', 'Trabajador/Fabio', 'Trabajador/Fabio'].join(), 'el reporte no muestra los históricos con su atribución')
 })
 
-await spec('EXP-CLASS-028', 'migración: N/A — esquema v15 intacto (campo `scope` no indexado)', async () => {
+await spec('EXP-CLASS-028', 'migración: N/A — la clasificación no exigió versión propia (campo `scope` no indexado)', async () => {
   const dbSrc = src('src/lib/db.ts')
   const versiones = [...dbSrc.matchAll(/this\.version\((\d+)\)/g)].map(m => Number(m[1]))
   metric('versión de la base', db.verno)
   metric('versión más alta declarada', Math.max(...versiones))
-  assert(db.verno === 15 && Math.max(...versiones) === 15, 'se subió la versión del esquema')
+  // v16 (capital por Administrador) subió la versión por OTRA razón; lo que esta
+  // prueba protege es que la clasificación de gastos no necesitó migración.
+  assert(db.verno === Math.max(...versiones), 'la base no abre en la versión declarada')
   assert(!/expenses: '[^']*scope/.test(dbSrc), '`scope` se indexó')
 })
 
@@ -608,7 +619,7 @@ await spec('EXP-CLASS-030', 'aislamiento total empresa / ruta / trabajador', asy
 await spec('EXP-CLASS-SOCIO', 'caso del socio: Transporte $11.000 y Papelería $300 del Admin; luego Transporte de Fabio', async () => {
   await escenario()
   const antes = { pos: await posicion(FABIO), gastos: await gastosEnCuadre(FABIO) }
-  await gasto(SUPER, 'ruta', { valor: 11_000, descripcion: 'Transporte (sin atribución)' })
+  await gasto(ADMIN, 'ruta', { valor: 11_000, descripcion: 'Transporte (sin atribución)' })
   await deEmpresa(300, 'Papelería')
   const tras1 = { vista: descripciones(await vistaOperativa(FABIO)), pos: await posicion(FABIO), gastos: await gastosEnCuadre(FABIO) }
   metric('1) Gastos de Fabio', tras1.vista)

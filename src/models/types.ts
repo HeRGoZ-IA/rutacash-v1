@@ -111,6 +111,12 @@ export type AuditAction =
   | 'MODIFY_CASHBOX'
   | 'CLOSE_PERIOD'
   | 'REOPEN_PERIOD'
+  // Capital por Administrador (v16): SuperAdmin → Admin → Ruta.
+  | 'COMPANY_CAPITAL_DEPOSIT'
+  | 'COMPANY_CAPITAL_WITHDRAWAL'
+  | 'ADMIN_CAPITAL_ALLOCATED'
+  | 'ADMIN_CAPITAL_RETURNED'
+  | 'ROUTE_CAPITAL_CONTROLLER_CHANGED'
 
 // --- ENTIDADES ---
 
@@ -218,6 +224,23 @@ export interface Route {
    */
   capitalActual: number
   cobradorId?: string
+  /**
+   * ADMINISTRADOR RESPONSABLE DEL CAPITAL (v16). Una ruta puede tener varios
+   * Administradores asignados (`User.authorizedRouteIds`), pero SOLO este maneja su
+   * capital y su caja estructural. 0 o 1 por construcción (un único campo).
+   *
+   * Es la fuente de verdad: nunca se deduce del orden de una lista. Lo fija el primer
+   * Administrador válido asignado (regla del "primer Admin") y solo el SuperAdmin lo
+   * cambia (`setRouteCapitalController`). Cada cambio deja un
+   * `RouteCapitalControllerEvent` y traspasa el capital colocado en la ruta de una
+   * bolsa a otra en el `capitalLedger`, en la misma transacción.
+   *
+   * `undefined` = "Sin responsable de capital": la ruta existe pero sus operaciones
+   * financieras estructurales fallan cerradas.
+   */
+  capitalControllerAdminId?: string
+  /** Instante desde el que responde el responsable actual. */
+  capitalControllerSince?: string
   status: RouteStatus
   createdAt: string
   updatedAt: string
@@ -658,6 +681,13 @@ export interface CapitalMovement extends MovementReversalFields {
   fecha: string
   userId: string
   createdAt: string
+  /**
+   * Bolsa del Administrador de la que salió este capital (v16). Es el responsable de
+   * la ruta EN ESE MOMENTO, sellado por el servicio y nunca recalculado. `undefined`
+   * = movimiento anterior a v16 (su neto lo reconoce la migración, ver
+   * `capitalLedger` ROUTE_CONTROL_TRANSFER).
+   */
+  adminId?: string
 }
 
 /**
@@ -692,6 +722,12 @@ export interface Transfer extends MovementReversalFields {
   fecha: string
   userId: string
   createdAt: string
+  /**
+   * Ruta → Ruta (v16): Administrador responsable de AMBAS rutas al registrarla. Un
+   * traslado entre rutas de responsables distintos movería capital de una bolsa a
+   * otra sin pasar por el SuperAdmin: el servicio lo rechaza.
+   */
+  adminId?: string
 }
 
 export interface Withdrawal extends MovementReversalFields {
@@ -703,6 +739,94 @@ export interface Withdrawal extends MovementReversalFields {
   fecha: string
   userId: string
   createdAt: string
+  /**
+   * Bolsa del Administrador que RECIBE el retiro (v16): el responsable de la ruta en
+   * ese momento. `undefined` = retiro anterior a v16 (salida sin destino registrado).
+   */
+  adminId?: string
+}
+
+/**
+ * LIBRO DE CAPITAL POR ADMINISTRADOR (v16). Capa POR ENCIMA de las rutas:
+ *
+ *   externo ──COMPANY_DEPOSIT──▶ bolsa de la empresa (SuperAdmin)
+ *   bolsa empresa ──ADMIN_ALLOCATION──▶ bolsa del Admin
+ *   bolsa del Admin ──ADMIN_RETURN──▶ bolsa empresa
+ *   bolsa empresa ──COMPANY_WITHDRAWAL──▶ externo
+ *   ROUTE_CONTROL_TRANSFER: el capital colocado en UNA ruta pasa de la
+ *     responsabilidad de `fromAdminId` a `toAdminId` (cualquiera de los dos puede
+ *     faltar: "sin responsable"). Acompaña siempre a un RouteCapitalControllerEvent.
+ *
+ * Admin → Ruta y Ruta → Admin NO viven aquí: son `CapitalMovement.adminId` y
+ * `Withdrawal.adminId` (el libro de la ruta sigue siendo la única fuente de su Base).
+ *
+ * Inmutable: nunca se edita ni se borra. Se corrige con un asiento espejo (campos
+ * de reversión), igual que el resto de movimientos de fondos.
+ */
+export type CapitalLedgerType =
+  | 'COMPANY_DEPOSIT'
+  | 'COMPANY_WITHDRAWAL'
+  | 'ADMIN_ALLOCATION'
+  | 'ADMIN_RETURN'
+  | 'ROUTE_CONTROL_TRANSFER'
+
+export interface CapitalLedgerEntry extends MovementReversalFields {
+  id: string
+  tenantId: string
+  tipo: CapitalLedgerType
+  /**
+   * Importe. Entero > 0 en todos los tipos salvo ROUTE_CONTROL_TRANSFER, que traslada
+   * el capital NETO colocado en la ruta (puede ser negativo si la ruta ya devolvió
+   * más de lo que recibió).
+   */
+  amount: number
+  fromAdminId?: string
+  toAdminId?: string
+  routeId?: string
+  /** RouteCapitalControllerEvent que originó un ROUTE_CONTROL_TRANSFER. */
+  relatedEventId?: string
+  descripcion?: string
+  fecha: string
+  createdAt: string
+  /** Quién lo registró. `system:migration-v16` para la migración. */
+  actorUserId: string
+  actorRole?: UserRole | 'system'
+  status: 'aplicado'
+  syncStatus: SyncStatus
+}
+
+/** Por qué cambió el responsable de capital de una ruta. */
+export type RouteCapitalControllerEventKind =
+  | 'MIGRATION'          // migración v16: responsable inicial deducido del histórico
+  | 'FIRST_ADMIN'        // regla del primer Administrador válido asignado
+  | 'CHANGE'             // el SuperAdmin cambió el responsable
+  | 'RELEASE'            // la ruta quedó sin responsable (sin Administradores válidos)
+
+/**
+ * HISTORIAL DE RESPONSABLES DE CAPITAL (v16). Una fila por transición; nunca se
+ * edita. Responde "¿quién respondía por el capital de la ruta en tal instante?" sin
+ * recalcular el pasado con el responsable actual.
+ */
+export interface RouteCapitalControllerEvent {
+  id: string
+  tenantId: string
+  routeId: string
+  kind: RouteCapitalControllerEventKind
+  fromAdminId?: string
+  toAdminId?: string
+  /** Capital neto colocado en la ruta que cambió de bolsa (ROUTE_CONTROL_TRANSFER). */
+  capitalTransferido: number
+  /**
+   * Base de la ruta (libro completo) en el instante del cambio: foto, no saldo vivo.
+   * Ausente en los eventos de la migración v16 (que no recalcula libros).
+   */
+  baseAlCambio?: number
+  ledgerEntryId?: string
+  motivo?: string
+  createdAt: string
+  actorUserId: string
+  actorRole?: UserRole | 'system'
+  syncStatus: SyncStatus
 }
 
 /**
@@ -814,6 +938,8 @@ export interface CashSettlement {
   reopenedAt?: string
   reopenedByUserId?: string
   reopenReason?: string
+  /** Responsable de capital de la ruta al cerrar (v16). Foto histórica. */
+  capitalControllerAdminIdAtClose?: string
 }
 
 /**
@@ -914,6 +1040,11 @@ export interface WeeklySettlement {
   officeIdAtClose?: string
   officeNameAtClose?: string
   officeCodeAtClose?: string
+  /**
+   * Responsable de capital de la ruta AL CERRAR (v16). Foto histórica: si después
+   * cambia el responsable, este cierre sigue diciendo quién respondía entonces.
+   */
+  capitalControllerAdminIdAtClose?: string
 }
 
 export interface AuditLog {

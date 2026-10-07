@@ -216,7 +216,13 @@ export default function ExpensesPage() {
           {(form.scope === 'ruta' || form.scope === 'trabajador') && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Select label="Ruta" value={form.routeId} onChange={e => setForm(f => ({ ...f, routeId: e.target.value, collectorId: '' }))}
-                options={officeRoutes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
+                options={officeRoutes
+                  // v16: gasto de ruta (lo paga su caja) o cargado a un trabajador:
+                  // solo en rutas donde el actor tiene autoridad sobre la caja.
+                  .filter(r => canRegisterExpenseScope(user, form.scope as ExpenseScope, r.id, { route: r, users }))
+                  .map(r => ({ value: r.id, label: r.nombre }))}
+                placeholder="Seleccionar ruta" required
+                hint={form.scope === 'ruta' ? 'Solo las rutas de las que eres responsable de capital: el gasto sale de su caja.' : undefined} />
               {form.scope === 'trabajador' && (
                 <Select label="Trabajador que pagó" value={form.collectorId} onChange={e => setForm(f => ({ ...f, collectorId: e.target.value }))}
                   options={trabajadores.map(u => ({ value: u.id, label: u.nombre }))}

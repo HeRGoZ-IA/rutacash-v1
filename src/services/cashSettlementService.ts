@@ -25,7 +25,8 @@ import { db, type RutaCashDB } from '@/lib/db'
 import { nowISO } from '@/lib/formatters'
 import { generateId } from '@/lib/utils'
 import { logAction } from '@/services/auditService'
-import { assertCan, AuthzError } from '@/services/authz'
+import { assertCan, assertRouteCashAuthority, AuthzError } from '@/services/authz'
+import type { RouteCashOperation } from '@/lib/permissions'
 import { getCollectorCashSummary } from '@/services/cashboxEngine'
 import { can, filterAccessibleRoutes } from '@/lib/permissions'
 import { getAssignedRouteIds } from '@/lib/roles'
@@ -192,6 +193,15 @@ export async function previewCashSettlement(
   return preview
 }
 
+/** Autoridad sobre la caja de la ruta (v16), con responsable y usuarios actuales. */
+async function exigirAutoridadDeCaja(actor: User | null | undefined, routeId: string, tenantId: string, op: RouteCashOperation, database: RutaCashDB) {
+  const [route, users] = await Promise.all([
+    database.routes.get(routeId),
+    database.users.where('tenantId').equals(tenantId).toArray(),
+  ])
+  assertRouteCashAuthority(actor, route, op, users)
+}
+
 // ------------------------------------------------------------
 // CIERRE
 // ------------------------------------------------------------
@@ -220,6 +230,10 @@ export async function closeCashSettlement(
 
   // 1) Permiso CON ruta y empresa.
   assertCan(actor, 'cashSettlement.close', { routeId, tenantId })
+  // 1.b) v16: el efectivo cuadrado entra a la caja de la ruta, que tiene UN
+  //      responsable de capital. Cuadran él, el SuperAdmin y el Supervisor de la
+  //      ruta; otro Administrador asignado, no. Sin responsable: fail closed.
+  await exigirAutoridadDeCaja(actor, routeId, tenantId, 'settle', database)
   // 2) Nadie se cuadra a sí mismo: quien entrega no puede ser quien recibe.
   if (actor!.id === userId) {
     throw new CashSettlementError('No puedes cerrar tu propio cuadre: debe hacerlo otra persona autorizada.')
@@ -299,6 +313,8 @@ export async function closeCashSettlement(
         createdAt: hasta,
         closedAt: hasta,
         closedByUserId: actor!.id,
+        // Responsable de capital al cerrar (v16): foto histórica, no se recalcula.
+        capitalControllerAdminIdAtClose: route.capitalControllerAdminId,
       }
       await database.cashSettlements.add(documento)
       for (const previo of sustituye) {
@@ -348,6 +364,8 @@ export async function reopenCashSettlement(
   if (!doc) throw new CashSettlementError('El cuadre indicado no existe.')
   // Permiso con la ruta y la empresa del DOCUMENTO, no las de la pantalla.
   assertCan(actor, 'cashSettlement.reopen', { routeId: doc.routeId, tenantId: doc.tenantId })
+  // v16: reabrir es CORREGIR: responsable de capital de la ruta o SuperAdmin.
+  await exigirAutoridadDeCaja(actor, doc.routeId, doc.tenantId, 'correct', database)
   if (motivo.length < MIN_CASH_REASON) {
     throw new CashSettlementError(`Debes explicar el motivo de la reapertura (mínimo ${MIN_CASH_REASON} caracteres).`)
   }

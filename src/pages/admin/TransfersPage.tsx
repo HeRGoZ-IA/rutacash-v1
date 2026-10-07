@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, ArrowLeftRight, ArrowRightLeft, ChevronRight, MapPin, Users, Search } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { Plus, ArrowLeftRight, ChevronRight, MapPin, Users, Search } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -21,7 +20,8 @@ import { AnnulledBadge, ReversalDetail, ReverseButton, ReverseMovementModal, sig
 import { custodianBlockedReason } from '@/services/cashCustodyService'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
-import { can, filterAccessibleRoutes, authorizedRouteIdsOf, isPartnerInScope, isTransferInScope } from '@/lib/permissions'
+import { canOperateRouteCash, filterAccessibleRoutes, authorizedRouteIdsOf, isPartnerInScope, isTransferInScope } from '@/lib/permissions'
+import { CapitalControllerBadge } from '@/components/ui/CapitalControllerBadge'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import type { Transfer, Route, User, TransferEntityType } from '@/models/types'
@@ -52,12 +52,11 @@ export default function TransfersPage() {
   const { tenantId, currency } = useTenant()
   const officeFilter = useOfficeRouteFilter()
   const { user } = useAuth()
-  const navigate = useNavigate()
-  // Punto 6: mover efectivo ENTRE TRABAJADORES de una misma ruta no es una
-  // Transferencia (Ruta→Ruta exige rutas distintas). Vive en el cuadre por
-  // trabajador; aquí solo se ofrece el acceso.
-  const puedeTraspasar = can(user, 'cashCustody.manage', { tenantId: user?.tenantId })
-  const irATraspaso = () => navigate('/admin/weekly-settlement?vista=trabajadores')
+  // El traspaso de efectivo ENTRE TRABAJADORES de una misma ruta no es una
+  // Transferencia: vive en Liquidación → Cuadre por trabajador
+  // (`transferBaseBetweenWorkers`). El antiguo botón "Traspaso entre trabajadores"
+  // de esta pantalla solo navegaba allí y anunciaba una operación que no ocurría
+  // aquí; se retiró (2026-10-07). La operación real no cambia.
   const [transfers, setTransfers] = useState<Transfer[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
   const [partners, setPartners] = useState<User[]>([])
@@ -126,9 +125,14 @@ export default function TransfersPage() {
   const destinoRuta = decodeEndpoint(form.destino)?.type === 'route' ? decodeEndpoint(form.destino)!.id : ''
   const receptores = destinoRuta ? users.filter(u => !custodianBlockedReason(u, destinoRuta, tenantId)) : []
 
+  // v16: una ruta solo puede ser origen o destino si el actor es su Administrador
+  // responsable de capital (la caja de la ruta tiene UN responsable). Ruta → Ruta
+  // solo entre rutas del mismo responsable: lo garantiza ofrecer solo las propias.
+  const rutasControladas = routes.filter(r => canOperateRouteCash(user, r, 'structural', users))
+
   // Opciones del selector origen/destino: rutas y socios diferenciados.
   const endpointOptions = [
-    ...routes.map(r => ({ value: encodeEndpoint('route', r.id), label: `Ruta: ${r.nombre}` })),
+    ...rutasControladas.map(r => ({ value: encodeEndpoint('route', r.id), label: `Ruta: ${r.nombre}` })),
     ...partners.map(p => ({ value: encodeEndpoint('partner', p.id), label: `Socio: ${p.nombre}` })),
   ]
 
@@ -139,8 +143,8 @@ export default function TransfersPage() {
     if (!destino) { toast.error('Selecciona el destino'); return }
     if (form.valor <= 0) { toast.error('El valor debe ser mayor a 0'); return }
     if (form.origen === form.destino) {
-      toast.error(origen.type === 'route' && puedeTraspasar
-        ? 'Origen y destino no pueden ser iguales. Para mover efectivo entre trabajadores de la misma ruta usa «Traspaso entre trabajadores».'
+      toast.error(origen.type === 'route'
+        ? 'Origen y destino no pueden ser iguales. El efectivo entre trabajadores de una misma ruta se traspasa en Liquidación → Cuadre por trabajador.'
         : 'Origen y destino no pueden ser iguales')
       return
     }
@@ -216,9 +220,6 @@ export default function TransfersPage() {
           <p className="text-sm text-gray-500 mt-0.5">{visibleTransfers.length} transferencia(s) · {routes.length} ruta(s) · {partners.length} socio(s)</p>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
-          {puedeTraspasar && (
-            <Button variant="secondary" onClick={irATraspaso} icon={<ArrowRightLeft className="w-4 h-4" />}>Traspaso entre trabajadores</Button>
-          )}
           <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>Nueva transferencia</Button>
         </div>
       </div>
@@ -274,6 +275,7 @@ export default function TransfersPage() {
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-900 truncate">{g.nombre}</p>
                     <Badge variant={g.type === 'route' ? 'info' : 'purple'} size="sm">{g.type === 'route' ? 'Ruta' : 'Socio'}</Badge>
+                    {g.type === 'route' && <CapitalControllerBadge className="block mt-1" route={routes.find(r => r.id === g.id)} users={users} currentUserId={user?.id} />}
                   </div>
                 </div>
                 <span className="text-xs text-gray-400">{g.cantidad} mov.</span>
@@ -320,7 +322,7 @@ export default function TransfersPage() {
               options={receptores.map(u => ({ value: u.id, label: `${u.nombre} · ${u.rol === 'supervisor' ? 'Supervisor' : 'Cobrador'}` }))}
               placeholder="No: queda en la caja de la ruta" />
           )}
-          <p className="text-xs text-gray-400">Puedes transferir entre rutas y socios. Si participa un socio, se registra automáticamente en Caja socios.</p>
+          <p className="text-xs text-gray-400">Puedes transferir entre tus rutas (de las que eres responsable de capital) y socios. Si participa un socio, se registra automáticamente en Caja socios.</p>
           <div className="grid grid-cols-2 gap-3">
             <MoneyInput label="Valor" currency={currency} value={form.valor} onValueChange={v => setForm(f => ({ ...f, valor: v }))} required />
             <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
@@ -363,7 +365,7 @@ export default function TransfersPage() {
                           </div>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
-                          {canReverseTransfer(user, t, partnerRouteIds) && <ReverseButton onClick={() => setReversing(t)} />}
+                          {canReverseTransfer(user, t, partnerRouteIds, routes, users) && <ReverseButton onClick={() => setReversing(t)} />}
                           <span className={`text-sm font-bold ${estado === 'anulado' ? 'text-gray-400 line-through' : signo * t.valor >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>{signedMoney(signo * t.valor, currency)}</span>
                         </div>
                       </div>

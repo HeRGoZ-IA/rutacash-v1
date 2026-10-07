@@ -6,26 +6,27 @@ npm run smoke:prod
 
 Script: `scripts/prod-smoke.mjs`. Recorre la aplicación **publicada** como una persona: formularios, botones y navegación. No importa código de `src/`, no llama servicios y no lee ni escribe IndexedDB. La propia RutaCash crea sus datos.
 
-## Qué valida (A–H)
+## Qué valida (A–I)
 
 Bootstrap por UI desde cero:
 
 - Owner → empresa `SMOKE PRODUCCION <run-id>` → Super Admin
 - ruta *Norte Smoke*
 - usuarios: Juan (Cobrador), Laura (Supervisora), Andrés (Administrador)
-- capital de 5.000.000
+- capital por Administrador (v16): el Super Admin ingresa 5.000.000 a la empresa y los asigna a Andrés (responsable de capital de la ruta); Andrés los coloca en la ruta
 - clientes: Carlos (Venta A de 1.000.000) y Diana
 
 | | Escenario | Comprueba |
 |---|---|---|
 | A | Segundo crédito del Cobrador | Juan no ve venta directa, ve el aviso de crédito activo y genera 1 solicitud pendiente marcada "Cliente con crédito activo"; el reintento se rechaza por duplicado |
 | B | Supervisor | Laura ve y aprueba solicitudes, y otorga crédito directo (`sale.createDirect`) |
-| C | Base física | 1.500.000 a Juan: el libro no cambia, "sin asignar" baja 1.500.000, "Cuadra" |
+| C | Base física | Laura (Supervisora) ya no ve "Entregar Base" y ve al responsable de capital; Andrés entrega 1.500.000 a Juan: el libro no cambia, "sin asignar" baja 1.500.000, "Cuadra" |
 | D | Operación | Mi efectivo: 1.500.000 − 500.000 + 300.000 − 100.000 = 1.200.000 |
 | E | Cuadre exacto | Entrega 1.200.000 → exacto; el ciclo siguiente queda en 0 |
-| F | Faltante | Esperado 1.000.000, entregado 900.000 → faltante 100.000 que se arrastra |
+| F | Faltante | Andrés entrega Base y cuadra: esperado 1.000.000, entregado 900.000 → faltante 100.000 que se arrastra |
 | G | Conciliación | libro = sin asignar + personas; la vía (b) coincide; faltante visible; cartera aparte; "Cuadra" |
 | H | Retiro vs custodia | Retirar el libro completo se rechaza; tras una devolución, el disponible sube y el retiro válido se acepta; sigue "Cuadra" |
+| I | Capital por Administrador | Andrés: asignado = disponible + en rutas = 5.000.000 y el retiro volvió a su bolsa; Transferencias sin el botón "Traspaso entre trabajadores"; el Super Admin ve a Andrés en la tabla de Administradores (asignado / en rutas / disponible) y no tiene "Inyectar capital" |
 
 También comprueba:
 

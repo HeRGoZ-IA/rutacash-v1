@@ -45,7 +45,9 @@ export const CAPABILITY_METADATA: Record<Capability, CapabilityMeta> = {
   'company.viewConsolidated': { key: 'company.viewConsolidated', label: 'Ver información consolidada', description: 'Consultar cifras consolidadas de la empresa.', category: 'Empresa' },
   'settings.access': { key: 'settings.access', label: 'Acceder a configuración', description: 'Ver la configuración administrativa de la empresa.', category: 'Empresa' },
   'settings.edit': { key: 'settings.edit', label: 'Editar parámetros generales', description: 'Modificar parámetros generales del sistema.', category: 'Empresa', risk: 'medio' },
-  'capital.manage': { key: 'capital.manage', label: 'Gestionar capital', description: 'Registrar y ajustar el capital de las rutas.', category: 'Pagos y caja', risk: 'medio' },
+  'capital.manage': { key: 'capital.manage', label: 'Gestionar capital', description: 'Colocar y retirar capital de las rutas de las que es responsable de capital.', category: 'Pagos y caja', risk: 'medio' },
+  'capital.allocateAdmins': { key: 'capital.allocateAdmins', label: 'Asignar capital a Administradores', description: 'Registrar el capital de la empresa y entregarlo o recogerlo de la bolsa de cada Administrador.', category: 'Pagos y caja', risk: 'alto' },
+  'capital.assignController': { key: 'capital.assignController', label: 'Cambiar responsable de capital', description: 'Decidir qué Administrador maneja el capital y la caja de cada ruta.', category: 'Pagos y caja', risk: 'alto' },
 
   // Rutas
   // Oficinas — CATÁLOGO de agrupación. Ninguna concede acceso a los datos de las

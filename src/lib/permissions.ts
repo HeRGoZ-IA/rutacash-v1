@@ -12,7 +12,8 @@
 // todo, en los servicios que ejecutan cada acción crítica). La autenticación
 // segura deberá migrar a un backend en la versión SaaS real.
 // ============================================================
-import type { User, UserRole } from '@/models/types'
+import type { Route, User, UserRole } from '@/models/types'
+import { isValidCapitalController } from '@/lib/capitalAllocation'
 
 // --- Lista tipada de capacidades ---
 export type Capability =
@@ -27,6 +28,11 @@ export type Capability =
   | 'settings.access'
   | 'settings.edit'
   | 'capital.manage'
+  // Capital por Administrador (v16). SOLO el SuperAdmin: entrega/recoge capital de
+  // la bolsa de cada Administrador y decide quién es el responsable de capital de
+  // cada ruta. Ningún otro rol puede tenerlas (ver INCOMPATIBLE_BY_ROLE).
+  | 'capital.allocateAdmins'
+  | 'capital.assignController'
   // Oficinas (CATÁLOGO de agrupación, NO acceso a datos)
   // ADVERTENCIA: ninguna de estas capacidades concede acceso a las rutas de una
   // Oficina. Gestionar el catálogo y poder ver los datos de sus rutas son cosas
@@ -130,6 +136,7 @@ const SUPERADMIN_CAPS: Capability[] = [
   'company.edit',
   'company.enterPanel', 'company.viewConsolidated',
   'settings.access', 'settings.edit', 'capital.manage',
+  'capital.allocateAdmins', 'capital.assignController',
   'office.create', 'office.edit', 'office.delete', 'office.changeStatus',
   'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
   'route.viewAll', 'route.viewAssigned',
@@ -268,6 +275,9 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     // El Administrador no es plataforma ni gestiona empresas ni borra rutas.
     'platform.access', 'company.create', 'company.edit', 'company.suspend',
     'route.delete', 'route.viewAll',
+    // El Administrador recibe capital del SuperAdmin; no se lo asigna a sí mismo ni a
+    // otros, y no decide quién es el responsable de capital de una ruta.
+    'capital.allocateAdmins', 'capital.assignController',
   ],
   socio: [
     // Perfil de consulta: prohibida toda escritura operativa y de gestión.
@@ -285,6 +295,7 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
     'user.create', 'user.edit', 'user.block', 'user.setRole', 'user.grantCapabilities', 'user.resetPassword',
     'platform.access', 'company.create', 'company.edit', 'company.suspend',
+    'capital.allocateAdmins', 'capital.assignController',
   ],
   supervisor: [
     // (2026-09-24) Venta directa y autorizaciones YA NO son incompatibles: forman
@@ -300,6 +311,7 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
     'user.create', 'user.edit', 'user.block', 'user.setRole', 'user.grantCapabilities', 'user.resetPassword',
     'platform.access', 'company.create', 'company.edit', 'company.suspend', 'settings.access', 'capital.manage',
+    'capital.allocateAdmins', 'capital.assignController',
   ],
   cobrador: [
     'sale.createDirect',
@@ -318,6 +330,7 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
     'user.create', 'user.edit', 'user.block', 'user.setRole', 'user.grantCapabilities', 'user.resetPassword',
     'platform.access', 'company.create', 'company.edit', 'company.suspend', 'settings.access', 'capital.manage',
+    'capital.allocateAdmins', 'capital.assignController',
   ],
   secretario: [
     'sale.createDirect', 'sale.createRequest',
@@ -332,6 +345,7 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
     'route.create', 'route.edit', 'route.block', 'route.delete', 'route.assign',
     'user.create', 'user.edit', 'user.block', 'user.setRole', 'user.grantCapabilities', 'user.resetPassword',
     'platform.access', 'company.create', 'company.edit', 'company.suspend',
+    'capital.allocateAdmins', 'capital.assignController',
   ],
 }
 
@@ -569,6 +583,93 @@ export function can(user: User | null | undefined, capability: Capability, ctx?:
   }
 
   return true
+}
+
+// ============================================================
+// AUTORIDAD SOBRE LA CAJA DE UNA RUTA (v16 — capital por Administrador)
+// ------------------------------------------------------------
+// Tener la capacidad (`capital.manage`, `cashCustody.manage`, `cashSettlement.*`)
+// y la ruta asignada YA NO basta. La caja de una ruta tiene UN responsable: su
+// `Route.capitalControllerAdminId`. Tres niveles:
+//
+//   'structural'  mueve capital o efectivo de la CAJA de la ruta hacia fuera o
+//                 hacia dentro de una bolsa: capital, retiros, transferencias con
+//                 la ruta, entrega de Base desde la caja, gasto pagado por la caja.
+//                 → SOLO el Administrador responsable. Ni otro Admin asignado, ni el
+//                   Supervisor, ni el SuperAdmin (su vía es asignar capital al Admin:
+//                   no existe el atajo SuperAdmin → Ruta).
+//   'settle'      cuadra o recoge efectivo que YA está en manos de un trabajador
+//                 (cierre de cuadre, devolución de Base, traspaso entre
+//                 trabajadores, gasto atribuido a un trabajador).
+//                 → responsable, SuperAdmin (control global) y el Supervisor de la
+//                   ruta (operación en campo con la Base ya entregada).
+//   'correct'     corrige lo registrado (anulaciones, reabrir un cuadre, cerrar o
+//                 reabrir la liquidación semanal de la ruta).
+//                 → responsable y SuperAdmin.
+//
+// FAIL CLOSED: sin responsable válido (inexistente, inactivo, desasignado o de otro
+// rol) NINGUNA operación de caja procede, para nadie.
+//
+// Es una regla ADICIONAL a `can()`: los servicios exigen ambas.
+// ============================================================
+export type RouteCashOperation = 'structural' | 'settle' | 'correct'
+
+type ControllerLike = Pick<User, 'id' | 'rol' | 'status' | 'tenantId' | 'authorizedRouteIds' | 'routeId' | 'createdAt'>
+
+/** Responsable de capital VÁLIDO de la ruta (o undefined). */
+export function routeCapitalController<T extends ControllerLike>(
+  route: Pick<Route, 'id' | 'tenantId' | 'capitalControllerAdminId'> | null | undefined,
+  users: T[],
+): T | undefined {
+  if (!route?.capitalControllerAdminId) return undefined
+  const u = users.find(x => x.id === route.capitalControllerAdminId)
+  return u && isValidCapitalController(u, route) ? u : undefined
+}
+
+/** ¿`user` es HOY el responsable válido del capital de la ruta? */
+export function isRouteCapitalController(
+  user: ControllerLike | null | undefined,
+  route: Pick<Route, 'id' | 'tenantId' | 'capitalControllerAdminId'> | null | undefined,
+): boolean {
+  return !!user && !!route && route.capitalControllerAdminId === user.id && isValidCapitalController(user, route)
+}
+
+export const NO_CAPITAL_CONTROLLER_MESSAGE =
+  'La ruta no tiene Administrador responsable de capital: sus operaciones de caja están bloqueadas hasta que el SuperAdmin asigne uno.'
+
+/**
+ * ¿Por qué `actor` NO puede ejecutar `op` sobre la caja de `route`? `null` = puede.
+ * `users`: usuarios de la empresa (para validar al responsable actual).
+ */
+export function routeCashAuthorityError(
+  actor: User | null | undefined,
+  route: Pick<Route, 'id' | 'tenantId' | 'capitalControllerAdminId'> | null | undefined,
+  op: RouteCashOperation,
+  users: ControllerLike[],
+): string | null {
+  if (!actor || actor.status !== 'activo') return 'Acción no autorizada.'
+  if (!route || route.tenantId !== actor.tenantId) return 'La ruta no pertenece a tu empresa.'
+  const controller = routeCapitalController(route, users)
+  if (!controller) return NO_CAPITAL_CONTROLLER_MESSAGE
+  if (controller.id === actor.id) return null
+  if (op === 'structural') {
+    return actor.rol === 'superadmin'
+      ? 'El SuperAdmin asigna capital a los Administradores; la caja de la ruta la maneja su Administrador responsable.'
+      : 'Solo el Administrador responsable del capital de esta ruta puede manejar su caja.'
+  }
+  if (actor.rol === 'superadmin') return null
+  if (op === 'settle' && actor.rol === 'supervisor' && authorizedRouteIdsOf(actor).includes(route.id)) return null
+  return 'Solo el Administrador responsable del capital de esta ruta (o el SuperAdmin) puede hacerlo.'
+}
+
+/** Versión booleana para la UI (el servicio revalida siempre). */
+export function canOperateRouteCash(
+  actor: User | null | undefined,
+  route: Pick<Route, 'id' | 'tenantId' | 'capitalControllerAdminId'> | null | undefined,
+  op: RouteCashOperation,
+  users: ControllerLike[],
+): boolean {
+  return routeCashAuthorityError(actor, route, op, users) === null
 }
 
 /**

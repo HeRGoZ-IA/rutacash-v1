@@ -146,6 +146,9 @@ export class MemoryDb {
   capitalMovements = new FakeTable<any>(this, 'capitalMovements')
   transfers = new FakeTable<any>(this, 'transfers')
   withdrawals = new FakeTable<any>(this, 'withdrawals')
+  // Capital por Administrador (v16): libro empresa ↔ Admin y historial de responsables.
+  capitalLedger = new FakeTable<any>(this, 'capitalLedger')
+  routeCapitalControllerEvents = new FakeTable<any>(this, 'routeCapitalControllerEvents')
   // Liquidaciones semanales PERSISTENTES (cierre y reapertura de periodo).
   weeklySettlements = new FakeTable<any>(this, 'weeklySettlements')
   // PLANO DE CONTROL SaaS (nivel plataforma). Están en TABLES para que el zero-state
@@ -161,6 +164,7 @@ export class MemoryDb {
     'users', 'tenants', 'offices', 'routes', 'clients', 'sales', 'installments',
     'payments', 'expenses', 'expenseCategories', 'noPaymentVisits',
     'capitalMovements', 'transfers', 'withdrawals', 'weeklySettlements',
+    'capitalLedger', 'routeCapitalControllerEvents',
     'platformUsers', 'companyControl', 'saasPayments', 'controlEvents',
   ] as const
 

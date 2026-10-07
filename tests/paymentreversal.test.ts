@@ -15,6 +15,7 @@
 // ============================================================
 import 'fake-indexeddb/auto'
 import { db } from '../src/lib/db'
+import { sembrarResponsables } from './financial/capitalFixture'
 import { today } from '../src/lib/formatters'
 import { OPERATIONAL_TABLES, subscribeDataChanges } from '../src/lib/dataRevision'
 import { compareByCreation } from '../src/lib/eventOrder'
@@ -104,6 +105,9 @@ async function empresa() {
     ({ id, tenantId, officeId, nombre, codigo: id, status: 'activa', capitalInicial: 0, capitalActual: 0, tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 0, createdAt: '2026-09-01' })
   await db.routes.bulkAdd([ruta(R1, T, 'of-1', 'Barreiro'), ruta(R2, T, 'of-1', 'Centro'), ruta(RB, TB, 'of-b', 'Ajena')] as never[])
   await db.users.bulkAdd([SUPER, ADMIN, ADMIN_CENTRO, LAURA, SECRE, SOCIO, FABIO, CARLOS, AJENO_ADMIN])
+  // v16: Andrés (primer Admin de ambas rutas) es su responsable de capital, con bolsa.
+  await sembrarResponsables(db, T, { [R1]: ADMIN.id, [R2]: ADMIN.id })
+  await sembrarResponsables(db, TB, { [RB]: AJENO_ADMIN.id })
   await registerCapital({ actor: ADMIN, tenantId: T, routeId: R1, valor: 5_000_000 })
 }
 

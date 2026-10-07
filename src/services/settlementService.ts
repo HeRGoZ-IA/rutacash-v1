@@ -30,7 +30,7 @@
 import { db } from '@/lib/db'
 import { nowISO } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
-import { assertCan, AuthzError } from '@/services/authz'
+import { assertCan, assertRouteCashAuthority, AuthzError } from '@/services/authz'
 import { filterAccessibleRoutes } from '@/lib/permissions'
 import { generateWeeklySettlement } from '@/services/weeklySettlementEngine'
 import type { CashboxDatabase } from '@/services/cashboxEngine'
@@ -57,6 +57,10 @@ export interface SettlementDatabase extends CashboxDatabase {
   routes: {
     get(key: string): Promise<Route | undefined>
     where(index: string): { equals(key: string): { toArray(): Promise<Route[]> } }
+  }
+  /** Usuarios de la empresa: validar al responsable de capital de la ruta (v16). */
+  users: {
+    where(index: string): { equals(key: string): { toArray(): Promise<User[]> } }
   }
   offices: {
     where(index: string): { equals(key: string): { toArray(): Promise<Office[]> } }
@@ -111,6 +115,11 @@ export async function closeSettlement(
   if (!route) throw new SettlementError('La ruta indicada no existe.')
   if (route.tenantId !== tenantId) throw new AuthzError('La ruta no pertenece a esta empresa.')
 
+  // 2.b) v16: liquidar la ruta es decisión de su Administrador RESPONSABLE de capital
+  //      (o del SuperAdmin). Otro Administrador asignado no la cierra. Sin
+  //      responsable válido: fail closed.
+  assertRouteCashAuthority(actor, route, 'correct', await database.users.where('tenantId').equals(tenantId).toArray())
+
   // 3) Estado actual del periodo en esa ruta.
   const existentes = await database.weeklySettlements.where('routeId').equals(routeId).toArray()
   const bloqueo = closureBlockedReason(existentes, routeId, semanaInicio, semanaFin)
@@ -135,6 +144,9 @@ export async function closeSettlement(
     closedByUserId: actor?.id,
     version,
     ...snapshot,
+    // Foto del responsable de capital al cerrar: el histórico no se recalcula si
+    // después cambia el responsable de la ruta.
+    capitalControllerAdminIdAtClose: route.capitalControllerAdminId,
   }
 
   // 6) ESCRITURA ATÓMICA: el documento nuevo y el enlace de los sustituidos viajan
@@ -202,6 +214,11 @@ export async function reopenSettlement(
 
   // Permiso CON la ruta y la empresa del documento, no las que diga la pantalla.
   assertCan(actor, 'settlement.reopen', { routeId: documento.routeId, tenantId: documento.tenantId })
+  // v16: reabrir es corregir — responsable de capital ACTUAL de la ruta o SuperAdmin.
+  assertRouteCashAuthority(
+    actor, await database.routes.get(documento.routeId), 'correct',
+    await database.users.where('tenantId').equals(documento.tenantId).toArray(),
+  )
 
   // MOTIVO OBLIGATORIO: se valida después del permiso para no revelar la
   // existencia del documento a quien no puede tocarlo.

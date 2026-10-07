@@ -69,6 +69,12 @@ const MARCADORES = [
   ['no puede volver a otro estado.', true, 'anulación monótona y sincronización causal (2026-10-02 R8)'],
   // Ronda 9: gastos clasificados por atribución económica (empresa / ruta / trabajador).
   ['¿A quién corresponde este gasto?', true, 'clasificación y atribución de gastos (2026-10-02 R9)'],
+  // Ronda 10: capital por Administrador (SuperAdmin → Admin → Ruta) y un responsable por ruta.
+  ['Asignar a Administrador', true, 'capital por Administrador: SuperAdmin → Admin (2026-10-07 R10)'],
+  ['Sin responsable de capital', true, 'responsable de capital por ruta (2026-10-07 R10)'],
+  ['capitalLedger', true, 'tabla Dexie v16 capitalLedger (2026-10-07 R10)'],
+  ['Inyectar capital', false, 'atajo SuperAdmin → Ruta retirado (≤2026-10-06)'],
+  ['usa «Traspaso entre trabajadores»', false, 'acceso confuso desde Transferencias retirado (≤2026-10-06)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

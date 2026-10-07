@@ -28,12 +28,24 @@
 // alcance, Oficina activa (operación nueva), monto entero > 0, fecha válida no
 // futura, fondos disponibles (dentro de la transacción) y autoría/instante sellados
 // por el servicio — la pantalla no aporta `userId` ni `createdAt`.
+//
+// v16 — CAPITAL POR ADMINISTRADOR (SuperAdmin → Admin → Ruta):
+//   · Capital y retiros: SOLO el Administrador responsable de capital de la ruta
+//     (`Route.capitalControllerAdminId`). El capital sale de SU bolsa (no puede
+//     superar su disponible) y el retiro vuelve a SU bolsa; ambos sellan `adminId`.
+//     No existe el atajo SuperAdmin → Ruta: el SuperAdmin asigna al Administrador.
+//   · Transferencias con una ruta: el actor debe ser el responsable de CADA ruta
+//     implicada. Ruta → Ruta solo entre rutas del MISMO responsable (si no, el
+//     capital cambiaría de bolsa sin pasar por el SuperAdmin).
+//   · Ruta sin responsable válido: todo falla cerrado.
 // ============================================================
 import { db, type RutaCashDB } from '@/lib/db'
 import { generateId } from '@/lib/utils'
 import { nowISO, today } from '@/lib/formatters'
-import { authorizedRouteIdsOf, can, isTransferInScope } from '@/lib/permissions'
-import { assertCan, assertRouteAccess, AuthzError } from '@/services/authz'
+import { authorizedRouteIdsOf, can, canOperateRouteCash, isTransferInScope } from '@/lib/permissions'
+import { adminCapital } from '@/lib/capitalAllocation'
+import { assertCan, assertRouteAccess, assertRouteCashAuthority, AuthzError } from '@/services/authz'
+import { loadCapitalRows, type CapitalControlDatabase } from '@/services/capitalControlService'
 import { logAction } from '@/services/auditService'
 import { assertRouteOperationalContext } from '@/services/officeService'
 import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
@@ -80,6 +92,22 @@ async function auditar(params: Parameters<typeof logAction>[0]) {
   await logAction(params).catch(() => undefined)
 }
 
+/** Alcance de las escrituras de fondos: conciliación + libro de capital. */
+export function fundsTables(database: RutaCashDB) {
+  return [...new Set([
+    ...reconciliationTables(database), database.capitalLedger, database.routeCapitalControllerEvents,
+  ])]
+}
+
+/** Autoridad estructural sobre la caja de la ruta, con datos releídos en la transacción. */
+async function exigirResponsable(actor: User, routeId: string, tenantId: string, database: RutaCashDB): Promise<void> {
+  const [route, users] = await Promise.all([
+    database.routes.get(routeId),
+    database.users.where('tenantId').equals(tenantId).toArray(),
+  ])
+  assertRouteCashAuthority(actor, route, 'structural', users)
+}
+
 // ------------------------------------------------------------
 // CAPITAL
 // ------------------------------------------------------------
@@ -98,18 +126,26 @@ export async function registerCapital(
   const valor = validarMonto(params.valor)
   const fecha = validarFecha(params.fecha)
   let mov!: CapitalMovement
-  await database.transaction('rw', [database.capitalMovements], async () => {
+  await database.transaction('rw', fundsTables(database), async () => {
     await database.capitalMovements.where('routeId').equals(routeId).count()
+    // Responsable y bolsa RELEÍDOS dentro de la transacción: dos colocaciones
+    // simultáneas no gastan el mismo disponible.
+    await exigirResponsable(actor, routeId, tenantId, database)
+    const disponible = adminCapital(actor.id, await loadCapitalRows(tenantId, database as unknown as CapitalControlDatabase)).disponible
+    if (valor > disponible) {
+      throw new RouteFundsError(`Tu capital disponible no alcanza (disponible: ${disponible}). Pide al SuperAdmin que te asigne más capital o retíralo de otra de tus rutas.`)
+    }
     mov = {
       id: generateId(), tenantId, routeId, tipo: 'ingresoCapital', valor,
       descripcion: params.descripcion?.trim() || undefined, fecha, userId: actor.id, createdAt: nowISO(),
+      adminId: actor.id,
     }
     await database.capitalMovements.add(mov)
   })
   await auditar({
     tenantId, userId: actor.id, userRole: actor.rol, routeId, action: 'CAPITAL_REGISTERED',
-    entityType: 'capitalMovement', entityId: mov.id, descripcion: `Capital ${valor} a la ruta (${fecha}).`,
-    after: { valor, fecha },
+    entityType: 'capitalMovement', entityId: mov.id, descripcion: `Capital ${valor} de la bolsa de ${actor.nombre} a la ruta (${fecha}).`,
+    after: { valor, fecha, adminId: actor.id },
   })
   return mov
 }
@@ -179,6 +215,11 @@ export async function registerTransfer(
   if (!isTransferInScope(actor, transfer, partnerRoutes)) {
     throw new AuthzError('No puedes transferir desde/hacia una ruta o socio fuera de tu alcance.')
   }
+  // v16: la caja de cada ruta implicada la maneja SOLO su responsable de capital.
+  // Ruta → Ruta exige el MISMO responsable en ambas (lo implica exigirlo en las dos)
+  // y queda sellado en `adminId`: el traslado no cambia el capital de bolsa.
+  const rutasImplicadas = [origen, destino].filter(e => e.type === 'route').map(e => e.id)
+  if (origen.type === 'route' && destino.type === 'route') transfer.adminId = actor.id
 
   // Entrega en mano: solo en una Route destino, a una persona elegible, con permiso.
   if (params.entregarA) {
@@ -192,8 +233,9 @@ export async function registerTransfer(
   const partnerMovements: PartnerCashMovement[] = []
   let custody: CashCustodyMovement | undefined
   // Transferencia + Caja socios + entrega en mano: TODO o NADA.
-  await database.transaction('rw', [...reconciliationTables(database), database.partnerCashMovements], async () => {
+  await database.transaction('rw', [...fundsTables(database), database.partnerCashMovements], async () => {
     await database.transfers.where('routeOrigenId').equals(transfer.routeOrigenId).count()   // bloqueo
+    for (const routeId of rutasImplicadas) await exigirResponsable(actor, routeId, tenantId, database)
     const ahora = nowISO()
     if (origen.type === 'route') {
       const r = await computeRouteCashReconciliation({ tenantId, routeId: origen.id, hasta: ahora }, database)
@@ -259,17 +301,19 @@ export async function registerWithdrawal(
   const valor = validarMonto(params.valor)
   const fecha = validarFecha(params.fecha)
   let w!: Withdrawal
-  await database.transaction('rw', reconciliationTables(database), async () => {
+  await database.transaction('rw', fundsTables(database), async () => {
     await database.withdrawals.where('routeId').equals(routeId).count()   // bloqueo
+    await exigirResponsable(actor, routeId, tenantId, database)
     const ahora = nowISO()
     const r = await computeRouteCashReconciliation({ tenantId, routeId, hasta: ahora }, database)
     if (valor > r.disponible) throw new RouteFundsError(`El retiro supera los fondos disponibles de la ruta (disponible: ${r.disponible}).`)
-    w = { id: generateId(), tenantId, routeId, valor, descripcion: params.descripcion?.trim() || undefined, fecha, userId: actor.id, createdAt: ahora }
+    // El retiro vuelve a la bolsa del responsable (v16): `adminId`.
+    w = { id: generateId(), tenantId, routeId, valor, descripcion: params.descripcion?.trim() || undefined, fecha, userId: actor.id, createdAt: ahora, adminId: actor.id }
     await database.withdrawals.add(w)
   })
   await auditar({
     tenantId, userId: actor.id, userRole: actor.rol, routeId, action: 'WITHDRAWAL_REGISTERED',
-    entityType: 'withdrawal', entityId: w.id, descripcion: `Retiro ${valor} de la ruta (${fecha}).`, after: { valor, fecha },
+    entityType: 'withdrawal', entityId: w.id, descripcion: `Retiro ${valor} de la ruta a la bolsa de ${actor.nombre} (${fecha}).`, after: { valor, fecha, adminId: actor.id },
   })
   return w
 }
@@ -279,6 +323,10 @@ export async function getRouteAvailableFunds(tenantId: string, routeId: string, 
   return (await computeRouteCashReconciliation({ tenantId, routeId }, database)).disponible
 }
 
-/** ¿El actor puede registrar capital / retiros en la ruta? (para la UI). */
-export const canManageRouteFunds = (actor: User | null | undefined, routeId: string, tenantId: string) =>
-  can(actor, 'capital.manage', { routeId, tenantId })
+/**
+ * ¿El actor puede registrar capital / retiros en la ruta? (para la UI; el servicio
+ * revalida). v16: capacidad + ser su Administrador responsable de capital.
+ */
+export const canManageRouteFunds = (
+  actor: User | null | undefined, route: Route | undefined, tenantId: string, users: User[],
+) => !!route && can(actor, 'capital.manage', { routeId: route.id, tenantId }) && canOperateRouteCash(actor, route, 'structural', users)

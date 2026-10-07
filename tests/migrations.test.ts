@@ -105,7 +105,7 @@ async function crearBaseV1(): Promise<void> {
  * nueva no obligue a perseguir números sueltos por todo el archivo: lo que estos
  * casos comprueban es que la base llega al esquema actual, no que sea la 11.
  */
-const VERSION_ACTUAL = 15
+const VERSION_ACTUAL = 16
 
 /** Abre la base con el esquema ACTUAL de producción (dispara v2 → actual). */
 async function abrirActual() {
@@ -1863,7 +1863,7 @@ await spec('MIG-BASE-001', 'Migración v15', 'v14 → v15 preserva pagos, capita
   const iguales = (await snap(actual)) === previo
   metric('versión', `${verPartida} → ${actual.verno}`)
   metric('pagos, capital, cuadres, rutas y usuarios idénticos', iguales)
-  assert(verPartida === 14 && actual.verno === 15, 'la migración no fue 14 → 15')
+  assert(verPartida === 14 && actual.verno === VERSION_ACTUAL, `la migración no fue 14 → ${VERSION_ACTUAL}`)
   assert(iguales, 'la migración v15 modificó datos existentes')
   actual.close()
 })
@@ -1940,6 +1940,9 @@ async function escenarioCierre() {
   const cob = (await db.users.get('u-cob'))!
   const adm = (await db.users.get('u-adm'))!
   const sec = (await db.users.get('u-sec'))!
+  // v16: Ada es el único Administrador de la ruta → su responsable de capital (la
+  // regla del primer Admin, aquí fijada directamente porque se sembró sin servicio).
+  await db.routes.update(ruta.id, { capitalControllerAdminId: adm.id })
 
   await ventaLista(db, ruta.id, 'c-1', 's-1')
   // Pago con fecha contable DENTRO de la semana que se va a cerrar.

@@ -29,12 +29,12 @@ import {
   settlementHistory,
   type SettlementHistoryRow,
 } from '@/lib/settlementPeriods'
-import { filterAccessibleRoutes, canAccessRoute, can } from '@/lib/permissions'
+import { filterAccessibleRoutes, canAccessRoute, can, canOperateRouteCash } from '@/lib/permissions'
 import { formatCurrency, formatDate, getWeekStart, getWeekEnd } from '@/lib/formatters'
 import { downloadCSV } from '@/lib/utils'
 import { WorkerCashSettlementPanel, PendingShortagesNotice } from '@/components/settlement/WorkerCashSettlementPanel'
 import { listCashSettlementsForUser } from '@/services/cashSettlementService'
-import type { WeeklySettlement, Route, CashSettlement } from '@/models/types'
+import type { WeeklySettlement, Route, CashSettlement, User } from '@/models/types'
 
 /**
  * LIQUIDACIÓN SEMANAL — SIEMPRE DE UNA RUTA.
@@ -103,14 +103,19 @@ export default function WeeklySettlementPage() {
    *    efectivo debía entregar cada PERSONA. Coexisten; ninguno sustituye al otro.
    */
   const puedeVerCuadres = can(user, 'cashSettlement.view', { tenantId })
-  // `?vista=trabajadores` abre directamente el cuadre por trabajador (acceso
-  // "Traspaso entre trabajadores" desde Transferencias).
+  // `?vista=trabajadores` abre directamente el cuadre por trabajador (enlace
+  // profundo; el antiguo botón de Transferencias se retiró en v16).
   const [vista, setVista] = useState<'ruta' | 'trabajadores'>(searchParams.get('vista') === 'trabajadores' ? 'trabajadores' : 'ruta')
   /** Cuadres de trabajadores de la ruta (sección informativa de la liquidación). */
   const [cuadresRuta, setCuadresRuta] = useState<CashSettlement[]>([])
 
-  const puedeCerrar = can(user, 'settlement.close', { routeId: routeId || undefined, tenantId })
-  const puedeReabrir = can(user, 'settlement.reopen', { routeId: routeId || undefined, tenantId })
+  // v16: liquidar la ruta es del Administrador RESPONSABLE de capital (o del
+  // SuperAdmin); otro Administrador asignado la consulta. El servicio revalida.
+  const [usuarios, setUsuarios] = useState<User[]>([])
+  const rutaSel = routes.find(r => r.id === routeId)
+  const autoridadRuta = !routeId || canOperateRouteCash(user, rutaSel, 'correct', usuarios)
+  const puedeCerrar = can(user, 'settlement.close', { routeId: routeId || undefined, tenantId }) && autoridadRuta
+  const puedeReabrir = can(user, 'settlement.reopen', { routeId: routeId || undefined, tenantId }) && autoridadRuta
 
   useEffect(() => { loadMeta() }, [tenantId, user])
 
@@ -165,6 +170,7 @@ export default function WeeklySettlementPage() {
     // RESTRICCIÓN POR RUTAS: el selector solo ofrece rutas autorizadas.
     const rts = filterAccessibleRoutes(user, await db.routes.where('tenantId').equals(tenantId).toArray())
     setRoutes(rts)
+    setUsuarios(await db.users.where('tenantId').equals(tenantId).toArray())
     // Con una sola ruta accesible, se preselecciona (sigue siendo obligatoria).
     if (rts.length === 1) setRouteId(rts[0].id)
   }

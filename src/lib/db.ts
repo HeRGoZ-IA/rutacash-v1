@@ -5,7 +5,9 @@ import type {
   NoPaymentVisit, ExpenseCategory, Expense, CapitalMovement, Transfer,
   Withdrawal, CashboxMovement, WeeklySettlement, AuditLog, SaleRequest,
   PartnerCashMovement, PaymentAdjustmentRequest, CashSettlement, CashCustodyMovement,
+  CapitalLedgerEntry, RouteCapitalControllerEvent,
 } from '@/models/types'
+import { planCapitalMigrationV16 } from '@/lib/capitalAllocation'
 import type {
   PlatformUser, CompanyControlRecord, SaaSPayment, ControlEvent,
 } from '@/platform/types'
@@ -34,6 +36,10 @@ export class RutaCashDB extends Dexie {
   /** Cuadre real por trabajador (v14). Route + persona + periodo por instantes. */
   cashSettlements!: Table<CashSettlement>
   cashCustodyMovements!: Table<CashCustodyMovement>
+  /** Capital por Administrador (v16): empresa ↔ Admin y traspasos de responsabilidad. */
+  capitalLedger!: Table<CapitalLedgerEntry>
+  /** Historial de responsables de capital por ruta (v16). */
+  routeCapitalControllerEvents!: Table<RouteCapitalControllerEvent>
 
   // ------------------------------------------------------------
   // PLANO DE CONTROL SaaS (NIVEL PLATAFORMA — v13)
@@ -606,6 +612,43 @@ export class RutaCashDB extends Dexie {
         if (!t.baseCustodyStartAt) t.baseCustodyStartAt = inicio
       })
       console.log(`[RutaCash][migración v15] Custodia de Base por trabajador habilitada desde ${inicio}. Sin Base histórica reconstruida.`)
+    })
+
+    // ============================================================
+    // v16 (CAPITAL POR ADMINISTRADOR): SuperAdmin → Administrador → Ruta.
+    //
+    //   1) Tablas nuevas `capitalLedger` y `routeCapitalControllerEvents`; índice
+    //      `capitalControllerAdminId` en rutas.
+    //   2) RESPONSABLE INICIAL de cada ruta (`planCapitalMigrationV16`, puro):
+    //      un Administrador válido → ese; varios → el primero según la auditoría
+    //      (no el orden de un array); ninguno → sin responsable (fail closed).
+    //   3) El capital ya colocado en cada ruta con responsable se RECONOCE en su
+    //      bolsa (ROUTE_CONTROL_TRANSFER sin origen). No se crea dinero: la suma de
+    //      bolsas + capital sin responsable = capital histórico de las rutas.
+    //
+    // No se borra ni modifica ningún capital, retiro, transferencia, pago ni cuadre:
+    // solo se AÑADE el responsable a las rutas que lo tienen. IDs deterministas.
+    // ============================================================
+    this.version(16).stores({
+      routes: 'id, tenantId, cobradorId, status, capitalControllerAdminId',
+      capitalLedger: 'id, tenantId, tipo, fromAdminId, toAdminId, routeId, createdAt',
+      routeCapitalControllerEvents: 'id, tenantId, routeId, createdAt',
+    }).upgrade(async (tx) => {
+      const [routes, users, auditLogs, capitalMovements, withdrawals, transfers] = await Promise.all(
+        ['routes', 'users', 'auditLogs', 'capitalMovements', 'withdrawals', 'transfers'].map(t => tx.table(t).toArray()),
+      )
+      const plan = planCapitalMigrationV16({
+        routes, users, auditLogs, rows: { ledger: [], capitalMovements, withdrawals, transfers }, now: new Date().toISOString(),
+      })
+      for (const u of plan.routeUpdates) {
+        await tx.table('routes').update(u.id, { capitalControllerAdminId: u.capitalControllerAdminId, capitalControllerSince: u.capitalControllerSince })
+      }
+      if (plan.ledger.length) await tx.table('capitalLedger').bulkAdd(plan.ledger)
+      if (plan.events.length) await tx.table('routeCapitalControllerEvents').bulkAdd(plan.events)
+      console.log(
+        `[RutaCash][migración v16] Capital por Administrador: ${plan.routeUpdates.length} ruta(s) con responsable, ` +
+        `${plan.sinResponsable.length} sin responsable, ${plan.ledger.length} reconocimiento(s) de capital existente.`,
+      )
     })
 
     // ============================================================

@@ -24,6 +24,7 @@ import { logAction } from '@/services/auditService'
 import { assertCan, AuthzError } from '@/services/authz'
 import { canManageUser } from '@/lib/permissions'
 import { setCobradorRoutes } from '@/services/routeAssignment'
+import { withCapitalControllerGuard } from '@/services/capitalControlService'
 import { applyOfficeRouteSelection } from '@/lib/officeManagement'
 import type { AuditLog, Client, Expense, Installment, Office, Payment, Route, Sale, User } from '@/models/types'
 
@@ -626,16 +627,23 @@ export async function setUserOfficeRoutes(
   const antes = getAssignedRouteIds(target)
   const despues = applyOfficeRouteSelection(antes, params.officeRouteIds, params.selectedRouteIds)
 
-  if (target.rol === 'cobrador') {
-    // Reutiliza el mecanismo existente: mantiene coherente `route.cobradorId`.
-    await setCobradorRoutes(params.userId, despues)
-  } else {
-    await db.users.update(params.userId, {
-      authorizedRouteIds: despues.length ? despues : undefined,
-      routeId: despues[0],
-      updatedAt: nowISO(),
-    })
-  }
+  // v16: asignar o retirar un Administrador puede fijar o proteger al responsable
+  // de capital de la ruta: misma transacción que la escritura.
+  await withCapitalControllerGuard({
+    tenantId: params.tenantId, actor, routeIds: [...new Set([...antes, ...despues])],
+    preferredAdminIds: target.rol === 'admin' ? [target.id] : [],
+  }, async () => {
+    if (target.rol === 'cobrador') {
+      // Reutiliza el mecanismo existente: mantiene coherente `route.cobradorId`.
+      await setCobradorRoutes(params.userId, despues)
+    } else {
+      await db.users.update(params.userId, {
+        authorizedRouteIds: despues.length ? despues : undefined,
+        routeId: despues[0],
+        updatedAt: nowISO(),
+      })
+    }
+  })
 
   const agregadas = despues.filter(id => !antes.includes(id))
   const retiradas = antes.filter(id => !despues.includes(id))

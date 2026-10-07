@@ -15,11 +15,13 @@ import type { User } from '@/models/types'
  * identifica siempre de forma explícita: "Sin Cobrador asignado", tanto cuando no
  * hay nadie asignado como cuando hay otros roles pero ningún Cobrador.
  */
-export function RouteAssignedUsers({ users, routeId, tenantId, responsibleCobradorId }: {
+export function RouteAssignedUsers({ users, routeId, tenantId, responsibleCobradorId, capitalControllerAdminId }: {
   users: User[]
   routeId: string
   tenantId: string
   responsibleCobradorId?: string
+  /** Administrador responsable del capital (v16): se marca entre los Administradores. */
+  capitalControllerAdminId?: string
 }) {
   const [expanded, setExpanded] = useState(false)
   const a = getRouteAssignmentsByRole(users, routeId, tenantId)
@@ -70,6 +72,9 @@ export function RouteAssignedUsers({ users, routeId, tenantId, responsibleCobrad
                     )}
                     {g.rol === 'cobrador' && u.id === responsibleCobradorId && (
                       <span className="text-[10px] font-medium text-primary-600"> (responsable)</span>
+                    )}
+                    {g.rol === 'admin' && u.id === capitalControllerAdminId && (
+                      <span className="text-[10px] font-medium text-emerald-700"> (responsable de capital)</span>
                     )}
                     {i < shown.length - 1 ? ', ' : ''}
                   </span>

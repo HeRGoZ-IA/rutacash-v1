@@ -19,7 +19,8 @@
 // ============================================================
 import 'fake-indexeddb/auto'
 import { db } from '../src/lib/db'
-import { can } from '../src/lib/permissions'
+import { sembrarResponsables } from './financial/capitalFixture'
+import { can, canOperateRouteCash } from '../src/lib/permissions'
 import { today } from '../src/lib/formatters'
 import {
   ACTIVE_SALE_STATUSES, activeCreditsOf, decideSaleOrigination, isActiveCredit,
@@ -109,6 +110,9 @@ async function empresa(opts: { capitalNorte?: number; capitalSur?: number } = {}
     { id: R_AJENA, tenantId: T_AJENA, nombre: 'Ajena', codigo: 'A-1', status: 'activa', capitalInicial: 0, capitalActual: 0, montoMaximoPrestamo: 0, createdAt: '2026-09-01' },
   ] as never[])
   await db.users.bulkAdd(EQUIPO)
+  // v16: Andrés (primer Admin de ambas rutas) es su responsable de capital, con bolsa.
+  await sembrarResponsables(db, T, { [R_NORTE]: ADMIN.id, [R_SUR]: ADMIN.id })
+  await sembrarResponsables(db, T_AJENA, { [R_AJENA]: AJENO.id })
   const movs = [
     { id: 'cap-n', tenantId: T, routeId: R_NORTE, tipo: 'ingresoCapital', valor: opts.capitalNorte ?? 10_000_000, fecha: '2026-09-01', userId: ADMIN.id, createdAt: '2026-09-01T08:00:00.000Z' },
     { id: 'cap-s', tenantId: T, routeId: R_SUR, tipo: 'ingresoCapital', valor: opts.capitalSur ?? 10_000_000, fecha: '2026-09-01', userId: ADMIN.id, createdAt: '2026-09-01T08:00:00.000Z' },
@@ -443,14 +447,22 @@ await spec('BASE-WORKER-005', G_BW, 'la asignación no duplica el capital de la 
   assert(despues.cuadra, 'la conciliación no cuadra')
 })
 
-await spec('BASE-WORKER-006', G_BW, 'asignación válida a un Supervisor (y el Supervisor entrega a su equipo)', async () => {
+await spec('BASE-WORKER-006', G_BW, 'asignación válida a un Supervisor; v16: el Supervisor ya NO entrega Base desde la caja de la ruta', async () => {
   await empresa({ capitalNorte: 5_000_000 })
   await entregar(LAURA.id, 1_000_000)
-  const aPedro = await entregar(PEDRO.id, 200_000, LAURA)
+  // v16 (§8): sacar Base de la CAJA de la ruta es control estructural → solo el
+  // Administrador responsable de capital. Antes (2026-09-24) el Supervisor podía.
+  const laura = await rechazo(() => entregar(PEDRO.id, 200_000, LAURA))
+  const aPedro = await entregar(PEDRO.id, 200_000, ADMIN)
+  const users = await db.users.where('tenantId').equals(T).toArray()
+  const norte = await db.routes.get(R_NORTE)
   metric('Laura (Supervisora)', await posicion(LAURA.id))
-  metric('Laura entrega a Pedro', `${aPedro.amount} · registró ${aPedro.createdByUserId}`)
+  metric('Laura intenta entregar a Pedro', laura)
+  metric('el responsable entrega a Pedro', `${aPedro.amount} · registró ${aPedro.createdByUserId}`)
   assert(await posicion(LAURA.id) === 1_000_000 && await posicion(PEDRO.id) === 200_000, 'la Base del Supervisor no quedó a su cargo')
+  assert(laura !== 'ACEPTADO' && /responsable del capital/.test(laura), 'el Supervisor sigue sacando Base de la caja de la ruta')
   assert(can(LAURA, 'cashCustody.manage', { routeId: R_NORTE, tenantId: T }) && !can(JUAN, 'cashCustody.manage', { routeId: R_NORTE, tenantId: T }), 'matriz de custodia incorrecta')
+  assert(!canOperateRouteCash(LAURA, norte, 'structural', users) && canOperateRouteCash(LAURA, norte, 'settle', users), 'el Supervisor debe conservar solo la operación de cuadre')
 })
 
 await spec('BASE-WORKER-007', G_BW, 'Admin/SuperAdmin no son custodios (no existe "Modo Supervisor"); el ledger es por persona', async () => {
@@ -644,8 +656,9 @@ await spec('MOVEMENT-SVC-002', G_MS, 'Transferencia Route → Route: atómica, t
 await spec('MOVEMENT-SVC-003', G_MS, 'contrapartidas (Caja socios, entrega en mano) son atómicas: todo o nada', async () => {
   await empresa({ capitalNorte: 5_000_000 })
   // a) Socio → Norte entregado en mano a Juan: transferencia + Caja socios + custodia.
+  // v16: la caja de Norte la maneja su responsable (Andrés), no el SuperAdmin.
   const { kind, custody, partnerMovements } = await registerTransfer({
-    actor: SUPER, tenantId: T, origen: { type: 'partner', id: SOCIO.id }, destino: { type: 'route', id: R_NORTE }, valor: 800_000, entregarA: { userId: JUAN.id },
+    actor: ADMIN, tenantId: T, origen: { type: 'partner', id: SOCIO.id }, destino: { type: 'route', id: R_NORTE }, valor: 800_000, entregarA: { userId: JUAN.id },
   })
   const r = await recon()
   metric('Socio → Norte', `${kind} · Caja socios ${partnerMovements.map(m => m.type).join(',')} · en mano a ${custody?.toUserId} (${custody?.relatedTransferId ? 'enlazada' : 'sin enlace'})`)
@@ -657,20 +670,24 @@ await spec('MOVEMENT-SVC-003', G_MS, 'contrapartidas (Caja socios, entrega en ma
   const antes = await conteo()
   const original = db.partnerCashMovements.bulkAdd.bind(db.partnerCashMovements)
   ;(db.partnerCashMovements as { bulkAdd: unknown }).bulkAdd = () => Promise.reject(new Error('fallo simulado en Caja socios'))
-  const fallo = await rechazo(() => registerTransfer({ actor: SUPER, tenantId: T, origen: { type: 'route', id: R_NORTE }, destino: { type: 'partner', id: SOCIO.id }, valor: 100_000 }))
+  const fallo = await rechazo(() => registerTransfer({ actor: ADMIN, tenantId: T, origen: { type: 'route', id: R_NORTE }, destino: { type: 'partner', id: SOCIO.id }, valor: 100_000 }))
   ;(db.partnerCashMovements as { bulkAdd: unknown }).bulkAdd = original
   // c) Fallo en la entrega en mano: tampoco queda la transferencia.
   const addOriginal = db.cashCustodyMovements.add.bind(db.cashCustodyMovements)
   ;(db.cashCustodyMovements as { add: unknown }).add = () => Promise.reject(new Error('fallo simulado en custodia'))
-  const fallo2 = await rechazo(() => registerTransfer({ actor: SUPER, tenantId: T, origen: { type: 'partner', id: SOCIO.id }, destino: { type: 'route', id: R_NORTE }, valor: 100_000, entregarA: { userId: JUAN.id } }))
+  const fallo2 = await rechazo(() => registerTransfer({ actor: ADMIN, tenantId: T, origen: { type: 'partner', id: SOCIO.id }, destino: { type: 'route', id: R_NORTE }, valor: 100_000, entregarA: { userId: JUAN.id } }))
   ;(db.cashCustodyMovements as { add: unknown }).add = addOriginal
   const despues = await conteo()
   metric('transferencias/socios/custodia antes → después de dos fallos', `${antes} → ${despues}`)
   metric('fallos', `${fallo} | ${fallo2}`)
   assert(fallo !== 'ACEPTADO' && fallo2 !== 'ACEPTADO' && antes === despues, 'una transferencia quedó a medias')
   // d) Receptor no elegible: rechazo antes de escribir.
-  const noElegible = await rechazo(() => registerTransfer({ actor: SUPER, tenantId: T, origen: { type: 'partner', id: SOCIO.id }, destino: { type: 'route', id: R_NORTE }, valor: 1000, entregarA: { userId: SECRE.id } }))
+  const noElegible = await rechazo(() => registerTransfer({ actor: ADMIN, tenantId: T, origen: { type: 'partner', id: SOCIO.id }, destino: { type: 'route', id: R_NORTE }, valor: 1000, entregarA: { userId: SECRE.id } }))
   assert(noElegible !== 'ACEPTADO' && (await conteo()) === antes, 'entrega en mano a un no elegible')
+  // e) v16: el SuperAdmin no opera la caja de la ruta (no hay atajo SuperAdmin → Ruta).
+  const sa = await rechazo(() => registerTransfer({ actor: SUPER, tenantId: T, origen: { type: 'partner', id: SOCIO.id }, destino: { type: 'route', id: R_NORTE }, valor: 1000 }))
+  metric('SuperAdmin → caja de Norte', sa)
+  assert(sa !== 'ACEPTADO' && (await conteo()) === antes, 'el SuperAdmin operó la caja de la ruta')
 })
 
 await spec('MOVEMENT-SVC-004', G_MS, 'retiro > fondos → rechazado (incluido el efectivo que está en manos de trabajadores)', async () => {
@@ -745,7 +762,8 @@ await spec('MOVEMENT-SVC-008', G_MS, 'fecha y autoría las pone el servicio', as
   await empresa({ capitalNorte: 5_000_000 })
   const t0 = new Date().toISOString()
   const cap = await registerCapital({ actor: ADMIN, tenantId: T, routeId: R_NORTE, valor: 1000, fecha: '2026-09-01' })
-  const ret = await registerWithdrawal({ actor: SUPER, tenantId: T, routeId: R_NORTE, valor: 500 })
+  // v16: el retiro lo registra el responsable de capital (vuelve a su bolsa).
+  const ret = await registerWithdrawal({ actor: ADMIN, tenantId: T, routeId: R_NORTE, valor: 500 })
   const { transfer } = await registerTransfer({ actor: ADMIN, tenantId: T, origen: { type: 'route', id: R_NORTE }, destino: { type: 'route', id: R_SUR }, valor: 200 })
   const t1 = new Date().toISOString()
   const audit = await db.auditLogs.where('entityId').anyOf([cap.id, ret.id, transfer.id]).toArray()
@@ -754,7 +772,7 @@ await spec('MOVEMENT-SVC-008', G_MS, 'fecha y autoría las pone el servicio', as
   metric('transferencia', `fecha ${transfer.fecha} · autor ${transfer.userId}`)
   metric('auditoría', audit.map(a => a.action).sort().join(', '))
   assert(cap.fecha === '2026-09-01' && cap.userId === ADMIN.id && cap.createdAt >= t0 && cap.createdAt <= t1, 'capital sin autoría o instante')
-  assert(ret.fecha === HOY_F && ret.userId === SUPER.id && transfer.userId === ADMIN.id && transfer.createdAt >= t0, 'retiro/transferencia sin autoría')
+  assert(ret.fecha === HOY_F && ret.userId === ADMIN.id && ret.adminId === ADMIN.id && transfer.userId === ADMIN.id && transfer.createdAt >= t0, 'retiro/transferencia sin autoría')
   assert(audit.length === 3, 'faltan registros de auditoría')
 })
 

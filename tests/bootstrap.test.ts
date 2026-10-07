@@ -2569,12 +2569,15 @@ await spec('ROUTE-ADMIN-012S', 'Multi-Admin', 'desasignar de una ruta conserva l
   const rX = await createRouteWithAdmins(datosRuta({ adminIds: [carlos.id, juan.id], nombre: 'Ruta X', codigo: 'RT-003' }), su, asRouteDb(db), sink)
 
   // Se edita Ruta X y se desasigna a Carlos (Juan sigue): el guardado real.
+  // v16: Carlos es el responsable de capital de X (primer Admin); retirarlo exige
+  // que el SuperAdmin elija explícitamente al nuevo responsable en la misma operación.
   await updateRouteWithAssignments({
     routeId: rX.id, tenantId: 't-1', nombre: 'Ruta X', ciudad: undefined,
     tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000,
     cobradorId: undefined,
     assignedUserIds: [juan.id],
     assignableUserIds: [carlos.id, juan.id],
+    capitalControllerAdminId: juan.id,
   }, su, asRouteDb(db), sink)
 
   const users = await db.users.toArray() as User[]
@@ -2587,6 +2590,9 @@ await spec('ROUTE-ADMIN-012S', 'Multi-Admin', 'desasignar de una ruta conserva l
   assert(!rutasDeCarlos.includes(rX.id), 'Carlos debía salir de Ruta X')
   assert(rutasDeCarlos.includes(rA.id) && rutasDeCarlos.includes(rB.id), 'SE PERDIERON las otras rutas de Carlos')
   assert(routeAdmins(users, rX.id, 't-1').length === 1, 'Juan debe seguir siendo Administrador de Ruta X')
+  const rutaX = await db.routes.get(rX.id)
+  metric('responsable de capital de X', rutaX?.capitalControllerAdminId === juan.id ? 'Juan' : rutaX?.capitalControllerAdminId)
+  assert(rutaX?.capitalControllerAdminId === juan.id, 'el responsable de capital de X debía pasar a Juan')
 })
 
 await spec('ROUTE-ADMIN-014S', 'Multi-Admin', 'el panel de Oficina muestra los DOS Administradores de una ruta', async () => {

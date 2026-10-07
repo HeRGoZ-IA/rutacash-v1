@@ -22,18 +22,27 @@
 //   · si la anulación SACA dinero de una Route, rige la misma regla que un retiro:
 //     no puede superar la caja no asignada (no toca efectivo en manos de nadie).
 //     El dinero entregado en mano solo se revierte si esa persona aún lo tiene.
+//
+// v16 — CAPITAL POR ADMINISTRADOR: anular es CORREGIR ('correct'): lo hace el
+// Administrador responsable de capital de la ruta o el SuperAdmin. La reversión se
+// atribuye a la bolsa del responsable ACTUAL (`adminId`), que es quien responde por
+// la ruta desde el último traspaso: anular un capital devuelve el dinero a su bolsa;
+// anular un retiro lo saca de su bolsa (no puede superar su disponible). Una ruta
+// sin responsable válido no admite anulaciones (fail closed).
 // ============================================================
 import { db, type RutaCashDB } from '@/lib/db'
 import { generateId } from '@/lib/utils'
 import { nowISO, today } from '@/lib/formatters'
-import { authorizedRouteIdsOf, can, canAccessRoute, isTransferInScope } from '@/lib/permissions'
+import { authorizedRouteIdsOf, can, canAccessRoute, canOperateRouteCash, isTransferInScope, routeCapitalController } from '@/lib/permissions'
+import { adminCapital } from '@/lib/capitalAllocation'
 import { isReversible, normalizeReversalReason, reversalStateOf } from '@/lib/movementReversal'
-import { assertCan, assertRouteAccess, AuthzError } from '@/services/authz'
+import { assertCan, assertRouteAccess, assertRouteCashAuthority, AuthzError } from '@/services/authz'
+import { loadCapitalRows, type CapitalControlDatabase } from '@/services/capitalControlService'
 import { logAction } from '@/services/auditService'
 import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
 import { reconciliationTables } from '@/services/cashCustodyService'
 import type {
-  CapitalMovement, CashCustodyMovement, MovementReversalFields, PartnerCashMovement, Transfer, User, Withdrawal,
+  CapitalMovement, CashCustodyMovement, MovementReversalFields, PartnerCashMovement, Route, Transfer, User, Withdrawal,
 } from '@/models/types'
 
 export class MovementReversalError extends Error {
@@ -62,6 +71,24 @@ function assertVigente(m: MovementReversalFields | undefined, tenantId: string, 
   const estado = reversalStateOf(m)
   if (estado === 'anulado') throw new MovementReversalError('Este movimiento ya fue anulado.')
   if (estado === 'reversion') throw new MovementReversalError('Una reversión no se puede anular.')
+}
+
+/** Alcance de las anulaciones de fondos: conciliación + libro de capital. */
+function reversalTables(database: RutaCashDB) {
+  return [...new Set([...reconciliationTables(database), database.capitalLedger, database.routeCapitalControllerEvents])]
+}
+
+/**
+ * Autoridad de CORRECCIÓN sobre la caja de la ruta (datos releídos dentro de la
+ * transacción). Devuelve el responsable actual: la reversión se atribuye a su bolsa.
+ */
+async function responsableParaCorregir(actor: User, routeId: string, tenantId: string, database: RutaCashDB): Promise<User> {
+  const [route, users] = await Promise.all([
+    database.routes.get(routeId),
+    database.users.where('tenantId').equals(tenantId).toArray(),
+  ])
+  assertRouteCashAuthority(actor, route, 'correct', users)
+  return routeCapitalController(route, users)!
 }
 
 /** Campos que se escriben en el ORIGINAL al anularlo. */
@@ -101,15 +128,17 @@ export async function reverseCapitalMovement(
 
   let original!: CapitalMovement
   let reversal!: CapitalMovement
-  await database.transaction('rw', reconciliationTables(database), async () => {
+  await database.transaction('rw', reversalTables(database), async () => {
     const m = await database.capitalMovements.get(movementId)
     assertVigente(m, tenantId, x => (x as CapitalMovement).tenantId)
+    const responsable = await responsableParaCorregir(actor, m!.routeId, tenantId, database)
     const ahora = nowISO()
     await assertFondosParaRevertir(database, tenantId, m!.routeId, m!.valor, ahora)
+    // El capital anulado vuelve a la bolsa del responsable ACTUAL.
     reversal = {
       id: generateId(), tenantId, routeId: m!.routeId, tipo: m!.tipo, valor: -m!.valor,
       descripcion: `Reversión: ${motivo}`, fecha: today(), userId: actor.id, createdAt: ahora,
-      reversesId: m!.id, reversalReason: motivo,
+      reversesId: m!.id, reversalReason: motivo, adminId: responsable.id,
     }
     original = { ...m!, ...marcaAnulado(reversal.id, actor, ahora, motivo) }
     await database.capitalMovements.add(reversal)
@@ -134,15 +163,21 @@ export async function reverseWithdrawal(
 
   let original!: Withdrawal
   let reversal!: Withdrawal
-  await database.transaction('rw', reconciliationTables(database), async () => {
+  await database.transaction('rw', reversalTables(database), async () => {
     const w = await database.withdrawals.get(movementId)
     assertVigente(w, tenantId, x => (x as Withdrawal).tenantId)
+    const responsable = await responsableParaCorregir(actor, w!.routeId, tenantId, database)
     const ahora = nowISO()
-    // Anular un retiro DEVUELVE el dinero a la Route: no hay fondos que comprobar.
+    // Anular un retiro DEVUELVE el dinero a la Route desde la bolsa del responsable
+    // actual: no puede superar su disponible (nunca bolsa negativa).
+    const disponible = adminCapital(responsable.id, await loadCapitalRows(tenantId, database as unknown as CapitalControlDatabase)).disponible
+    if (w!.valor > disponible) {
+      throw new MovementReversalError(`El responsable de la ruta (${responsable.nombre}) no tiene ese capital disponible para devolverlo a la ruta (disponible: ${disponible}).`)
+    }
     reversal = {
       id: generateId(), tenantId, routeId: w!.routeId, valor: -w!.valor,
       descripcion: `Reversión: ${motivo}`, fecha: today(), userId: actor.id, createdAt: ahora,
-      reversesId: w!.id, reversalReason: motivo,
+      reversesId: w!.id, reversalReason: motivo, adminId: responsable.id,
     }
     original = { ...w!, ...marcaAnulado(reversal.id, actor, ahora, motivo) }
     await database.withdrawals.add(reversal)
@@ -176,9 +211,18 @@ export async function reverseTransfer(
   }
 
   const result = {} as TransferReversalResult
-  await database.transaction('rw', [...reconciliationTables(database), database.partnerCashMovements], async () => {
+  await database.transaction('rw', [...reversalTables(database), database.partnerCashMovements], async () => {
     const t = await database.transfers.get(movementId)
     assertVigente(t, tenantId, x => (x as Transfer).tenantId)
+    // v16: corrige el responsable de CADA ruta implicada (o el SuperAdmin).
+    const responsables: User[] = []
+    for (const routeId of [t!.routeOrigenId, t!.routeDestinoId].filter(Boolean) as string[]) {
+      responsables.push(await responsableParaCorregir(actor, routeId, tenantId, database))
+    }
+    const esTraslado = !!t!.routeOrigenId && !!t!.routeDestinoId
+    if (esTraslado && responsables[0].id !== responsables[1].id) {
+      throw new MovementReversalError('Las dos rutas tienen hoy responsables de capital distintos: anular este traslado movería capital entre sus bolsas. El SuperAdmin debe resolverlo reasignando capital.')
+    }
     const ahora = nowISO()
     const fecha = today()
     const reversalId = generateId()
@@ -209,6 +253,7 @@ export async function reverseTransfer(
       ...t!, id: reversalId, valor: -t!.valor, descripcion: `Reversión: ${motivo}`, fecha, userId: actor.id, createdAt: ahora,
       reversesId: t!.id, reversalReason: motivo,
       reversalId: undefined, reversedAt: undefined, reversedByUserId: undefined,
+      adminId: esTraslado ? responsables[0].id : undefined,
     }
     const partnerReversals: PartnerCashMovement[] = patasSocio.map(m => ({
       id: generateId(), tenantId, partnerId: m.partnerId, type: m.type, category: m.category, amount: -m.amount,
@@ -244,10 +289,20 @@ export async function reverseTransfer(
 // ------------------------------------------------------------
 // Para la UI: ¿mostrar "Anular movimiento"? (el servicio revalida siempre)
 // ------------------------------------------------------------
-export function canReverseRouteFund(actor: User | null | undefined, m: { routeId: string; tenantId: string } & MovementReversalFields): boolean {
+export function canReverseRouteFund(
+  actor: User | null | undefined,
+  m: { routeId: string; tenantId: string } & MovementReversalFields,
+  routes: Route[],
+  users: User[],
+): boolean {
   return isReversible(m) && can(actor, 'capital.manage', { routeId: m.routeId, tenantId: m.tenantId }) && canAccessRoute(actor, m.routeId)
+    && canOperateRouteCash(actor, routes.find(r => r.id === m.routeId), 'correct', users)
 }
 
-export function canReverseTransfer(actor: User | null | undefined, t: Transfer, partnerRouteIds: (socioId: string) => string[]): boolean {
+export function canReverseTransfer(
+  actor: User | null | undefined, t: Transfer, partnerRouteIds: (socioId: string) => string[], routes: Route[], users: User[],
+): boolean {
+  const rutas = [t.routeOrigenId, t.routeDestinoId].filter(Boolean) as string[]
   return isReversible(t) && can(actor, 'transfer.create', { tenantId: t.tenantId }) && isTransferInScope(actor, t, partnerRouteIds)
+    && rutas.every(id => canOperateRouteCash(actor, routes.find(r => r.id === id), 'correct', users))
 }

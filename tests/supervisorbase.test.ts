@@ -22,6 +22,7 @@
 import 'fake-indexeddb/auto'
 import Dexie from 'dexie'
 import { db } from '../src/lib/db'
+import { sembrarResponsables } from './financial/capitalFixture'
 import { today } from '../src/lib/formatters'
 import { OPERATIONAL_TABLES, ROUTE_BASE_TABLES, subscribeDataChanges, watchQuery } from '../src/lib/dataRevision'
 import { getRouteBase, getRouteAvailableCapital, getRouteFinancialSummary } from '../src/services/cashboxEngine'
@@ -86,6 +87,8 @@ async function empresa() {
     ({ id, tenantId: T, officeId: OF1, nombre, codigo: id, status: 'activa', capitalInicial: 0, capitalActual: 0, tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 0, createdAt: '2026-09-01' })
   await db.routes.bulkAdd([ruta(R1, 'Barreiro'), ruta(R2, 'Centro')] as never[])
   await db.users.bulkAdd([ADMIN, LAURA, JUAN, SOCIO])
+  // v16: Andrés (primer Admin de ambas rutas) es su responsable de capital, con bolsa.
+  await sembrarResponsables(db, T, { [R1]: ADMIN.id, [R2]: ADMIN.id })
 }
 
 const capital = (valor: number, routeId = R1) => registerCapital({ actor: ADMIN, tenantId: T, routeId, valor })

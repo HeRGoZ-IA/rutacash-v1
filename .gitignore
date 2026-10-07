@@ -19,3 +19,4 @@ tests/_out.workertransfer.mjs
 tests/_out.paymentreversal.mjs
 tests/_out.paymentsync.mjs
 tests/_out.expenseclassification.mjs
+tests/_out.capitalcontrol.mjs

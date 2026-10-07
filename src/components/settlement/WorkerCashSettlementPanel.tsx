@@ -8,7 +8,8 @@ import { toast } from '@/components/ui/Toast'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useDataRevision } from '@/hooks/useDataRevision'
-import { can } from '@/lib/permissions'
+import { can, canOperateRouteCash } from '@/lib/permissions'
+import { CapitalControllerBadge } from '@/components/ui/CapitalControllerBadge'
 import { formatCurrency, formatDateTime } from '@/lib/formatters'
 import { settlementOutcome, reopenCashBlockedReason, MIN_CASH_REASON } from '@/lib/cashSettlementRules'
 import {
@@ -20,7 +21,7 @@ import {
   assignBaseToWorker, custodianBlockedReason, getTransferableCash, listCustodyMovements, returnBaseFromWorker, transferBaseBetweenWorkers,
 } from '@/services/cashCustodyService'
 import { RouteCashReconciliationCard } from '@/components/settlement/RouteCashReconciliationCard'
-import type { CashCustodyMovement, CashSettlement, User } from '@/models/types'
+import type { CashCustodyMovement, CashSettlement, Route, User } from '@/models/types'
 
 /**
  * CUADRE POR TRABAJADOR — Ruta → Trabajador → Vista previa → Entregado → Confirmar.
@@ -39,6 +40,9 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
   const [workers, setWorkers] = useState<{ user: User; esPropio: boolean }[]>([])
   /** Nombres de la empresa (trabajadores y quien cerró: Admin, Super Admin…). */
   const [nombres, setNombres] = useState<Map<string, string>>(new Map())
+  // Ruta y usuarios de la empresa: autoridad sobre la caja (responsable de capital, v16).
+  const [ruta, setRuta] = useState<Route | undefined>()
+  const [usuarios, setUsuarios] = useState<User[]>([])
   const [userId, setUserId] = useState('')
   const [preview, setPreview] = useState<CashSettlementPreview | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
@@ -56,7 +60,12 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
   const [baseMonto, setBaseMonto] = useState(0)
   const [baseMotivo, setBaseMotivo] = useState('')
   const [baseGuardando, setBaseGuardando] = useState(false)
-  const puedeBase = can(user, 'cashCustody.manage', { routeId, tenantId })
+  // v16: ENTREGAR Base saca efectivo de la caja de la ruta → solo su Administrador
+  // responsable de capital. Recibir devolución y traspasar entre trabajadores operan
+  // con Base ya entregada → también SuperAdmin y Supervisor de la ruta.
+  const custodia = can(user, 'cashCustody.manage', { routeId, tenantId })
+  const puedeEntregarBase = custodia && canOperateRouteCash(user, ruta, 'structural', usuarios)
+  const puedeBase = custodia && canOperateRouteCash(user, ruta, 'settle', usuarios)
 
   // TRASPASO INTERNO (punto 6): efectivo de un trabajador a otro de la MISMA ruta.
   // El origen es el trabajador seleccionado; el servicio revalida todo.
@@ -70,8 +79,8 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
   /** Movimientos de custodia de la ruta (entregas, devoluciones, traspasos). */
   const [movsBase, setMovsBase] = useState<CashCustodyMovement[]>([])
 
-  const puedeCerrar = can(user, 'cashSettlement.close', { routeId, tenantId })
-  const puedeReabrir = can(user, 'cashSettlement.reopen', { routeId, tenantId })
+  const puedeCerrar = can(user, 'cashSettlement.close', { routeId, tenantId }) && canOperateRouteCash(user, ruta, 'settle', usuarios)
+  const puedeReabrir = can(user, 'cashSettlement.reopen', { routeId, tenantId }) && canOperateRouteCash(user, ruta, 'correct', usuarios)
   const seleccionado = workers.find(w => w.user.id === userId)
 
   // Trabajadores de la ruta (con caja personal y asignados).
@@ -80,10 +89,13 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
     Promise.all([
       listSettleableWorkers(user, tenantId, routeId),
       db.users.where('tenantId').equals(tenantId).toArray(),
-    ]).then(([list, users]) => {
+      db.routes.get(routeId),
+    ]).then(([list, users, r]) => {
       if (!alive) return
       setWorkers(list)
       setNombres(new Map(users.map(u => [u.id, u.nombre])))
+      setUsuarios(users)
+      setRuta(r)
       if (!list.some(w => w.user.id === userId)) setUserId('')
     })
     return () => { alive = false }
@@ -224,6 +236,12 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
   return (
     <div className="space-y-5">
       <RouteCashReconciliationCard routeId={routeId} />
+      <CapitalControllerBadge route={ruta} users={usuarios} currentUserId={user?.id} />
+      {ruta && !canOperateRouteCash(user, ruta, 'settle', usuarios) && can(user, 'cashSettlement.view', { routeId, tenantId }) && (
+        <p className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2" data-testid="settlement-readonly">
+          Consulta: el cuadre y la Base de esta ruta los maneja su Administrador responsable de capital.
+        </p>
+      )}
 
       <Select
         label="Trabajador"
@@ -264,13 +282,15 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
             </div>
           </div>
 
-          {puedeBase && seleccionado && (
+          {(puedeBase || puedeEntregarBase) && seleccionado && (
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" icon={<Wallet className="w-4 h-4" />}
-                disabled={Boolean(custodianBlockedReason(seleccionado.user, routeId, tenantId))}
-                onClick={() => { setBaseAccion('entregar'); setBaseMonto(0); setBaseMotivo('Base del día') }}>
-                Entregar Base
-              </Button>
+              {puedeEntregarBase && (
+                <Button variant="secondary" icon={<Wallet className="w-4 h-4" />}
+                  disabled={Boolean(custodianBlockedReason(seleccionado.user, routeId, tenantId))}
+                  onClick={() => { setBaseAccion('entregar'); setBaseMonto(0); setBaseMotivo('Base del día') }}>
+                  Entregar Base
+                </Button>
+              )}
               {!seleccionado.esPropio && (
                 <Button variant="secondary" icon={<Wallet className="w-4 h-4" />}
                   onClick={() => { setBaseAccion('devolver'); setBaseMonto(0); setBaseMotivo('Devolución de Base') }}>

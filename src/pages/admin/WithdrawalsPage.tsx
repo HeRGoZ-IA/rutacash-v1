@@ -17,7 +17,8 @@ import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from 
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import type { Withdrawal, Route, User } from '@/models/types'
-import { registerWithdrawal, getRouteAvailableFunds } from '@/services/routeFundsService'
+import { registerWithdrawal, getRouteAvailableFunds, canManageRouteFunds } from '@/services/routeFundsService'
+import { CapitalControllerBadge } from '@/components/ui/CapitalControllerBadge'
 import { canReverseRouteFund, reverseWithdrawal } from '@/services/movementReversalService'
 import { pairReversals, reversalStateOf } from '@/lib/movementReversal'
 import { AnnulledBadge, ReversalDetail, ReverseButton, ReverseMovementModal, signedMoney } from '@/components/ui/MovementReversal'
@@ -99,6 +100,9 @@ export default function WithdrawalsPage() {
   }
 
   const getUserName = (id?: string) => users.find(u => u.id === id)?.nombre
+  // v16: solo se retira de las rutas cuyo capital controla el actor; el retiro
+  // vuelve a SU bolsa. El SuperAdmin no retira de rutas: recoge capital del Admin.
+  const rutasControladas = routes.filter(r => canManageRouteFunds(user, r, tenantId, users))
 
   // Retiros dentro del rango de fecha (los totales agrupados lo respetan;
   // la Base de la ruta es un saldo a la fecha y no depende del filtro).
@@ -154,8 +158,17 @@ export default function WithdrawalsPage() {
           <h1 className="text-xl font-bold text-gray-900">Retiros</h1>
           <p className="text-sm text-gray-500 mt-0.5">{withdrawals.length} retiro(s) · {routes.length} ruta(s)</p>
         </div>
-        <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>Nuevo retiro</Button>
+        {rutasControladas.length > 0 && (
+          <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>Nuevo retiro</Button>
+        )}
       </div>
+      {!loading && rutasControladas.length === 0 && (
+        <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2" data-testid="withdrawals-readonly">
+          {user?.rol === 'superadmin'
+            ? 'Los retiros de una ruta los registra su Administrador responsable de capital y vuelven a su bolsa. Para recoger capital de un Administrador usa Capital.'
+            : 'No eres responsable de capital de ninguna ruta: consulta los retiros, pero solo el responsable de cada ruta puede registrarlos.'}
+        </p>
+      )}
 
       {/* Filtro por fecha (compacto) */}
       {/* FILTRO OFICINA → RUTA. La Oficina solo estrecha las rutas autorizadas;
@@ -192,6 +205,7 @@ export default function WithdrawalsPage() {
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-900 truncate">{g.nombre}</p>
                     <p className="text-xs text-gray-400">{g.codigo}</p>
+                    {g.routeId !== '__none__' && <CapitalControllerBadge route={routes.find(r => r.id === g.routeId)} users={users} currentUserId={user?.id} />}
                   </div>
                 </div>
                 <span className="text-xs text-gray-400">{g.cantidad} retiro(s)</span>
@@ -226,7 +240,8 @@ export default function WithdrawalsPage() {
         footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={handleSave} loading={saving}>Registrar</Button></>}>
         <div className="space-y-4">
           <Select label="Ruta" value={form.routeId} onChange={e => setForm(f => ({ ...f, routeId: e.target.value }))}
-            options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
+            options={rutasControladas.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
+          <p className="text-xs text-gray-500">El retiro vuelve a tu bolsa de capital (Capital → Disponible).</p>
           {form.routeId && disponibleByRoute[form.routeId] !== undefined && (
             <p className={`text-xs ${form.valor > disponibleByRoute[form.routeId] ? 'text-red-600' : 'text-gray-500'}`}>
               Disponible para retiro (caja no asignada): <b>{formatCurrency(disponibleByRoute[form.routeId], currency)}</b>
@@ -271,7 +286,7 @@ export default function WithdrawalsPage() {
                           </div>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
-                          {canReverseRouteFund(user, w) && <ReverseButton onClick={() => setReversing(w)} />}
+                          {canReverseRouteFund(user, w, routes, users) && <ReverseButton onClick={() => setReversing(w)} />}
                           <span className={`text-sm font-bold ${estado === 'anulado' ? 'text-gray-400 line-through' : w.valor >= 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{signedMoney(-w.valor, currency)}</span>
                         </div>
                       </div>

@@ -11,7 +11,7 @@ import { can } from '@/lib/permissions'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { formatCurrency, formatCurrencyInput, parseCurrencyInput, getCurrencySymbol, formatDate, today } from '@/lib/formatters'
-import type { Expense, ExpenseCategory, User } from '@/models/types'
+import type { Expense, ExpenseCategory, Route, User } from '@/models/types'
 import { custodianBlockedReason } from '@/services/cashCustodyService'
 import { canRegisterExpenseScope, createExpense } from '@/services/expenseService'
 
@@ -37,7 +37,12 @@ export default function CollectorExpensesPage() {
   // cobros y desembolsos). Solo quien administra la caja de la ruta (Supervisor)
   // puede indicar que pagó OTRO trabajador o la caja de la ruta.
   const pagaConSuEfectivo = !!user && hasPersonalCashbox(user.rol)
-  const eligeQuienPaga = !!user && !!routeId && canRegisterExpenseScope(user, 'ruta', routeId)
+  // v16: cargar el gasto a OTRO trabajador es nivel de cuadre (Supervisor de la
+  // ruta); que lo pague la CAJA de la ruta, solo su Administrador responsable.
+  const [ruta, setRuta] = useState<Route | undefined>()
+  const [usuarios, setUsuarios] = useState<User[]>([])
+  const eligeQuienPaga = !!user && !!routeId && canRegisterExpenseScope(user, 'trabajador', routeId, { route: ruta, users: usuarios })
+  const pagaCajaRuta = !!user && !!routeId && canRegisterExpenseScope(user, 'ruta', routeId, { route: ruta, users: usuarios })
   // Ver los gastos de la ruta (no solo los propios) es información de la caja de la
   // ruta: el Cobrador no la tiene (`cashbox.viewRoute`), el Supervisor sí.
   const veGastosDeRuta = !!user && !!routeId && can(user, 'cashbox.viewRoute', { routeId, tenantId: user.tenantId })
@@ -48,11 +53,14 @@ export default function CollectorExpensesPage() {
 
   async function load() {
     if (!user || !routeId) return
-    const [exps, cats, users] = await Promise.all([
+    const [exps, cats, users, r] = await Promise.all([
       db.expenses.where('routeId').equals(routeId).toArray(),
       db.expenseCategories.where('tenantId').equals(user.tenantId).toArray(),
       db.users.where('tenantId').equals(user.tenantId).toArray(),
+      db.routes.get(routeId),
     ])
+    setRuta(r)
+    setUsuarios(users)
     // Solo lo que corresponde ver: el Cobrador, sus gastos (por ATRIBUCIÓN, no por
     // quién los registró); el Supervisor, los de la ruta y de sus trabajadores.
     // Los gastos de empresa no tienen ruta: nunca llegan aquí.
@@ -145,7 +153,7 @@ export default function CollectorExpensesPage() {
                 {team.filter(u => u.id !== user!.id).map(u => (
                   <option key={u.id} value={u.id}>Efectivo de {u.nombre}</option>
                 ))}
-                <option value={CAJA_RUTA}>Caja de la ruta (sin trabajador)</option>
+                {pagaCajaRuta && <option value={CAJA_RUTA}>Caja de la ruta (sin trabajador)</option>}
               </select>
             </div>
           )}

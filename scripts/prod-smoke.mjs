@@ -19,6 +19,11 @@
 //   B autoridad del Supervisor       F faltante que persiste
 //   C Base física por trabajador     G conciliación Route ↔ trabajadores
 //   D operación / Mi efectivo        H retiro vs efectivo bajo custodia
+//   I capital por Administrador (v16): SuperAdmin → Administrador → Ruta
+//
+// v16 (2026-10-07): el SuperAdmin ya no coloca capital en la ruta ni el Supervisor
+// entrega Base desde la caja. El capital fluye SuperAdmin → Andrés (Administrador
+// responsable de capital de la ruta) → ruta, y la Base la entrega Andrés.
 //
 // Evidencia: tmp/prod-smoke/<run-id>/ (result.json + screenshots/), ignorado por git.
 // Salida: exit 0 solo si todos los escenarios pasan y no hubo errores de página.
@@ -316,14 +321,37 @@ try {
     await esperarTexto('Usuario creado')
   }
 
-  paso('inyectar capital 5.000.000')
+  // v16: capital por Administrador. El SuperAdmin ingresa capital a la empresa y lo
+  // asigna a Andrés (primer y único Administrador de la ruta → su responsable).
+  paso('ingresar 5.000.000 a la empresa')
   await ir('/admin/capital')
-  await click('Inyectar capital')
-  await elegir('Ruta', RUTA)
+  await click('Ingresar capital')
+  await escribir('Valor', 5000000)
+  await escribir('Descripción', 'Capital smoke')
+  await click('Registrar', { exact: true })
+  await esperarTexto('Movimiento de capital registrado')
+  paso('asignar 5.000.000 a Andrés')
+  await click('Asignar a Administrador')
+  await elegir('Administrador', ANDRES)
+  await escribir('Valor', 5000000)
+  await click('Registrar', { exact: true })
+  await esperarTexto('Movimiento de capital registrado')
+  paso('el SuperAdmin ve la ruta con su responsable')
+  await esperarTexto(`Responsable: ${ANDRES}`)
+  await logout()
+
+  // La Base de la ruta la pone su responsable desde su bolsa (antes de los créditos).
+  paso('Andrés coloca 5.000.000 de su bolsa en la ruta')
+  await login(mail('andres'), ANDRES)
+  await ir('/admin/capital')
+  await esperarTexto('Rutas cuyo capital controlo')
+  await click('Colocar capital')
   await escribir('Valor', 5000000)
   await escribir('Descripción', 'Base estructural smoke')
   await click('Registrar', { exact: true })
-  await esperarTexto('Capital registrado')
+  await esperarTexto('Capital colocado en la ruta')
+  await logout()
+  await login(mail('sonia'), 'Sonia Smoke')
 
   for (const [doc, nombre, credito] of [[`SMK-${RUN_ID}-1`, CARLOS, 1000000], [`SMK-${RUN_ID}-2`, DIANA, 0]]) {
     paso(`crear cliente ${nombre}${credito ? ' con Venta A' : ''}`)
@@ -413,9 +441,22 @@ try {
   await evidencia('B_credito_directo')
 
   // ---------------- C · Base física ----------------
-  escenario('C', 'Base física: 1.500.000 a Juan sin duplicar el libro')
-  paso('conciliación antes')
+  escenario('C', 'Base física: 1.500.000 a Juan sin duplicar el libro (la entrega el responsable de capital)')
+  paso('el Supervisor ya no entrega Base desde la caja (v16)')
   await ir('/supervisor/worker-settlements')
+  await esperarTexto('Efectivo de la ruta')
+  await elegir('Trabajador', JUAN)
+  await esperarTexto('Esperado a entregar')
+  await esperarTexto(`Responsable de capital: ${ANDRES}`)
+  comprobar('Supervisor: botón "Entregar Base" oculto', false, (await texto()).includes('Entregar Base'))
+  comprobar('Supervisor: conserva "Recibir devolución"', true, (await texto()).includes('Recibir devolución'))
+  await evidencia('C_supervisor_sin_entregar_base')
+  await logout()
+  await desktop()
+  await login(mail('andres'), ANDRES)
+  paso('conciliación antes (Andrés, Liquidación → Cuadre por trabajador)')
+  await ir('/admin/weekly-settlement?vista=trabajadores')
+  await elegir('Ruta', RUTA).catch(() => {})
   await esperarTexto('Efectivo de la ruta')
   const c0 = await esperarTarjeta(t => t.libro !== null && t.sinAsignar !== null, 'tarjeta de conciliación cargada')
   paso('entregar Base a Juan')
@@ -432,6 +473,7 @@ try {
   comprobar('libro = sin asignar + personas', c1.libro, c1.sinAsignar + c1.juan + c1.laura)
   comprobar('conciliación', 'Cuadra', c1.cuadra ? 'Cuadra' : 'Revisar')
   await logout()
+  await movil()
 
   // ---------------- D · Operación ----------------
   escenario('D', 'Operación de Juan: 1.500.000 − 500.000 + 300.000 − 100.000 = 1.200.000')
@@ -499,9 +541,18 @@ try {
   comprobar('Base del ciclo siguiente', 0, e1.base)
   comprobar('esperado del ciclo siguiente', 0, e1.esperado)
   comprobar('Juan fuera de "En manos de"', null, e1.juan)
+  await logout()
 
   // ---------------- F · Faltante ----------------
+  // v16: la Base la entrega Andrés (responsable de capital); él también cuadra.
   escenario('F', 'Faltante: esperado 1.000.000, entregado 900.000 → 100.000 persiste')
+  await desktop()
+  await login(mail('andres'), ANDRES)
+  await ir('/admin/weekly-settlement?vista=trabajadores')
+  await elegir('Ruta', RUTA).catch(() => {})
+  await esperarTexto('Efectivo de la ruta')
+  await elegir('Trabajador', JUAN)
+  await esperarTexto('Esperado a entregar')
   paso('entregar Base 1.000.000')
   await click('Entregar Base')
   await escribir('Efectivo entregado', 1000000)
@@ -526,12 +577,9 @@ try {
   await escribir('Efectivo entregado', 1500000)
   await click('Registrar', { exact: true })
   await esperarTarjeta(t => t.esperado === 1600000, 'esperado 1.600.000')
-  await logout()
 
   // ---------------- G · Conciliación ----------------
   escenario('G', 'Conciliación Route ↔ trabajadores: dos vías iguales, cartera aparte')
-  await desktop()
-  await login(mail('andres'), ANDRES)
   paso('sesión Andrés')
   await sesion({ rol: 'Administrador', actor: ANDRES, layout: '/admin' })
   paso('Liquidación → Cuadre por trabajador')
@@ -593,6 +641,37 @@ try {
   await evidencia('H_conciliacion_final')
   comprobar('libro = sin asignar + personas tras el retiro', gFin.libro, gFin.sinAsignar + (gFin.juan ?? 0) + gFin.laura)
   comprobar('conciliación tras el retiro', 'Cuadra', gFin.cuadra ? 'Cuadra' : 'Revisar')
+
+  // ---------------- I · Capital por Administrador ----------------
+  escenario('I', 'Capital por Administrador: SuperAdmin → Andrés → ruta; el retiro vuelve a su bolsa')
+  paso('Capital de Andrés')
+  await ir('/admin/capital')
+  await esperarTexto('Mi capital')
+  const leerStat = id => page.evaluate(id => document.querySelector(`[data-testid="${id}"] p:last-child`)?.innerText ?? null, id).then(num)
+  const iAsignado = await hasta(() => leerStat('my-assigned'), 'capital asignado de Andrés')
+  const iDisponible = await leerStat('my-available')
+  const iRutas = await leerStat('my-in-routes')
+  await evidencia('I_capital_andres')
+  comprobar('Andrés: asignado = disponible + en rutas', iAsignado, iDisponible + iRutas)
+  comprobar('Andrés: el retiro volvió a su bolsa (disponible)', permitido, iDisponible)
+  comprobar('Andrés: asignado = 5.000.000 (no se creó ni perdió capital)', 5000000, iAsignado)
+  comprobar('Andrés controla la ruta', true, await aparece('Rutas cuyo capital controlo') && (await texto()).includes(RUTA))
+  paso('Transferencias sin el acceso confuso')
+  await ir('/admin/transfers')
+  await esperarTexto('Nueva transferencia')
+  comprobar('botón "Traspaso entre trabajadores" retirado de Transferencias', false,
+    await page.evaluate(() => [...document.querySelectorAll('button')].some(b => b.textContent.includes('Traspaso entre trabajadores'))))
+  await evidencia('I_transferencias')
+  await logout()
+  paso('SuperAdmin: Administradores primero')
+  await login(mail('sonia'), 'Sonia Smoke')
+  await ir('/admin/capital')
+  await esperarTexto('Administradores')
+  const fila = await hasta(() => page.evaluate(n => [...document.querySelectorAll('[data-testid^="admin-row-"]')].find(r => r.innerText.includes(n))?.innerText ?? null, ANDRES), 'fila de Andrés')
+  const cifras = [...fila.matchAll(/\$\s*[\d.]+/g)].map(m => num(m[0]))
+  await evidencia('I_capital_superadmin')
+  comprobar('SuperAdmin ve a Andrés: asignado / en rutas / disponible', JSON.stringify([5000000, 5000000 - permitido, permitido]), JSON.stringify(cifras.slice(0, 3)))
+  comprobar('SuperAdmin no coloca capital en rutas', false, (await texto()).includes('Inyectar capital'))
 } catch (e) {
   fatal = e
   console.error(`\n  ✖ ${e instanceof SmokeError ? e.message : `[${actual?.id ?? 'BOOTSTRAP'} · ${pasoActual}] ${e.stack ?? e}`}`)
@@ -606,7 +685,7 @@ try {
 // ============================================================
 // Informe
 // ============================================================
-const ESPERADOS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+const ESPERADOS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I']
 const resumen = ESPERADOS.map(id => {
   const e = escenarios.find(x => x.id === id)
   return { id, titulo: e?.titulo ?? '(no ejecutado)', ok: Boolean(e?.ok) && !e?.error }

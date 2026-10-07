@@ -1298,10 +1298,16 @@ check('ROUTE-ADMIN-007 — un Administrador recién creado no recibe rutas autom
     !page.includes("const draftAdmins = form.assignedUserIds.filter"))
   check('ROUTE-ADMIN-REG-005 — la advertencia ámbar usa la misma fuente',
     page.includes('hasAdmin: effectiveAdminIds.length > 0'))
-  // Fuente única: no aparecen campos de admin en la Ruta.
+  // Fuente única: no aparecen campos de admin en la Ruta. (v16: el ÚNICO campo de
+  // Administrador en la Ruta es el responsable de capital — uno, explícito —; la
+  // MEMBRESÍA Admin↔Ruta sigue viviendo solo en `authorizedRouteIds`. Los
+  // movimientos de fondos sí llevan `adminId`: la bolsa de origen/destino.)
   const types = readSourceFile('src/models/types.ts')
+  const routeIface = types.slice(types.indexOf('export interface Route {'), types.indexOf('export interface User {'))
   check('ROUTE-ADMIN-018 — no existe Route.adminId ni Route.adminIds',
-    !/adminIds?\??:/.test(types))
+    routeIface.length > 0 && !/adminIds?\??:/.test(routeIface))
+  check('ROUTE-ADMIN-018b — la Ruta solo guarda UN responsable de capital explícito',
+    /capitalControllerAdminId\?: string/.test(routeIface) && !/capitalControllerAdminIds/.test(routeIface))
 }
 
 

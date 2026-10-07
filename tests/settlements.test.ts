@@ -106,11 +106,14 @@ function nuevaBase(): { db: SettlementDatabase; audit: Array<Record<string, unkn
     { id: OF_CENTRO, tenantId: TENANT, nombre: 'Oficina Centro', codigo: 'CEN', status: 'activa' },
     { id: OF_RIO, tenantId: TENANT, nombre: 'Oficina Río', codigo: 'RIO', status: 'activa' },
   ])
+  // v16: cada ruta con su Administrador responsable de capital (el único Admin de
+  // cada una). Los usuarios se siembran porque el cierre valida al responsable.
   mem.routes._seed([
-    { id: R_NORTE, tenantId: TENANT, officeId: OF_CENTRO, nombre: 'Ruta Norte', codigo: 'RN', status: 'activa' },
-    { id: R_SUR, tenantId: TENANT, officeId: OF_RIO, nombre: 'Ruta Sur', codigo: 'RS', status: 'activa' },
-    { id: R_SOLA, tenantId: TENANT, nombre: 'Ruta Sola', codigo: 'SO', status: 'activa' },
+    { id: R_NORTE, tenantId: TENANT, officeId: OF_CENTRO, nombre: 'Ruta Norte', codigo: 'RN', status: 'activa', capitalControllerAdminId: admin.id },
+    { id: R_SUR, tenantId: TENANT, officeId: OF_RIO, nombre: 'Ruta Sur', codigo: 'RS', status: 'activa', capitalControllerAdminId: adminAjeno.id },
+    { id: R_SOLA, tenantId: TENANT, nombre: 'Ruta Sola', codigo: 'SO', status: 'activa', capitalControllerAdminId: admin.id },
   ])
+  mem.users._seed([admin, adminAjeno, secretario, cobrador])
   mem.payments._seed([
     { id: 'p-1', tenantId: TENANT, routeId: R_NORTE, saleId: 's-1', clientId: 'c-1', valor: 50000, fecha: '2026-09-09', createdAt: '2026-09-09' },
   ])

@@ -31,13 +31,23 @@
 //     transacción: dos entregas simultáneas no pueden gastar el mismo efectivo.
 //   · Instante sellado dentro de la transacción (frontera del cuadre: el cierre
 //     incluye esta tabla en su bloqueo).
+//
+// v16 — RESPONSABLE DE CAPITAL (además de `cashCustody.manage`):
+//   · ENTREGAR Base saca efectivo de la CAJA de la ruta → 'structural': solo el
+//     Administrador responsable de capital. Ni otro Admin asignado, ni el
+//     Supervisor (antes podía), ni el SuperAdmin.
+//   · RECIBIR una devolución o registrar un TRASPASO entre trabajadores opera con
+//     Base que YA está en manos de alguien → 'settle': responsable, SuperAdmin y
+//     el Supervisor de la ruta (en campo). Otro Admin asignado: no.
+//   · Ruta sin responsable válido: nada procede (fail closed).
 // ============================================================
 import { db, type RutaCashDB } from '@/lib/db'
 import { generateId } from '@/lib/utils'
 import { nowISO, today } from '@/lib/formatters'
 import { hasPersonalCashbox } from '@/lib/collectorAttribution'
 import { getAssignedRouteIds } from '@/lib/roles'
-import { assertCan, AuthzError } from '@/services/authz'
+import { assertCan, assertRouteCashAuthority, AuthzError } from '@/services/authz'
+import type { RouteCashOperation } from '@/lib/permissions'
 import { logAction } from '@/services/auditService'
 import { assertRouteOperationalContext } from '@/services/officeService'
 import { personalCashPosition } from '@/services/cashSettlementService'
@@ -99,6 +109,13 @@ interface CustodyParams {
   motivo: string
 }
 
+/** Nivel de autoridad sobre la caja de la ruta que exige cada tipo de custodia. */
+const OPERACION: Record<CashCustodyType, RouteCashOperation> = {
+  BASE_ASSIGNMENT: 'structural',
+  BASE_RETURN: 'settle',
+  PERSON_TO_PERSON: 'settle',
+}
+
 async function registrar(
   tipo: CashCustodyType,
   params: CustodyParams & { fromUserId?: string; toUserId?: string; origen?: CashCustodyMovement['origen']; relatedTransferId?: string },
@@ -112,6 +129,12 @@ async function registrar(
   let mov!: CashCustodyMovement
   await database.transaction('rw', reconciliationTables(database), async () => {
     await database.cashCustodyMovements.where('routeId').equals(routeId).count()   // bloqueo obtenido
+    // Responsable de capital releído DENTRO de la transacción (v16).
+    const [route, users] = await Promise.all([
+      database.routes.get(routeId),
+      database.users.where('tenantId').equals(tenantId).toArray(),
+    ])
+    assertRouteCashAuthority(actor, route, OPERACION[tipo], users)
     const ahora = nowISO()
     await validarFondos(ahora)
     mov = {
@@ -143,6 +166,7 @@ export async function assignBaseToWorker(
   const { actor, tenantId, routeId, recipientUserId } = params
   assertCan(actor, 'cashCustody.manage', { routeId, tenantId })
   await rutaDeLaEmpresa(routeId, tenantId, database)
+  await exigirAutoridad(actor, routeId, tenantId, 'structural', database)
   await assertRouteOperationalContext(routeId)
   const bloqueo = custodianBlockedReason(await database.users.get(recipientUserId), routeId, tenantId)
   if (bloqueo) throw new CashCustodyError(bloqueo)
@@ -165,6 +189,7 @@ export async function returnBaseFromWorker(
   const { actor, tenantId, routeId, fromUserId } = params
   assertCan(actor, 'cashCustody.manage', { routeId, tenantId })
   await rutaDeLaEmpresa(routeId, tenantId, database)
+  await exigirAutoridad(actor, routeId, tenantId, 'settle', database)
   if (actor!.id === fromUserId) {
     throw new CashCustodyError('No puedes registrar tu propia devolución: debe recibirla otra persona autorizada.')
   }
@@ -220,6 +245,7 @@ export async function transferBaseBetweenWorkers(
   const { actor, tenantId, routeId, fromUserId, toUserId } = params
   assertCan(actor, 'cashCustody.manage', { routeId, tenantId })
   await rutaDeLaEmpresa(routeId, tenantId, database)
+  await exigirAutoridad(actor, routeId, tenantId, 'settle', database)
   await assertRouteOperationalContext(routeId)
   if (fromUserId === toUserId) throw new CashCustodyError('Quien entrega y quien recibe deben ser personas distintas.')
   if (actor!.id === fromUserId) {
@@ -237,6 +263,15 @@ export async function transferBaseBetweenWorkers(
       throw new CashCustodyError(`El traspaso supera el efectivo en manos de ${origen.nombre} (${disponible}).`)
     }
   })
+}
+
+/** Comprobación previa (fuera de la transacción) para fallar antes de validar personas. */
+async function exigirAutoridad(actor: User | null | undefined, routeId: string, tenantId: string, op: RouteCashOperation, database: RutaCashDB) {
+  const [route, users] = await Promise.all([
+    database.routes.get(routeId),
+    database.users.where('tenantId').equals(tenantId).toArray(),
+  ])
+  assertRouteCashAuthority(actor, route, op, users)
 }
 
 /** Movimientos de custodia de una persona en una Route (consulta; más reciente primero). */

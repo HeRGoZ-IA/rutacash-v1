@@ -19,6 +19,7 @@ import { getAssignedRouteIds } from '@/lib/roles'
 import { groupRoutesByOffice } from '@/lib/officeGrouping'
 import { setCobradorRoutes, clearRouteResponsibilities } from '@/services/routeAssignment'
 import { resetUserPassword } from '@/services/passwordService'
+import { withCapitalControllerGuard } from '@/services/capitalControlService'
 import { blockIfLastSuperadmin, blockIfDemotingLastSuperadmin } from '@/lib/superadminProtection'
 import {
   assignableRoles, canManageUser, filterAccessibleRoutes,
@@ -177,35 +178,46 @@ export default function UsersPage() {
           editing, form.rol, todos.filter(u => u.tenantId === tenantId),
         )
         if (bloqueoRol) { toast.error(bloqueoRol.message); setSaving(false); return }
-        await db.users.update(editing.id, {
-          nombre: form.nombre, email, password: form.password, rol: form.rol,
-          ...noGrants, ...legacyDirect, updatedAt: nowISO(),
-        })
-      } else {
-        const u: User = {
-          id: userId, tenantId, nombre: form.nombre, email, password: form.password, rol: form.rol,
-          // CONTRASEÑA INICIAL UTILIZABLE (apartado Q). Quien la recibe entra y
-          // trabaja: RutaCash ya no interpone ninguna pantalla ni modal de cambio
-          // obligatorio. Si hay que cambiarla, se cambia desde aquí, en Usuarios.
-          mustChangePassword: false,
-          ...noGrants, ...legacyDirect, status: 'activo', createdAt: nowISO(), updatedAt: nowISO(),
-        }
-        await db.users.add(u)
       }
 
-      // Sincronización de rutas según rol.
-      if (form.rol === 'cobrador') {
-        await setCobradorRoutes(userId, form.authorizedRouteIds)
-      } else if (form.rol === 'admin' || form.rol === 'socio' || form.rol === 'supervisor' || form.rol === 'secretario') {
-        await clearRouteResponsibilities(userId)
-        await db.users.update(userId, {
-          authorizedRouteIds: form.authorizedRouteIds.length ? form.authorizedRouteIds : undefined,
-          routeId: undefined, updatedAt: nowISO(),
-        })
-      } else {
-        await clearRouteResponsibilities(userId)
-        await db.users.update(userId, { authorizedRouteIds: undefined, routeId: undefined, updatedAt: nowISO() })
-      }
+      // Datos + rol + rutas y RESPONSABLE DE CAPITAL (v16) en UNA transacción: si el
+      // cambio deja una ruta sin su responsable habiendo otros Administradores, no
+      // se guarda nada y se explica qué hacer (nunca se elige a nadie en silencio).
+      const rutasAfectadas = [...new Set([...(editing ? getAssignedRouteIds(editing) : []), ...form.authorizedRouteIds])]
+      await withCapitalControllerGuard({
+        tenantId, actor: currentUser, routeIds: rutasAfectadas, preferredAdminIds: form.rol === 'admin' ? [userId] : [],
+      }, async () => {
+        if (editing) {
+          await db.users.update(editing.id, {
+            nombre: form.nombre, email, password: form.password, rol: form.rol,
+            ...noGrants, ...legacyDirect, updatedAt: nowISO(),
+          })
+        } else {
+          const u: User = {
+            id: userId, tenantId, nombre: form.nombre, email, password: form.password, rol: form.rol,
+            // CONTRASEÑA INICIAL UTILIZABLE (apartado Q). Quien la recibe entra y
+            // trabaja: RutaCash ya no interpone ninguna pantalla ni modal de cambio
+            // obligatorio. Si hay que cambiarla, se cambia desde aquí, en Usuarios.
+            mustChangePassword: false,
+            ...noGrants, ...legacyDirect, status: 'activo', createdAt: nowISO(), updatedAt: nowISO(),
+          }
+          await db.users.add(u)
+        }
+
+        // Sincronización de rutas según rol.
+        if (form.rol === 'cobrador') {
+          await setCobradorRoutes(userId, form.authorizedRouteIds)
+        } else if (form.rol === 'admin' || form.rol === 'socio' || form.rol === 'supervisor' || form.rol === 'secretario') {
+          await clearRouteResponsibilities(userId)
+          await db.users.update(userId, {
+            authorizedRouteIds: form.authorizedRouteIds.length ? form.authorizedRouteIds : undefined,
+            routeId: undefined, updatedAt: nowISO(),
+          })
+        } else {
+          await clearRouteResponsibilities(userId)
+          await db.users.update(userId, { authorizedRouteIds: undefined, routeId: undefined, updatedAt: nowISO() })
+        }
+      })
 
       await logAction({
         tenantId, userId: currentUser.id, userRole: currentUser.rol,
@@ -216,7 +228,7 @@ export default function UsersPage() {
       toast.success(editing ? 'Usuario actualizado' : 'Usuario creado')
       closeModal()
       await load()
-    } catch { toast.error('Error al guardar') } finally { setSaving(false) }
+    } catch (e) { toast.error(e instanceof Error && e.message ? e.message : 'Error al guardar') } finally { setSaving(false) }
   }
 
   async function toggleStatus(u: User) {
@@ -228,7 +240,13 @@ export default function UsersPage() {
       if (bloqueo) { toast.error(bloqueo.message); return }
     }
     const ns = u.status === 'activo' ? 'inactivo' : 'activo'
-    await db.users.update(u.id, { status: ns, updatedAt: nowISO() })
+    // v16: desactivar al responsable de capital de una ruta exige elegir antes otro
+    // responsable (si quedan Administradores); reactivar a un Admin puede convertirlo
+    // en responsable de una ruta que no tenía. Todo en una transacción.
+    try {
+      await withCapitalControllerGuard({ tenantId, actor: currentUser!, routeIds: getAssignedRouteIds(u), preferredAdminIds: [u.id] },
+        () => db.users.update(u.id, { status: ns, updatedAt: nowISO() }))
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo cambiar el estado'); return }
     if (currentUser) await logAction({ tenantId, userId: currentUser.id, userRole: currentUser.rol, action: 'BLOCK_USER', entityType: 'User', entityId: u.id, descripcion: `Usuario ${ns}: ${u.nombre}`, before: { status: u.status }, after: { status: ns } })
     toast.success(`Usuario ${ns}`)
     await load()

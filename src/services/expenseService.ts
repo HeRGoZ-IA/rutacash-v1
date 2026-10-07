@@ -28,15 +28,15 @@
 import { db, type RutaCashDB } from '@/lib/db'
 import { nowISO, today } from '@/lib/formatters'
 import { generateId } from '@/lib/utils'
-import { can } from '@/lib/permissions'
+import { can, canOperateRouteCash } from '@/lib/permissions'
 import { expenseShapeError } from '@/lib/expenseAttribution'
-import { assertCan, AuthzError } from '@/services/authz'
+import { assertCan, assertRouteCashAuthority, AuthzError } from '@/services/authz'
 import { logAction } from '@/services/auditService'
 import { assertRouteOperationalContext } from '@/services/officeService'
 import { custodianBlockedReason, reconciliationTables, transferableCash } from '@/services/cashCustodyService'
 import { personalCashPosition } from '@/services/cashSettlementService'
 import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
-import type { Expense, ExpenseScope, SyncStatus, User } from '@/models/types'
+import type { Expense, ExpenseScope, Route, SyncStatus, User } from '@/models/types'
 
 export async function addExpenseStamped(expense: Omit<Expense, 'createdAt'>, database: RutaCashDB = db): Promise<Expense> {
   return database.transaction('rw', [database.expenses], async () => {
@@ -70,14 +70,27 @@ export interface CreateExpenseParams {
   syncStatus?: SyncStatus
 }
 
-/** ¿Puede el actor registrar gastos de este tipo? (para ofrecer opciones en la UI). */
-export function canRegisterExpenseScope(actor: User | null | undefined, scope: ExpenseScope, routeId?: string): boolean {
+/**
+ * ¿Puede el actor registrar gastos de este tipo? (para ofrecer opciones en la UI).
+ *
+ * v16: 'ruta' lo paga la CAJA de la ruta → solo su Administrador responsable de
+ * capital ('structural'). 'trabajador' cargado a OTRA persona → nivel de cuadre
+ * ('settle': responsable, SuperAdmin, Supervisor de la ruta). Sin `ctx` (ruta y
+ * usuarios) no se puede comprobar al responsable: falla cerrado.
+ */
+export function canRegisterExpenseScope(
+  actor: User | null | undefined,
+  scope: ExpenseScope,
+  routeId?: string,
+  ctx?: { route?: Route; users?: User[] },
+): boolean {
   if (!actor) return false
   const tenantId = actor.tenantId
   if (scope === 'empresa') return can(actor, 'expense.register', { tenantId }) && can(actor, 'cashbox.viewConsolidated', { tenantId })
   if (!can(actor, 'expense.register', { tenantId, routeId })) return false
-  // Ruta, o trabajador ajeno: administra la caja de la ruta.
-  return can(actor, 'cashCustody.manage', { tenantId, routeId })
+  if (!can(actor, 'cashCustody.manage', { tenantId, routeId })) return false
+  if (!ctx?.route || !ctx.users) return false
+  return canOperateRouteCash(actor, ctx.route, scope === 'ruta' ? 'structural' : 'settle', ctx.users)
 }
 
 export async function createExpense(params: CreateExpenseParams, database: RutaCashDB = db): Promise<Expense> {
@@ -103,14 +116,21 @@ export async function createExpense(params: CreateExpenseParams, database: RutaC
     if (!route) throw new ExpenseError('La ruta indicada no existe.')
     if (route.tenantId !== tenantId) throw new AuthzError('La ruta no pertenece a esta empresa.')
     await assertRouteOperationalContext(routeId!)
+    const usuarios = await database.users.where('tenantId').equals(tenantId).toArray()
     if (scope === 'ruta') {
       assertCan(actor, 'cashCustody.manage', { tenantId, routeId })
+      // v16: lo paga la caja de la ruta → solo su Administrador responsable.
+      assertRouteCashAuthority(actor, route, 'structural', usuarios)
     } else {
       persona = await database.users.get(collectorId!)
       const bloqueo = custodianBlockedReason(persona, routeId!, tenantId)
       if (bloqueo) throw new ExpenseError(bloqueo.replace('recibir Base física', 'responder por un gasto'))
-      if (collectorId !== actor.id && !can(actor, 'cashCustody.manage', { tenantId, routeId })) {
-        throw new AuthzError('Los gastos que registras quedan a tu cargo: no puedes cargarlos a otra persona.')
+      if (collectorId !== actor.id) {
+        if (!can(actor, 'cashCustody.manage', { tenantId, routeId })) {
+          throw new AuthzError('Los gastos que registras quedan a tu cargo: no puedes cargarlos a otra persona.')
+        }
+        // Cargar a otra persona es operar con su efectivo: nivel de cuadre (v16).
+        assertRouteCashAuthority(actor, route, 'settle', usuarios)
       }
     }
   }

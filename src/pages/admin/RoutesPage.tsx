@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { DateRangeFilter } from '@/components/ui/DateRangeFilter'
 import { ConfirmDiscardModal } from '@/components/ui/ConfirmDiscardModal'
 import { RouteAssignedUsers } from '@/components/ui/RouteAssignedUsers'
+import { CapitalControllerBadge } from '@/components/ui/CapitalControllerBadge'
 import { useDirtyForm } from '@/hooks/useDirtyForm'
 import { useDataRevision } from '@/hooks/useDataRevision'
 import { toast } from '@/components/ui/Toast'
@@ -65,6 +66,8 @@ export default function RoutesPage() {
     // BORRADOR de asignaciones de usuarios (edición): NO persiste hasta "Actualizar".
     assignedUserIds: [] as string[],
     tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0,
+    /** Responsable de capital (v16). Solo el SuperAdmin lo cambia desde el editor. */
+    capitalControllerAdminId: '',
   })
   // Dirty-state: snapshot original al abrir vs draft actual (para confirmar descarte).
   const [original, setOriginal] = useState<Record<string, unknown> | null>(null)
@@ -169,7 +172,7 @@ export default function RoutesPage() {
     const officePorDefecto = officePreseleccionada && offices.some(o => o.id === officePreseleccionada)
       ? officePreseleccionada
       : (officeFilter !== ALL_OFFICES && offices.some(o => o.id === officeFilter) ? officeFilter : '')
-    const init = { nombre: '', ciudad: '', cobradorId: '', officeId: officePorDefecto, adminIds: preselect, assignedUserIds: [], tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0 }
+    const init = { nombre: '', ciudad: '', cobradorId: '', officeId: officePorDefecto, adminIds: preselect, assignedUserIds: [], tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0, capitalControllerAdminId: '' }
     setForm(init)
     setOriginal({ ...init })   // snapshot para dirty-check
     setModalOpen(true)
@@ -187,6 +190,7 @@ export default function RoutesPage() {
       cobradorId: route.cobradorId ?? '', officeId: route.officeId ?? '', adminIds: [] as string[], assignedUserIds,
       tasaInteres: route.tasaInteres, tasaLibre: route.tasaLibre,
       montoMaximoPrestamo: route.montoMaximoPrestamo, capitalInicial: route.capitalInicial,
+      capitalControllerAdminId: route.capitalControllerAdminId ?? '',
     }
     setForm(init)
     setOriginal({ ...init })   // snapshot de TODO (generales + asignaciones)
@@ -268,6 +272,14 @@ export default function RoutesPage() {
       })
     : (lockAdminToSelf && user ? [user.id] : form.adminIds)
 
+  // RESPONSABLE DE CAPITAL (v16) tras guardar: el elegido si sigue entre los
+  // Administradores efectivos; si se retiró al actual y quedan otros, el SuperAdmin
+  // DEBE elegir (el servicio lo exige igual). Nunca se elige a nadie en silencio.
+  const puedeElegirResponsable = !!editing && user?.rol === 'superadmin'
+  const adminsEfectivos = allUsers.filter(u => effectiveAdminIds.includes(u.id) && u.rol === 'admin' && u.status === 'activo')
+  const responsableQueda = !!form.capitalControllerAdminId && effectiveAdminIds.includes(form.capitalControllerAdminId)
+  const faltaElegirResponsable = !!editing && !!editing.capitalControllerAdminId && !responsableQueda && adminsEfectivos.length > 0
+
   const assignmentWarnings = routeAssignmentWarnings({
     hasOffice: !!form.officeId,
     hasAdmin: effectiveAdminIds.length > 0,
@@ -298,6 +310,12 @@ export default function RoutesPage() {
       userById: (id) => allUsers.find(u => u.id === id),
     })
     if (editing && !inv.ok) { toast.error(inv.message); return }
+    if (faltaElegirResponsable) {
+      toast.error(puedeElegirResponsable
+        ? 'Retiras al responsable de capital de la ruta: elige el nuevo responsable entre los Administradores que quedan.'
+        : 'No puedes retirar al responsable de capital de la ruta: el SuperAdmin debe elegir antes otro responsable.')
+      return
+    }
     // Confirmación al Actualizar: solo si el guardado REALMENTE deja la ruta ACTIVA
     // sin ningún Administrador efectivo. Antes se comparaba el borrador (que nunca
     // contiene admins cuando el actor es Administrador) contra los previos, y por eso
@@ -321,6 +339,8 @@ export default function RoutesPage() {
           officeId: form.officeId || undefined,
           assignedUserIds: form.assignedUserIds,
           assignableUserIds: assignableToRoutes.map(u => u.id),
+          capitalControllerAdminId: puedeElegirResponsable && form.capitalControllerAdminId && form.capitalControllerAdminId !== editing.capitalControllerAdminId
+            ? form.capitalControllerAdminId : undefined,
         }, user)
         // Si el actor se vio afectado (auto-asignación/retiro), refrescar su sesión.
         if (form.assignedUserIds.includes(user.id) || getAssignedRouteIds(user).includes(editing.id)) await refreshUser()
@@ -522,7 +542,8 @@ export default function RoutesPage() {
               {/* Usuarios asignados — fuente única authorizedRouteIds (coherente con
                   el editor y con Usuarios). Ya NO se lee solo route.cobradorId. */}
               <div className="border-t border-gray-50 pt-2">
-                <RouteAssignedUsers users={allUsers} routeId={route.id} tenantId={tenantId} responsibleCobradorId={route.cobradorId} />
+                <RouteAssignedUsers users={allUsers} routeId={route.id} tenantId={tenantId} responsibleCobradorId={route.cobradorId} capitalControllerAdminId={route.capitalControllerAdminId} />
+                <CapitalControllerBadge className="mt-1" route={route} users={allUsers} currentUserId={user?.id} />
               </div>
 
               <div className="flex gap-2 pt-1">
@@ -621,8 +642,11 @@ export default function RoutesPage() {
             <Input label="Tasa de interés (%)" type="number" value={form.tasaInteres} onChange={e => setForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} min={0} max={100} />
             <MoneyInput label="Monto máx. préstamo" currency={currency} value={form.montoMaximoPrestamo} onValueChange={v => setForm(f => ({ ...f, montoMaximoPrestamo: v }))} />
           </div>
-          {!editing && (
-            <MoneyInput label="Capital inicial" currency={currency} value={form.capitalInicial} onValueChange={v => setForm(f => ({ ...f, capitalInicial: v }))} hint="Se registrará como movimiento de capital" />
+          {/* v16: el capital inicial sale de la bolsa del responsable de capital y solo
+              lo coloca él (el Administrador que crea la ruta). El SuperAdmin asigna
+              capital al Administrador desde Capital; no lo coloca en rutas. */}
+          {!editing && lockAdminToSelf && (
+            <MoneyInput label="Capital inicial" currency={currency} value={form.capitalInicial} onValueChange={v => setForm(f => ({ ...f, capitalInicial: v }))} hint="Sale de tu bolsa de capital (Capital → Disponible)" />
           )}
           <div className="flex items-center gap-3">
             <input type="checkbox" id="tasaLibre" checked={form.tasaLibre} onChange={e => setForm(f => ({ ...f, tasaLibre: e.target.checked }))} className="w-4 h-4 text-primary-600" />
@@ -647,8 +671,9 @@ export default function RoutesPage() {
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{g.plural}</p>
                       {g.list.map(u => {
                         const member = form.assignedUserIds.includes(u.id)   // ← lee del BORRADOR
-                        const isResp = g.rol === 'cobrador' && member && u.id === form.cobradorId
-                        const tag = !member ? 'Asignar' : isResp ? 'Responsable' : 'Asignado'
+                        const isResp = (g.rol === 'cobrador' && member && u.id === form.cobradorId)
+                          || (g.rol === 'admin' && member && u.id === form.capitalControllerAdminId)
+                        const tag = !member ? 'Asignar' : isResp ? (g.rol === 'admin' ? 'Responsable de capital' : 'Responsable') : 'Asignado'
                         return (
                           <button key={u.id} type="button" onClick={() => toggleAssignUser(u.id)}
                             className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-left transition-colors ${member ? 'bg-primary-50 border-primary-200' : 'bg-white border-gray-200 hover:bg-gray-50'}`}>
@@ -665,6 +690,24 @@ export default function RoutesPage() {
                     </div>
                   ))}
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* RESPONSABLE DE CAPITAL (v16): visible siempre; editable solo por el SuperAdmin. */}
+          {editing && (
+            <div className="pt-3 border-t border-gray-100 space-y-1.5" data-testid="route-capital-controller">
+              {puedeElegirResponsable ? (
+                <Select label="Responsable de capital" value={responsableQueda ? form.capitalControllerAdminId : ''}
+                  onChange={e => setForm(f => ({ ...f, capitalControllerAdminId: e.target.value }))}
+                  options={adminsEfectivos.map(a => ({ value: a.id, label: a.nombre }))}
+                  placeholder={adminsEfectivos.length ? 'Seleccionar Administrador' : 'Sin Administradores asignados'}
+                  hint="Solo uno maneja el capital y la caja de la ruta. Al cambiarlo, el capital colocado pasa a su bolsa." />
+              ) : (
+                <CapitalControllerBadge route={editing} users={allUsers} currentUserId={user?.id} />
+              )}
+              {faltaElegirResponsable && (
+                <p className="text-xs font-medium text-amber-700">Retiras al responsable de capital: elige otro antes de guardar.</p>
               )}
             </div>
           )}

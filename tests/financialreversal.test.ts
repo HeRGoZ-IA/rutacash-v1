@@ -12,6 +12,7 @@
 // ============================================================
 import 'fake-indexeddb/auto'
 import { db } from '../src/lib/db'
+import { sembrarResponsables } from './financial/capitalFixture'
 import { today } from '../src/lib/formatters'
 import { getCashboxSummary } from '../src/services/cashboxEngine'
 import { computeRouteCashReconciliation } from '../src/services/routeCashReconciliation'
@@ -91,6 +92,9 @@ async function empresa() {
     ({ id, tenantId, officeId, nombre, codigo: id, status: 'activa', capitalInicial: 0, capitalActual: 0, tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 0, createdAt: '2026-09-01' })
   await db.routes.bulkAdd([ruta(R1, T, 'of-a', 'Barreiro'), ruta(R2, T, 'of-a', 'Centro'), ruta(RB, TB, 'of-b', 'Ajena')] as never[])
   await db.users.bulkAdd([SUPER, ADMIN, ADMIN_CENTRO, JUAN, PEDRO, LAURA, SECRE, SOCIO, AJENO])
+  // v16: Andrés (primer Admin de ambas rutas) es su responsable de capital, con bolsa.
+  await sembrarResponsables(db, T, { [R1]: ADMIN.id, [R2]: ADMIN.id })
+  await sembrarResponsables(db, TB, { [RB]: AJENO.id })
 }
 
 const saldo = async (routeId: string) => (await getCashboxSummary(routeId)).saldoActual
@@ -205,7 +209,8 @@ await spec('FIN-REV-006', 'permisos: solo Admin/SuperAdmin con la capacidad del 
       rechazo(() => reverseWithdrawal({ actor: u, tenantId: T, movementId: w.id, reason: MOTIVO })),
       rechazo(() => reverseTransfer({ actor: u, tenantId: T, movementId: t.id, reason: MOTIVO })),
     ])
-    const ui = canReverseRouteFund(u, cap) || canReverseRouteFund(u, w) || canReverseTransfer(u, t, () => [R1])
+    const [rts, us] = [await db.routes.toArray(), await db.users.toArray()]
+    const ui = canReverseRouteFund(u, cap, rts, us) || canReverseRouteFund(u, w, rts, us) || canReverseTransfer(u, t, () => [R1], rts, us)
     res.push(`${u.rol}: ${r.every(x => x !== 'ACEPTADO') ? 'rechazado' : 'ACEPTADO'} · botón ${ui ? 'VISIBLE' : 'oculto'}`)
     assert(r.every(x => x !== 'ACEPTADO') && !ui, `${u.rol} pudo anular`)
   }
@@ -260,7 +265,8 @@ await spec('FIN-REV-009', 'una reversión no es anulable', async () => {
   metric('anular reversión de retiro', a)
   metric('anular reversión de transferencia', b)
   assert(/reversión no se puede anular/.test(a) && /reversión no se puede anular/.test(b), 'se permitió anular una reversión')
-  assert(!canReverseRouteFund(SUPER, reversal) && !canReverseTransfer(SUPER, rt.reversal, () => [R1]), 'la UI ofrece anular una reversión')
+  const [rts, us] = [await db.routes.toArray(), await db.users.toArray()]
+  assert(!canReverseRouteFund(SUPER, reversal, rts, us) && !canReverseTransfer(SUPER, rt.reversal, () => [R1], rts, us), 'la UI ofrece anular una reversión')
   assert((await db.withdrawals.count()) === 2 && (await db.transfers.count()) === 2, 'se creó una cadena de reversiones')
 })
 
@@ -381,7 +387,8 @@ await spec('FIN-REV-014', 'aislamiento de empresa y ruta', async () => {
     assert(r !== 'ACEPTADO', `${k}: aceptado`)
   }
   const partnerRoutes = (id: string) => authorizedRouteIdsOf([SOCIO].find(u => u.id === id))
-  assert(!canReverseRouteFund(ADMIN_CENTRO, cap) && !canReverseTransfer(ADMIN_CENTRO, transfer, partnerRoutes), 'la UI ofrece anular fuera de alcance')
+  const [rts, us] = [await db.routes.toArray(), await db.users.toArray()]
+  assert(!canReverseRouteFund(ADMIN_CENTRO, cap, rts, us) && !canReverseTransfer(ADMIN_CENTRO, transfer, partnerRoutes, rts, us), 'la UI ofrece anular fuera de alcance')
   assert(isReversible((await db.capitalMovements.get(cap.id))!) && isReversible((await db.transfers.get(transfer.id))!), 'un rechazo modificó el movimiento')
 })
 

@@ -23,6 +23,14 @@
 //
 // No hay migración de `Route`: el modelo nunca tuvo campo de Administrador; la
 // relación Admin↔Ruta vive exclusivamente en `User.authorizedRouteIds`.
+//
+// v16 — RESPONSABLE DE CAPITAL: de todos los Administradores asignados, UNO maneja
+// el capital y la caja (`Route.capitalControllerAdminId`). Al crear o editar, en la
+// MISMA transacción que las asignaciones, `reconcileRouteCapitalControllers`
+// aplica la regla del "primer Admin", protege al responsable vigente (no se le
+// retira sin elegir otro) y, si el SuperAdmin lo elige, lo cambia con traspaso de
+// capital. El capital inicial de una ruta nueva sale de la bolsa de su responsable
+// y solo lo coloca él mismo (no hay atajo SuperAdmin → Ruta).
 // ============================================================
 import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
@@ -35,6 +43,11 @@ import { canManageUser, authorizedRouteIdsOf } from '@/lib/permissions'
 import { computeRouteAssignmentDiff } from '@/lib/routeAssignmentDiff'
 import { validateCobradorInvariant } from '@/lib/cobradorRules'
 import { syncRouteMetrics } from '@/platform/companyControlService'
+import { adminCapital } from '@/lib/capitalAllocation'
+import {
+  capitalTables, loadCapitalRows, reconcileRouteCapitalControllers, CapitalControlError,
+  type CapitalControlDatabase,
+} from '@/services/capitalControlService'
 import { controlPlane } from '@/platform/controlPlane'
 import type { ControlEventType } from '@/platform/types'
 import type { CapitalMovement, Office, Route, User } from '@/models/types'
@@ -48,18 +61,15 @@ import type { CapitalMovement, Office, Route, User } from '@/models/types'
  * tiene IndexedDB) y verificar la creación de rutas de verdad, en la capa de
  * servicio. En producción SIEMPRE se usa el `db` real (valor por defecto).
  */
-export interface RouteDatabase {
-  routes: {
+export interface RouteDatabase extends Omit<CapitalControlDatabase, 'routes' | 'users' | 'capitalMovements'> {
+  routes: CapitalControlDatabase['routes'] & {
     add(item: Route): Promise<unknown>
-    get(key: string): Promise<Route | undefined>
-    update(key: string, changes: Partial<Route>): Promise<number>
   }
-  users: {
+  users: CapitalControlDatabase['users'] & {
     get(key: string): Promise<User | undefined>
     update(key: string, changes: Partial<User>): Promise<number>
-    where(index: string): { equals(key: string): { toArray(): Promise<User[]> } }
   }
-  capitalMovements: { add(item: CapitalMovement): Promise<unknown> }
+  capitalMovements: CapitalControlDatabase['capitalMovements'] & { add(item: CapitalMovement): Promise<unknown> }
   /** Solo LECTURA: validar que la Oficina indicada existe y es del mismo tenant. */
   offices: { get(key: string): Promise<Office | undefined> }
   transaction<U>(mode: 'rw', tables: unknown, scope: () => PromiseLike<U>): Promise<U>
@@ -172,17 +182,11 @@ export async function createRouteWithAdmins(
     status: 'activa', createdAt: nowISO(), updatedAt: nowISO(),
   }
 
-  // 4) Transaccional ÚNICO: crea la ruta, el capital inicial, asigna la ruta a cada Admin
-  //    y al cobrador responsable. Si algo falla, Dexie revierte todo (no queda ruta huérfana).
-  await database.transaction('rw', [database.routes, database.users, database.capitalMovements], async () => {
+  // 4) Transaccional ÚNICO: crea la ruta, asigna la ruta a cada Admin y al cobrador,
+  //    fija el responsable de capital y coloca el capital inicial. Si algo falla,
+  //    Dexie revierte todo (no queda ruta huérfana ni capital sin bolsa).
+  await database.transaction('rw', capitalTables(database), async () => {
     await database.routes.add(route)
-    if (input.capitalInicial > 0) {
-      await database.capitalMovements.add({
-        id: generateId(), tenantId: input.tenantId, routeId: route.id,
-        tipo: 'ingresoCapital', valor: input.capitalInicial, descripcion: 'Capital inicial',
-        fecha: nowISO().slice(0, 10), userId: actor.id, createdAt: nowISO(),
-      })
-    }
     for (const id of adminIds) {
       const a = users.find(u => u.id === id)!
       const ids = new Set(getAssignedRouteIds(a)); ids.add(route.id) // sin duplicados
@@ -197,6 +201,29 @@ export async function createRouteWithAdmins(
       const clist = [...cids]
       await database.users.update(cobrador.id, { authorizedRouteIds: clist, routeId: clist[0], updatedAt: nowISO() })
     }
+    // RESPONSABLE DE CAPITAL: el primer Administrador seleccionado (orden de la
+    // selección en ESTA operación, que queda persistido; nunca se vuelve a deducir).
+    await reconcileRouteCapitalControllers(database, {
+      tenantId: input.tenantId, routeIds: [route.id], actor, preferredAdminIds: adminIds,
+    })
+    // CAPITAL INICIAL: sale de la bolsa del responsable y solo lo coloca él.
+    if (input.capitalInicial > 0) {
+      const creada = await database.routes.get(route.id)
+      const responsable = creada?.capitalControllerAdminId
+      if (!responsable || responsable !== actor.id) {
+        throw new CapitalControlError('El capital inicial lo coloca el Administrador responsable de capital desde su bolsa. Crea la ruta sin capital y que él lo asigne en Capital.')
+      }
+      const disponible = adminCapital(responsable, await loadCapitalRows(input.tenantId, database)).disponible
+      if (input.capitalInicial > disponible) {
+        throw new CapitalControlError(`Tu capital disponible no alcanza para el capital inicial (disponible: ${disponible}).`)
+      }
+      await database.capitalMovements.add({
+        id: generateId(), tenantId: input.tenantId, routeId: route.id,
+        tipo: 'ingresoCapital', valor: input.capitalInicial, descripcion: 'Capital inicial',
+        fecha: nowISO().slice(0, 10), userId: actor.id, createdAt: nowISO(), adminId: responsable,
+      })
+    }
+    route.capitalControllerAdminId = (await database.routes.get(route.id))?.capitalControllerAdminId
   })
 
   // 5) Auditoría de creación, de cada asignación de Administrador y del cobrador responsable.
@@ -214,7 +241,8 @@ export async function createRouteWithAdmins(
       ? `Ruta creada SIN ${faltantes.join(' ni ')} responsable: ${route.nombre}`
       : `Ruta creada: ${route.nombre}`,
     after: {
-      adminIds, cobradorId: input.cobradorId, officeId: input.officeId ?? null,
+      adminIds, capitalControllerAdminId: route.capitalControllerAdminId ?? null,
+      cobradorId: input.cobradorId, officeId: input.officeId ?? null,
       sinAdministrador: adminIds.length === 0, sinCobrador: !cobrador,
       sinOficina: !input.officeId,
     },
@@ -256,6 +284,12 @@ export interface UpdateRouteInput {
   assignedUserIds: string[]
   /** Universo de usuarios que el actor puede togglear (para acotar los retiros). */
   assignableUserIds: string[]
+  /**
+   * Responsable de capital ELEGIDO explícitamente (solo SuperAdmin). Debe ser un
+   * Administrador activo que quede asignado a la ruta. Ausente = se conserva el
+   * actual (o se aplica la regla del primer Admin si no hay ninguno).
+   */
+  capitalControllerAdminId?: string
 }
 
 /** Actualiza la ruta y TODAS sus relaciones en una sola transacción. Audita al final. */
@@ -290,8 +324,9 @@ export async function updateRouteWithAssignments(
 
   let added: string[] = []
   let removed: string[] = []
+  let cambiosResponsable: Awaited<ReturnType<typeof reconcileRouteCapitalControllers>> = []
 
-  await database.transaction('rw', [database.routes, database.users], async () => {
+  await database.transaction('rw', capitalTables(database), async () => {
     // Todos los usuarios que podrían cambiar (asignables + cobrador previo/nuevo).
     const affectedIds = new Set<string>(input.assignableUserIds)
     if (prevRoute.cobradorId) affectedIds.add(prevRoute.cobradorId)
@@ -340,6 +375,14 @@ export async function updateRouteWithAssignments(
       const list = [...set]
       await database.users.update(id, { authorizedRouteIds: list.length ? list : undefined, routeId: list[0], updatedAt: nowISO() })
     }
+
+    // RESPONSABLE DE CAPITAL (v16), con las asignaciones ya escritas. Si se retira
+    // al responsable sin elegir otro (y quedan Admins), lanza y NADA se guarda.
+    cambiosResponsable = await reconcileRouteCapitalControllers(database, {
+      tenantId: input.tenantId, routeIds: [input.routeId], actor,
+      preferredAdminIds: input.assignedUserIds.filter(id => added.includes(id)),
+      replacements: input.capitalControllerAdminId ? { [input.routeId]: input.capitalControllerAdminId } : undefined,
+    })
   })
 
   // Auditoría (fuera de la transacción de escritura).
@@ -347,8 +390,20 @@ export async function updateRouteWithAssignments(
     tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: input.routeId,
     action: 'UPDATE_ROUTE', entityType: 'Route', entityId: input.routeId,
     descripcion: `Ruta actualizada: ${input.nombre}`, before: beforeGeneral, after: afterGeneral,
-    metadata: { usuariosAgregados: added, usuariosRetirados: removed },
+    metadata: {
+      usuariosAgregados: added, usuariosRetirados: removed,
+      responsableCapital: cambiosResponsable.map(e => ({ kind: e.kind, from: e.fromAdminId ?? null, to: e.toAdminId ?? null, capital: e.capitalTransferido })),
+    },
   })
+  for (const e of cambiosResponsable) {
+    await auditSink({
+      tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: input.routeId,
+      action: 'ROUTE_CAPITAL_CONTROLLER_CHANGED', entityType: 'Route', entityId: input.routeId,
+      descripcion: `Responsable de capital de ${input.nombre}: ${e.fromAdminId ?? 'ninguno'} → ${e.toAdminId ?? 'ninguno'} (${e.kind}).`,
+      before: { capitalControllerAdminId: e.fromAdminId ?? null },
+      after: { capitalControllerAdminId: e.toAdminId ?? null, capitalTransferido: e.capitalTransferido, eventId: e.id },
+    })
+  }
   for (const id of added) await auditSink({ tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: input.routeId, action: 'ASSIGN_ROUTE', entityType: 'User', entityId: id, descripcion: `Usuario asignado a ${input.nombre}` })
   for (const id of removed) await auditSink({ tenantId: input.tenantId, userId: actor.id, userRole: actor.rol, routeId: input.routeId, action: 'UNASSIGN_ROUTE', entityType: 'User', entityId: id, descripcion: `Usuario retirado de ${input.nombre}` })
 

@@ -18,6 +18,7 @@
 import 'fake-indexeddb/auto'
 import Dexie, { liveQuery } from 'dexie'
 import { db } from '../src/lib/db'
+import { sembrarResponsables } from './financial/capitalFixture'
 import { addExpenseStamped } from '../src/services/expenseService'
 import { registerPayment } from '../src/services/paymentService'
 import { getCashboxSummary, getCollectorDailyCashSummary, getCollectorCashSummary } from '../src/services/cashboxEngine'
@@ -111,6 +112,8 @@ async function empresa(opts: { cobradoresActivosNorte?: string[] } = {}) {
     (u.rol === 'cobrador' && u.authorizedRouteIds?.includes(R_NORTE) && !activos.has(u.id))
       ? { ...u, status: 'inactivo' as const } : u)
   await db.users.bulkAdd(equipo)
+  // v16: Andrés (primer Admin de ambas rutas) es su responsable de capital, con bolsa.
+  await sembrarResponsables(db, T, { [R_NORTE]: ADMIN.id, [R_SUR]: ADMIN.id })
   // Capital para que la Base no parta en negativo.
   await db.capitalMovements.bulkAdd([
     { id: 'cap-n', tenantId: T, routeId: R_NORTE, tipo: 'ingresoCapital', valor: 10_000_000, fecha: '2026-09-01', createdAt: '' },
