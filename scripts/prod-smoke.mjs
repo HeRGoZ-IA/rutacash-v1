@@ -33,10 +33,21 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { randomBytes } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 
 const URL_BASE = (process.env.RUTACASH_SMOKE_URL ?? 'https://rutacash-clean.vercel.app').replace(/\/+$/, '')
 const RUN_ID = `${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}-${randomBytes(2).toString('hex')}`
-const OUT = path.resolve(process.env.RUTACASH_SMOKE_OUT ?? path.join('tmp', 'prod-smoke', RUN_ID))
+// La evidencia se ancla a la raíz del proyecto (no al cwd) y nunca sale de RutaCash/tmp/
+// ni del temporal del sistema: así ninguna ejecución deja basura junto a /RutaCash.
+const PROJECT_TMP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'tmp')
+const OUT = process.env.RUTACASH_SMOKE_OUT
+  ? path.resolve(PROJECT_TMP, process.env.RUTACASH_SMOKE_OUT)
+  : path.join(PROJECT_TMP, 'prod-smoke', RUN_ID)
+const dentroDe = (base, p) => { const r = path.relative(base, p); return r !== '' && !r.startsWith('..') && !path.isAbsolute(r) }
+if (!dentroDe(PROJECT_TMP, OUT) && !dentroDe(path.resolve(os.tmpdir()), OUT)) {
+  console.error(`RUTACASH_SMOKE_OUT debe quedar dentro de ${PROJECT_TMP} o de ${os.tmpdir()}; recibido: ${OUT}`)
+  process.exit(2)
+}
 const SHOTS = path.join(OUT, 'screenshots')
 const TIMEOUT = Number(process.env.RUTACASH_SMOKE_TIMEOUT ?? 15000)
 // Credenciales sintéticas, válidas solo dentro del perfil temporal. No se escriben en result.json.
