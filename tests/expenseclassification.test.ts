@@ -336,22 +336,28 @@ await spec('EXP-CLASS-014', 'trabajador con una ruta que no es la suya: rechazo'
   assert(r !== 'ACEPTADO' && /no está asignada/.test(r), 'se aceptó un trabajador en una ruta ajena')
 })
 
-await spec('EXP-CLASS-015', 'gasto mayor al efectivo: rechazo; nunca posición imposible', async () => {
+await spec('EXP-CLASS-015', 'gasto mayor al efectivo: el de trabajador se registra en negativo (incidente 2026-10-08); el de ruta se rechaza', async () => {
   await escenario()
+  // Gasto de TRABAJADOR por encima de su efectivo: se registra (comportamiento
+  // histórico) y deja su posición en negativo, sin tocar la caja sin asignar.
+  const antes = await foto()
   const fabio = await rechazo(() => deTrabajador(FABIO, 100_001))
+  const tras = await foto()
   const ruta = await rechazo(() => deRuta(150_001))
   metric('Fabio 100.001 con 100.000 en manos', fabio)
+  metric('Fabio / Sin asignar', `${await posicion(FABIO)} / ${antes.sinAsignar} → ${tras.sinAsignar}`)
   metric('ruta 150.001 con 150.000 sin asignar', ruta)
-  assert(/supera el efectivo en manos/.test(fabio) && /supera el efectivo sin asignar/.test(ruta), 'se aceptó un gasto sin fondos')
-  // Exactamente lo disponible: se acepta y deja 0, nunca negativo.
-  await deTrabajador(FABIO, 100_000)
+  assert(fabio === 'ACEPTADO' && await posicion(FABIO) === -1, 'el gasto del trabajador no quedó en negativo')
+  assert(tras.sinAsignar === antes.sinAsignar, 'el negativo se compensó con la caja sin asignar')
+  // La caja de la ruta (capital) sigue sin poder gastar lo que no tiene.
+  assert(/supera el efectivo sin asignar/.test(ruta), 'se aceptó un gasto de ruta sin fondos')
   await deRuta(150_000)
   const f = await foto()
-  metric('Fabio / Sin asignar tras gastar todo', `${await posicion(FABIO)} / ${f.sinAsignar}`)
-  assert(await posicion(FABIO) === 0 && f.sinAsignar === 0, 'posición imposible')
+  metric('Sin asignar tras gastar todo', f.sinAsignar)
+  assert(f.sinAsignar === 0, 'posición imposible en la caja de la ruta')
   // El gasto de empresa no consume efectivo de ninguna ruta.
   await deEmpresa(1_000_000)
-  assert((await foto()).base === 50_000, 'el gasto de empresa tocó la ruta')
+  assert((await foto()).base === 300_000 - 100_001 - 150_000, 'el gasto de empresa tocó la ruta')
 })
 
 // ============================================================

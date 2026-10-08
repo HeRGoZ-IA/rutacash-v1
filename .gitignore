@@ -20,3 +20,4 @@ tests/_out.paymentreversal.mjs
 tests/_out.paymentsync.mjs
 tests/_out.expenseclassification.mjs
 tests/_out.capitalcontrol.mjs
+tests/_out.expensecash.mjs

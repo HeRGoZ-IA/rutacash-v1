@@ -31,7 +31,7 @@ import { effectivePayments } from '@/lib/paymentState'
 import { isExpenseOf } from '@/lib/expenseAttribution'
 import { today as todayLocal } from '@/lib/formatters'
 import {
-  personalPaymentLedger, disbursementInstant, expenseInstant, inCycle, custodyInCycle,
+  personalPaymentLedger, isCashPayment, disbursementInstant, expenseInstant, inCycle, custodyInCycle,
 } from '@/lib/cashSettlementRules'
 import type {
   CashboxSummary, RouteFinancialSummary, CollectorCashSummary,
@@ -386,8 +386,9 @@ export async function getCollectorCashSummary(
   ])
 
   // Libro con signo, anclado al inicio del modelo (ver `personalPaymentLedger`).
+  // Solo efectivo: una transferencia no está en manos del cobrador (`isCashPayment`).
   const recaudado = personalPaymentLedger(payments, params.modelStart ?? '')
-    .filter(x => x.payment.collectorId === userId && inCycle(x.instante, desde, hasta))
+    .filter(x => x.payment.collectorId === userId && isCashPayment(x.payment) && inCycle(x.instante, desde, hasta))
     .reduce((sum, x) => sum + x.aporte, 0)
 
   const desembolsado = sales

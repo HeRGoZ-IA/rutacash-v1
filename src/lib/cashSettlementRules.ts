@@ -14,7 +14,9 @@
 //
 //   Cada término sale de UNA fuente y de ninguna otra: la Base solo de
 //   `cashCustodyMovements`; recaudo, desembolso y gasto solo de pagos, ventas y
-//   gastos atribuidos a la persona. Un desembolso hecho con Base recibida resta
+//   gastos atribuidos a la persona. El recaudo es solo EN EFECTIVO
+//   (`isCashPayment`). El esperado puede ser NEGATIVO (gasto pagado sin efectivo
+//   registrado): se arrastra tal cual dentro del ciclo y se concilia al cuadrar. Un desembolso hecho con Base recibida resta
 //   UNA vez (como desembolso); la Base suma UNA vez (como entrega). Sin Base, la
 //   fórmula es exactamente la anterior (v14).
 //     diferencia = entregado − esperado
@@ -89,6 +91,16 @@ export function inCycle(instante: string, desde: string, hasta: string): boolean
  * inicio del modelo personal. Corregir un pago histórico no genera efectivo nuevo
  * ni deuda: su original nunca estuvo en ningún cuadre.
  */
+/**
+ * ¿El pago entró FÍSICAMENTE al bolsillo de su responsable? Solo el efectivo (y
+ * los pagos sin tipo, anteriores al campo). Una transferencia u otro medio cuenta
+ * para el crédito y el libro de la ruta, pero no es efectivo en manos de nadie.
+ * Reversiones y reemplazos copian el tipo del original: la cadena se netea igual.
+ */
+export function isCashPayment(p: Pick<Payment, 'tipo'>): boolean {
+  return (p.tipo ?? 'efectivo') === 'efectivo'
+}
+
 export function personalPaymentLedger(
   payments: Payment[],
   modelStart: string,

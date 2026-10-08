@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Plus, DollarSign, Image as ImageIcon } from 'lucide-react'
 import { toast } from '@/components/ui/Toast'
 import { PhotoInput } from '@/components/ui/PhotoInput'
@@ -8,6 +8,7 @@ import { useDataRevision } from '@/hooks/useDataRevision'
 import { hasPersonalCashbox } from '@/lib/collectorAttribution'
 import { expenseAttribution, isExpenseOf } from '@/lib/expenseAttribution'
 import { can } from '@/lib/permissions'
+import { generateId } from '@/lib/utils'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { formatCurrency, formatCurrencyInput, parseCurrencyInput, getCurrencySymbol, formatDate, today } from '@/lib/formatters'
@@ -28,6 +29,9 @@ export default function CollectorExpensesPage() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ categoryId: '', valor: 0, descripcion: '', receiptPhotoDataUrl: undefined as string | undefined, pagadoPor: '' })
   const [saving, setSaving] = useState(false)
+  // Id de la operación en curso: se reutiliza en cada reintento del MISMO gasto
+  // (doble toque, error de red) para que el servicio no lo duplique.
+  const operacion = useRef<string | null>(null)
 
   // Gastos de la ruta activa (o la ruta principal del cobrador)
   const routeId = activeRouteId ?? user?.routeId ?? null
@@ -78,9 +82,10 @@ export default function CollectorExpensesPage() {
     setSaving(true)
     try {
       // `userId` = quién REGISTRÓ; la atribución (`scope` + `collectorId`) = a qué
-      // efectivo se carga. El servicio valida permisos, ruta, Oficina activa y que
-      // el gasto no supere el efectivo de quien lo paga. El instante se sella BAJO
-      // BLOQUEO: frontera exacta del cuadre por trabajador.
+      // efectivo se carga. El servicio valida permisos, ruta y Oficina activa; el
+      // gasto de un trabajador puede dejar su efectivo en negativo (se concilia en
+      // su cuadre). El instante se sella BAJO BLOQUEO: frontera exacta del cuadre.
+      if (!operacion.current) operacion.current = generateId()
       await createExpense({
         actor: user, tenantId: user.tenantId, routeId,
         scope: pagadoPor === CAJA_RUTA ? 'ruta' : 'trabajador',
@@ -88,7 +93,9 @@ export default function CollectorExpensesPage() {
         categoryId: form.categoryId, valor: form.valor,
         descripcion: form.descripcion, receiptPhotoDataUrl: form.receiptPhotoDataUrl,
         syncStatus: navigator.onLine ? 'synced' : 'pending',
+        operationId: operacion.current,
       })
+      operacion.current = null
       toast.success('Gasto registrado')
       setForm({ categoryId: '', valor: 0, descripcion: '', receiptPhotoDataUrl: undefined, pagadoPor: '' })
       setShowForm(false)
@@ -115,7 +122,7 @@ export default function CollectorExpensesPage() {
           <h1 className="font-bold text-gray-900">Gastos</h1>
           <p className="text-xs text-gray-500">{veGastosDeRuta ? 'A tu cargo hoy' : 'Hoy'}: {formatCurrency(todayTotal, currency)}</p>
         </div>
-        <button onClick={() => setShowForm(true)} className="w-10 h-10 bg-primary-600 text-white rounded-full flex items-center justify-center">
+        <button onClick={() => { operacion.current = null; setShowForm(true) }} className="w-10 h-10 bg-primary-600 text-white rounded-full flex items-center justify-center">
           <Plus className="w-5 h-5" />
         </button>
       </div>

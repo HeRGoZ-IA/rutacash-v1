@@ -121,7 +121,7 @@ export default function CollectorCashClosePage() {
               {ciclo.baseDevuelta > 0 && (
                 <Row icon={<Wallet className="w-4 h-4 text-gray-500" />} label="Base devuelta / traspasada" value={`-${money(ciclo.baseDevuelta)}`} color="text-gray-600" />
               )}
-              <Row icon={<TrendingUp className="w-4 h-4 text-emerald-600" />} label="Recaudado por ti" value={`+${money(ciclo.recaudado)}`} color="text-emerald-600" />
+              <Row icon={<TrendingUp className="w-4 h-4 text-emerald-600" />} label="Recaudado en efectivo por ti" value={`+${money(ciclo.recaudado)}`} color="text-emerald-600" />
               <Row icon={<Banknote className="w-4 h-4 text-primary-600" />} label="Desembolsado por ti" value={`-${money(ciclo.desembolsado)}`} color="text-primary-600" />
               <Row icon={<TrendingDown className="w-4 h-4 text-red-500" />} label="Tus gastos" value={`-${money(ciclo.gastos)}`} color="text-red-500" />
             </div>
@@ -131,8 +131,20 @@ export default function CollectorCashClosePage() {
                 <Calculator className="w-4 h-4" /> Efectivo a entregar
               </div>
               <p className="text-3xl font-bold mt-1">{money(ciclo.esperado)}</p>
-              <p className="text-primary-200 text-xs mt-2">Faltante pendiente + Base recibida − Base devuelta + recaudado − desembolsado − gastos, desde tu último cuadre</p>
+              <p className="text-primary-200 text-xs mt-2">Faltante pendiente + Base recibida − Base devuelta + recaudado en efectivo − desembolsado − gastos, desde tu último cuadre</p>
             </div>
+
+            {/* Saldo negativo: gastos por encima del efectivo registrado. No es dinero
+                entregado ni deuda inventada: se muestra tal cual y se concilia en el cuadre. */}
+            {ciclo.esperado < 0 && (
+              <div className="flex items-start gap-2 rounded-xl bg-red-50 border border-red-100 px-3 py-2">
+                <AlertTriangle className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-red-800">
+                  <span className="font-semibold">Saldo negativo de {money(Math.abs(ciclo.esperado))}</span>: tus gastos superan el
+                  efectivo registrado a tu cargo. Se conciliará en tu próximo cuadre.
+                </p>
+              </div>
+            )}
           </>
         )}
 

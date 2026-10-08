@@ -21,9 +21,16 @@
 //                    efectivo en ella (`custodianBlockedReason`). Cargarlo a OTRA
 //                    persona exige `cashCustody.manage`: el Cobrador solo registra
 //                    los suyos; Supervisor y Admin pueden indicar a quién.
-//   · Fondos, releídos DENTRO de la transacción: un gasto de trabajador no supera
-//     su efectivo en manos (`transferableCash`, sin el arrastre de faltantes); uno
-//     de ruta no supera lo Sin asignar (`disponible`). Nunca una posición imposible.
+//   · Fondos, releídos DENTRO de la transacción: un gasto de RUTA no supera lo Sin
+//     asignar (`disponible`): sale de la caja de la ruta, que es capital.
+//   · Un gasto de TRABAJADOR NO se limita a su efectivo en manos (incidente
+//     2026-10-08, comportamiento histórico anterior a e7708c2): el combustible del
+//     día se paga aunque el cobrador ya haya desembolsado o entregado lo recaudado.
+//     Su posición puede quedar NEGATIVA: se muestra y se arrastra tal cual (nunca
+//     se compensa con Base, capital ni custodia) y se concilia en su cuadre. Un
+//     negativo no ofrece efectivo traspasable ni devolvible (`transferableCash`).
+//   · Idempotencia: `operationId` identifica la operación; un reintento técnico con
+//     los mismos datos devuelve el gasto ya guardado, sin duplicarlo.
 // ============================================================
 import { db, type RutaCashDB } from '@/lib/db'
 import { nowISO, today } from '@/lib/formatters'
@@ -33,8 +40,7 @@ import { expenseShapeError } from '@/lib/expenseAttribution'
 import { assertCan, assertRouteCashAuthority, AuthzError } from '@/services/authz'
 import { logAction } from '@/services/auditService'
 import { assertRouteOperationalContext } from '@/services/officeService'
-import { custodianBlockedReason, reconciliationTables, transferableCash } from '@/services/cashCustodyService'
-import { personalCashPosition } from '@/services/cashSettlementService'
+import { custodianBlockedReason, reconciliationTables } from '@/services/cashCustodyService'
 import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
 import type { Expense, ExpenseScope, Route, SyncStatus, User } from '@/models/types'
 
@@ -68,6 +74,19 @@ export interface CreateExpenseParams {
   /** Fecha contable (por defecto, hoy). */
   fecha?: string
   syncStatus?: SyncStatus
+  /**
+   * Identificador de la OPERACIÓN (lo genera la pantalla al abrir el formulario y
+   * lo reutiliza en cada reintento). Se usa como id del gasto: repetir la misma
+   * operación devuelve el gasto ya guardado en lugar de crear otro.
+   */
+  operationId?: string
+}
+
+/** ¿`previo` es la misma operación que `fila`? (reintento técnico legítimo) */
+function mismaOperacion(previo: Expense, fila: Omit<Expense, 'createdAt'>): boolean {
+  return previo.tenantId === fila.tenantId && previo.routeId === fila.routeId && previo.scope === fila.scope
+    && previo.collectorId === fila.collectorId && previo.categoryId === fila.categoryId
+    && previo.valor === fila.valor && previo.userId === fila.userId
 }
 
 /**
@@ -135,8 +154,11 @@ export async function createExpense(params: CreateExpenseParams, database: RutaC
     }
   }
 
+  const operacion = params.operationId === undefined ? generateId() : params.operationId.trim()
+  if (!operacion) throw new ExpenseError('Identificador de operación inválido.')
+
   const fila: Omit<Expense, 'createdAt'> = {
-    id: generateId(), tenantId, routeId, scope, collectorId,
+    id: operacion, tenantId, routeId, scope, collectorId,
     categoryId: params.categoryId, valor,
     descripcion: params.descripcion?.trim() || undefined,
     receiptPhotoDataUrl: params.receiptPhotoDataUrl,
@@ -146,17 +168,21 @@ export async function createExpense(params: CreateExpenseParams, database: RutaC
   }
 
   let guardado!: Expense
+  let reintento = false
   const tablas = scope === 'empresa' ? [database.expenses] : reconciliationTables(database)
   await database.transaction('rw', tablas, async () => {
-    await database.expenses.get(fila.id)                // primera lectura: bloqueo obtenido
+    const previo = await database.expenses.get(fila.id)  // primera lectura: bloqueo obtenido
     const ahora = nowISO()
-    if (scope === 'trabajador') {
-      const pos = await personalCashPosition({ tenantId, routeId: routeId!, userId: collectorId!, hasta: ahora }, database)
-      const enMano = transferableCash(pos)
-      if (valor > enMano) {
-        throw new ExpenseError(`El gasto supera el efectivo en manos de ${persona!.nombre} (${enMano}).`)
-      }
-    } else if (scope === 'ruta') {
+    if (previo) {
+      // Reintento técnico de la MISMA operación: ya está guardada, no se duplica.
+      if (!mismaOperacion(previo, fila)) throw new ExpenseError('Ese identificador de operación ya corresponde a otro gasto.')
+      guardado = previo
+      reintento = true
+      return
+    }
+    // Gasto de TRABAJADOR: sin tope de efectivo en manos (ver cabecera); su posición
+    // puede quedar negativa y se concilia en el cuadre.
+    if (scope === 'ruta') {
       const r = await computeRouteCashReconciliation({ tenantId, routeId: routeId!, hasta: ahora }, database)
       if (valor > r.disponible) {
         throw new ExpenseError(`El gasto supera el efectivo sin asignar de la ruta (${r.disponible}).`)
@@ -165,6 +191,7 @@ export async function createExpense(params: CreateExpenseParams, database: RutaC
     guardado = { ...fila, createdAt: ahora }
     await database.expenses.add(guardado)
   })
+  if (reintento) return guardado
 
   await logAction({
     tenantId, userId: actor.id, userRole: actor.rol, routeId,
