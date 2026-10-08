@@ -20,6 +20,7 @@
 //   C Base física por trabajador     G conciliación Route ↔ trabajadores
 //   D operación / Mi efectivo        H retiro vs efectivo bajo custodia
 //   I capital por Administrador (v16): SuperAdmin → Administrador → Ruta
+//   J gasto del Cobrador por encima de su efectivo: negativo visible (2026-10-08)
 //
 // v16 (2026-10-07): el SuperAdmin ya no coloca capital en la ruta ni el Supervisor
 // entrega Base desde la caja. El capital fluye SuperAdmin → Andrés (Administrador
@@ -525,7 +526,7 @@ try {
   await evidencia('D_mi_efectivo')
   comprobar('Base recibida', 1500000, leer(/Base recibida\s*\+?\$?\s*([\d.]+)/))
   comprobar('Desembolsado por Juan', 500000, leer(/Desembolsado por ti\s*-?\$?\s*([\d.]+)/))
-  comprobar('Recaudado por Juan', 300000, leer(/Recaudado por ti\s*\+?\$?\s*([\d.]+)/))
+  comprobar('Recaudado por Juan', 300000, leer(/Recaudado (?:en efectivo )?por ti\s*\+?\$?\s*([\d.]+)/))
   comprobar('Gastos de Juan', 100000, leer(/Tus gastos\s*-?\$?\s*([\d.]+)/))
   comprobar('Efectivo a entregar', 1200000, leer(/Efectivo a entregar\s*\$?\s*([\d.]+)/))
   await logout()
@@ -683,6 +684,40 @@ try {
   await evidencia('I_capital_superadmin')
   comprobar('SuperAdmin ve a Andrés: asignado / en rutas / disponible', JSON.stringify([5000000, 5000000 - permitido, permitido]), JSON.stringify(cifras.slice(0, 3)))
   comprobar('SuperAdmin no coloca capital en rutas', false, (await texto()).includes('Inyectar capital'))
+  await logout()
+
+  // ---------------- J · Gasto por encima del efectivo (incidente 2026-10-08) ----------------
+  escenario('J', 'Gasto del Cobrador mayor que su efectivo: se registra y queda en negativo')
+  await movil()
+  await login(mail('juan'), JUAN)
+  await ir('/collector/cashclose')
+  await esperarTexto('Efectivo a entregar')
+  const j0 = num((await texto()).match(/Efectivo a entregar\s*([^\n]*\d)/)?.[1])
+  comprobar('Juan parte con efectivo positivo', true, j0 > 0)
+  const jGasto = j0 + 100000
+  paso(`gasto de Juan (${jGasto}) por encima de su efectivo (${j0})`)
+  await ir('/collector/expenses')
+  await hasta(() => page.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find(x => x.className.includes('rounded-full') && x.className.includes('bg-primary-600'))
+    b?.click(); return !!b
+  }), 'botón de nuevo gasto')
+  await esperarTexto('Registrar gasto')
+  await page.evaluate(() => {
+    const s = [...document.querySelectorAll('select')].find(x => [...x.options].some(o => o.textContent.includes('Seleccionar categoría')))
+    const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+    set.call(s, s.options[1].value); s.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await (await page.$('input[placeholder=Valor]')).type(String(jGasto))
+  await click('Guardar', { exact: true })
+  comprobar('gasto aceptado (sin «supera el efectivo»)', 'ACEPTADO',
+    await aparece('Gasto registrado') ? 'ACEPTADO' : 'RECHAZADO')
+  paso('Mi efectivo en negativo')
+  await ir('/collector/cashclose')
+  await esperarTexto('Saldo negativo de')
+  const tJ = await texto()
+  await evidencia('J_saldo_negativo')
+  comprobar('saldo negativo visible', 100000, num(tJ.match(/Saldo negativo de\s*([^:\n]*\d)/)?.[1]))
+  comprobar('Tus gastos incluye el gasto completo', jGasto, num(tJ.match(/Tus gastos\s*-?\$?\s*([\d.]+)/)?.[1]))
 } catch (e) {
   fatal = e
   console.error(`\n  ✖ ${e instanceof SmokeError ? e.message : `[${actual?.id ?? 'BOOTSTRAP'} · ${pasoActual}] ${e.stack ?? e}`}`)
@@ -696,7 +731,7 @@ try {
 // ============================================================
 // Informe
 // ============================================================
-const ESPERADOS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I']
+const ESPERADOS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
 const resumen = ESPERADOS.map(id => {
   const e = escenarios.find(x => x.id === id)
   return { id, titulo: e?.titulo ?? '(no ejecutado)', ok: Boolean(e?.ok) && !e?.error }
