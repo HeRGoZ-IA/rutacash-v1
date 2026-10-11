@@ -187,6 +187,8 @@ export interface RegisterTransferParams {
   fecha?: string
   /** Entrega en mano del efectivo a una persona de la Route destino (opcional). */
   entregarA?: { userId: string; motivo?: string }
+  /** Id de la operación (Ronda 4/6): reintentos y doble clic no duplican la transferencia. */
+  operationId?: string
 }
 
 export async function registerTransfer(
@@ -216,7 +218,7 @@ export async function registerTransfer(
   const destinoNombre = await nombreDe(destino)
 
   const transfer: Transfer = {
-    id: generateId(), tenantId,
+    id: operationIdOf(params.operationId, m => new RouteFundsError(m)), tenantId,
     origenType: origen.type, destinoType: destino.type,
     routeOrigenId: origen.type === 'route' ? origen.id : '',
     routeDestinoId: destino.type === 'route' ? destino.id : undefined,
@@ -243,11 +245,27 @@ export async function registerTransfer(
   }
 
   const kind = classifyTransfer(origen, destino)
-  const partnerMovements: PartnerCashMovement[] = []
+  let partnerMovements: PartnerCashMovement[] = []
   let custody: CashCustodyMovement | undefined
+  let reintento = false
+  let registrada = transfer
   // Transferencia + Caja socios + entrega en mano: TODO o NADA.
   await database.transaction('rw', [...fundsTables(database), database.partnerCashMovements], async () => {
     await database.transfers.where('routeOrigenId').equals(transfer.routeOrigenId).count()   // bloqueo
+    // Reintento de la MISMA operación: devuelve la transferencia y sus patas ya guardadas.
+    const previo = params.operationId !== undefined ? await database.transfers.get(transfer.id) : undefined
+    if (previo) {
+      if (previo.tenantId !== tenantId || previo.valor !== valor || previo.userId !== actor.id || previo.reversesId
+        || previo.routeOrigenId !== transfer.routeOrigenId || previo.routeDestinoId !== transfer.routeDestinoId
+        || previo.socioOrigenId !== transfer.socioOrigenId || previo.socioDestinoId !== transfer.socioDestinoId) {
+        throw new RouteFundsError('Ese identificador de operación ya corresponde a otra transferencia.')
+      }
+      registrada = previo
+      partnerMovements = await database.partnerCashMovements.where('relatedTransferId').equals(previo.id).toArray()
+      custody = (await database.cashCustodyMovements.where('relatedTransferId').equals(previo.id).toArray()).find(c => c.tipo === 'BASE_ASSIGNMENT')
+      reintento = true
+      return
+    }
     for (const routeId of rutasImplicadas) await exigirResponsable(actor, routeId, tenantId, database)
     const ahora = nowISO()
     if (origen.type === 'route') {
@@ -280,6 +298,7 @@ export async function registerTransfer(
       await database.cashCustodyMovements.add(custody)
     }
   })
+  if (reintento) return { transfer: registrada, kind, partnerMovements, custody }
   await auditar({
     tenantId, userId: actor.id, userRole: actor.rol,
     routeId: transfer.routeDestinoId || transfer.routeOrigenId || undefined,

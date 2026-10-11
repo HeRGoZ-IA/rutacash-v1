@@ -81,7 +81,7 @@ const MARCADORES = [
   ['Recaudado en efectivo por ti', true, 'Mi efectivo: recaudo solo en efectivo y saldo negativo visible (2026-10-08)'],
   // Ronda 1/6 (2026-10-11): Transferencias con disponible real y guía «Entregar Base».
   ['Neto de transferencias', true, 'tarjetas sin «Saldo neto» ambiguo (2026-10-11 R1/6)'],
-  ['Disponible para transferir', true, 'disponible real del origen en Transferencias (2026-10-11 R1/6)'],
+  ['Disponible para mover', true, 'disponible real de cada caja de ruta en Transferencias (R1/6 → R4/6)'],
   ['Entregar Base a un trabajador', true, 'guía caja de ruta → trabajador desde Transferencias (2026-10-11 R1/6)'],
   ['Vienes de Transferencias: pulsa', true, 'botón exacto señalado en el cuadre (2026-10-11 R1/6)'],
   ['Entregar en mano a (opcional)', false, 'etiqueta ambigua de entrega en mano retirada (≤2026-10-10)'],
@@ -96,6 +96,11 @@ const MARCADORES = [
   ['Conciliación de la bolsa', true, 'Caja principal: conciliación visible (2026-10-11 R3/6)'],
   ['Movimientos de la bolsa', true, 'Caja principal: historial de la bolsa (2026-10-11 R3/6)'],
   ['Capital bajo mi responsabilidad', true, 'Caja principal: indicadores de la bolsa (2026-10-11 R3/6)'],
+  // Ronda 4/6 (2026-10-11): Transferencias unificadas con asistente por operación.
+  ['Revisé el origen, el destino y el importe', true, 'confirmación consciente antes de registrar (2026-10-11 R4/6)'],
+  ['Registrada por el sistema', true, 'resultado confirmado por el servicio (2026-10-11 R4/6)'],
+  ['Ese identificador de operación ya corresponde a otra transferencia.', true, 'transferencias idempotentes (2026-10-11 R4/6)'],
+  ['Ese identificador de operación ya corresponde a otro movimiento de Base.', true, 'entrega/devolución de Base idempotentes (2026-10-11 R4/6)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

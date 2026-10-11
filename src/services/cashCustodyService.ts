@@ -52,6 +52,7 @@ import { logAction } from '@/services/auditService'
 import { assertRouteOperationalContext } from '@/services/officeService'
 import { personalCashPosition } from '@/services/cashSettlementService'
 import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
+import { operationIdOf } from '@/services/capitalControlService'
 import type { CashCustodyMovement, CashCustodyType, Route, User } from '@/models/types'
 
 export class CashCustodyError extends Error {
@@ -107,6 +108,12 @@ interface CustodyParams {
   routeId: string
   amount: number
   motivo: string
+  /**
+   * Id de la OPERACIÓN (Ronda 4/6): lo genera el formulario al abrirse y viaja en
+   * cada intento. Repetir la misma operación (doble clic, reintento) devuelve el
+   * movimiento ya guardado; con otros datos, se rechaza.
+   */
+  operationId?: string
 }
 
 /** Nivel de autoridad sobre la caja de la ruta que exige cada tipo de custodia. */
@@ -126,9 +133,22 @@ async function registrar(
   const { actor, tenantId, routeId } = params
   const amount = validarMonto(params.amount)
   const motivo = validarMotivo(params.motivo)
+  const id = operationIdOf(params.operationId, m => new CashCustodyError(m))
   let mov!: CashCustodyMovement
+  let reintento = false
   await database.transaction('rw', reconciliationTables(database), async () => {
     await database.cashCustodyMovements.where('routeId').equals(routeId).count()   // bloqueo obtenido
+    // Reintento de la MISMA operación: ya está guardada (se devuelve, no se duplica).
+    const previo = params.operationId !== undefined ? await database.cashCustodyMovements.get(id) : undefined
+    if (previo) {
+      if (previo.tenantId !== tenantId || previo.routeId !== routeId || previo.tipo !== tipo || previo.amount !== amount
+        || previo.fromUserId !== params.fromUserId || previo.toUserId !== params.toUserId || previo.createdByUserId !== actor!.id) {
+        throw new CashCustodyError('Ese identificador de operación ya corresponde a otro movimiento de Base.')
+      }
+      mov = previo
+      reintento = true
+      return
+    }
     // Responsable de capital releído DENTRO de la transacción (v16).
     const [route, users] = await Promise.all([
       database.routes.get(routeId),
@@ -138,13 +158,14 @@ async function registrar(
     const ahora = nowISO()
     await validarFondos(ahora)
     mov = {
-      id: generateId(), tenantId, routeId, tipo, amount,
+      id, tenantId, routeId, tipo, amount,
       fromUserId: params.fromUserId, toUserId: params.toUserId,
       origen: params.origen ?? 'route-cash', relatedTransferId: params.relatedTransferId,
       motivo, fecha: today(), createdAt: ahora, createdByUserId: actor!.id,
     }
     await database.cashCustodyMovements.add(mov)
   })
+  if (reintento) return mov
   await logAction({
     tenantId, userId: actor!.id, userRole: actor!.rol, routeId,
     action: `CASH_CUSTODY_${tipo}`, entityType: 'cashCustodyMovement', entityId: mov.id,

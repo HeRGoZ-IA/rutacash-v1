@@ -773,11 +773,13 @@ await spec('CAP-G-003', GG, 'la UI ofrece acciones solo donde corresponde (y el 
 const GH = 'H · Traspaso entre trabajadores'
 
 await spec('CAP-H-001', GH, 'Transferencias ya no tiene el botón "Traspaso entre trabajadores" que llevaba a Liquidación', async () => {
-  const t = src('src/pages/admin/TransfersPage.tsx')
+  // Ronda 4/6: Transferencias = página + asistente de operaciones. En NINGUNO vuelve
+  // el botón que solo navegaba al traspaso entre trabajadores.
+  const t = src('src/pages/admin/TransfersPage.tsx') + src('src/components/transfers/OperationWizard.tsx')
   metric('botón', /Traspaso entre trabajadores<\/Button>/.test(t) ? 'presente' : 'retirado')
-  assert(!/Traspaso entre trabajadores<\/Button>/.test(t) && !/irATraspaso|useNavigate/.test(t), 'sigue el acceso confuso')
-  // Ronda 1/6 (2026-10-11): el ÚNICO enlace a Liquidación es la guía «Entregar Base»
-  // (caja de la ruta → trabajador), con ruta, trabajador y acción explícitos.
+  assert(!/Traspaso entre trabajadores<\/Button>/.test(t) && !/irATraspaso|useNavigate|transferBaseBetweenWorkers\(/.test(t), 'sigue el acceso confuso')
+  // El ÚNICO enlace a Liquidación es el de «Entregar Base» (misma operación, también
+  // disponible en el cuadre), con ruta, trabajador y acción explícitos.
   const enlaces = t.match(/weekly-settlement\?vista=trabajadores[^`'"]*/g) ?? []
   metric('enlaces a Liquidación', enlaces.join(' | ') || 'ninguno')
   assert(enlaces.length === 1 && /accion=entregar-base/.test(enlaces[0]) && /routeId=/.test(enlaces[0]) && /userId=/.test(enlaces[0]),
@@ -826,13 +828,22 @@ await spec('CAP-H-003', GH, 'Ronda 1/6: el disponible de Transferencias es el de
   await invariantes()
 
   // Pantallas: misma fuente que Retiros, solo rutas en alcance, sin cálculo ni escritura propia.
+  // Ronda 4/6: la página y el asistente leen la conciliación CON permiso
+  // (`getRouteCashReconciliation`, la misma fuente de `disponible`) solo para
+  // rutas en alcance, y no calculan ni escriben por su cuenta.
   const t = src('src/pages/admin/TransfersPage.tsx')
-  assert(/scopedRoutes\.map\(r =>\s*getRouteAvailableFunds\(tenantId, r\.id\)/.test(t), 'el disponible no sale de getRouteAvailableFunds sobre rutas en alcance')
+  const w = src('src/components/transfers/OperationWizard.tsx')
+  const ops = src('src/lib/transferOperations.ts')
+  assert(/scopedRoutes\.map\(async r => \{[\s\S]*?getRouteCashReconciliation\(\{ actor: user, tenantId, routeId: r\.id \}\)/.test(t), 'los saldos no salen de la conciliación sobre rutas en alcance')
+  assert(/getRouteCashReconciliation\(\{ actor, tenantId, routeId \}\)/.test(w), 'el asistente no lee los saldos del servicio')
   // Llamadas o importaciones (no menciones en comentarios).
-  assert(!/(computeRouteCashReconciliation|getRouteLedger|getRouteBase|assignBaseToWorker)\(|import[^\n]*(computeRouteCashReconciliation|getRouteLedger|getRouteBase|assignBaseToWorker)|db\.\w+\.(add|put|update)\(/.test(t), 'Transferencias calcula o escribe por su cuenta')
+  for (const x of [t, w, ops]) {
+    assert(!/(computeRouteCashReconciliation|getRouteLedger|getRouteBase|adminCapital)\(|import[^\n]*(computeRouteCashReconciliation|getRouteLedger|getRouteBase)|db\.\w+\.(add|put|update)\(/.test(x), 'Transferencias calcula o escribe por su cuenta')
+  }
   assert(!/>Saldo neto</.test(t) && /Neto de transferencias/.test(t) && /No es el efectivo en caja/.test(t), '«Saldo neto» sigue pareciendo el saldo de la caja')
-  assert(/origenOptions = endpointOptions\.filter\(o => o\.value !== form\.destino\)/.test(t) && /destinoOptions = endpointOptions\.filter\(o => o\.value !== form\.origen\)/.test(t), 'el formulario ofrece Ruta X → Ruta X')
-  assert(/Entregar Base a un trabajador/.test(t) && /«Entregar Base»/.test(t), 'falta la guía de entrega de Base')
+  assert(/origenOptions = endpointOptions\.filter\(o => o\.value !== form\.destino\)/.test(t) && /destinoOptions = endpointOptions\.filter\(o => o\.value !== form\.origen\)/.test(t), 'el formulario de socios ofrece X → X')
+  assert(/destinos = kind === 'ruta-ruta' \? rutas\.filter\(r => r\.id !== routeId\)/.test(w), 'el asistente ofrece Ruta X → Ruta X')
+  assert(/Entregar Base a un trabajador/.test(ops) && /«Entregar Base»/.test(w) && /assignBaseToWorker\(/.test(w), 'la entrega de Base no está en el asistente')
   const panel = src('src/components/settlement/WorkerCashSettlementPanel.tsx')
   const liq = src('src/pages/admin/WeeklySettlementPage.tsx')
   assert(/list\.some\(w => w\.user\.id === preseleccion\.userId\)/.test(panel) && /rts\.some\(r => r\.id === preseleccion\.routeId\)/.test(liq),

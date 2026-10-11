@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, ArrowLeftRight, ChevronRight, MapPin, Users, Search, Wallet, Info } from 'lucide-react'
+import { Plus, ArrowLeftRight, ChevronRight, MapPin, Users, Search, Wallet, Info, AlertTriangle, History } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -13,21 +13,25 @@ import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { useDataRevision } from '@/hooks/useDataRevision'
-import { registerTransfer, getRouteAvailableFunds } from '@/services/routeFundsService'
+import { registerTransfer } from '@/services/routeFundsService'
 import { canReverseTransfer, reverseTransfer } from '@/services/movementReversalService'
+import { getRouteCashReconciliation } from '@/services/routeCashReconciliation'
+import { getAdminAvailableCapital } from '@/services/capitalControlService'
+import { listCustodyMovements } from '@/services/cashCustodyService'
 import { pairReversals, reversalStateOf } from '@/lib/movementReversal'
 import { transferTotalsFor } from '@/lib/transferTotals'
+import { TRANSFER_CATEGORIES, TRANSFER_OPERATIONS, availableOperations, routesForOperation, type TransferOperationKind } from '@/lib/transferOperations'
 import { AnnulledBadge, ReversalDetail, ReverseButton, ReverseMovementModal, signedMoney } from '@/components/ui/MovementReversal'
-import { custodianBlockedReason } from '@/services/cashCustodyService'
+import { OperationWizard } from '@/components/transfers/OperationWizard'
 import { generateId } from '@/lib/utils'
-import { formatCurrency, formatDate, formatDateTime, today, nowISO } from '@/lib/formatters'
+import { formatCurrency, formatDate, formatDateTime, today } from '@/lib/formatters'
 import { can, canOperateRouteCash, filterAccessibleRoutes, authorizedRouteIdsOf, isPartnerInScope, isTransferInScope } from '@/lib/permissions'
 import { CapitalControllerBadge } from '@/components/ui/CapitalControllerBadge'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
-import type { Transfer, Route, User, TransferEntityType } from '@/models/types'
+import type { CashCustodyMovement, Transfer, Route, User, TransferEntityType } from '@/models/types'
 
-// Entidad participante (ruta o socio) para la vista agrupada (Revisión 2).
+// Entidad participante (ruta o socio) para el historial agrupado.
 interface EntityGroup {
   key: string          // `${type}:${id}`
   type: TransferEntityType
@@ -41,7 +45,9 @@ interface EntityGroup {
   transfers: Transfer[]
 }
 
-// Un endpoint (origen o destino) codificado como `route:<id>` / `partner:<id>`.
+/** Saldos de la caja de una ruta (conciliación con permiso). `null` = no disponibles. */
+interface RouteSummary { disponible: number; sinAsignar: number; enTrabajadores: number }
+
 function encodeEndpoint(type: TransferEntityType, id: string) { return `${type}:${id}` }
 function decodeEndpoint(v: string): { type: TransferEntityType; id: string } | null {
   const [type, id] = v.split(':')
@@ -49,61 +55,55 @@ function decodeEndpoint(v: string): { type: TransferEntityType; id: string } | n
   return null
 }
 
+/**
+ * TRANSFERENCIAS — MÓDULO UNIFICADO (Ronda 4/6).
+ *
+ * Una sola pantalla para las operaciones de caja EXISTENTES, cada una con su
+ * servicio (ver `OperationWizard` y `lib/transferOperations`): entregar y recibir
+ * Base, transferir entre rutas del mismo responsable, distribuir y retirar
+ * capital. No hay libro paralelo: el historial muestra los registros reales.
+ *
+ * Fuera del flujo nuevo, a propósito:
+ *  · Traspaso de efectivo ENTRE TRABAJADORES: sigue en Liquidación → Cuadre por
+ *    trabajador (`transferBaseBetweenWorkers`); el botón que solo navegaba se retiró
+ *    (2026-10-07) y no vuelve.
+ *  · Operaciones con SOCIOS: se conservan como estaban (sección propia), sin nuevos
+ *    accesos, por los riesgos R1/R2 de la auditoría (decisión D1 pendiente).
+ *  · Entre bolsas de Administradores distintos: no existe (D2 pendiente).
+ */
 export default function TransfersPage() {
   const { tenantId, currency } = useTenant()
   const officeFilter = useOfficeRouteFilter()
   const { user } = useAuth()
-  // El traspaso de efectivo ENTRE TRABAJADORES de una misma ruta no es una
-  // Transferencia: vive en Liquidación → Cuadre por trabajador
-  // (`transferBaseBetweenWorkers`). El antiguo botón "Traspaso entre trabajadores"
-  // de esta pantalla solo navegaba allí y anunciaba una operación que no ocurría
-  // aquí; se retiró (2026-10-07) y NO vuelve. Lo que sí ofrece esta pantalla (Ronda
-  // 1/6) es la guía «Entregar Base a un trabajador»: explica que la entrega desde la
-  // caja de la ruta es custodia y lleva al botón «Entregar Base» del cuadre con ruta y
-  // trabajador elegidos. No registra nada aquí.
+  const money = (n: number) => formatCurrency(n, currency)
   const [transfers, setTransfers] = useState<Transfer[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
   const [partners, setPartners] = useState<User[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
-  const [modalOpen, setModalOpen] = useState(false)
-  const [saving, setSaving] = useState(false)
-  // Clave de la entidad abierta: el detalle se DERIVA de los datos recargados
-  // (tras anular, el modal se actualiza sin cerrarse).
+  /** Saldos por ruta: MISMA fuente que Caja y Liquidación (`getRouteCashReconciliation`). */
+  const [resumen, setResumen] = useState<Record<string, RouteSummary | null>>({})
+  const [bolsa, setBolsa] = useState<number | null>(null)
+  const [custodia, setCustodia] = useState<CashCustodyMovement[]>([])
+  const [saldosAt, setSaldosAt] = useState('')
+  const [wizard, setWizard] = useState<{ kind?: TransferOperationKind; routeId?: string } | null>(null)
   const [detailKey, setDetailKey] = useState<string | null>(null)
   const [reversing, setReversing] = useState<Transfer | null>(null)
-  // Filtros
+  // Historial: filtros
   const [desde, setDesde] = useState('')
   const [hasta, setHasta] = useState('')
   const [tipoFiltro, setTipoFiltro] = useState<'all' | 'route' | 'partner'>('all')
   const [search, setSearch] = useState('')
-  // Origen/destino codificados como `route:id` / `partner:id`
-  const [form, setForm] = useState({ origen: '', destino: '', valor: 0, descripcion: '', fecha: today(), entregarA: '' })
-  /**
-   * DOS OPERACIONES DISTINTAS EN EL MISMO MODAL (Ronda 1/6, 2026-10-11):
-   *  · 'transferencia' → entre LIBROS (ruta ↔ ruta, ruta ↔ socio). `registerTransfer`.
-   *  · 'base'          → caja sin asignar de una ruta → un trabajador de ESA ruta. No
-   *    es una Transferencia (Ruta X → Ruta X sigue rechazada): es «Entregar Base»
-   *    (`assignBaseToWorker`), que vive en Liquidación → Cuadre por trabajador. Aquí
-   *    solo se explica y se lleva allí con ruta y trabajador preseleccionados; esta
-   *    pantalla NO registra la entrega.
-   */
-  const [modo, setModo] = useState<'transferencia' | 'base'>('transferencia')
-  const [base, setBase] = useState({ routeId: '', userId: '' })
-  /**
-   * DISPONIBLE PARA TRANSFERIR por ruta: MISMA fuente que Retiros y Capital
-   * (`getRouteAvailableFunds` = conciliación `disponible` = caja sin asignar,
-   * acotada por la Base). `null` = no se pudo calcular: se dice, no se inventa.
-   * Es una foto (`saldosAt`); el servicio revalida al registrar.
-   */
-  const [disponibles, setDisponibles] = useState<Record<string, number | null>>({})
-  const [saldosAt, setSaldosAt] = useState('')
+  // Operación con socio (formulario existente, sin cambios de reglas).
+  const [socioOpen, setSocioOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({ origen: '', destino: '', valor: 0, descripcion: '', fecha: today() })
+  const [socioOpId, setSocioOpId] = useState('')
 
   // Reactiva: otra pestaña del mismo navegador registra y esta vista se entera sin F5.
   const revision = useDataRevision()
-  useEffect(() => { load() }, [tenantId, user, revision])
+  useEffect(() => { load() }, [tenantId, user, revision])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Rutas del socio (relación socio↔ruta) para decidir alcance de transferencias/caja socios.
   const partnerRouteIds = (socioId: string) => authorizedRouteIdsOf(users.find(u => u.id === socioId))
 
   async function load() {
@@ -113,31 +113,35 @@ export default function TransfersPage() {
       db.routes.where('tenantId').equals(tenantId).toArray(),
       db.users.where('tenantId').equals(tenantId).toArray(),
     ])
-    // RESTRICCIÓN POR RUTAS: rutas autorizadas, socios vinculados a ellas y
-    // transferencias cuyas DOS entidades están en alcance (antes de agregar).
+    // RESTRICCIÓN POR RUTAS: rutas autorizadas, socios vinculados y transferencias
+    // cuyas DOS entidades están en alcance.
     const socioRoute = (id: string) => authorizedRouteIdsOf(us.find(u => u.id === id))
     const scopedRoutes = filterAccessibleRoutes(user, rts)
-    const scopedPartners = us.filter(u => u.rol === 'socio' && isPartnerInScope(user, authorizedRouteIdsOf(u)))
-    const scopedTransfers = ts.filter(t => isTransferInScope(user, t, socioRoute))
-    setTransfers(scopedTransfers.sort((a, b) => b.fecha.localeCompare(a.fecha)))
+    setTransfers(ts.filter(t => isTransferInScope(user, t, socioRoute)).sort((a, b) => b.fecha.localeCompare(a.fecha)))
     setRoutes(scopedRoutes)
     setUsers(us)
-    setPartners(scopedPartners)
-    // Solo rutas en alcance (las mismas que ya se listan): nunca rutas ajenas.
-    const saldos = await Promise.all(scopedRoutes.map(r =>
-      getRouteAvailableFunds(tenantId, r.id).then(v => [r.id, v] as const, () => [r.id, null] as const)))
-    setDisponibles(Object.fromEntries(saldos))
-    setSaldosAt(nowISO())
+    setPartners(us.filter(u => u.rol === 'socio' && isPartnerInScope(user, authorizedRouteIdsOf(u))))
+    // Saldos SOLO de rutas en alcance (nunca rutas ajenas), con el permiso del servicio.
+    const saldos = await Promise.all(scopedRoutes.map(async r => {
+      try {
+        const c = await getRouteCashReconciliation({ actor: user, tenantId, routeId: r.id })
+        return [r.id, { disponible: c.disponible, sinAsignar: c.noAsignado, enTrabajadores: c.enPersonas }] as const
+      } catch { return [r.id, null] as const }
+    }))
+    setResumen(Object.fromEntries(saldos))
+    // Bolsa del Administrador (Caja principal): solo la propia; el SuperAdmin no tiene caja personal.
+    setBolsa(user?.rol === 'admin' ? await getAdminAvailableCapital(tenantId, user.id).catch(() => null) : null)
+    const movs = (await Promise.all(scopedRoutes.map(r => listCustodyMovements(r.id)))).flat()
+      .filter(m => m.tenantId === tenantId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    setCustodia(movs.slice(0, 15))
+    setSaldosAt(new Date().toISOString())
     setLoading(false)
   }
 
-  const routeName = (id?: string) => id ? (routes.find(r => r.id === id)?.nombre ?? id) : undefined
+  const routeNombre = (id: string) => routes.find(r => r.id === id)?.nombre ?? id
   const partnerName = (id?: string) => id ? (users.find(u => u.id === id)?.nombre ?? id) : undefined
   const userName = (id?: string) => id ? (users.find(u => u.id === id)?.nombre ?? '') : ''
 
-  // Etiqueta de un endpoint de la transferencia (origen/destino).
-  // La Oficina de cada extremo se DERIVA de su `routeId`; la transferencia no
-  // guarda officeId (y no debe guardarlo: una ruta puede cambiar de Oficina).
   function originLabel(t: Transfer): string {
     if (t.socioOrigenId) return `Socio: ${partnerName(t.socioOrigenId)}`
     if (t.routeOrigenId) return `Ruta: ${officeFilter.labelFor(t.routeOrigenId)}`
@@ -149,163 +153,119 @@ export default function TransfersPage() {
     return 'Externo/Socio'
   }
 
-  // Entrega en mano: solo personas elegibles de la ruta destino (misma regla que el servicio).
-  const destinoRuta = decodeEndpoint(form.destino)?.type === 'route' ? decodeEndpoint(form.destino)!.id : ''
-  const receptores = destinoRuta ? users.filter(u => !custodianBlockedReason(u, destinoRuta, tenantId)) : []
+  // Operaciones que el actor puede iniciar (mismas reglas que cada servicio).
+  const operaciones = availableOperations(user, routes, users, tenantId)
+  const opsDeRuta = (r: Route) => (Object.keys(TRANSFER_OPERATIONS) as TransferOperationKind[])
+    .filter(k => operaciones.includes(k) && routesForOperation(k, user, [r], users, tenantId).length > 0)
 
-  // v16: una ruta solo puede ser origen o destino si el actor es su Administrador
-  // responsable de capital (la caja de la ruta tiene UN responsable). Ruta → Ruta
-  // solo entre rutas del mismo responsable: lo garantiza ofrecer solo las propias.
+  // ---------- Operación con socio (sin cambios de reglas; sin nuevos accesos) ----------
   const rutasControladas = routes.filter(r => canOperateRouteCash(user, r, 'structural', users))
-
-  // Opciones del selector origen/destino: cada una nombra la CUENTA que se mueve.
+  const puedeSocios = can(user, 'transfer.create', { tenantId }) && partners.length > 0
   const endpointOptions = [
-    ...rutasControladas.map(r => ({ value: encodeEndpoint('route', r.id), label: `Ruta ${r.nombre} · caja sin asignar` })),
     ...partners.map(p => ({ value: encodeEndpoint('partner', p.id), label: `Socio ${p.nombre} · Caja socios` })),
+    ...rutasControladas.map(r => ({ value: encodeEndpoint('route', r.id), label: `Ruta ${r.nombre} · caja sin asignar` })),
   ]
-  // Origen y destino se excluyen entre sí: Ruta X → Ruta X no se puede elegir. Dar
-  // efectivo de la caja de una ruta a su cobrador es «Entregar Base» (modo 'base').
+  // Origen y destino se excluyen entre sí, y al menos un extremo es un socio
+  // (Ruta → Ruta va por el asistente, con su vista previa).
   const origenOptions = endpointOptions.filter(o => o.value !== form.destino)
   const destinoOptions = endpointOptions.filter(o => o.value !== form.origen)
-
   const origenSel = decodeEndpoint(form.origen)
   const destinoSel = decodeEndpoint(form.destino)
-  const routeNombre = (id: string) => routes.find(r => r.id === id)?.nombre ?? id
-  /** Disponible conocido de una ruta: número, o `null` si no pudo calcularse. */
-  const disponibleDe = (routeId: string): number | null => disponibles[routeId] ?? null
-  const origenDisponible = origenSel?.type === 'route' ? disponibleDe(origenSel.id) : null
-  // Vista previa: el origen pierde exactamente el valor (mismo término en Base y en
-  // caja sin asignar). Solo se muestra si el disponible es conocido.
-  const origenDespues = origenDisponible != null ? origenDisponible - form.valor : null
+  const origenDisponible = origenSel?.type === 'route' ? resumen[origenSel.id]?.disponible ?? null : null
   const superaDisponible = origenDisponible != null && form.valor > origenDisponible
-  const receptorSel = users.find(u => u.id === form.entregarA)
 
-  // ENTREGAR BASE: rutas cuya caja maneja el actor (responsable de capital) y en las
-  // que tiene `cashCustody.manage` — la misma regla que el botón del cuadre.
-  const rutasBase = rutasControladas.filter(r => can(user, 'cashCustody.manage', { routeId: r.id, tenantId }))
-  const trabajadoresBase = base.routeId ? users.filter(u => !custodianBlockedReason(u, base.routeId, tenantId)) : []
-  const baseDisponible = base.routeId ? disponibleDe(base.routeId) : null
-  const enlaceBase = base.routeId && base.userId
-    ? `/admin/weekly-settlement?vista=trabajadores&routeId=${encodeURIComponent(base.routeId)}&userId=${encodeURIComponent(base.userId)}&accion=entregar-base`
-    : ''
-  const nombreTrabajador = (u: User) => `${u.nombre} · ${u.rol === 'supervisor' ? 'Supervisor' : 'Cobrador'}`
-
-  function abrir(m: 'transferencia' | 'base', routeId = '') {
-    setModo(m)
-    if (m === 'base') {
-      // Solo se preselecciona una ruta en la que el actor puede entregar Base.
-      const valida = rutasBase.some(r => r.id === routeId) ? routeId : rutasBase.length === 1 ? rutasBase[0].id : ''
-      setBase({ routeId: valida, userId: '' })
-    }
-    setModalOpen(true)
-  }
-
-  async function handleSave() {
-    const origen = decodeEndpoint(form.origen)
-    const destino = decodeEndpoint(form.destino)
-    if (!origen) { toast.error('Selecciona el origen'); return }
-    if (!destino) { toast.error('Selecciona el destino'); return }
+  async function guardarSocio() {
+    if (!origenSel || !destinoSel) { toast.error('Selecciona origen y destino'); return }
+    if (origenSel.type !== 'partner' && destinoSel.type !== 'partner') { toast.error('Entre rutas usa «Nueva operación» → Transferir entre rutas.'); return }
     if (form.valor <= 0) { toast.error('El valor debe ser mayor a 0'); return }
-    if (form.origen === form.destino) {
-      toast.error(origen.type === 'route'
-        ? 'Origen y destino no pueden ser la misma ruta. Para dar efectivo de la caja de una ruta a su cobrador usa «Entregar Base a un trabajador».'
-        : 'Origen y destino no pueden ser iguales')
-      return
-    }
-    if (superaDisponible) {
-      toast.error(`El valor supera el disponible de la ruta origen (${formatCurrency(origenDisponible ?? 0, currency)}).`)
-      return
-    }
+    if (form.origen === form.destino) { toast.error('Origen y destino no pueden ser iguales'); return }
+    if (superaDisponible) { toast.error(`El valor supera el disponible de la ruta origen (${money(origenDisponible ?? 0)}).`); return }
     setSaving(true)
     try {
-      // Alcance, Oficina activa, fondos del origen, Caja socios y entrega en mano:
-      // TODO en el servicio y en UNA transacción.
-      await registerTransfer({
-        actor: user, tenantId, origen, destino, valor: form.valor, descripcion: form.descripcion, fecha: form.fecha,
-        entregarA: destino.type === 'route' && form.entregarA ? { userId: form.entregarA } : undefined,
-      })
-      toast.success('Transferencia registrada')
-      setModalOpen(false)
-      setForm({ origen: '', destino: '', valor: 0, descripcion: '', fecha: today(), entregarA: '' })
+      // El servicio valida alcance, Oficina activa, responsable y fondos de la ruta origen.
+      const r = await registerTransfer({ actor: user, tenantId, origen: origenSel, destino: destinoSel, valor: form.valor, descripcion: form.descripcion, fecha: form.fecha, operationId: socioOpId })
+      toast.success(`Transferencia registrada · Ref. ${r.transfer.id.slice(0, 8).toUpperCase()}`)
+      setSocioOpen(false)
       await load()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Error') } finally { setSaving(false) }
   }
 
-  // Transferencias dentro del rango de fecha (para totales y detalle).
-  /**
-   * Una transferencia entra en el filtro si ALGUNO de sus extremos de tipo ruta
-   * está dentro. Las de socio a socio no tienen ruta: solo aparecen sin filtro de
-   * Oficina, porque no pueden atribuirse a ninguna.
-   */
+  // ---------- Historial agrupado ----------
   const enFiltroDeOficina = (t: Transfer): boolean => {
     if (!officeFilter.hasOfficeFilter && !officeFilter.routeId) return true
     const extremos = [t.routeOrigenId, t.routeDestinoId].filter(Boolean) as string[]
     return extremos.some(id => officeFilter.visibleRouteIds.has(id))
   }
-
-  const visibleTransfers = transfers.filter(t =>
-    enFiltroDeOficina(t) && (!desde || t.fecha >= desde) && (!hasta || t.fecha <= hasta)
-  )
-
-  // ---- Agrupación por entidad (rutas + socios) ----
+  const visibleTransfers = transfers.filter(t => enFiltroDeOficina(t) && (!desde || t.fecha >= desde) && (!hasta || t.fecha <= hasta))
   const groups: EntityGroup[] = (() => {
-    // Totales = efecto VIGENTE (original anulado + su reversión suman 0).
     const build = (type: TransferEntityType, id: string, nombre: string): EntityGroup => {
       const t = transferTotalsFor(visibleTransfers, type, id)
-      return {
-        key: encodeEndpoint(type, id), type, id, nombre,
-        entrante: t.entrante, saliente: t.saliente, neto: t.neto,
-        cantidad: t.cantidad, ultimoMovimiento: t.transfers[0]?.fecha, transfers: t.transfers,
-      }
+      return { key: encodeEndpoint(type, id), type, id, nombre, entrante: t.entrante, saliente: t.saliente, neto: t.neto, cantidad: t.cantidad, ultimoMovimiento: t.transfers[0]?.fecha, transfers: t.transfers }
     }
-    const routeGroups = routes.map(r => build('route', r.id, r.nombre))
-    const partnerGroups = partners.map(p => build('partner', p.id, p.nombre))
-    return [...routeGroups, ...partnerGroups]
+    return [...routes.map(r => build('route', r.id, r.nombre)), ...partners.map(p => build('partner', p.id, p.nombre))]
   })()
-
   const detailGroup = detailKey ? groups.find(g => g.key === detailKey) ?? null : null
+  const filteredGroups = groups.filter(g => (tipoFiltro === 'all' || g.type === tipoFiltro) && (!search || g.nombre.toLowerCase().includes(search.toLowerCase())))
+  const rutasVisibles = routes.filter(r => officeFilter.visibleRouteIds.has(r.id))
 
   async function handleReverse(reason: string) {
     if (!reversing) return
-    // Permiso, alcance, estado vigente, fondos y TODAS las patas: en el servicio, atómico.
     await reverseTransfer({ actor: user, tenantId, movementId: reversing.id, reason })
     toast.success('Transferencia anulada')
     setReversing(null)
     await load()
   }
 
-  const filteredGroups = groups.filter(g => {
-    if (tipoFiltro !== 'all' && g.type !== tipoFiltro) return false
-    if (search && !g.nombre.toLowerCase().includes(search.toLowerCase())) return false
-    return true
-  })
+  const etiquetaCustodia = (m: CashCustodyMovement) =>
+    m.tipo === 'BASE_ASSIGNMENT' ? `Entrega de Base · caja de ${routeNombre(m.routeId)} → ${userName(m.toUserId)}`
+      : m.tipo === 'BASE_RETURN' ? `Devolución · ${userName(m.fromUserId)} → caja de ${routeNombre(m.routeId)}`
+        : `Traspaso · ${userName(m.fromUserId)} → ${userName(m.toUserId)} (${routeNombre(m.routeId)})`
+
+  const sumaRutas = (k: keyof RouteSummary) => rutasVisibles.reduce((s, r) => s + (resumen[r.id]?.[k] ?? 0), 0)
 
   return (
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Transferencias</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{visibleTransfers.length} transferencia(s) · {routes.length} ruta(s) · {partners.length} socio(s)</p>
+          <p className="text-sm text-gray-500 mt-0.5">Mover efectivo entre la caja de tus rutas, sus trabajadores y tu bolsa. Cada operación usa su registro de siempre.</p>
         </div>
         <div className="flex flex-wrap gap-2 sm:justify-end">
-          {rutasBase.length > 0 && (
-            <Button variant="secondary" onClick={() => abrir('base')} icon={<Wallet className="w-4 h-4" />}>Entregar Base a un trabajador</Button>
+          {user?.rol === 'admin' && (
+            <Link to="/admin/capital" className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-lg bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 shadow-sm">
+              <Wallet className="w-4 h-4" /> Caja principal
+            </Link>
           )}
-          <Button onClick={() => abrir('transferencia')} icon={<Plus className="w-4 h-4" />}>Nueva transferencia</Button>
+          {operaciones.length > 0 && <Button onClick={() => setWizard({})} icon={<Plus className="w-4 h-4" />}>Nueva operación</Button>}
         </div>
       </div>
 
-      {!loading && rutasControladas.length === 0 && (
+      {!loading && operaciones.length === 0 && (
         <p className="flex items-start gap-2 text-sm text-gray-600 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2" data-testid="transfers-readonly">
           <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-400" />
           {user?.rol === 'superadmin'
-            ? 'Consulta: el SuperAdmin asigna capital a los Administradores (Capital). El efectivo de cada ruta solo lo transfiere su Administrador responsable de capital.'
-            : 'Consulta: no eres el Administrador responsable de capital de ninguna de estas rutas. Solo su responsable puede transferir su efectivo.'}
+            ? 'Consulta: el SuperAdmin asigna capital a los Administradores (Capital). El efectivo de cada ruta solo lo mueve su Administrador responsable de capital.'
+            : 'Consulta: no eres el Administrador responsable de capital de ninguna de estas rutas. Solo su responsable puede mover su efectivo.'}
         </p>
       )}
 
-      {/* Filtros (compacto, una sola fila en desktop) */}
-      {/* FILTRO OFICINA → RUTA (patrón compartido). Solo estrecha lo autorizado. */}
+      {/* ---------- OPERACIONES (solo las autorizadas) ---------- */}
+      {operaciones.length > 0 && (
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" data-testid="op-categories">
+          {TRANSFER_CATEGORIES.filter(c => c.kinds.some(k => operaciones.includes(k))).map(c => (
+            <button key={c.categoria} type="button" onClick={() => setWizard(c.kinds.filter(k => operaciones.includes(k)).length === 1 ? { kind: c.kinds.find(k => operaciones.includes(k)) } : {})}
+              className="text-left rounded-2xl border border-gray-100 bg-white shadow-card p-4 hover:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-500">
+              <span className="block text-sm font-semibold text-gray-900">{c.titulo}</span>
+              <span className="block text-xs text-gray-500 mt-1">{c.ayuda}</span>
+            </button>
+          ))}
+          <a href="#historial" className="rounded-2xl border border-gray-100 bg-white shadow-card p-4 hover:border-primary-300">
+            <span className="flex items-center gap-1.5 text-sm font-semibold text-gray-900"><History className="w-4 h-4 text-gray-400" />Consultar movimientos</span>
+            <span className="block text-xs text-gray-500 mt-1">Transferencias, entregas y devoluciones registradas.</span>
+          </a>
+        </section>
+      )}
+
       <OfficeRouteFilterBar
         offices={officeFilter.offices}
         officeId={officeFilter.officeId}
@@ -318,228 +278,187 @@ export default function TransfersPage() {
         showContext={officeFilter.hasOfficeFilter}
       />
 
-      <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta}
-        onClear={() => { setDesde(''); setHasta('') }}>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Buscar</label>
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Nombre..."
-              className="h-9 w-48 rounded-lg border border-gray-300 pl-8 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+      {/* ---------- RESUMEN: bolsa, cajas de ruta y efectivo en manos de trabajadores (separados) ---------- */}
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-3" data-testid="transfers-summary">
+        {user?.rol === 'admin' && (
+          <div className="rounded-2xl bg-primary-50 border border-primary-100 p-4">
+            <p className="text-xs text-gray-600">Mi bolsa (Caja principal)</p>
+            <p className="text-lg font-bold text-primary-700" data-testid="summary-pool">{bolsa == null ? 'No disponible' : money(bolsa)}</p>
+            <p className="text-[11px] text-gray-500">Para distribuir a tus rutas o pagar gastos administrativos.</p>
           </div>
+        )}
+        <div className="rounded-2xl bg-white border border-gray-100 shadow-card p-4">
+          <p className="text-xs text-gray-600">Disponible en cajas de ruta</p>
+          <p className="text-lg font-bold text-gray-900" data-testid="summary-routes">{money(sumaRutas('disponible'))}</p>
+          <p className="text-[11px] text-gray-500">{rutasVisibles.length} ruta(s) en tu alcance. Caja sin asignar, acotada por la Base.</p>
         </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Tipo</label>
-          <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value as 'all' | 'route' | 'partner')}
-            className="h-9 rounded-lg border border-gray-300 pl-3 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
-            <option value="all">Todas</option>
-            <option value="route">Rutas</option>
-            <option value="partner">Socios</option>
-          </select>
+        <div className="rounded-2xl bg-white border border-gray-100 shadow-card p-4">
+          <p className="text-xs text-gray-600">En manos de trabajadores</p>
+          <p className="text-lg font-bold text-gray-900" data-testid="summary-workers">{money(sumaRutas('enTrabajadores'))}</p>
+          <p className="text-[11px] text-gray-500">Base entregada y recaudo aún no cuadrado. No se mueve desde la caja.</p>
         </div>
-      </DateRangeFilter>
+      </section>
 
-      {loading ? (
-        <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
-      ) : filteredGroups.length === 0 ? (
-        <EmptyState icon={<ArrowLeftRight className="w-8 h-8" />} title="No hay entidades" description="Crea rutas o socios para registrar transferencias." />
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filteredGroups.map(g => (
-            <div key={g.key} className="bg-white rounded-2xl shadow-card border border-gray-100 p-4">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${g.type === 'route' ? 'bg-primary-100' : 'bg-purple-100'}`}>
-                    {g.type === 'route' ? <MapPin className="w-4 h-4 text-primary-600" /> : <Users className="w-4 h-4 text-purple-600" />}
+      {/* ---------- CAJAS DE RUTA ---------- */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-gray-900">Cajas de ruta</h2>
+        {loading ? (
+          <div className="flex justify-center py-10"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
+        ) : rutasVisibles.length === 0 ? (
+          <EmptyState icon={<MapPin className="w-8 h-8" />} title="No hay rutas en tu alcance" />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {rutasVisibles.map(r => {
+              const s = resumen[r.id]
+              const ops = opsDeRuta(r)
+              const neto = groups.find(g => g.key === encodeEndpoint('route', r.id))?.neto ?? 0
+              return (
+                <div key={r.id} className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-3" data-testid={`route-card-${r.id}`}>
+                  <div className="flex items-start gap-2 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-primary-100 flex items-center justify-center flex-shrink-0"><MapPin className="w-4 h-4 text-primary-600" /></div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{r.nombre}</p>
+                      <CapitalControllerBadge className="block mt-0.5" route={r} users={users} currentUserId={user?.id} />
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{g.nombre}</p>
-                    <Badge variant={g.type === 'route' ? 'info' : 'purple'} size="sm">{g.type === 'route' ? 'Ruta' : 'Socio'}</Badge>
-                    {g.type === 'route' && <CapitalControllerBadge className="block mt-1" route={routes.find(r => r.id === g.id)} users={users} currentUserId={user?.id} />}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-primary-50 rounded-xl p-2.5" data-testid="route-available">
+                      <p className="text-xs text-gray-600">Disponible para mover</p>
+                      <p className="text-sm font-bold text-primary-700">{s == null ? 'No disponible' : money(s.disponible)}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-xl p-2.5">
+                      <p className="text-xs text-gray-600">En manos de trabajadores</p>
+                      <p className="text-sm font-bold text-gray-800">{s == null ? 'No disponible' : money(s.enTrabajadores)}</p>
+                    </div>
                   </div>
+                  <p className="text-[11px] text-gray-400">Neto de transferencias: {money(neto)} (entrante − saliente). No es el efectivo en caja.</p>
+                  {ops.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {ops.map(k => (
+                        <Button key={k} size="sm" variant={k === 'entregar-base' ? 'primary' : 'secondary'} onClick={() => setWizard({ kind: k, routeId: r.id })}>
+                          {k === 'entregar-base' ? 'Entregar Base' : k === 'devolver-base' ? 'Recibir devolución' : k === 'ruta-ruta' ? 'Transferir a otra ruta' : k === 'colocar' ? 'Colocar capital' : 'Retirar capital'}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <span className="text-xs text-gray-400">{g.cantidad} mov.</span>
-              </div>
+              )
+            })}
+          </div>
+        )}
+        {saldosAt && <p className="text-[11px] text-gray-400">Saldos calculados {formatDateTime(saldosAt)}. Cada operación los vuelve a comprobar al registrar.</p>}
+      </section>
 
-              <div className="grid grid-cols-2 gap-2 mt-3">
-                <div className="bg-emerald-50 rounded-xl p-2.5">
-                  <p className="text-xs text-gray-400">Entrante</p>
-                  <p className="text-sm font-bold text-emerald-600">{formatCurrency(g.entrante, currency)}</p>
-                </div>
-                <div className="bg-amber-50 rounded-xl p-2.5">
-                  <p className="text-xs text-gray-400">Saliente</p>
-                  <p className="text-sm font-bold text-amber-600">{formatCurrency(g.saliente, currency)}</p>
-                </div>
-              </div>
-              <div className="mt-2 bg-gray-50 rounded-xl p-2.5 flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-xs text-gray-500">Neto de transferencias</p>
-                  <p className="text-[11px] text-gray-400">Entrante − saliente. No es el efectivo en caja.</p>
-                </div>
-                <p className={`text-sm font-bold ${g.neto >= 0 ? 'text-gray-800' : 'text-red-600'}`}>{formatCurrency(g.neto, currency)}</p>
-              </div>
-              {g.type === 'route' && (
-                <div className="mt-2 bg-primary-50 rounded-xl p-2.5 flex items-center justify-between gap-2" data-testid="route-available">
-                  <div className="min-w-0">
-                    <p className="text-xs text-gray-600">Disponible para transferir</p>
-                    <p className="text-[11px] text-gray-400">Caja sin asignar de la ruta (sin lo que tienen los trabajadores)</p>
-                  </div>
-                  <p className="text-sm font-bold text-primary-700">
-                    {disponibleDe(g.id) == null ? 'No disponible' : formatCurrency(disponibleDe(g.id)!, currency)}
-                  </p>
-                </div>
-              )}
-
-              <div className="flex items-center justify-between mt-3">
-                <p className="text-xs text-gray-400">{g.ultimoMovimiento ? `Último: ${formatDate(g.ultimoMovimiento)}` : 'Sin movimientos'}</p>
-                <Button variant="secondary" size="sm" disabled={g.cantidad === 0} onClick={() => setDetailKey(g.key)} icon={<ChevronRight className="w-3.5 h-3.5" />}>
-                  Ver movimientos
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
+      {/* ---------- OPERACIONES CON SOCIOS (existentes; sin nuevos accesos) ---------- */}
+      {puedeSocios && (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-2" data-testid="partner-ops">
+          <p className="flex items-center gap-2 text-sm font-semibold text-amber-900"><AlertTriangle className="w-4 h-4" />Operaciones con socios</p>
+          <p className="text-xs text-amber-900">
+            Se conservan como estaban. Pendientes de revisión (D1): una salida Ruta → Socio no pasa por tu bolsa y un aporte Socio → Ruta no comprueba el saldo de Caja socios. Por eso no forman parte del asistente.
+          </p>
+          <Button size="sm" variant="secondary" onClick={() => { setForm({ origen: '', destino: '', valor: 0, descripcion: '', fecha: today() }); setSocioOpId(generateId()); setSocioOpen(true) }}
+            icon={<Users className="w-4 h-4" />}>Operación con socio</Button>
+        </section>
       )}
 
-      {/* Nueva transferencia */}
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)}
-        title={modo === 'base' ? 'Entregar Base a un trabajador' : 'Nueva transferencia'}
-        footer={modo === 'base'
-          ? <>
-              <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button>
-              {enlaceBase
-                ? <Link to={enlaceBase} data-testid="go-entregar-base"
-                    className="inline-flex items-center justify-center gap-2 h-9 px-4 text-sm font-medium rounded-lg bg-primary-600 hover:bg-primary-700 text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1">
-                    <Wallet className="w-4 h-4" /> Ir a «Entregar Base»
-                  </Link>
-                : <Button disabled icon={<Wallet className="w-4 h-4" />}>Ir a «Entregar Base»</Button>}
-            </>
-          : <><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={handleSave} loading={saving} disabled={superaDisponible}>Registrar</Button></>}>
-        <div className="space-y-4">
-          {/* ¿Qué operación es? Dos tipos distintos, nunca mezclados. */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="tablist" aria-label="Tipo de operación">
-            {([
-              ['transferencia', 'Transferir entre rutas o socios', 'El dinero cambia de libro: sale de una cuenta y entra en otra.'],
-              ['base', 'Entregar Base a un trabajador', 'De la caja de una ruta a un cobrador o supervisor de esa misma ruta.'],
-            ] as const).map(([k, titulo, ayuda]) => (
-              <button key={k} type="button" role="tab" aria-selected={modo === k}
-                onClick={() => (k === 'base' ? abrir('base', origenSel?.type === 'route' ? origenSel.id : '') : setModo('transferencia'))}
-                className={`text-left rounded-xl border px-3 py-2 transition-colors ${modo === k ? 'border-primary-500 bg-primary-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
-                <span className={`block text-sm font-semibold ${modo === k ? 'text-primary-700' : 'text-gray-800'}`}>{titulo}</span>
-                <span className="block text-xs text-gray-500 mt-0.5">{ayuda}</span>
-              </button>
-            ))}
-          </div>
-
-          {modo === 'transferencia' ? (<>
-            <p className="text-xs text-gray-500">
-              <b>Origen</b>: la cuenta de la que sale el dinero. <b>Destino</b>: la cuenta a la que llega. Solo ves tus rutas
-              (de las que eres responsable de capital) y los socios de tus rutas. Si participa un socio, se registra también en Caja socios.
-            </p>
-            {/* Una columna: los nombres de cuenta («Ruta X · caja sin asignar») se leen completos. */}
-            <div className="grid grid-cols-1 gap-3">
-              <Select label="Origen (sale de)" value={form.origen} onChange={e => setForm(f => ({ ...f, origen: e.target.value }))}
-                options={origenOptions} placeholder="Seleccionar origen" required />
-              <Select label="Destino (llega a)" value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value, entregarA: '' }))}
-                options={destinoOptions} placeholder="Seleccionar destino" required />
-            </div>
-            {origenSel?.type === 'route' && rutasBase.some(r => r.id === origenSel.id) && (
-              <button type="button" onClick={() => abrir('base', origenSel.id)}
-                className="text-xs text-primary-700 hover:underline text-left">
-                ¿Quieres dar efectivo de la caja de {routeNombre(origenSel.id)} a uno de sus cobradores? Eso no es una transferencia: es «Entregar Base» →
-              </button>
-            )}
-            {destinoRuta && (
-              <Select label={`¿Quién recibe el efectivo en ${routeNombre(destinoRuta)}? (opcional)`} value={form.entregarA}
-                onChange={e => setForm(f => ({ ...f, entregarA: e.target.value }))}
-                options={receptores.map(u => ({ value: u.id, label: nombreTrabajador(u) }))}
-                placeholder={`Nadie: entra a la caja sin asignar de ${routeNombre(destinoRuta)}`}
-                hint="Si eliges a alguien, el efectivo queda a su cargo en la ruta destino (entrega de Base enlazada a esta transferencia)." />
-            )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <MoneyInput label="Valor" currency={currency} value={form.valor} onValueChange={v => setForm(f => ({ ...f, valor: v }))} required />
-              <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
-            </div>
-
-            {/* VISTA PREVIA: cifras del servicio, nunca calculadas aquí más allá de restar el valor. */}
-            {(origenSel || destinoSel) && (
-              <div className="rounded-xl border border-gray-100 divide-y divide-gray-50 text-sm" data-testid="transfer-preview">
-                {origenSel?.type === 'route' && (
-                  <div className="px-3 py-2 space-y-1">
-                    <p className="text-xs font-semibold text-gray-700">Origen · Ruta {routeNombre(origenSel.id)} (caja sin asignar)</p>
-                    {origenDisponible == null ? (
-                      <p className="text-xs text-amber-700">No se pudo calcular el disponible. Al registrar, el sistema lo comprobará y rechazará el movimiento si no alcanza.</p>
-                    ) : (<>
-                      <div className="flex justify-between gap-2"><span className="text-gray-500">Disponible para transferir</span><b data-testid="origin-available">{formatCurrency(origenDisponible, currency)}</b></div>
-                      <div className="flex justify-between gap-2"><span className="text-gray-500">Valor</span><span>− {formatCurrency(form.valor, currency)}</span></div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-gray-500">Disponible después</span>
-                        <b className={superaDisponible ? 'text-red-600' : 'text-gray-900'} data-testid="origin-after">{superaDisponible ? 'Insuficiente' : formatCurrency(origenDespues!, currency)}</b>
-                      </div>
-                      {superaDisponible && <p className="text-xs text-red-600">El valor supera lo disponible. El efectivo en manos de los trabajadores no se puede transferir desde aquí.</p>}
-                    </>)}
+      {/* ---------- HISTORIAL ---------- */}
+      <section id="historial" className="space-y-4 scroll-mt-4">
+        <h2 className="text-sm font-semibold text-gray-900">Historial</h2>
+        <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-2" data-testid="custody-history">
+          <p className="text-sm font-semibold text-gray-800">Entregas y devoluciones de Base recientes</p>
+          {custodia.length === 0 ? <p className="text-sm text-gray-400">Sin movimientos de Base.</p> : (
+            <div className="divide-y divide-gray-50">
+              {custodia.map(m => (
+                <div key={m.id} className="flex flex-wrap items-start justify-between gap-x-3 gap-y-0.5 py-2 text-xs">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-gray-800 break-words">{etiquetaCustodia(m)}</p>
+                    <p className="text-gray-500 break-words">{formatDateTime(m.createdAt)} · registró {userName(m.createdByUserId)} · {m.motivo} · Ref. {m.id.slice(0, 8).toUpperCase()}</p>
                   </div>
-                )}
-                {origenSel?.type === 'partner' && (
-                  <div className="px-3 py-2">
-                    <p className="text-xs font-semibold text-gray-700">Origen · Socio {partnerName(origenSel.id)}</p>
-                    <p className="text-xs text-gray-500">Aporte de socio: esta operación no valida un saldo de Caja socios, así que no se muestra disponible.</p>
-                  </div>
-                )}
-                {destinoSel?.type === 'route' && (
-                  <div className="px-3 py-2 space-y-1">
-                    <p className="text-xs font-semibold text-gray-700">Destino · Ruta {routeNombre(destinoSel.id)}</p>
-                    <div className="flex justify-between gap-2"><span className="text-gray-500">Disponible actual</span><span>{disponibleDe(destinoSel.id) == null ? 'No disponible' : formatCurrency(disponibleDe(destinoSel.id)!, currency)}</span></div>
-                    <p className="text-xs text-gray-500">
-                      {receptorSel
-                        ? `Recibe ${formatCurrency(form.valor, currency)}, que queda a cargo de ${receptorSel.nombre} (no en la caja sin asignar).`
-                        : `Recibe ${formatCurrency(form.valor, currency)} en su caja sin asignar.`}
-                    </p>
-                  </div>
-                )}
-                {destinoSel?.type === 'partner' && (
-                  <div className="px-3 py-2">
-                    <p className="text-xs font-semibold text-gray-700">Destino · Socio {partnerName(destinoSel.id)}</p>
-                    <p className="text-xs text-gray-500">Se registra como ingreso en su Caja socios.</p>
-                  </div>
-                )}
-                {saldosAt && <p className="px-3 py-1.5 text-[11px] text-gray-400">Saldos calculados {formatDateTime(saldosAt)}. Se vuelven a comprobar al registrar.</p>}
-              </div>
-            )}
-            <Textarea label="Descripción" value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} rows={2} />
-          </>) : (
-            <div className="space-y-3" data-testid="base-guide">
-              <p className="text-sm text-gray-700">
-                Entregar efectivo de la caja de una ruta a un trabajador de <b>esa misma ruta</b> no es una transferencia: es una
-                <b> entrega de Base</b>. El dinero no cambia de ruta; pasa de la caja sin asignar a estar a cargo del trabajador,
-                y entra en su próximo cuadre.
-              </p>
-              {rutasBase.length === 0 ? (
-                <p className="text-sm text-gray-600 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
-                  Solo el Administrador responsable de capital de una ruta puede entregar su Base. No lo eres de ninguna ruta.
-                </p>
-              ) : (<>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Select label="Ruta" value={base.routeId} onChange={e => setBase({ routeId: e.target.value, userId: '' })}
-                    options={rutasBase.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" />
-                  <Select label="Trabajador que recibe" value={base.userId} onChange={e => setBase(b => ({ ...b, userId: e.target.value }))}
-                    options={trabajadoresBase.map(u => ({ value: u.id, label: nombreTrabajador(u) }))}
-                    placeholder={!base.routeId ? 'Primero elige la ruta' : trabajadoresBase.length ? 'Seleccionar trabajador' : 'Sin trabajadores activos en la ruta'}
-                    disabled={!base.routeId} />
+                  <span className="font-semibold text-gray-800 whitespace-nowrap">{money(m.amount)}</span>
                 </div>
-                {base.routeId && (
-                  <div className="flex justify-between gap-2 rounded-xl bg-primary-50 px-3 py-2 text-sm">
-                    <span className="text-gray-600">Disponible en la caja sin asignar de {routeNombre(base.routeId)}</span>
-                    <b className="text-primary-700" data-testid="base-available">{baseDisponible == null ? 'No disponible' : formatCurrency(baseDisponible, currency)}</b>
-                  </div>
-                )}
-                <ol className="text-xs text-gray-600 list-decimal pl-5 space-y-0.5">
-                  <li>Pulsa <b>Ir a «Entregar Base»</b>: se abre Liquidación → <b>Cuadre por trabajador</b> con la ruta y el trabajador elegidos.</li>
-                  <li>Allí pulsa el botón <b>«Entregar Base»</b>, escribe el valor y el motivo, y registra.</li>
-                </ol>
-              </>)}
+              ))}
             </div>
           )}
+          {user?.rol === 'admin' && <p className="text-[11px] text-gray-400">Colocaciones y retiros de capital: en <Link className="text-primary-700 hover:underline" to="/admin/capital">Caja principal</Link> → Movimientos de la bolsa.</p>}
+        </div>
+
+        <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta} onClear={() => { setDesde(''); setHasta('') }}>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Buscar</label>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Nombre..."
+                className="h-9 w-full sm:w-48 rounded-lg border border-gray-300 pl-8 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Tipo</label>
+            <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value as 'all' | 'route' | 'partner')}
+              className="h-9 rounded-lg border border-gray-300 pl-3 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+              <option value="all">Todas</option>
+              <option value="route">Rutas</option>
+              <option value="partner">Socios</option>
+            </select>
+          </div>
+        </DateRangeFilter>
+
+        {filteredGroups.length === 0 ? (
+          <EmptyState icon={<ArrowLeftRight className="w-8 h-8" />} title="Sin transferencias" />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredGroups.map(g => (
+              <div key={g.key} className="bg-white rounded-2xl shadow-card border border-gray-100 p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${g.type === 'route' ? 'bg-primary-100' : 'bg-purple-100'}`}>
+                      {g.type === 'route' ? <MapPin className="w-4 h-4 text-primary-600" /> : <Users className="w-4 h-4 text-purple-600" />}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{g.nombre}</p>
+                      <Badge variant={g.type === 'route' ? 'info' : 'purple'} size="sm">{g.type === 'route' ? 'Ruta' : 'Socio'}</Badge>
+                    </div>
+                  </div>
+                  <span className="text-xs text-gray-400">{g.cantidad} mov.</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <div className="bg-emerald-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Entrante</p><p className="text-sm font-bold text-emerald-600">{money(g.entrante)}</p></div>
+                  <div className="bg-amber-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Saliente</p><p className="text-sm font-bold text-amber-600">{money(g.saliente)}</p></div>
+                </div>
+                <div className="mt-2 bg-gray-50 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                  <div className="min-w-0"><p className="text-xs text-gray-500">Neto de transferencias</p><p className="text-[11px] text-gray-400">Entrante − saliente. No es el efectivo en caja.</p></div>
+                  <p className={`text-sm font-bold ${g.neto >= 0 ? 'text-gray-800' : 'text-red-600'}`}>{money(g.neto)}</p>
+                </div>
+                <div className="flex items-center justify-between mt-3">
+                  <p className="text-xs text-gray-400">{g.ultimoMovimiento ? `Último: ${formatDate(g.ultimoMovimiento)}` : 'Sin movimientos'}</p>
+                  <Button variant="secondary" size="sm" disabled={g.cantidad === 0} onClick={() => setDetailKey(g.key)} icon={<ChevronRight className="w-3.5 h-3.5" />}>Ver movimientos</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Asistente: cada operación con su servicio existente */}
+      <OperationWizard open={!!wizard} onClose={() => setWizard(null)} onDone={() => { void load() }}
+        routes={routes} users={users} inicial={wizard ?? undefined} />
+
+      {/* Operación con socio (formulario y reglas existentes) */}
+      <Modal open={socioOpen} onClose={() => { if (!saving) setSocioOpen(false) }} title="Operación con socio"
+        footer={<><Button variant="secondary" onClick={() => setSocioOpen(false)}>Cancelar</Button><Button onClick={guardarSocio} loading={saving} disabled={superaDisponible}>Registrar</Button></>}>
+        <div className="space-y-4">
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">Al menos un extremo es un socio; se registra también en Caja socios. Entre rutas usa el asistente.</p>
+          <div className="grid grid-cols-1 gap-3">
+            <Select label="Origen (sale de)" value={form.origen} onChange={e => setForm(f => ({ ...f, origen: e.target.value }))} options={origenOptions} placeholder="Seleccionar origen" required />
+            <Select label="Destino (llega a)" value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value }))} options={destinoOptions} placeholder="Seleccionar destino" required />
+          </div>
+          {origenSel?.type === 'route' && (
+            <p className="text-xs text-gray-600" data-testid="partner-origin-available">Disponible de la ruta origen: <b>{origenDisponible == null ? 'No disponible' : money(origenDisponible)}</b>{superaDisponible && <span className="text-red-600"> · Insuficiente</span>}</p>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <MoneyInput label="Valor" currency={currency} value={form.valor} onValueChange={v => setForm(f => ({ ...f, valor: v }))} required />
+            <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
+          </div>
+          <Textarea label="Descripción" value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} rows={2} />
         </div>
       </Modal>
 
@@ -549,9 +468,9 @@ export default function TransfersPage() {
         {detailGroup && (
           <div className="space-y-3">
             <div className="grid grid-cols-3 gap-2">
-              <div className="bg-emerald-50 rounded-xl p-3"><p className="text-xs text-gray-400">Entrante</p><p className="font-bold text-emerald-600">{formatCurrency(detailGroup.entrante, currency)}</p></div>
-              <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs text-gray-400">Saliente</p><p className="font-bold text-amber-600">{formatCurrency(detailGroup.saliente, currency)}</p></div>
-              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400">Neto</p><p className="font-bold text-gray-800">{formatCurrency(detailGroup.neto, currency)}</p></div>
+              <div className="bg-emerald-50 rounded-xl p-3"><p className="text-xs text-gray-400">Entrante</p><p className="font-bold text-emerald-600">{money(detailGroup.entrante)}</p></div>
+              <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs text-gray-400">Saliente</p><p className="font-bold text-amber-600">{money(detailGroup.saliente)}</p></div>
+              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400">Neto</p><p className="font-bold text-gray-800">{money(detailGroup.neto)}</p></div>
             </div>
             {detailGroup.transfers.length === 0 ? (
               <div className="flex justify-center py-8 text-gray-400 text-sm">Sin movimientos</div>
@@ -565,15 +484,13 @@ export default function TransfersPage() {
                     <div key={t.id}>
                       <div className="flex items-center justify-between gap-2 py-3">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center flex-shrink-0">
-                            <ArrowLeftRight className="w-4 h-4 text-blue-500" />
-                          </div>
+                          <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center flex-shrink-0"><ArrowLeftRight className="w-4 h-4 text-blue-500" /></div>
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-gray-900 flex items-center gap-1.5 flex-wrap">
                               {estado === 'reversion' ? 'Reversión · ' : ''}{originLabel(t)} → {destinoLabel(t)}
                               {estado === 'anulado' && <AnnulledBadge />}
                             </p>
-                            <p className="text-xs text-gray-400">{formatDate(t.fecha)}{userName(t.userId) ? ` · ${userName(t.userId)}` : ''}{t.descripcion ? ` · ${t.descripcion}` : ''}</p>
+                            <p className="text-xs text-gray-400">{formatDate(t.fecha)}{userName(t.userId) ? ` · ${userName(t.userId)}` : ''}{t.descripcion ? ` · ${t.descripcion}` : ''} · Ref. {t.id.slice(0, 8).toUpperCase()}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">

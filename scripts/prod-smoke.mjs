@@ -673,7 +673,10 @@ try {
     await page.evaluate(() => document.querySelector('[data-testid="pool-reconciled"]') ? 'Cuadra' : document.querySelector('[data-testid="pool-difference"]')?.innerText ?? 'sin conciliación'))
   paso('Transferencias sin el acceso confuso')
   await ir('/admin/transfers')
-  await esperarTexto('Nueva transferencia')
+  // Ronda 4/6: módulo unificado — un asistente por operación existente.
+  await esperarTexto('Nueva operación')
+  comprobar('Transferencias: «Entregar Base» en la caja de su ruta (asistente unificado)', true,
+    await page.evaluate(() => [...document.querySelectorAll('[data-testid^="route-card-"] button')].some(b => b.textContent.trim() === 'Entregar Base')))
   comprobar('botón "Traspaso entre trabajadores" retirado de Transferencias', false,
     await page.evaluate(() => [...document.querySelectorAll('button')].some(b => b.textContent.includes('Traspaso entre trabajadores'))))
   await evidencia('I_transferencias')
