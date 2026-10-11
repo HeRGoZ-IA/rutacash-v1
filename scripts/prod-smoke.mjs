@@ -668,6 +668,9 @@ try {
   comprobar('Andrés: el retiro volvió a su bolsa (disponible)', permitido, iDisponible)
   comprobar('Andrés: asignado = 5.000.000 (no se creó ni perdió capital)', 5000000, iAsignado)
   comprobar('Andrés controla la ruta', true, await aparece('Rutas cuyo capital controlo') && (await texto()).includes(RUTA))
+  // Ronda 3/6: Caja principal — la conciliación de la bolsa cuadra (sin ajustes).
+  comprobar('Caja principal: conciliación de la bolsa', 'Cuadra',
+    await page.evaluate(() => document.querySelector('[data-testid="pool-reconciled"]') ? 'Cuadra' : document.querySelector('[data-testid="pool-difference"]')?.innerText ?? 'sin conciliación'))
   paso('Transferencias sin el acceso confuso')
   await ir('/admin/transfers')
   await esperarTexto('Nueva transferencia')

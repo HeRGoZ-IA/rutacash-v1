@@ -92,6 +92,10 @@ const MARCADORES = [
   ['Histórico · sin bolsa', true, 'gastos históricos identificados sin imputar (D9, 2026-10-11 R2/6)'],
   ['Ese identificador de operación ya corresponde a otro movimiento de capital.', true, 'asignaciones idempotentes por operación (2026-10-11 R2/6)'],
   ['Gasto general de la empresa. No resta la Base', false, 'gasto de empresa sin bolsa (≤2026-10-10)'],
+  // Ronda 3/6 (2026-10-11): Caja principal del Administrador.
+  ['Conciliación de la bolsa', true, 'Caja principal: conciliación visible (2026-10-11 R3/6)'],
+  ['Movimientos de la bolsa', true, 'Caja principal: historial de la bolsa (2026-10-11 R3/6)'],
+  ['Capital bajo mi responsabilidad', true, 'Caja principal: indicadores de la bolsa (2026-10-11 R3/6)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

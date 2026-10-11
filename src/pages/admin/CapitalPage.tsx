@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import {
-  Plus, DollarSign, ChevronRight, MapPin, UserCog, History, ArrowDownLeft, ArrowUpRight, ShieldAlert, Repeat,
+  Plus, DollarSign, ChevronRight, MapPin, UserCog, History, ArrowDownLeft, ArrowUpRight, ShieldAlert, Repeat, Wallet,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea } from '@/components/ui/Input'
@@ -18,11 +18,15 @@ import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import { formatCurrency, formatDate, formatDateTime, today } from '@/lib/formatters'
 import { can, filterAccessibleRoutes, filterByAccessibleRoute, isRouteCapitalController, routeCapitalController } from '@/lib/permissions'
 import { validRouteAdmins } from '@/lib/capitalAllocation'
-import type { CapitalLedgerEntry, CapitalMovement, Route, RouteCapitalControllerEvent, RouteFinancialSummary, User } from '@/models/types'
+import type { CapitalLedgerEntry, CapitalMovement, ExpenseCategory, Route, RouteCapitalControllerEvent, RouteFinancialSummary, User } from '@/models/types'
+import { useSearchParams } from 'react-router-dom'
+import type { PoolStatement } from '@/lib/adminPoolStatement'
+import { AdminPoolPanel } from '@/components/capital/AdminPoolPanel'
+import { AdminExpenseModal } from '@/components/expenses/AdminExpenseModal'
 import { registerCapital, registerWithdrawal, getRouteAvailableFunds } from '@/services/routeFundsService'
 import { generateId } from '@/lib/utils'
 import {
-  allocateCapitalToAdmin, getCapitalOverview, listCapitalLedger, listRouteControllerHistory, registerCompanyCapital,
+  allocateCapitalToAdmin, getAdminPoolStatement, getCapitalOverview, listCapitalLedger, listRouteControllerHistory, registerCompanyCapital,
   returnCapitalFromAdmin, setRouteCapitalController, withdrawCompanyCapital, type CapitalOverview,
 } from '@/services/capitalControlService'
 import { canReverseRouteFund, reverseCapitalMovement } from '@/services/movementReversalService'
@@ -107,22 +111,35 @@ export default function CapitalPage() {
   const [historyRouteId, setHistoryRouteId] = useState<string | null>(null)
   const [detailRouteId, setDetailRouteId] = useState<string | null>(null)
   const [reversing, setReversing] = useState<CapitalMovement | null>(null)
+  /**
+   * CAJA PRINCIPAL (Ronda 3/6): estado de cuenta de la bolsa, SIEMPRE del servicio
+   * (`getAdminPoolStatement` → `adminCapital`). Administrador: la suya. SuperAdmin:
+   * la de un Administrador en consulta (`?admin=<id>`), validada por el servicio.
+   */
+  const [statement, setStatement] = useState<PoolStatement | null>(null)
+  const [categories, setCategories] = useState<ExpenseCategory[]>([])
+  const [gastoAbierto, setGastoAbierto] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const verAdminId = esSuperAdmin ? searchParams.get('admin') ?? '' : ''
+  const titularId = esSuperAdmin ? verAdminId : user?.id ?? ''
 
   // Reactiva: otra pestaña del mismo navegador registra y esta vista se entera sin F5.
   const revision = useDataRevision()
-  useEffect(() => { load() }, [tenantId, user, revision])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [tenantId, user, revision, titularId])  // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
     if (!user) return
     setLoading(true)
     try {
-      const [ov, rts, us, movs, led, evs] = await Promise.all([
+      const [ov, rts, us, movs, led, evs, st, cats] = await Promise.all([
         getCapitalOverview({ actor: user, tenantId }),
         db.routes.where('tenantId').equals(tenantId).toArray(),
         db.users.where('tenantId').equals(tenantId).toArray(),
         db.capitalMovements.where('tenantId').equals(tenantId).toArray(),
         listCapitalLedger({ actor: user, tenantId }),
         listRouteControllerHistory({ actor: user, tenantId }),
+        titularId ? getAdminPoolStatement({ actor: user, tenantId, adminId: titularId }) : Promise.resolve(null),
+        db.expenseCategories.where('tenantId').equals(tenantId).toArray(),
       ])
       const scoped = filterAccessibleRoutes(user, rts)
       setOverview(ov)
@@ -131,6 +148,8 @@ export default function CapitalPage() {
       setMovements(filterByAccessibleRoute(user, movs).sort((a, b) => b.fecha.localeCompare(a.fecha) || b.createdAt.localeCompare(a.createdAt)))
       setLedger(led)
       setEvents(evs)
+      setStatement(st)
+      setCategories(cats)
       const sum: Record<string, RouteFinancialSummary> = {}
       for (const r of scoped) sum[r.id] = await getRouteFinancialSummary(r.id)
       setSummaryByRoute(sum)
@@ -199,6 +218,7 @@ export default function CapitalPage() {
 
   async function guardarRouteOp() {
     if (!routeOp || !user) return
+    if (!routeOp.routeId) { toast.error('Selecciona la ruta'); return }
     setSaving(true)
     try {
       const p = { actor: user, tenantId, routeId: routeOp.routeId, valor: routeOp.valor, descripcion: routeOp.descripcion, fecha: routeOp.fecha, operationId: routeOpId || undefined }
@@ -234,17 +254,32 @@ export default function CapitalPage() {
   // ============================================================
   // RENDER
   // ============================================================
+  const filtroRutas = (
+      <OfficeRouteFilterBar
+        offices={officeFilter.offices}
+        officeId={officeFilter.officeId}
+        onOfficeChange={officeFilter.setOfficeId}
+        routesInOffice={officeFilter.routesInOffice}
+        routeId={officeFilter.routeId}
+        onRouteChange={officeFilter.setRouteId}
+        hasUnassigned={officeFilter.hasUnassigned}
+        contextLabel={officeFilter.contextLabel}
+        showContext={officeFilter.hasOfficeFilter}
+      />
+  )
   const header = (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h1 className="text-xl font-bold text-gray-900">Capital</h1>
+        <h1 className="text-xl font-bold text-gray-900">{titularId ? 'Caja principal' : 'Capital'}</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          {esSuperAdmin
-            ? 'SuperAdmin → Administradores → Rutas. Asignas capital a cada Administrador; él lo distribuye en sus rutas.'
-            : 'Tu capital asignado por el SuperAdmin y las rutas cuyo capital controlas.'}
+          {verAdminId
+            ? <>Consulta de la bolsa de <b>{nombre(verAdminId)}</b> (SuperAdmin). <button type="button" className="text-primary-700 hover:underline" onClick={() => setSearchParams({}, { replace: true })}>Volver a Capital</button></>
+            : esSuperAdmin
+              ? 'SuperAdmin → Administradores → Rutas. Asignas capital a cada Administrador; él lo distribuye en sus rutas.'
+              : 'Mi capital: lo que recibí del SuperAdmin, lo que distribuí en mis rutas y mis gastos administrativos. Una sola bolsa.'}
         </p>
       </div>
-      {esSuperAdmin && (
+      {esSuperAdmin && !verAdminId && (
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" onClick={() => setSaOp({ tipo: 'COMPANY_DEPOSIT', adminId: '', amount: 0, descripcion: '', fecha: today() })} icon={<Plus className="w-4 h-4" />}>
             Ingresar capital
@@ -275,19 +310,15 @@ export default function CapitalPage() {
         </div>
       )}
 
-      <OfficeRouteFilterBar
-        offices={officeFilter.offices}
-        officeId={officeFilter.officeId}
-        onOfficeChange={officeFilter.setOfficeId}
-        routesInOffice={officeFilter.routesInOffice}
-        routeId={officeFilter.routeId}
-        onRouteChange={officeFilter.setRouteId}
-        hasUnassigned={officeFilter.hasUnassigned}
-        contextLabel={officeFilter.contextLabel}
-        showContext={officeFilter.hasOfficeFilter}
-      />
+      {/* Oficina → Ruta solo filtra LISTAS de rutas. En la Caja principal va junto a
+          las rutas: el disponible es lo primero que se ve. */}
+      {!titularId && filtroRutas}
 
-      {esSuperAdmin && overview ? (
+      {verAdminId && statement ? (
+        // SuperAdmin en consulta: la misma caja; puede cargar un gasto a esta bolsa (D11).
+        <AdminPoolPanel statement={statement} routes={routes} users={users} categories={categories} currency={currency}
+          titular={nombre(verAdminId)} onRegistrarGasto={() => setGastoAbierto(true)} puedeDistribuir={false} />
+      ) : esSuperAdmin && overview ? (
         <>
           {/* Empresa */}
           <section className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-3">
@@ -330,6 +361,7 @@ export default function CapitalPage() {
                       <td className="py-2.5 pr-3 text-right text-emerald-700 font-semibold">{money(a.disponible)}</td>
                       <td className="py-2.5 pr-3 text-center">{a.rutas.filter(r => routes.find(x => x.id === r.routeId)?.capitalControllerAdminId === a.adminId).length}</td>
                       <td className="py-2.5 text-right whitespace-nowrap">
+                        <Button size="sm" variant="ghost" onClick={() => setSearchParams({ admin: a.adminId })} icon={<Wallet className="w-3.5 h-3.5" />}>Caja</Button>
                         <Button size="sm" variant="ghost" onClick={() => setDetailAdminId(a.adminId)} icon={<ChevronRight className="w-3.5 h-3.5" />}>Detalle</Button>
                       </td>
                     </tr>
@@ -396,16 +428,15 @@ export default function CapitalPage() {
         </>
       ) : (
         <>
-          {/* Administrador: su bolsa */}
-          <section className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-3" data-testid="my-capital">
-            <h2 className="text-sm font-semibold text-gray-900">Mi capital</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <Stat label="Capital asignado" value={money(miBolsa?.asignado ?? 0)} testId="my-assigned" />
-              <Stat label="Distribuido en mis rutas" value={money(miBolsa?.enRutas ?? 0)} tone="text-indigo-700" bg="bg-indigo-50" testId="my-in-routes" />
-              <Stat label="Disponible" value={money(miBolsa?.disponible ?? 0)} tone="text-emerald-700" bg="bg-emerald-50" testId="my-available" />
-            </div>
-          </section>
+          {/* Administrador: su CAJA PRINCIPAL (una sola bolsa). */}
+          {statement && (
+            <AdminPoolPanel statement={statement} routes={routes} users={users} categories={categories} currency={currency}
+              onRegistrarGasto={() => setGastoAbierto(true)}
+              onDistribuir={() => setRouteOp({ tipo: 'colocar', routeId: misRutas.length === 1 ? misRutas[0].id : '', valor: 0, descripcion: '', fecha: today() })}
+              puedeDistribuir={misRutas.length > 0} />
+          )}
 
+          {filtroRutas}
           <section className="space-y-3">
             <h2 className="text-sm font-semibold text-gray-900">Rutas cuyo capital controlo</h2>
             {misRutas.length === 0 ? (
@@ -455,8 +486,8 @@ export default function CapitalPage() {
         </>
       )}
 
-      {/* Historial del libro de capital */}
-      <section className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-2" data-testid="capital-ledger">
+      {/* Historial del libro de capital (vista de empresa; la Caja principal tiene el suyo) */}
+      {!titularId && <section className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-2" data-testid="capital-ledger">
         <h2 className="text-sm font-semibold text-gray-900">Historial de capital</h2>
         {ledger.length === 0 ? <p className="text-sm text-gray-400">Sin movimientos.</p> : (
           <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
@@ -475,7 +506,7 @@ export default function CapitalPage() {
             ))}
           </div>
         )}
-      </section>
+      </section>}
 
       {/* SuperAdmin: movimiento de capital */}
       <Modal open={!!saOp} onClose={() => setSaOp(null)} title={saOp ? SA_OPERATION_LABEL[saOp.tipo] : ''}
@@ -521,15 +552,29 @@ export default function CapitalPage() {
       </Modal>
 
       {/* Admin: colocar / retirar */}
-      <Modal open={!!routeOp} onClose={() => setRouteOp(null)} title={routeOp ? `${routeOp.tipo === 'colocar' ? 'Colocar capital en' : 'Retirar capital de'} ${routeName(routeOp.routeId)}` : ''}
+      <Modal open={!!routeOp} onClose={() => setRouteOp(null)} title={routeOp ? (routeOp.tipo === 'colocar' ? (routeOp.routeId ? `Colocar capital en ${routeName(routeOp.routeId)}` : 'Distribuir capital a una ruta') : `Retirar capital de ${routeName(routeOp.routeId)}`) : ''}
         footer={<><Button variant="secondary" onClick={() => setRouteOp(null)}>Cancelar</Button><Button onClick={guardarRouteOp} loading={saving}>Registrar</Button></>}>
         {routeOp && (
           <div className="space-y-4">
-            <p className="text-xs text-gray-500">
-              {routeOp.tipo === 'colocar'
-                ? `Sale de tu bolsa. Disponible: ${money(miBolsa?.disponible ?? 0)}.`
-                : `Vuelve a tu bolsa. Disponible para retiro en la ruta (caja no asignada): ${money(routeOp.disponibleRuta ?? 0)}.`}
-            </p>
+            {routeOp.tipo === 'colocar' && (
+              <Select label="Ruta" value={routeOp.routeId} onChange={e => setRouteOp(o => o && { ...o, routeId: e.target.value })} required
+                options={misRutas.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta"
+                hint="Solo las rutas de las que eres responsable de capital." />
+            )}
+            {routeOp.tipo === 'colocar' ? (() => {
+              // Disponible OFICIAL de la bolsa (servicio); el servicio revalida al registrar.
+              const disp = statement?.capital.disponible ?? miBolsa?.disponible ?? 0
+              const excede = routeOp.valor > disp
+              return (
+                <div className="rounded-xl border border-gray-100 divide-y divide-gray-50 text-sm" data-testid="place-preview">
+                  <div className="flex justify-between gap-2 px-3 py-2"><span className="text-gray-500">Disponible en caja</span><b data-testid="place-available">{money(disp)}</b></div>
+                  <div className="flex justify-between gap-2 px-3 py-2"><span className="text-gray-500">Capital a colocar</span><span>− {money(routeOp.valor)}</span></div>
+                  <div className="flex justify-between gap-2 px-3 py-2"><span className="text-gray-500">Disponible después</span><b className={excede ? 'text-red-600' : 'text-gray-900'} data-testid="place-after">{excede ? 'Insuficiente' : money(disp - routeOp.valor)}</b></div>
+                </div>
+              )
+            })() : (
+              <p className="text-xs text-gray-500">{`Vuelve a tu bolsa. Disponible para retiro en la ruta (caja no asignada): ${money(routeOp.disponibleRuta ?? 0)}.`}</p>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <MoneyInput label="Valor" currency={currency} value={routeOp.valor} onValueChange={v => setRouteOp(o => o && { ...o, valor: v })} required />
               <Input label="Fecha" type="date" value={routeOp.fecha} onChange={e => setRouteOp(o => o && { ...o, fecha: e.target.value })} />
@@ -634,6 +679,9 @@ export default function CapitalPage() {
           </div>
         )}
       </Modal>
+
+      <AdminExpenseModal open={gastoAbierto} onClose={() => setGastoAbierto(false)} onSaved={() => { void load() }}
+        users={users} categories={categories} bolsaInicial={titularId ? `admin:${titularId}` : undefined} />
 
       <ReverseMovementModal currency={currency} onCancel={() => setReversing(null)} onConfirm={handleReverse}
         target={reversing && { tipo: 'Capital colocado', valor: reversing.valor, fecha: reversing.fecha, detalle: [routeName(reversing.routeId), reversing.descripcion].filter(Boolean).join(' · ') }} />

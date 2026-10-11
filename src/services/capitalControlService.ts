@@ -37,6 +37,7 @@ import {
   type CapitalRows, type CapitalStructure,
 } from '@/lib/capitalAllocation'
 import { can, isRouteCapitalController } from '@/lib/permissions'
+import { buildPoolStatement, type PoolStatement } from '@/lib/adminPoolStatement'
 import { assertCan, AuthzError } from '@/services/authz'
 import { logAction } from '@/services/auditService'
 import { getRouteLedger } from '@/services/cashboxEngine'
@@ -92,7 +93,10 @@ export function capitalTables(database: CapitalControlDatabase = db as unknown a
 }
 
 /** Lee TODO lo que alimenta las bolsas de una empresa (llamar dentro de la transacción). */
-export async function loadCapitalRows(tenantId: string, database: CapitalControlDatabase = db as unknown as CapitalControlDatabase): Promise<CapitalRows & { users: User[] }> {
+export async function loadCapitalRows(tenantId: string, database: CapitalControlDatabase = db as unknown as CapitalControlDatabase): Promise<CapitalRows & {
+  users: User[]; routes: Route[]; ledger: CapitalLedgerEntry[]; capitalMovements: CapitalMovement[]
+  withdrawals: Withdrawal[]; transfers: Transfer[]; expenses: Expense[]
+}> {
   const [routes, users, ledger, capitalMovements, withdrawals, transfers, expenses] = await Promise.all([
     database.routes.where('tenantId').equals(tenantId).toArray(),
     database.users.where('tenantId').equals(tenantId).toArray(),
@@ -171,6 +175,30 @@ export async function getCapitalOverview(
 /** Disponible de la bolsa del Administrador (para mostrar antes de colocar capital o gastar). */
 export async function getAdminAvailableCapital(tenantId: string, adminId: string, database: RutaCashDB = db): Promise<number> {
   return adminCapital(adminId, await loadCapitalRows(tenantId, database as unknown as CapitalControlDatabase)).disponible
+}
+
+/**
+ * CAJA PRINCIPAL (Ronda 3/6): estado de cuenta de la bolsa de `adminId` —cifras
+ * oficiales de `adminCapital`, partidas, conciliación y movimientos reales—.
+ *   · Administrador: SOLO su propia bolsa.
+ *   · SuperAdmin: la de cualquier Administrador de su empresa (supervisión).
+ *   · Resto de roles: denegado.
+ */
+export async function getAdminPoolStatement(
+  params: { actor: User | null | undefined; tenantId: string; adminId: string },
+  database: RutaCashDB = db,
+): Promise<PoolStatement> {
+  const actor = exigirActor(params.actor)
+  if (actor.tenantId !== params.tenantId) throw new AuthzError('Empresa no autorizada.')
+  const sa = can(actor, 'capital.allocateAdmins', { tenantId: params.tenantId })
+  if (!sa) {
+    if (!can(actor, 'capital.manage', { tenantId: params.tenantId }) || actor.rol !== 'admin') throw new AuthzError('Acción no autorizada (capital).')
+    if (params.adminId !== actor.id) throw new AuthzError('Solo puedes consultar tu propia caja principal.')
+  }
+  const rows = await loadCapitalRows(params.tenantId, database as unknown as CapitalControlDatabase)
+  const admin = rows.users.find(u => u.id === params.adminId)
+  if (!admin || admin.rol !== 'admin') throw new CapitalControlError('El Administrador indicado no existe en esta empresa.')
+  return buildPoolStatement(params.adminId, rows)
 }
 
 /** Disponible de la bolsa de la EMPRESA (D10: gastos del SuperAdmin). Solo lectura. */

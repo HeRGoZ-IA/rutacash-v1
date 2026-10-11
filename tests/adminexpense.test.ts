@@ -476,7 +476,7 @@ await spec('ADM-EXP-018', GG, 'gastos de ruta y de trabajador conservan sus regl
 await spec('ADM-EXP-019', GG, 'conservación tras 80 operaciones mezcladas (empresa + bolsas + rutas + gastos + correcciones)', async () => {
   await empresa({ deposito: 200_000, ana: 50_000, beto: 30_000 })
   let seed = 7
-  const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n }
+  const rnd = (n: number) => { seed = (seed * 48271) % 2147483647; return seed % n }
   const gastos: string[] = []
   let aceptadas = 0
   for (let i = 0; i < 80; i++) {

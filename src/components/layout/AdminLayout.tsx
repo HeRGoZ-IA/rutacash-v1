@@ -31,7 +31,9 @@ const navItems: NavItem[] = [
   { path: '/admin/active-sales', label: 'Ventas Activas', icon: <CreditCard className="w-4 h-4" /> },
   { path: '/admin/sale-authorizations', label: 'Autorizaciones', icon: <ClipboardCheck className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
   { path: '/admin/payment-adjustments', label: 'Ajustes de pago', icon: <Receipt className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
-  { path: '/admin/capital', label: 'Capital', icon: <DollarSign className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
+  // Ronda 3/6: para el Administrador, Capital es su CAJA PRINCIPAL (misma página y bolsa).
+  { path: '/admin/capital', label: 'Caja principal', icon: <DollarSign className="w-4 h-4" />, roles: ['admin'] },
+  { path: '/admin/capital', label: 'Capital', icon: <DollarSign className="w-4 h-4" />, roles: ['superadmin'] },
   { path: '/admin/expenses', label: 'Gastos', icon: <TrendingDown className="w-4 h-4" /> },
   { path: '/admin/transfers', label: 'Transferencias', icon: <ArrowLeftRight className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
   { path: '/admin/withdrawals', label: 'Retiros', icon: <Wallet className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
