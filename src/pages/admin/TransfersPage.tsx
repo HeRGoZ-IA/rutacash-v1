@@ -363,7 +363,10 @@ export default function TransfersPage() {
 
       {/* ---------- HISTORIAL ---------- */}
       <section id="historial" className="space-y-4 scroll-mt-4">
-        <h2 className="text-sm font-semibold text-gray-900">Historial</h2>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-gray-900">Historial</h2>
+          <Link to="/admin/movements" className="text-sm text-primary-700 hover:underline" data-testid="go-history">Historial completo y comprobantes</Link>
+        </div>
         <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-2" data-testid="custody-history">
           <p className="text-sm font-semibold text-gray-800">Entregas y devoluciones de Base recientes</p>
           {custodia.length === 0 ? <p className="text-sm text-gray-400">Sin movimientos de Base.</p> : (

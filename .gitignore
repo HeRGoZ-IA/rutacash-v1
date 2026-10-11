@@ -24,3 +24,4 @@ tests/_out.expensecash.mjs
 tests/_out.adminexpense.mjs
 tests/_out.adminpool.mjs
 tests/_out.transferops.mjs
+tests/_out.movementhistory.mjs

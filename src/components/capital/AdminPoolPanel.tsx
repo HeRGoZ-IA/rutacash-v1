@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, ArrowDownLeft, ArrowUpRight, CheckCircle2, Receipt, Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Input'
@@ -161,7 +162,10 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
       <section className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-3" data-testid="pool-movements">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-gray-900">Movimientos de la bolsa</h2>
-          <span className="text-xs text-gray-400">{visibles.length} de {movimientos.length}</span>
+          <span className="flex items-center gap-3 text-xs text-gray-400">
+            {visibles.length} de {movimientos.length}
+            <Link to={`/admin/movements?adminId=${encodeURIComponent(statement.adminId)}`} className="text-primary-700 hover:underline" data-testid="go-history">Historial completo y comprobantes</Link>
+          </span>
         </div>
         <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta} onClear={() => { setDesde(''); setHasta(''); setTipo(''); setRutaFiltro('') }}>
           <div className="w-full sm:w-64">

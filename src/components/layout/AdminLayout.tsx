@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, MapPin, CreditCard, Wallet,
   ArrowLeftRight, TrendingDown, Archive, BarChart3, CalendarRange,
-  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt, ArrowLeft, Building2 } from 'lucide-react'
+  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt, ArrowLeft, Building2, History } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { cn } from '@/lib/utils'
@@ -36,6 +36,8 @@ const navItems: NavItem[] = [
   { path: '/admin/capital', label: 'Capital', icon: <DollarSign className="w-4 h-4" />, roles: ['superadmin'] },
   { path: '/admin/expenses', label: 'Gastos', icon: <TrendingDown className="w-4 h-4" /> },
   { path: '/admin/transfers', label: 'Transferencias', icon: <ArrowLeftRight className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
+  // Ronda 5/6: historial unificado de movimientos reales (con comprobantes).
+  { path: '/admin/movements', label: 'Historial', icon: <History className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
   { path: '/admin/withdrawals', label: 'Retiros', icon: <Wallet className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
   { path: '/admin/cashbox', label: 'Caja', icon: <Archive className="w-4 h-4" /> },
   { path: '/admin/reports', label: 'Reportes', icon: <BarChart3 className="w-4 h-4" /> },

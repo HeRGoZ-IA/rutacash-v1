@@ -101,6 +101,11 @@ const MARCADORES = [
   ['Registrada por el sistema', true, 'resultado confirmado por el servicio (2026-10-11 R4/6)'],
   ['Ese identificador de operación ya corresponde a otra transferencia.', true, 'transferencias idempotentes (2026-10-11 R4/6)'],
   ['Ese identificador de operación ya corresponde a otro movimiento de Base.', true, 'entrega/devolución de Base idempotentes (2026-10-11 R4/6)'],
+  // Ronda 5/6 (2026-10-11): historial unificado, comprobantes y Caja socios validada en el servicio.
+  ['Historial de movimientos', true, 'historial unificado de registros reales (2026-10-11 R5/6)'],
+  ['Comprobante de movimiento registrado', true, 'comprobante imprimible (2026-10-11 R5/6)'],
+  ['No acredita la entrega ni la recepción física del efectivo', true, 'comprobante sin recepciones inventadas (2026-10-11 R5/6)'],
+  ['Ese identificador de operación ya corresponde a otro movimiento de Caja socios.', true, 'Caja socios validada e idempotente en el servicio (2026-10-11 R5/6)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

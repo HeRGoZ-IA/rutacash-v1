@@ -10,6 +10,7 @@ import { ModuleTabs, CASHBOX_TABS } from '@/components/ui/ModuleTabs'
 import { DateRangeFilter } from '@/components/ui/DateRangeFilter'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
+import { generateId } from '@/lib/utils'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
@@ -48,6 +49,8 @@ export default function PartnerCashPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  /** Id de la operación del formulario abierto (Ronda 5/6): reintentos idempotentes. */
+  const [opId, setOpId] = useState('')
   const [detailGroup, setDetailGroup] = useState<PartnerCashSummary | null>(null)
   // Filtro por fecha
   const [desde, setDesde] = useState('')
@@ -82,6 +85,7 @@ export default function PartnerCashPage() {
 
   function openCreate() {
     setForm({ partnerId: partners[0]?.id ?? '', type: 'ingreso', category: 'ingreso', amount: 0, description: '', fecha: today() })
+    setOpId(generateId())
     setModalOpen(true)
   }
 
@@ -98,15 +102,15 @@ export default function PartnerCashPage() {
     if (!partners.some(p => p.id === form.partnerId)) { toast.error('Socio fuera de tu alcance.'); return }
     setSaving(true)
     try {
+      // El servicio valida permiso, alcance, saldo (salidas) y duplicados.
       await createPartnerMovement({
-        tenantId, partnerId: form.partnerId, type: form.type, category: form.category,
+        actor: user, operationId: opId, tenantId, partnerId: form.partnerId, type: form.type, category: form.category,
         amount: form.amount, description: form.description || undefined, fecha: form.fecha,
-        createdBy: user?.id,
       })
       toast.success('Movimiento registrado en Caja socios')
       setModalOpen(false)
       await load()
-    } catch { toast.error('Error al guardar') } finally { setSaving(false) }
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error al guardar') } finally { setSaving(false) }
   }
 
   const availableCategories = form.type === 'ingreso' ? INGRESO_CATEGORIES : SALIDA_CATEGORIES

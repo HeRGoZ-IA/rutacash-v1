@@ -34,6 +34,8 @@ import ActiveSalesPage from '@/pages/admin/ActiveSalesPage'
 import CapitalPage from '@/pages/admin/CapitalPage'
 import ExpensesPage from '@/pages/admin/ExpensesPage'
 import TransfersPage from '@/pages/admin/TransfersPage'
+import MovementHistoryPage from '@/pages/admin/MovementHistoryPage'
+import MovementReceiptPage from '@/pages/admin/MovementReceiptPage'
 import WithdrawalsPage from '@/pages/admin/WithdrawalsPage'
 import CashboxPage from '@/pages/admin/CashboxPage'
 import ReportsPage from '@/pages/admin/ReportsPage'
@@ -214,6 +216,14 @@ export default function App() {
 
         {/* Panel de EMPRESA. El Super Admin es aquí la máxima autoridad —y solo aquí:
             su alcance es su propio tenant, sin ninguna puerta hacia la plataforma. */}
+        {/* Comprobante imprimible (Ronda 5/6): sin el layout, para imprimir limpio. El
+            servicio aplica el mismo alcance que el historial. */}
+        <Route path="/comprobante/:fuente/:id" element={
+          <RequireAuth roles={['admin', 'superadmin']}>
+            <MovementReceiptPage />
+          </RequireAuth>
+        } />
+
         <Route path="/admin" element={
           <RequireAuth roles={['admin', 'superadmin']}>
             <AdminLayout />
@@ -233,6 +243,7 @@ export default function App() {
           <Route path="expenses" element={<ExpensesPage />} />
           <Route path="expense-categories" element={<ExpenseCategoriesPage />} />
           <Route path="transfers" element={<TransfersPage />} />
+          <Route path="movements" element={<MovementHistoryPage />} />
           <Route path="partner-cash" element={<PartnerCashPage />} />
           <Route path="withdrawals" element={<WithdrawalsPage />} />
           <Route path="cashbox" element={<CashboxPage />} />

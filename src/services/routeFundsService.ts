@@ -267,6 +267,11 @@ export async function registerTransfer(
       return
     }
     for (const routeId of rutasImplicadas) await exigirResponsable(actor, routeId, tenantId, database)
+    // Socio → Ruta NO exige saldo en Caja socios (Ronda 5/6, revisado): es el aporte
+    // de efectivo EXTERNO que el socio entrega (caso real Barreiro 21.000 + 21.500,
+    // ajustes 2026-10-02). Si Caja socios debe tener fondos es la decisión D1: no se
+    // decide aquí. El efectivo que entra a la ruta es real; lo que queda negativo es
+    // el registro de Caja socios, visible en su resumen.
     const ahora = nowISO()
     if (origen.type === 'route') {
       const r = await computeRouteCashReconciliation({ tenantId, routeId: origen.id, hasta: ahora }, database)
