@@ -31,18 +31,37 @@
 //     negativo no ofrece efectivo traspasable ni devolvible (`transferableCash`).
 //   · Idempotencia: `operationId` identifica la operación; un reintento técnico con
 //     los mismos datos devuelve el gasto ya guardado, sin duplicarlo.
+//
+// GASTOS ADMINISTRATIVOS EN LA BOLSA (Ronda 2/6, 2026-10-11; D9–D12):
+//   · Todo gasto NUEVO de 'empresa' declara la bolsa que lo paga (`funding`):
+//       Administrador → solo SU bolsa (el servicio lo exige; nunca otra ni la de
+//                       la empresa).
+//       SuperAdmin    → la bolsa de la empresa (D10) o la de un Administrador
+//                       ACTIVO de la empresa (D11); queda quién lo registró.
+//   · Fondos: el gasto no supera el disponible de esa bolsa, releído DENTRO de una
+//     transacción que bloquea las tablas de capital (gasto y colocación
+//     concurrentes no gastan el mismo dinero). Sin saldo negativo: la excepción del
+//     gasto del trabajador NO aplica a las bolsas.
+//   · Históricos (sin `funding`) se conservan tal cual: no se imputan ni se corrigen
+//     por esta vía (D9).
+//   · Corrección (D12, `expense.correct`): anulación total o reintegro parcial, como
+//     asientos negados ENLAZADOS al original. Nunca se edita ni borra un gasto.
 // ============================================================
 import { db, type RutaCashDB } from '@/lib/db'
 import { nowISO, today } from '@/lib/formatters'
 import { generateId } from '@/lib/utils'
-import { can, canOperateRouteCash } from '@/lib/permissions'
+import { can, canOperateRouteCash, filterByAccessibleRoute } from '@/lib/permissions'
 import { expenseShapeError } from '@/lib/expenseAttribution'
 import { assertCan, assertRouteCashAuthority, AuthzError } from '@/services/authz'
 import { logAction } from '@/services/auditService'
 import { assertRouteOperationalContext } from '@/services/officeService'
 import { custodianBlockedReason, reconciliationTables } from '@/services/cashCustodyService'
 import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
-import type { Expense, ExpenseScope, Route, SyncStatus, User } from '@/models/types'
+import { capitalTables, loadCapitalRows, type CapitalControlDatabase } from '@/services/capitalControlService'
+import { adminCapital, computeCapitalStructure } from '@/lib/capitalAllocation'
+import { canViewCompanyExpense, expenseFundingOf, poolExpenseStateOf, refundedAmountOf } from '@/lib/expenseFunding'
+import { normalizeReversalReason } from '@/lib/movementReversal'
+import type { Expense, ExpenseFunding, ExpenseScope, Route, SyncStatus, User } from '@/models/types'
 
 export async function addExpenseStamped(expense: Omit<Expense, 'createdAt'>, database: RutaCashDB = db): Promise<Expense> {
   return database.transaction('rw', [database.expenses], async () => {
@@ -80,6 +99,10 @@ export interface CreateExpenseParams {
    * operación devuelve el gasto ya guardado en lugar de crear otro.
    */
   operationId?: string
+  /** Bolsa que paga un gasto de 'empresa' (obligatoria para gastos nuevos de empresa). */
+  funding?: { source: 'admin'; adminId: string } | { source: 'empresa' }
+  /** Referencia del soporte (factura, recibo). */
+  referencia?: string
 }
 
 /** ¿`previo` es la misma operación que `fila`? (reintento técnico legítimo) */
@@ -87,7 +110,68 @@ function mismaOperacion(previo: Expense, fila: Omit<Expense, 'createdAt'>): bool
   return previo.tenantId === fila.tenantId && previo.routeId === fila.routeId && previo.scope === fila.scope
     && previo.collectorId === fila.collectorId && previo.categoryId === fila.categoryId
     && previo.valor === fila.valor && previo.userId === fila.userId
+    && previo.funding === fila.funding && previo.fundingAdminId === fila.fundingAdminId
+    && !previo.reversesId && !previo.refundsExpenseId
 }
+
+export class ExpenseFundingError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ExpenseFundingError'
+  }
+}
+
+/**
+ * ¿Qué bolsas puede usar `actor` para un gasto de empresa? (UI; el servicio revalida.)
+ *   · Administrador activo → solo la suya.
+ *   · SuperAdmin → la de la empresa y la de cada Administrador ACTIVO de la empresa.
+ */
+export function payablePoolsFor(actor: User | null | undefined, users: User[]): ({ source: 'empresa' } | { source: 'admin'; adminId: string })[] {
+  if (!actor || !canRegisterExpenseScope(actor, 'empresa')) return []
+  if (actor.rol === 'admin') return [{ source: 'admin', adminId: actor.id }]
+  if (actor.rol !== 'superadmin') return []
+  return [
+    { source: 'empresa' },
+    ...users.filter(u => u.tenantId === actor.tenantId && u.rol === 'admin' && u.status === 'activo')
+      .map(u => ({ source: 'admin' as const, adminId: u.id })),
+  ]
+}
+
+/**
+ * Bolsa VALIDADA para el gasto (fuera de la transacción; el disponible se mide
+ * dentro). Lanza si el actor no puede cargar a esa bolsa.
+ */
+async function resolverBolsa(
+  actor: User, tenantId: string, funding: CreateExpenseParams['funding'], database: RutaCashDB,
+): Promise<{ funding: ExpenseFunding; fundingAdminId?: string }> {
+  if (!funding) throw new ExpenseFundingError('Indica qué bolsa paga este gasto administrativo.')
+  if (actor.rol === 'admin') {
+    if (funding.source !== 'admin' || funding.adminId !== actor.id) {
+      throw new AuthzError('Un Administrador solo registra gastos de su propia bolsa.')
+    }
+    return { funding: 'admin', fundingAdminId: actor.id }
+  }
+  if (actor.rol !== 'superadmin') throw new AuthzError('Solo el SuperAdmin y los Administradores registran gastos administrativos.')
+  if (funding.source === 'empresa') return { funding: 'empresa' }
+  const admin = await database.users.get(funding.adminId)
+  if (!admin || admin.tenantId !== tenantId || admin.rol !== 'admin') throw new ExpenseFundingError('El Administrador indicado no existe en esta empresa.')
+  if (admin.status !== 'activo') throw new ExpenseFundingError('No se pueden cargar gastos a la bolsa de un Administrador inactivo.')
+  return { funding: 'admin', fundingAdminId: admin.id }
+}
+
+/** Disponible de la bolsa (llamar DENTRO de la transacción con `capitalTables`). */
+async function disponibleDeBolsa(tenantId: string, bolsa: { funding: ExpenseFunding; fundingAdminId?: string }, database: RutaCashDB): Promise<number> {
+  const rows = await loadCapitalRows(tenantId, database as unknown as CapitalControlDatabase)
+  return bolsa.funding === 'admin'
+    ? adminCapital(bolsa.fundingAdminId!, rows).disponible
+    : computeCapitalStructure(rows, []).company.disponible
+}
+
+const tablasDeBolsa = (database: RutaCashDB) =>
+  [...new Set([...(capitalTables(database as unknown as CapitalControlDatabase) as never[]), database.expenses])]
+
+const nombreBolsa = (b: { funding: ExpenseFunding; fundingAdminId?: string }) =>
+  b.funding === 'empresa' ? 'la bolsa de la empresa' : `la bolsa del Administrador ${b.fundingAdminId}`
 
 /**
  * ¿Puede el actor registrar gastos de este tipo? (para ofrecer opciones en la UI).
@@ -126,10 +210,17 @@ export async function createExpense(params: CreateExpenseParams, database: RutaC
   if (!categoria || categoria.tenantId !== tenantId) throw new ExpenseError('Selecciona una categoría válida.')
 
   let persona: User | undefined
+  let bolsa: { funding: ExpenseFunding; fundingAdminId?: string } | undefined
   if (scope === 'empresa') {
     assertCan(actor, 'expense.register', { tenantId })
     assertCan(actor, 'cashbox.viewConsolidated', { tenantId })
+    // Ronda 2/6: todo gasto NUEVO de empresa se paga con una bolsa concreta.
+    bolsa = await resolverBolsa(actor, tenantId, params.funding, database)
+    // Precisión monetaria del capital: enteros (mismo criterio que las bolsas).
+    if (Math.round(valor) !== valor) throw new ExpenseError('El valor del gasto debe ser un entero.')
+    if ((params.descripcion ?? '').trim().length < 3) throw new ExpenseError('Indica el concepto del gasto administrativo.')
   } else {
+    if (params.funding) throw new ExpenseError('Solo los gastos de empresa se pagan con una bolsa: los de ruta y de trabajador salen de su caja.')
     assertCan(actor, 'expense.register', { tenantId, routeId })
     const route = await database.routes.get(routeId!)
     if (!route) throw new ExpenseError('La ruta indicada no existe.')
@@ -162,14 +253,18 @@ export async function createExpense(params: CreateExpenseParams, database: RutaC
     categoryId: params.categoryId, valor,
     descripcion: params.descripcion?.trim() || undefined,
     receiptPhotoDataUrl: params.receiptPhotoDataUrl,
+    referencia: params.referencia?.trim() || undefined,
     fecha: params.fecha || today(),
     userId: actor.id,
     syncStatus: params.syncStatus ?? 'synced',
+    ...(bolsa ? { funding: bolsa.funding, fundingAdminId: bolsa.fundingAdminId } : {}),
   }
 
   let guardado!: Expense
   let reintento = false
-  const tablas = scope === 'empresa' ? [database.expenses] : reconciliationTables(database)
+  // Empresa: las tablas de CAPITAL entran en el bloqueo (el gasto compite por el
+  // disponible de la bolsa con colocaciones, devoluciones y otros gastos).
+  const tablas = scope === 'empresa' ? tablasDeBolsa(database) : reconciliationTables(database)
   await database.transaction('rw', tablas, async () => {
     const previo = await database.expenses.get(fila.id)  // primera lectura: bloqueo obtenido
     const ahora = nowISO()
@@ -188,6 +283,13 @@ export async function createExpense(params: CreateExpenseParams, database: RutaC
         throw new ExpenseError(`El gasto supera el efectivo sin asignar de la ruta (${r.disponible}).`)
       }
     }
+    // Bolsa: nunca negativa (sin la excepción del gasto del trabajador).
+    if (bolsa) {
+      const disponible = await disponibleDeBolsa(tenantId, bolsa, database)
+      if (valor > disponible) {
+        throw new ExpenseFundingError(`El gasto supera el disponible de ${nombreBolsa(bolsa)} (disponible: ${disponible}).`)
+      }
+    }
     guardado = { ...fila, createdAt: ahora }
     await database.expenses.add(guardado)
   })
@@ -196,8 +298,148 @@ export async function createExpense(params: CreateExpenseParams, database: RutaC
   await logAction({
     tenantId, userId: actor.id, userRole: actor.rol, routeId,
     action: 'CREATE_EXPENSE', entityType: 'expense', entityId: guardado.id,
-    descripcion: `Gasto de ${scope}${collectorId ? ` a cargo de ${persona?.nombre ?? collectorId}` : ''}: ${valor}.`,
-    after: { scope, routeId, collectorId, valor, categoryId: guardado.categoryId, fecha: guardado.fecha },
+    descripcion: `Gasto de ${scope}${collectorId ? ` a cargo de ${persona?.nombre ?? collectorId}` : ''}${bolsa ? ` pagado con ${nombreBolsa(bolsa)}` : ''}: ${valor}.`,
+    after: { scope, routeId, collectorId, valor, categoryId: guardado.categoryId, fecha: guardado.fecha, funding: guardado.funding, fundingAdminId: guardado.fundingAdminId },
   }).catch(() => undefined)
   return guardado
+}
+
+// ============================================================
+// CORRECCIÓN DE GASTOS ADMINISTRATIVOS (D12) — `expense.correct`
+// ------------------------------------------------------------
+// Solo gastos IMPUTADOS a una bolsa (los de ruta/trabajador tienen efectos en
+// cuadres y cierres: fuera de este procedimiento; los históricos no se tocan, D9).
+//   · Administrador: solo los de SU bolsa. SuperAdmin: los de cualquier bolsa.
+//   · ANULACIÓN: asiento espejo (importe negado, misma bolsa, `reversesId`), el
+//     original queda ANULADO con quién, cuándo y motivo. Una vez; nunca una
+//     corrección; no con reintegros previos (se reintegra el resto).
+//   · REINTEGRO: dinero devuelto (proveedor, devolución): importe negado enlazado
+//     (`refundsExpenseId`), con tope en lo no reintegrado; idempotente.
+// Ambos SUMAN disponible: no necesitan fondos. La bolsa no tiene cierres periódicos
+// (los cierres son de rutas y cuadres, que un gasto de empresa no toca).
+// ============================================================
+export interface CorrectExpenseParams {
+  actor: User | null | undefined
+  tenantId: string
+  expenseId: string
+  reason: string
+}
+
+/** ¿Puede `actor` corregir este gasto? (para la UI; el servicio revalida). */
+export function canCorrectPoolExpense(actor: User | null | undefined, e: Expense): boolean {
+  if (!actor || e.tenantId !== actor.tenantId || !can(actor, 'expense.correct', { tenantId: e.tenantId })) return false
+  if (poolExpenseStateOf(e) !== 'vigente') return false
+  const f = expenseFundingOf(e)
+  if (actor.rol === 'superadmin') return f.kind === 'admin' || f.kind === 'empresa'
+  return actor.rol === 'admin' && f.kind === 'admin' && f.adminId === actor.id
+}
+
+/** Original corregible, releído DENTRO de la transacción. */
+async function originalCorregible(actor: User, tenantId: string, expenseId: string, database: RutaCashDB): Promise<{ original: Expense; todos: Expense[] }> {
+  const original = await database.expenses.get(expenseId)
+  if (!original || original.tenantId !== tenantId) throw new ExpenseError('El gasto no existe.')
+  const estado = poolExpenseStateOf(original)
+  if (estado === 'historico') throw new ExpenseError('Es un gasto histórico sin bolsa: se conserva tal cual y no se corrige por esta vía.')
+  if (estado === 'ruta') throw new ExpenseError('Los gastos de ruta o de trabajador no se corrigen desde la bolsa.')
+  if (estado === 'anulado') throw new ExpenseError('Este gasto ya fue anulado.')
+  if (estado === 'anulacion' || estado === 'reintegro') throw new ExpenseError('Una anulación o un reintegro no se pueden corregir.')
+  if (!canCorrectPoolExpense(actor, original)) throw new AuthzError('No puedes corregir gastos de esa bolsa.')
+  const todos = await database.expenses.where('tenantId').equals(tenantId).toArray()
+  return { original, todos }
+}
+
+export async function reverseAdminExpense(params: CorrectExpenseParams, database: RutaCashDB = db): Promise<{ original: Expense; reversal: Expense }> {
+  const { actor, tenantId } = params
+  if (!actor || actor.tenantId !== tenantId) throw new AuthzError('Acción no autorizada para esta empresa.')
+  assertCan(actor, 'expense.correct', { tenantId })
+  const motivo = normalizeReversalReason(params.reason)
+  if (!motivo) throw new ExpenseError('Indica el motivo de la anulación.')
+  let original!: Expense
+  let reversal!: Expense
+  await database.transaction('rw', tablasDeBolsa(database), async () => {
+    const r = await originalCorregible(actor, tenantId, params.expenseId, database)
+    if (refundedAmountOf(r.original.id, r.todos) > 0) {
+      throw new ExpenseError('Este gasto ya tiene reintegros: registra un reintegro por el valor restante en lugar de anularlo.')
+    }
+    const ahora = nowISO()
+    reversal = {
+      ...r.original, id: generateId(), valor: -r.original.valor, descripcion: `Anulación: ${motivo}`,
+      receiptPhotoDataUrl: undefined, referencia: undefined, fecha: today(), userId: actor.id, createdAt: ahora, syncStatus: 'synced',
+      reversesId: r.original.id, reversalReason: motivo,
+      reversalId: undefined, reversedAt: undefined, reversedByUserId: undefined, refundsExpenseId: undefined,
+    }
+    original = { ...r.original, reversalId: reversal.id, reversedAt: ahora, reversedByUserId: actor.id, reversalReason: motivo }
+    await database.expenses.add(reversal)
+    await database.expenses.put(original)
+  })
+  await logAction({
+    tenantId, userId: actor.id, userRole: actor.rol, action: 'MOVEMENT_REVERSED', entityType: 'expense', entityId: original.id,
+    descripcion: `Gasto administrativo anulado (${original.valor}): ${motivo}`, motivo,
+    before: { valor: original.valor, estado: 'vigente' }, after: { estado: 'anulado', reversalId: reversal.id, funding: original.funding, fundingAdminId: original.fundingAdminId },
+  }).catch(() => undefined)
+  return { original, reversal }
+}
+
+export async function refundAdminExpense(
+  params: CorrectExpenseParams & { amount: number; operationId?: string }, database: RutaCashDB = db,
+): Promise<Expense> {
+  const { actor, tenantId } = params
+  if (!actor || actor.tenantId !== tenantId) throw new AuthzError('Acción no autorizada para esta empresa.')
+  assertCan(actor, 'expense.correct', { tenantId })
+  const motivo = normalizeReversalReason(params.reason)
+  if (!motivo) throw new ExpenseError('Indica el motivo del reintegro.')
+  const amount = Number(params.amount)
+  if (!Number.isFinite(amount) || amount <= 0 || Math.round(amount) !== amount) throw new ExpenseError('El reintegro debe ser un entero mayor a 0.')
+  const id = params.operationId === undefined ? generateId() : params.operationId.trim()
+  if (!id) throw new ExpenseError('Identificador de operación inválido.')
+  let fila!: Expense
+  let reintento = false
+  await database.transaction('rw', tablasDeBolsa(database), async () => {
+    const previo = await database.expenses.get(id)
+    if (previo) {
+      if (previo.refundsExpenseId !== params.expenseId || previo.valor !== -amount || previo.tenantId !== tenantId) {
+        throw new ExpenseError('Ese identificador de operación ya corresponde a otro movimiento.')
+      }
+      fila = previo
+      reintento = true
+      return
+    }
+    const r = await originalCorregible(actor, tenantId, params.expenseId, database)
+    const restante = r.original.valor - refundedAmountOf(r.original.id, r.todos)
+    if (amount > restante) throw new ExpenseError(`El reintegro supera lo que queda por reintegrar de este gasto (${restante}).`)
+    fila = {
+      ...r.original, id, valor: -amount, descripcion: `Reintegro: ${motivo}`,
+      receiptPhotoDataUrl: undefined, referencia: undefined, fecha: today(), userId: actor.id, createdAt: nowISO(), syncStatus: 'synced',
+      refundsExpenseId: r.original.id, reversalReason: motivo,
+      reversesId: undefined, reversalId: undefined, reversedAt: undefined, reversedByUserId: undefined,
+    }
+    await database.expenses.add(fila)
+  })
+  if (reintento) return fila
+  await logAction({
+    tenantId, userId: actor.id, userRole: actor.rol, action: 'EXPENSE_REFUNDED', entityType: 'expense', entityId: params.expenseId,
+    descripcion: `Reintegro de ${amount} al gasto administrativo: ${motivo}`, motivo,
+    after: { reintegroId: fila.id, amount, funding: fila.funding, fundingAdminId: fila.fundingAdminId },
+  }).catch(() => undefined)
+  return fila
+}
+
+// ============================================================
+// CONSULTA CON ALCANCE (pantalla de Gastos y Reportes)
+// ============================================================
+/**
+ * Gastos que `actor` puede ver: los de rutas de su alcance (regla existente) y,
+ * de los de EMPRESA, solo los permitidos por `canViewCompanyExpense` (cada
+ * Administrador su bolsa; el SuperAdmin todos). Fuente única: ninguna pantalla lee
+ * `db.expenses` por empresa sin pasar por aquí.
+ */
+export async function listVisibleExpenses(
+  params: { actor: User | null | undefined; tenantId: string }, database: RutaCashDB = db,
+): Promise<Expense[]> {
+  const { actor, tenantId } = params
+  if (!actor || actor.tenantId !== tenantId) return []
+  const todos = await database.expenses.where('tenantId').equals(tenantId).toArray()
+  const deRutas = filterByAccessibleRoute(actor, todos.filter((e): e is Expense & { routeId: string } => !!e.routeId))
+  const deEmpresa = todos.filter(e => !e.routeId && canViewCompanyExpense(actor, e))
+  return [...deRutas, ...deEmpresa]
 }

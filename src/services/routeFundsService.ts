@@ -45,7 +45,7 @@ import { nowISO, today } from '@/lib/formatters'
 import { authorizedRouteIdsOf, can, canOperateRouteCash, isTransferInScope } from '@/lib/permissions'
 import { adminCapital } from '@/lib/capitalAllocation'
 import { assertCan, assertRouteAccess, assertRouteCashAuthority, AuthzError } from '@/services/authz'
-import { loadCapitalRows, type CapitalControlDatabase } from '@/services/capitalControlService'
+import { loadCapitalRows, operationIdOf, type CapitalControlDatabase } from '@/services/capitalControlService'
 import { logAction } from '@/services/auditService'
 import { assertRouteOperationalContext } from '@/services/officeService'
 import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
@@ -112,7 +112,7 @@ async function exigirResponsable(actor: User, routeId: string, tenantId: string,
 // CAPITAL
 // ------------------------------------------------------------
 export async function registerCapital(
-  params: { actor: User | null | undefined; tenantId: string; routeId: string; valor: number; descripcion?: string; fecha?: string },
+  params: { actor: User | null | undefined; tenantId: string; routeId: string; valor: number; descripcion?: string; fecha?: string; operationId?: string },
   database: RutaCashDB = db,
 ): Promise<CapitalMovement> {
   const actor = exigirActor(params.actor)
@@ -125,9 +125,21 @@ export async function registerCapital(
   await assertRouteOperationalContext(routeId)
   const valor = validarMonto(params.valor)
   const fecha = validarFecha(params.fecha)
+  const id = operationIdOf(params.operationId, m => new RouteFundsError(m))
   let mov!: CapitalMovement
+  let reintento = false
   await database.transaction('rw', fundsTables(database), async () => {
     await database.capitalMovements.where('routeId').equals(routeId).count()
+    // Reintento de la MISMA operación (doble clic, otra pestaña): ya está guardada.
+    const previo = params.operationId !== undefined ? await database.capitalMovements.get(id) : undefined
+    if (previo) {
+      if (previo.tenantId !== tenantId || previo.routeId !== routeId || previo.valor !== valor || previo.userId !== actor.id || previo.reversesId) {
+        throw new RouteFundsError('Ese identificador de operación ya corresponde a otro movimiento.')
+      }
+      mov = previo
+      reintento = true
+      return
+    }
     // Responsable y bolsa RELEÍDOS dentro de la transacción: dos colocaciones
     // simultáneas no gastan el mismo disponible.
     await exigirResponsable(actor, routeId, tenantId, database)
@@ -136,12 +148,13 @@ export async function registerCapital(
       throw new RouteFundsError(`Tu capital disponible no alcanza (disponible: ${disponible}). Pide al SuperAdmin que te asigne más capital o retíralo de otra de tus rutas.`)
     }
     mov = {
-      id: generateId(), tenantId, routeId, tipo: 'ingresoCapital', valor,
+      id, tenantId, routeId, tipo: 'ingresoCapital', valor,
       descripcion: params.descripcion?.trim() || undefined, fecha, userId: actor.id, createdAt: nowISO(),
       adminId: actor.id,
     }
     await database.capitalMovements.add(mov)
   })
+  if (reintento) return mov
   await auditar({
     tenantId, userId: actor.id, userRole: actor.rol, routeId, action: 'CAPITAL_REGISTERED',
     entityType: 'capitalMovement', entityId: mov.id, descripcion: `Capital ${valor} de la bolsa de ${actor.nombre} a la ruta (${fecha}).`,
@@ -287,7 +300,7 @@ export async function registerTransfer(
  * gastar el mismo dinero.
  */
 export async function registerWithdrawal(
-  params: { actor: User | null | undefined; tenantId: string; routeId: string; valor: number; descripcion?: string; fecha?: string },
+  params: { actor: User | null | undefined; tenantId: string; routeId: string; valor: number; descripcion?: string; fecha?: string; operationId?: string },
   database: RutaCashDB = db,
 ): Promise<Withdrawal> {
   const actor = exigirActor(params.actor)
@@ -300,17 +313,30 @@ export async function registerWithdrawal(
   await assertRouteOperationalContext(routeId)
   const valor = validarMonto(params.valor)
   const fecha = validarFecha(params.fecha)
+  const id = operationIdOf(params.operationId, m => new RouteFundsError(m))
   let w!: Withdrawal
+  let reintento = false
   await database.transaction('rw', fundsTables(database), async () => {
     await database.withdrawals.where('routeId').equals(routeId).count()   // bloqueo
+    // Reintento de la MISMA operación: devuelve el retiro ya guardado.
+    const previo = params.operationId !== undefined ? await database.withdrawals.get(id) : undefined
+    if (previo) {
+      if (previo.tenantId !== tenantId || previo.routeId !== routeId || previo.valor !== valor || previo.userId !== actor.id || previo.reversesId) {
+        throw new RouteFundsError('Ese identificador de operación ya corresponde a otro movimiento.')
+      }
+      w = previo
+      reintento = true
+      return
+    }
     await exigirResponsable(actor, routeId, tenantId, database)
     const ahora = nowISO()
     const r = await computeRouteCashReconciliation({ tenantId, routeId, hasta: ahora }, database)
     if (valor > r.disponible) throw new RouteFundsError(`El retiro supera los fondos disponibles de la ruta (disponible: ${r.disponible}).`)
     // El retiro vuelve a la bolsa del responsable (v16): `adminId`.
-    w = { id: generateId(), tenantId, routeId, valor, descripcion: params.descripcion?.trim() || undefined, fecha, userId: actor.id, createdAt: ahora, adminId: actor.id }
+    w = { id, tenantId, routeId, valor, descripcion: params.descripcion?.trim() || undefined, fecha, userId: actor.id, createdAt: ahora, adminId: actor.id }
     await database.withdrawals.add(w)
   })
+  if (reintento) return w
   await auditar({
     tenantId, userId: actor.id, userRole: actor.rol, routeId, action: 'WITHDRAWAL_REGISTERED',
     entityType: 'withdrawal', entityId: w.id, descripcion: `Retiro ${valor} de la ruta a la bolsa de ${actor.nombre} (${fecha}).`, after: { valor, fecha, adminId: actor.id },

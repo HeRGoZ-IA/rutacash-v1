@@ -82,6 +82,7 @@ export type AuditAction =
   | 'TRANSFER_REGISTERED'
   | 'WITHDRAWAL_REGISTERED'
   | 'MOVEMENT_REVERSED'
+  | 'EXPENSE_REFUNDED'
   | 'SETTLEMENT_REOPENED'
   | 'CREATE_OFFICE'
   | 'UPDATE_OFFICE'
@@ -623,7 +624,18 @@ export interface ExpenseCategory {
  */
 export type ExpenseScope = 'empresa' | 'ruta' | 'trabajador'
 
-export interface Expense {
+/**
+ * BOLSA QUE PAGA un gasto de 'empresa' (Ronda 2/6, 2026-10-11; decisiones D9–D12):
+ *   · 'admin'   → bolsa del Administrador `fundingAdminId` (su disponible baja).
+ *   · 'empresa' → bolsa de la empresa, la que maneja el SuperAdmin (D10).
+ * AUSENTE = gasto de empresa HISTÓRICO, anterior al modelo de imputación (D9): no
+ * entra en ninguna bolsa, nunca se le asigna una por defecto ni se reinterpreta. El
+ * corte es el MODELO (el campo), no la fecha: un gasto nuevo con fecha antigua sí
+ * está imputado; uno histórico con fecha reciente no.
+ */
+export type ExpenseFunding = 'admin' | 'empresa'
+
+export interface Expense extends MovementReversalFields {
   id: string
   tenantId: string
   /** Ruta a cuyo libro (Base) pertenece. `undefined` solo en gastos de 'empresa'. */
@@ -645,6 +657,17 @@ export interface Expense {
    * regla legacy: se cargaba a `userId` (ver `expenseAttribution`).
    */
   collectorId?: string
+  /** Bolsa que paga (solo 'empresa'). Ver `ExpenseFunding`. Sin índice: no exige versión de Dexie. */
+  funding?: ExpenseFunding
+  /** Administrador cuya bolsa paga (obligatorio con `funding: 'admin'`). */
+  fundingAdminId?: string
+  /**
+   * REINTEGRO: id del gasto imputado al que devuelve dinero (importe NEGADO, misma
+   * bolsa). La ANULACIÓN usa `MovementReversalFields` (`reversalId` / `reversesId`).
+   */
+  refundsExpenseId?: string
+  /** Referencia del soporte (n.º de factura, recibo…). */
+  referencia?: string
   syncStatus: SyncStatus
   createdAt: string
 }

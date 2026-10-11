@@ -20,6 +20,7 @@ import { can, filterAccessibleRoutes, filterByAccessibleRoute, isRouteCapitalCon
 import { validRouteAdmins } from '@/lib/capitalAllocation'
 import type { CapitalLedgerEntry, CapitalMovement, Route, RouteCapitalControllerEvent, RouteFinancialSummary, User } from '@/models/types'
 import { registerCapital, registerWithdrawal, getRouteAvailableFunds } from '@/services/routeFundsService'
+import { generateId } from '@/lib/utils'
 import {
   allocateCapitalToAdmin, getCapitalOverview, listCapitalLedger, listRouteControllerHistory, registerCompanyCapital,
   returnCapitalFromAdmin, setRouteCapitalController, withdrawCompanyCapital, type CapitalOverview,
@@ -153,12 +154,22 @@ export default function CapitalPage() {
     ? admins.filter(a => a.status === 'activo' && !adminRows.some(r => r.adminId === a.id))
     : []
 
+  // IDEMPOTENCIA (Ronda 2/6): cada formulario abierto es UNA operación. Su id se
+  // genera al abrirlo y viaja en cada intento: un doble clic o un reintento
+  // devuelve el movimiento ya guardado en lugar de duplicar capital.
+  const [saOpId, setSaOpId] = useState('')
+  const [routeOpId, setRouteOpId] = useState('')
+  const saAbierta = !!saOp
+  const routeAbierta = !!routeOp
+  useEffect(() => { if (saAbierta) setSaOpId(generateId()) }, [saAbierta])
+  useEffect(() => { if (routeAbierta) setRouteOpId(generateId()) }, [routeAbierta])
+
   // ---------- SuperAdmin ----------
   async function guardarSaOp() {
     if (!saOp || !user) return
     setSaving(true)
     try {
-      const base = { actor: user, tenantId, amount: saOp.amount, descripcion: saOp.descripcion, fecha: saOp.fecha }
+      const base = { actor: user, tenantId, amount: saOp.amount, descripcion: saOp.descripcion, fecha: saOp.fecha, operationId: saOpId || undefined }
       if (saOp.tipo === 'COMPANY_DEPOSIT') await registerCompanyCapital(base)
       if (saOp.tipo === 'COMPANY_WITHDRAWAL') await withdrawCompanyCapital(base)
       if (saOp.tipo === 'ADMIN_ALLOCATION') await allocateCapitalToAdmin({ ...base, adminId: saOp.adminId })
@@ -190,7 +201,7 @@ export default function CapitalPage() {
     if (!routeOp || !user) return
     setSaving(true)
     try {
-      const p = { actor: user, tenantId, routeId: routeOp.routeId, valor: routeOp.valor, descripcion: routeOp.descripcion, fecha: routeOp.fecha }
+      const p = { actor: user, tenantId, routeId: routeOp.routeId, valor: routeOp.valor, descripcion: routeOp.descripcion, fecha: routeOp.fecha, operationId: routeOpId || undefined }
       if (routeOp.tipo === 'colocar') await registerCapital(p)
       else await registerWithdrawal(p)
       toast.success(routeOp.tipo === 'colocar' ? 'Capital colocado en la ruta' : 'Retiro registrado: el dinero vuelve a tu bolsa')

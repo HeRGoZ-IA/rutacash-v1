@@ -86,6 +86,12 @@ const MARCADORES = [
   ['Vienes de Transferencias: pulsa', true, 'botón exacto señalado en el cuadre (2026-10-11 R1/6)'],
   ['Entregar en mano a (opcional)', false, 'etiqueta ambigua de entrega en mano retirada (≤2026-10-10)'],
   ['El efectivo entre trabajadores de una misma ruta se traspasa en', false, 'mensaje de rechazo que describía otra operación (≤2026-10-10)'],
+  // Ronda 2/6 (2026-10-11): gastos administrativos pagados con la bolsa (D9–D12).
+  ['¿Qué bolsa paga?', true, 'gasto de empresa con bolsa explícita (2026-10-11 R2/6)'],
+  ['Confirmar gasto administrativo', true, 'confirmación antes de descontar de una bolsa (2026-10-11 R2/6)'],
+  ['Histórico · sin bolsa', true, 'gastos históricos identificados sin imputar (D9, 2026-10-11 R2/6)'],
+  ['Ese identificador de operación ya corresponde a otro movimiento de capital.', true, 'asignaciones idempotentes por operación (2026-10-11 R2/6)'],
+  ['Gasto general de la empresa. No resta la Base', false, 'gasto de empresa sin bolsa (≤2026-10-10)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

@@ -41,7 +41,7 @@ import { assertCan, AuthzError } from '@/services/authz'
 import { logAction } from '@/services/auditService'
 import { getRouteLedger } from '@/services/cashboxEngine'
 import type {
-  CapitalLedgerEntry, CapitalLedgerType, CapitalMovement, Route, RouteCapitalControllerEvent,
+  CapitalLedgerEntry, CapitalLedgerType, CapitalMovement, Expense, Route, RouteCapitalControllerEvent,
   RouteCapitalControllerEventKind, Transfer, User, Withdrawal,
 } from '@/models/types'
 
@@ -63,11 +63,21 @@ export interface CapitalControlDatabase {
     update(key: string, changes: Partial<Route>): Promise<number>
   }
   users: ReadByIndex<User>
-  capitalLedger: ReadByIndex<CapitalLedgerEntry> & { add(item: CapitalLedgerEntry): Promise<unknown> }
+  capitalLedger: ReadByIndex<CapitalLedgerEntry> & {
+    add(item: CapitalLedgerEntry): Promise<unknown>
+    /** Reintentos idempotentes por `operationId` (Dexie real siempre lo tiene). */
+    get?(key: string): Promise<CapitalLedgerEntry | undefined>
+  }
   routeCapitalControllerEvents: ReadByIndex<RouteCapitalControllerEvent> & { add(item: RouteCapitalControllerEvent): Promise<unknown> }
   capitalMovements: ReadByIndex<CapitalMovement>
   withdrawals: ReadByIndex<Withdrawal>
   transfers: ReadByIndex<Transfer>
+  /**
+   * Gastos (Ronda 2/6): los imputados a una bolsa consumen su disponible. Opcional
+   * en el CONTRATO para las bases en memoria de pruebas antiguas; Dexie real siempre
+   * la tiene, y entonces entra en el bloqueo de toda transacción de capital.
+   */
+  expenses?: ReadByIndex<Expense>
 }
 
 /** Tablas que deben estar en el alcance de cualquier transacción que toque capital. */
@@ -75,20 +85,24 @@ export function capitalTables(database: CapitalControlDatabase = db as unknown a
   return [
     database.routes, database.users, database.capitalLedger, database.routeCapitalControllerEvents,
     database.capitalMovements, database.withdrawals, database.transfers,
+    // Un gasto y una colocación concurrentes compiten por el MISMO disponible: la
+    // tabla de gastos entra en el bloqueo (las transacciones rw se serializan).
+    ...(database.expenses ? [database.expenses] : []),
   ]
 }
 
 /** Lee TODO lo que alimenta las bolsas de una empresa (llamar dentro de la transacción). */
 export async function loadCapitalRows(tenantId: string, database: CapitalControlDatabase = db as unknown as CapitalControlDatabase): Promise<CapitalRows & { users: User[] }> {
-  const [routes, users, ledger, capitalMovements, withdrawals, transfers] = await Promise.all([
+  const [routes, users, ledger, capitalMovements, withdrawals, transfers, expenses] = await Promise.all([
     database.routes.where('tenantId').equals(tenantId).toArray(),
     database.users.where('tenantId').equals(tenantId).toArray(),
     database.capitalLedger.where('tenantId').equals(tenantId).toArray(),
     database.capitalMovements.where('tenantId').equals(tenantId).toArray(),
     database.withdrawals.where('tenantId').equals(tenantId).toArray(),
     database.transfers.where('tenantId').equals(tenantId).toArray(),
+    database.expenses ? database.expenses.where('tenantId').equals(tenantId).toArray() : Promise.resolve([] as Expense[]),
   ])
-  return { routes, users, ledger, capitalMovements, withdrawals, transfers }
+  return { routes, users, ledger, capitalMovements, withdrawals, transfers, expenses }
 }
 
 const ENTERO = (n: unknown) => Number.isFinite(Number(n)) && Number(n) > 0 && Math.round(Number(n)) === Number(n)
@@ -147,16 +161,21 @@ export async function getCapitalOverview(
   if (actor.rol === 'superadmin') return { ...s, issues: verifyCapitalInvariants(rows, adminIds) }
   const mias = new Set(rows.routes.filter(r => isRouteCapitalController(actor, r)).map(r => r.id))
   return {
-    company: { depositos: 0, retirosEmpresa: 0, asignadoAAdmins: 0, disponible: 0, historicoPreV16: 0, total: 0, sinResponsable: 0 },
+    company: { depositos: 0, retirosEmpresa: 0, asignadoAAdmins: 0, disponible: 0, historicoPreV16: 0, total: 0, sinResponsable: 0, gastos: 0, gastosAdministradores: 0 },
     admins: s.admins.filter(a => a.adminId === actor.id),
     routes: s.routes.filter(r => mias.has(r.routeId)),
     issues: [],
   }
 }
 
-/** Disponible de la bolsa del Administrador (para mostrar antes de colocar capital). */
+/** Disponible de la bolsa del Administrador (para mostrar antes de colocar capital o gastar). */
 export async function getAdminAvailableCapital(tenantId: string, adminId: string, database: RutaCashDB = db): Promise<number> {
   return adminCapital(adminId, await loadCapitalRows(tenantId, database as unknown as CapitalControlDatabase)).disponible
+}
+
+/** Disponible de la bolsa de la EMPRESA (D10: gastos del SuperAdmin). Solo lectura. */
+export async function getCompanyAvailableCapital(tenantId: string, database: RutaCashDB = db): Promise<number> {
+  return computeCapitalStructure(await loadCapitalRows(tenantId, database as unknown as CapitalControlDatabase), []).company.disponible
 }
 
 /** Movimientos del libro de capital (más reciente primero). Admin: solo los suyos. */
@@ -201,6 +220,20 @@ interface LedgerOpParams {
   amount: number
   descripcion?: string
   fecha?: string
+  /**
+   * Identificador de la OPERACIÓN (lo genera la pantalla al abrir el formulario y
+   * lo reutiliza en cada reintento / doble clic). Es el id del asiento: repetir la
+   * misma operación devuelve el asiento ya guardado; con otros datos, se rechaza.
+   */
+  operationId?: string
+}
+
+/** Id de la operación: el recibido (validado) o uno nuevo. */
+export function operationIdOf(operationId: string | undefined, error: (m: string) => Error): string {
+  if (operationId === undefined) return generateId()
+  const id = operationId.trim()
+  if (!id) throw error('Identificador de operación inválido.')
+  return id
 }
 
 async function registrarLedger(
@@ -214,8 +247,21 @@ async function registrarLedger(
   const amount = validarMonto(params.amount)
   const fecha = validarFecha(params.fecha)
   const conAdmin = tipo === 'ADMIN_ALLOCATION' || tipo === 'ADMIN_RETURN'
+  const id = operationIdOf(params.operationId, m => new CapitalControlError(m))
   let entry!: CapitalLedgerEntry
+  let reintento = false
   await database.transaction('rw', capitalTables(database as unknown as CapitalControlDatabase) as never[], async () => {
+    // Reintento de la MISMA operación (doble clic, otra pestaña): ya está guardada.
+    const previo = params.operationId !== undefined ? await database.capitalLedger.get(id) : undefined
+    if (previo) {
+      const adminDelPrevio = previo.toAdminId ?? previo.fromAdminId
+      if (previo.tenantId !== tenantId || previo.tipo !== tipo || previo.amount !== amount || (conAdmin && adminDelPrevio !== params.adminId)) {
+        throw new CapitalControlError('Ese identificador de operación ya corresponde a otro movimiento de capital.')
+      }
+      entry = previo
+      reintento = true
+      return
+    }
     const rows = await loadCapitalRows(tenantId, database as unknown as CapitalControlDatabase)
     let admin: User | undefined
     if (conAdmin) {
@@ -236,7 +282,7 @@ async function registrarLedger(
       }
     }
     entry = {
-      id: generateId(), tenantId, tipo, amount,
+      id, tenantId, tipo, amount,
       fromAdminId: tipo === 'ADMIN_RETURN' ? admin!.id : undefined,
       toAdminId: tipo === 'ADMIN_ALLOCATION' ? admin!.id : undefined,
       descripcion: params.descripcion?.trim() || undefined, fecha, createdAt: nowISO(),
@@ -244,6 +290,7 @@ async function registrarLedger(
     }
     await (database as unknown as CapitalControlDatabase).capitalLedger.add(entry)
   })
+  if (reintento) return entry
   const accion = {
     COMPANY_DEPOSIT: 'COMPANY_CAPITAL_DEPOSIT', COMPANY_WITHDRAWAL: 'COMPANY_CAPITAL_WITHDRAWAL',
     ADMIN_ALLOCATION: 'ADMIN_CAPITAL_ALLOCATED', ADMIN_RETURN: 'ADMIN_CAPITAL_RETURNED',

@@ -13,14 +13,20 @@ import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { useDataRevision } from '@/hooks/useDataRevision'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
-import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute, can } from '@/lib/permissions'
+import { filterAccessibleRoutes, canAccessRoute, can } from '@/lib/permissions'
 import { EXPENSE_SCOPE_LABEL, expenseAttribution } from '@/lib/expenseAttribution'
+import { POOL_STATE_LABEL, expenseFundingOf, poolExpenseStateOf, refundedAmountOf } from '@/lib/expenseFunding'
+import { generateId } from '@/lib/utils'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
+import { ReverseMovementModal } from '@/components/ui/MovementReversal'
 import type { Expense, ExpenseCategory, ExpenseScope, Route, User } from '@/models/types'
 import { hasPersonalCashbox } from '@/lib/collectorAttribution'
 import { custodianBlockedReason } from '@/services/cashCustodyService'
-import { canRegisterExpenseScope, createExpense } from '@/services/expenseService'
+import {
+  canCorrectPoolExpense, canRegisterExpenseScope, createExpense, listVisibleExpenses, payablePoolsFor, refundAdminExpense, reverseAdminExpense,
+} from '@/services/expenseService'
+import { getAdminAvailableCapital, getCompanyAvailableCapital } from '@/services/capitalControlService'
 
 /** Gasto con ruta (de ruta o de trabajador): el único que filtra Oficina → Ruta. */
 type RoutedExpense = Expense & { routeId: string }
@@ -31,7 +37,7 @@ const conRuta = (e: Expense): e is RoutedExpense => !!e.routeId
  * siempre de forma explícita; nunca se deduce de quién lo registra.
  */
 const EFECTO: Record<ExpenseScope, string> = {
-  empresa: 'Gasto general de la empresa. No resta la Base de ninguna ruta ni el efectivo de ningún trabajador.',
+  empresa: 'Gasto administrativo: se paga con una bolsa (la del Administrador o la de la empresa) y reduce su disponible. No resta la Base de ninguna ruta ni el efectivo de ningún trabajador.',
   ruta: 'Pagado con la caja de la ruta: resta su Base y lo Sin asignar. No se carga a ningún trabajador.',
   trabajador: 'Pagado con el efectivo de un trabajador: resta lo que tiene en manos y aparece en sus Gastos y en su cuadre.',
 }
@@ -42,7 +48,11 @@ const SCOPE_TONE: Record<ExpenseScope, string> = {
   trabajador: 'bg-amber-50 text-amber-700',
 }
 
-const FORM_VACIO = { scope: '' as ExpenseScope | '', routeId: '', collectorId: '', categoryId: '', valor: 0, descripcion: '', fecha: today() }
+// `bolsa` (solo gastos de empresa): 'empresa' o `admin:<id>`.
+const FORM_VACIO = { scope: '' as ExpenseScope | '', routeId: '', collectorId: '', categoryId: '', valor: 0, descripcion: '', fecha: today(), bolsa: '', referencia: '' }
+
+const decodeBolsa = (v: string): { source: 'empresa' } | { source: 'admin'; adminId: string } | undefined =>
+  v === 'empresa' ? { source: 'empresa' } : v.startsWith('admin:') ? { source: 'admin', adminId: v.slice(6) } : undefined
 
 export default function ExpensesPage() {
   const { tenantId, currency } = useTenant()
@@ -59,6 +69,19 @@ export default function ExpensesPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(FORM_VACIO)
+  /**
+   * Id de la OPERACIÓN: se genera al abrir el formulario y se reutiliza en cada
+   * reintento o doble clic; el servicio devuelve el mismo gasto (no lo duplica).
+   */
+  const [operationId, setOperationId] = useState(() => generateId())
+  /** Paso de confirmación de un gasto administrativo (bolsa, antes → después). */
+  const [confirmando, setConfirmando] = useState(false)
+  /** Disponible de la bolsa elegida: número, `null` si no se pudo calcular. */
+  const [bolsaDisponible, setBolsaDisponible] = useState<number | null | undefined>(undefined)
+  const [anulando, setAnulando] = useState<Expense | null>(null)
+  const [reintegrando, setReintegrando] = useState<Expense | null>(null)
+  const [reintegro, setReintegro] = useState({ valor: 0, motivo: '', operationId: '' })
+  const [guardandoReintegro, setGuardandoReintegro] = useState(false)
 
   /** Los gastos de empresa son información consolidada (fuera de las rutas). */
   const veEmpresa = !!user && can(user, 'cashbox.viewConsolidated', { tenantId })
@@ -70,16 +93,14 @@ export default function ExpensesPage() {
   async function load() {
     setLoading(true)
     const [exps, cats, rts, us] = await Promise.all([
-      db.expenses.where('tenantId').equals(tenantId).toArray(),
+      // ALCANCE EN EL SERVICIO: gastos de rutas autorizadas y, de los de empresa,
+      // solo los de la bolsa propia (Administrador) o todos (SuperAdmin).
+      listVisibleExpenses({ actor: user, tenantId }),
       db.expenseCategories.where('tenantId').equals(tenantId).toArray(),
       db.routes.where('tenantId').equals(tenantId).toArray(),
       db.users.where('tenantId').equals(tenantId).toArray(),
     ])
-    // RESTRICCIÓN POR RUTAS: gastos y rutas limitados a las autorizadas. Los de
-    // empresa (sin ruta) solo para quien ve el consolidado.
-    const deRutas = filterByAccessibleRoute(user, exps.filter(conRuta))
-    const deEmpresa = veEmpresa ? exps.filter(e => !e.routeId) : []
-    setExpenses([...deRutas, ...deEmpresa].sort((a, b) => b.fecha.localeCompare(a.fecha) || b.createdAt.localeCompare(a.createdAt)))
+    setExpenses(exps.sort((a, b) => b.fecha.localeCompare(a.fecha) || b.createdAt.localeCompare(a.createdAt)))
     setCategories(cats)
     setRoutes(filterAccessibleRoutes(user, rts))
     setUsers(us)
@@ -109,27 +130,103 @@ export default function ExpensesPage() {
     ? users.filter(u => custodianBlockedReason(u, form.routeId, tenantId) === null).sort((a, b) => a.nombre.localeCompare(b.nombre))
     : []
 
+  const nombreDe = (id: string) => users.find(u => u.id === id)?.nombre ?? id
+  // BOLSAS que el actor puede usar para un gasto de empresa (mismo criterio que el servicio).
+  const bolsas = payablePoolsFor(user, users)
+  const bolsaOpciones = bolsas.map(b => b.source === 'empresa'
+    ? { value: 'empresa', label: 'Bolsa de la empresa' }
+    : { value: `admin:${b.adminId}`, label: b.adminId === user?.id ? `Mi bolsa (${user?.nombre})` : `Bolsa de ${nombreDe(b.adminId)}` })
+  const bolsaSel = form.scope === 'empresa' ? decodeBolsa(form.bolsa) : undefined
+  const bolsaNombre = bolsaOpciones.find(o => o.value === form.bolsa)?.label ?? ''
+  const bolsaDespues = bolsaDisponible != null ? bolsaDisponible - form.valor : null
+  const bolsaInsuficiente = !!bolsaSel && bolsaDisponible != null && form.valor > bolsaDisponible
+
+  // Con una sola bolsa posible (Administrador), queda elegida.
+  useEffect(() => {
+    if (form.scope === 'empresa' && !form.bolsa && bolsaOpciones.length === 1) setForm(f => ({ ...f, bolsa: bolsaOpciones[0].value }))
+  }, [form.scope, form.bolsa, bolsaOpciones.length])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Disponible de la bolsa elegida: misma fuente que Capital (el servicio revalida al registrar).
+  useEffect(() => {
+    let alive = true
+    if (!modalOpen || !bolsaSel) { setBolsaDisponible(undefined); return }
+    setBolsaDisponible(undefined)
+    const p = bolsaSel.source === 'empresa' ? getCompanyAvailableCapital(tenantId) : getAdminAvailableCapital(tenantId, bolsaSel.adminId)
+    p.then(v => { if (alive) setBolsaDisponible(v) }, () => { if (alive) setBolsaDisponible(null) })
+    return () => { alive = false }
+  }, [modalOpen, form.scope, form.bolsa, tenantId, revision])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  function abrirNuevo() {
+    setForm(FORM_VACIO)
+    setOperationId(generateId())
+    setConfirmando(false)
+    setModalOpen(true)
+  }
+
   async function handleSave() {
     if (!form.scope) { toast.error('Indica a quién corresponde el gasto'); return }
     if (form.scope !== 'empresa' && !form.routeId) { toast.error('Selecciona la ruta'); return }
     if (form.scope === 'trabajador' && !form.collectorId) { toast.error('Selecciona el trabajador que pagó'); return }
     if (!form.categoryId || form.valor <= 0) { toast.error('Categoría y valor son requeridos'); return }
     if (form.routeId && form.scope !== 'empresa' && !canAccessRoute(user, form.routeId)) { toast.error('No tienes permiso sobre esa ruta.'); return }
+    if (form.scope === 'empresa') {
+      if (!bolsaSel) { toast.error('Indica qué bolsa paga el gasto'); return }
+      if (form.descripcion.trim().length < 3) { toast.error('Indica el concepto del gasto'); return }
+      if (bolsaInsuficiente) { toast.error(`El gasto supera el disponible de la bolsa (${formatCurrency(bolsaDisponible ?? 0, currency)}).`); return }
+      // Confirmación explícita antes de descontar de una bolsa.
+      if (!confirmando) { setConfirmando(true); return }
+    }
     setSaving(true)
     try {
-      // El servicio valida permisos, Oficina activa, trabajador de la ruta y fondos.
+      // El servicio valida permisos, bolsa, Oficina activa, trabajador de la ruta y
+      // fondos DENTRO de la transacción. `operationId` evita duplicados por reintento.
       await createExpense({
         actor: user, tenantId, scope: form.scope,
         routeId: form.scope === 'empresa' ? undefined : form.routeId,
         collectorId: form.scope === 'trabajador' ? form.collectorId : undefined,
         categoryId: form.categoryId, valor: form.valor, descripcion: form.descripcion, fecha: form.fecha,
-        syncStatus: 'synced',
+        syncStatus: 'synced', operationId,
+        funding: form.scope === 'empresa' ? bolsaSel : undefined,
+        referencia: form.scope === 'empresa' ? form.referencia : undefined,
       })
       toast.success('Gasto registrado')
       setModalOpen(false)
+      setConfirmando(false)
       setForm(FORM_VACIO)
+      setOperationId(generateId())
       await load()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error') } finally { setSaving(false) }
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error'); setConfirmando(false) } finally { setSaving(false) }
+  }
+
+  async function anular(reason: string) {
+    if (!anulando) return
+    // Permiso, bolsa, estado y vínculo: en el servicio, atómico.
+    await reverseAdminExpense({ actor: user, tenantId, expenseId: anulando.id, reason })
+    toast.success('Gasto anulado: el valor volvió a la bolsa')
+    setAnulando(null)
+    await load()
+  }
+
+  async function guardarReintegro() {
+    if (!reintegrando || guardandoReintegro) return
+    setGuardandoReintegro(true)
+    try {
+      await refundAdminExpense({
+        actor: user, tenantId, expenseId: reintegrando.id, amount: reintegro.valor, reason: reintegro.motivo, operationId: reintegro.operationId,
+      })
+      toast.success('Reintegro registrado')
+      setReintegrando(null)
+      await load()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo registrar el reintegro') } finally { setGuardandoReintegro(false) }
+  }
+
+  /** Bolsa de un gasto (solo gastos de empresa). */
+  const bolsaDe = (e: Expense): string | null => {
+    const f = expenseFundingOf(e)
+    if (f.kind === 'admin') return `Bolsa de ${nombreDe(f.adminId)}`
+    if (f.kind === 'empresa') return 'Bolsa de la empresa'
+    if (f.kind === 'historico') return 'Histórico · sin bolsa'
+    return null
   }
 
   const getRouteName = (id?: string) => routes.find(r => r.id === id)?.nombre ?? id ?? ''
@@ -148,7 +245,7 @@ export default function ExpensesPage() {
       <ModuleTabs tabs={EXPENSE_TABS} />
       <div className="flex items-center justify-between">
         <div><h1 className="text-xl font-bold text-gray-900">Gastos</h1><p className="text-sm text-gray-500 mt-0.5">Total: {formatCurrency(totalFiltered, currency)}</p></div>
-        <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>Nuevo gasto</Button>
+        <Button onClick={abrirNuevo} icon={<Plus className="w-4 h-4" />}>Nuevo gasto</Button>
       </div>
 
       {/* FILTRO OFICINA → RUTA. La Oficina solo estrecha las rutas autorizadas;
@@ -182,8 +279,11 @@ export default function ExpensesPage() {
           <div className="divide-y divide-gray-50">
             {filtered.map(e => {
               const scope = expenseAttribution(e, conCaja).scope
+              const estado = poolExpenseStateOf(e)
+              const bolsa = bolsaDe(e)
+              const correccion = estado === 'anulacion' || estado === 'reintegro'
               return (
-                <div key={e.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                <div key={e.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-3" data-testid="expense-row">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-9 h-9 bg-red-50 rounded-xl flex items-center justify-center flex-shrink-0">
                       <TrendingDown className="w-4 h-4 text-red-500" />
@@ -192,12 +292,25 @@ export default function ExpensesPage() {
                       <p className="text-sm font-medium text-gray-900 flex flex-wrap items-center gap-1.5">
                         {getCatName(e.categoryId)}
                         <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${SCOPE_TONE[scope]}`}>{EXPENSE_SCOPE_LABEL[scope]}</span>
+                        {estado !== 'ruta' && estado !== 'vigente' && (
+                          <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${estado === 'historico' ? 'bg-gray-100 text-gray-500' : estado === 'anulado' ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-700'}`}>
+                            {POOL_STATE_LABEL[estado]}
+                          </span>
+                        )}
                       </p>
-                      <p className="text-xs text-gray-400">{atribucionDe(e)} · {formatDate(e.fecha)}</p>
-                      {e.descripcion && <p className="text-xs text-gray-400">{e.descripcion}</p>}
+                      <p className="text-xs text-gray-400">{bolsa ?? atribucionDe(e)} · {formatDate(e.fecha)}{e.userId ? ` · registró ${getUserName(e.userId)}` : ''}</p>
+                      {e.descripcion && <p className="text-xs text-gray-400 break-words">{e.descripcion}{e.referencia ? ` · Ref. ${e.referencia}` : ''}</p>}
                     </div>
                   </div>
-                  <span className="text-sm font-bold text-red-600 flex-shrink-0">-{formatCurrency(e.valor, currency)}</span>
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
+                    {canCorrectPoolExpense(user, e) && (<>
+                      <Button size="sm" variant="ghost" onClick={() => { setReintegrando(e); setReintegro({ valor: 0, motivo: '', operationId: generateId() }) }}>Reintegro</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setAnulando(e)}>Anular</Button>
+                    </>)}
+                    <span className={`text-sm font-bold ${correccion ? 'text-emerald-600' : estado === 'anulado' ? 'text-gray-400 line-through' : 'text-red-600'}`}>
+                      {correccion ? `+${formatCurrency(-e.valor, currency)}` : `-${formatCurrency(e.valor, currency)}`}
+                    </span>
+                  </div>
                 </div>
               )
             })}
@@ -205,8 +318,23 @@ export default function ExpensesPage() {
         )}
       </div>
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Registrar gasto"
-        footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={handleSave} loading={saving}>Registrar</Button></>}>
+      <Modal open={modalOpen} onClose={() => { if (!saving) { setModalOpen(false); setConfirmando(false) } }}
+        title={confirmando ? 'Confirmar gasto administrativo' : 'Registrar gasto'}
+        footer={confirmando
+          ? <><Button variant="secondary" onClick={() => setConfirmando(false)} disabled={saving}>Volver</Button><Button onClick={handleSave} loading={saving}>Confirmar y registrar</Button></>
+          : <><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={handleSave} loading={saving} disabled={bolsaInsuficiente}>{form.scope === 'empresa' ? 'Continuar' : 'Registrar'}</Button></>}>
+        {confirmando ? (
+          <div className="space-y-2 text-sm" data-testid="expense-confirm">
+            <p className="text-lg font-bold text-gray-900">{formatCurrency(form.valor, currency)} · {getCatName(form.categoryId)}</p>
+            <p className="text-gray-700">{form.descripcion.trim()}{form.referencia.trim() ? ` · Ref. ${form.referencia.trim()}` : ''}</p>
+            <div className="rounded-xl border border-gray-100 divide-y divide-gray-50">
+              <div className="flex justify-between gap-2 px-3 py-2"><span className="text-gray-500">Paga</span><b>{bolsaNombre}</b></div>
+              <div className="flex justify-between gap-2 px-3 py-2"><span className="text-gray-500">Disponible</span><span>{bolsaDisponible == null ? '…' : formatCurrency(bolsaDisponible, currency)}</span></div>
+              <div className="flex justify-between gap-2 px-3 py-2"><span className="text-gray-500">Disponible después</span><b>{bolsaDespues == null ? '…' : formatCurrency(bolsaDespues, currency)}</b></div>
+            </div>
+            <p className="text-xs text-gray-500">Fecha {formatDate(form.fecha)}. El disponible se vuelve a comprobar al registrar.</p>
+          </div>
+        ) : (
         <div className="space-y-4">
           <Select label="¿A quién corresponde este gasto?" value={form.scope} required
             onChange={e => setForm(f => ({ ...f, scope: e.target.value as ExpenseScope | '', collectorId: '' }))}
@@ -230,14 +358,53 @@ export default function ExpensesPage() {
               )}
             </div>
           )}
+          {form.scope === 'empresa' && (
+            <Select label="¿Qué bolsa paga?" value={form.bolsa} required
+              onChange={e => setForm(f => ({ ...f, bolsa: e.target.value }))}
+              options={bolsaOpciones} placeholder="Seleccionar bolsa"
+              hint={user?.rol === 'admin' ? 'Tus gastos administrativos salen de tu bolsa: la misma que distribuyes a tus rutas.' : 'La bolsa de la empresa o la de un Administrador activo.'} />
+          )}
           <Select label="Categoría" value={form.categoryId} onChange={e => setForm(f => ({ ...f, categoryId: e.target.value }))}
             options={categories.filter(c => c.activa).map(c => ({ value: c.id, label: c.nombre }))} placeholder="Seleccionar categoría" required />
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <MoneyInput label="Valor" currency={currency} value={form.valor} onValueChange={v => setForm(f => ({ ...f, valor: v }))} required />
             <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
           </div>
-          <Textarea label="Descripción" value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} rows={2} />
+          {bolsaSel && (
+            <div className="rounded-xl border border-gray-100 divide-y divide-gray-50 text-sm" data-testid="pool-preview">
+              <div className="flex justify-between gap-2 px-3 py-2"><span className="text-gray-500">Disponible de la bolsa</span>
+                <b data-testid="pool-available">{bolsaDisponible === undefined ? '…' : bolsaDisponible === null ? 'No disponible' : formatCurrency(bolsaDisponible, currency)}</b></div>
+              <div className="flex justify-between gap-2 px-3 py-2"><span className="text-gray-500">Gasto</span><span>− {formatCurrency(form.valor, currency)}</span></div>
+              <div className="flex justify-between gap-2 px-3 py-2"><span className="text-gray-500">Disponible después</span>
+                <b className={bolsaInsuficiente ? 'text-red-600' : 'text-gray-900'} data-testid="pool-after">{bolsaInsuficiente ? 'Insuficiente' : bolsaDespues == null ? '…' : formatCurrency(bolsaDespues, currency)}</b></div>
+              {bolsaInsuficiente && <p className="px-3 py-2 text-xs text-red-600">El gasto supera el disponible. Lo colocado en rutas no se puede gastar: primero retíralo de una ruta.</p>}
+            </div>
+          )}
+          <Textarea label={form.scope === 'empresa' ? 'Concepto' : 'Descripción'} value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} rows={2} />
+          {form.scope === 'empresa' && (
+            <Input label="Referencia del soporte (opcional)" value={form.referencia} placeholder="N.º de factura o recibo"
+              onChange={e => setForm(f => ({ ...f, referencia: e.target.value }))} />
+          )}
         </div>
+        )}
+      </Modal>
+
+      {/* ANULACIÓN de un gasto de bolsa: motivo obligatorio; el servicio enlaza la reversión. */}
+      <ReverseMovementModal currency={currency} onCancel={() => setAnulando(null)} onConfirm={anular}
+        target={anulando && { tipo: 'Gasto administrativo', valor: anulando.valor, fecha: anulando.fecha, detalle: `${getCatName(anulando.categoryId)} · ${bolsaDe(anulando) ?? ''}` }} />
+
+      {/* REINTEGRO: dinero devuelto por el proveedor; con tope en lo no reintegrado. */}
+      <Modal open={!!reintegrando} onClose={() => { if (!guardandoReintegro) setReintegrando(null) }} title="Registrar reintegro" size="sm"
+        footer={<><Button variant="secondary" onClick={() => setReintegrando(null)} disabled={guardandoReintegro}>Cancelar</Button>
+          <Button onClick={guardarReintegro} loading={guardandoReintegro} disabled={reintegro.valor <= 0 || reintegro.motivo.trim().length < 3}>Registrar reintegro</Button></>}>
+        {reintegrando && (
+          <div className="space-y-3 text-sm">
+            <p className="text-gray-600">{getCatName(reintegrando.categoryId)} · {formatCurrency(reintegrando.valor, currency)} · {bolsaDe(reintegrando)}</p>
+            <p className="text-xs text-gray-500">Pendiente por reintegrar: <b>{formatCurrency(reintegrando.valor - refundedAmountOf(reintegrando.id, expenses), currency)}</b>. El valor vuelve a la misma bolsa.</p>
+            <MoneyInput label="Valor reintegrado" currency={currency} value={reintegro.valor} onValueChange={v => setReintegro(r => ({ ...r, valor: v }))} required />
+            <Input label="Motivo" value={reintegro.motivo} placeholder="Ej.: el proveedor devolvió un casco" onChange={e => setReintegro(r => ({ ...r, motivo: e.target.value }))} />
+          </div>
+        )}
       </Modal>
     </div>
   )

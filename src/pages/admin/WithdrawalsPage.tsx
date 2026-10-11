@@ -53,6 +53,9 @@ export default function WithdrawalsPage() {
   const [desde, setDesde] = useState('')
   const [hasta, setHasta] = useState('')
   const [form, setForm] = useState({ routeId: '', valor: 0, descripcion: '', fecha: today() })
+  // Id de la operación del formulario abierto (Ronda 2/6): reintentos idempotentes.
+  const [retiroOpId, setRetiroOpId] = useState('')
+  useEffect(() => { if (modalOpen) setRetiroOpId(generateId()) }, [modalOpen])
   // Grupo de ruta seleccionado para ver el detalle de sus retiros.
   // Ruta cuyo detalle está abierto: el grupo se DERIVA de los datos recargados.
   const [detailRouteId, setDetailRouteId] = useState<string | null>(null)
@@ -91,7 +94,8 @@ export default function WithdrawalsPage() {
     setSaving(true)
     try {
       // Fondos disponibles (caja NO asignada), permiso, Oficina y autoría: en el SERVICIO.
-      await registerWithdrawal({ actor: user, tenantId, routeId: form.routeId, valor: form.valor, descripcion: form.descripcion, fecha: form.fecha })
+      // Mismo id en cada intento de ESTE formulario: un doble clic no duplica el retiro.
+      await registerWithdrawal({ actor: user, tenantId, routeId: form.routeId, valor: form.valor, descripcion: form.descripcion, fecha: form.fecha, operationId: retiroOpId || undefined })
       toast.success('Retiro registrado')
       setModalOpen(false)
       setForm({ routeId: '', valor: 0, descripcion: '', fecha: today() })

@@ -127,7 +127,10 @@ type Extra = Partial<Omit<CreateExpenseParams, 'actor' | 'scope'>>
 const gasto = (actor: User, scope: CreateExpenseParams['scope'], extra: Extra = {}) =>
   createExpense({
     actor, tenantId: actor.tenantId, scope, categoryId: CAT_TRANSPORTE, valor: 10_000,
-    routeId: scope === 'empresa' ? undefined : R1, ...extra,
+    routeId: scope === 'empresa' ? undefined : R1,
+    // Ronda 2/6: el gasto de empresa se paga con una bolsa (la del Admin que lo registra).
+    funding: scope === 'empresa' ? { source: 'admin', adminId: actor.id } : undefined,
+    ...extra,
   })
 const deEmpresa = (valor: number, descripcion = 'Papelería administrativa') =>
   gasto(ADMIN, 'empresa', { categoryId: CAT_PAPELERIA, valor, descripcion })
@@ -488,7 +491,7 @@ await spec('EXP-CLASS-024', 'CollectorSyncPage: solo gastos del alcance; nunca l
   await deTrabajador(FABIO, 5_000, FABIO).then(e => db.expenses.update(e.id, { syncStatus: 'pending' }))
   const emp = await deEmpresa(300)
   await db.expenses.update(emp.id, { syncStatus: 'pending' })
-  const ajeno = await createExpense({ actor: AJENO_ADMIN, tenantId: TB, scope: 'empresa', categoryId: CAT_AJENA, valor: 1, syncStatus: 'pending' })
+  const ajeno = await createExpense({ actor: AJENO_ADMIN, tenantId: TB, scope: 'empresa', categoryId: CAT_AJENA, valor: 1, syncStatus: 'pending', descripcion: 'Gasto ajeno', funding: { source: 'admin', adminId: AJENO_ADMIN.id } })
   const n = await getPendingSyncCount({ tenantId: T, routeIds: [R1] })
   await syncPendingItems({ tenantId: T, routeIds: [R1] })
   const estado = async (id: string) => (await db.expenses.get(id))?.syncStatus
@@ -601,7 +604,7 @@ await spec('EXP-CLASS-030', 'aislamiento total empresa / ruta / trabajador', asy
   await deRuta(20_000)
   await deTrabajador(FABIO, 11_000)
   await deTrabajador(PEDRO, 4_000, ADMIN, R2)
-  await createExpense({ actor: AJENO_ADMIN, tenantId: TB, scope: 'empresa', categoryId: CAT_AJENA, valor: 999 })
+  await createExpense({ actor: AJENO_ADMIN, tenantId: TB, scope: 'empresa', categoryId: CAT_AJENA, valor: 999, descripcion: 'Gasto ajeno', funding: { source: 'admin', adminId: AJENO_ADMIN.id } })
   const v = {
     fabio: descripciones(await vistaOperativa(FABIO)),
     carlos: descripciones(await vistaOperativa(CARLOS)),

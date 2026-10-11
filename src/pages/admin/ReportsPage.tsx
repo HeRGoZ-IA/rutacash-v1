@@ -16,6 +16,7 @@ import { resolveOfficeParam } from '@/lib/officeRouteFilter'
 import { useSearchParams } from 'react-router-dom'
 import { getAccessibleRouteIdSet } from '@/lib/scope'
 import { can } from '@/lib/permissions'
+import { listVisibleExpenses } from '@/services/expenseService'
 import {
   buildReport, resolveReportRouteIds, REPORT_OPTIONS,
   type ReportType, type ReportRow,
@@ -116,7 +117,9 @@ export default function ReportsPage() {
       const [payments, sales, expenses, clients, allRoutes, categories, users] = await Promise.all([
         db.payments.where('tenantId').equals(tenantId).toArray(),
         db.sales.where('tenantId').equals(tenantId).toArray(),
-        db.expenses.where('tenantId').equals(tenantId).toArray(),
+        // Gastos con alcance (Ronda 2/6): un Administrador nunca recibe —ni exporta—
+        // gastos de la bolsa de otro ni los de la empresa.
+        listVisibleExpenses({ actor: user, tenantId }),
         db.clients.where('tenantId').equals(tenantId).toArray(),
         db.routes.where('tenantId').equals(tenantId).toArray(),
         db.expenseCategories.where('tenantId').equals(tenantId).toArray(),

@@ -22,6 +22,7 @@
 import { effectivePayments } from '@/services/paymentCorrectionService'
 import { formatDate } from '@/lib/formatters'
 import { EXPENSE_SCOPE_LABEL, expenseAttribution } from '@/lib/expenseAttribution'
+import { POOL_STATE_LABEL, expenseFundingOf, poolExpenseStateOf } from '@/lib/expenseFunding'
 import { hasPersonalCashbox } from '@/lib/collectorAttribution'
 import type {
   Client, Expense, ExpenseCategory, Payment, Route, Sale, User,
@@ -168,9 +169,15 @@ export function buildGastosReport(src: ReportSources, f: ReportFilters): ReportR
     .filter(e => inRange(e.fecha, f))
     .map(e => {
       const a = expenseAttribution(e, conCaja)
+      // Bolsa que paga (Ronda 2/6): solo gastos de empresa; los demás salen de una caja de ruta.
+      const f = expenseFundingOf(e)
+      const bolsa = f.kind === 'admin' ? `Administrador ${userName(f.adminId)}` : f.kind === 'empresa' ? 'Empresa' : f.kind === 'historico' ? 'Histórico sin bolsa' : '—'
+      const estado = poolExpenseStateOf(e)
       return {
         Fecha: formatDate(e.fecha),
         Tipo: EXPENSE_SCOPE_LABEL[a.scope],
+        Bolsa: bolsa,
+        Estado: estado === 'ruta' ? '' : POOL_STATE_LABEL[estado],
         Ruta: e.routeId ? routeName(e.routeId) : '—',
         Trabajador: a.scope === 'trabajador' ? userName(a.cashHolderId) : '—',
         Categoría: catName(e.categoryId),
