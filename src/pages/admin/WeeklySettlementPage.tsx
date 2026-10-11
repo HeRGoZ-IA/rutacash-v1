@@ -106,6 +106,20 @@ export default function WeeklySettlementPage() {
   // `?vista=trabajadores` abre directamente el cuadre por trabajador (enlace
   // profundo; el antiguo botón de Transferencias se retiró en v16).
   const [vista, setVista] = useState<'ruta' | 'trabajadores'>(searchParams.get('vista') === 'trabajadores' ? 'trabajadores' : 'ruta')
+  /**
+   * ACCESO DESDE TRANSFERENCIAS («Entregar Base a un trabajador», Ronda 1/6):
+   * `?routeId=&userId=&accion=entregar-base`. Solo PRESELECCIONA: la ruta se aplica si
+   * está entre las autorizadas (`loadMeta`) y el trabajador si está entre los
+   * cuadrables de esa ruta (el panel). Nunca amplía alcance ni registra nada; se
+   * consume una vez y se limpia de la URL.
+   */
+  const [preseleccion] = useState(() => {
+    const routeIdParam = searchParams.get('routeId')
+    const userIdParam = searchParams.get('userId')
+    return routeIdParam && userIdParam
+      ? { routeId: routeIdParam, userId: userIdParam, accion: searchParams.get('accion') === 'entregar-base' ? 'entregar-base' as const : undefined }
+      : null
+  })
   /** Cuadres de trabajadores de la ruta (sección informativa de la liquidación). */
   const [cuadresRuta, setCuadresRuta] = useState<CashSettlement[]>([])
 
@@ -173,6 +187,13 @@ export default function WeeklySettlementPage() {
     setUsuarios(await db.users.where('tenantId').equals(tenantId).toArray())
     // Con una sola ruta accesible, se preselecciona (sigue siendo obligatoria).
     if (rts.length === 1) setRouteId(rts[0].id)
+    // Preselección desde Transferencias: solo una ruta AUTORIZADA (si no, se ignora).
+    if (preseleccion) {
+      if (rts.some(r => r.id === preseleccion.routeId)) setRouteId(preseleccion.routeId)
+      const limpios = new URLSearchParams(window.location.search)
+      for (const k of ['routeId', 'userId', 'accion']) limpios.delete(k)
+      setSearchParams(limpios, { replace: true })
+    }
   }
 
   async function generate() {
@@ -332,7 +353,8 @@ export default function WeeklySettlementPage() {
             <RouteSelector routes={routesInOffice} value={routeId} onChange={setRouteId} className="w-64" />
           </div>
           {routeId
-            ? <WorkerCashSettlementPanel routeId={routeId} />
+            ? <WorkerCashSettlementPanel routeId={routeId}
+                preseleccion={preseleccion?.routeId === routeId ? { userId: preseleccion.userId, accion: preseleccion.accion } : undefined} />
             : <p className="text-sm text-gray-500">Selecciona la ruta para ver a sus trabajadores.</p>}
         </div>
       )}

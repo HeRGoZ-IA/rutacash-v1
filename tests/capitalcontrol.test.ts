@@ -33,7 +33,8 @@ import {
   allocateCapitalToAdmin, getCapitalOverview, listCapitalLedger, listRouteControllerHistory, loadCapitalRows,
   registerCompanyCapital, returnCapitalFromAdmin, setRouteCapitalController, withCapitalControllerGuard, withdrawCompanyCapital,
 } from '../src/services/capitalControlService'
-import { registerCapital, registerTransfer, registerWithdrawal, canManageRouteFunds } from '../src/services/routeFundsService'
+import { registerCapital, registerTransfer, registerWithdrawal, canManageRouteFunds, getRouteAvailableFunds } from '../src/services/routeFundsService'
+import { computeRouteCashReconciliation } from '../src/services/routeCashReconciliation'
 import { assignBaseToWorker, returnBaseFromWorker, transferBaseBetweenWorkers } from '../src/services/cashCustodyService'
 import { closeCashSettlement } from '../src/services/cashSettlementService'
 import { closeSettlement } from '../src/services/settlementService'
@@ -774,7 +775,13 @@ const GH = 'H · Traspaso entre trabajadores'
 await spec('CAP-H-001', GH, 'Transferencias ya no tiene el botón "Traspaso entre trabajadores" que llevaba a Liquidación', async () => {
   const t = src('src/pages/admin/TransfersPage.tsx')
   metric('botón', /Traspaso entre trabajadores<\/Button>/.test(t) ? 'presente' : 'retirado')
-  assert(!/Traspaso entre trabajadores<\/Button>/.test(t) && !/irATraspaso|useNavigate|weekly-settlement\?vista=trabajadores/.test(t), 'sigue el acceso confuso')
+  assert(!/Traspaso entre trabajadores<\/Button>/.test(t) && !/irATraspaso|useNavigate/.test(t), 'sigue el acceso confuso')
+  // Ronda 1/6 (2026-10-11): el ÚNICO enlace a Liquidación es la guía «Entregar Base»
+  // (caja de la ruta → trabajador), con ruta, trabajador y acción explícitos.
+  const enlaces = t.match(/weekly-settlement\?vista=trabajadores[^`'"]*/g) ?? []
+  metric('enlaces a Liquidación', enlaces.join(' | ') || 'ninguno')
+  assert(enlaces.length === 1 && /accion=entregar-base/.test(enlaces[0]) && /routeId=/.test(enlaces[0]) && /userId=/.test(enlaces[0]),
+    'Transferencias enlaza a Liquidación para algo distinto de «Entregar Base»')
   const panel = src('src/components/settlement/WorkerCashSettlementPanel.tsx')
   assert(/Traspasar a otro trabajador/.test(panel) && /transferBaseBetweenWorkers\(/.test(panel), 'la operación real desapareció del cuadre')
 })
@@ -791,6 +798,45 @@ await spec('CAP-H-002', GH, 'la lógica real se conserva: responsable y Supervis
   assert(t1.tipo === 'PERSON_TO_PERSON' && t2.tipo === 'PERSON_TO_PERSON' && dev.tipo === 'BASE_RETURN', 'se perdió la operación')
   assert(r !== 'ACEPTADO', 'el Admin secundario traspasó')
   assert(await getRouteBase(NORTE) === 1 * M, 'el traspaso movió la Base')
+})
+
+await spec('CAP-H-003', GH, 'Ronda 1/6: el disponible de Transferencias es el del servicio (antes/después) y Ruta X → Ruta X sigue rechazada', async () => {
+  await empresa()
+  await registerCapital({ actor: JUAN, tenantId: T, routeId: NORTE, valor: 5 * M })
+  await assignBaseToWorker({ actor: JUAN, tenantId: T, routeId: NORTE, recipientUserId: FABIO.id, amount: 1 * M, motivo: 'Base' })
+  // Lo que muestra la pantalla (getRouteAvailableFunds) = disponible de la conciliación.
+  const antes = await getRouteAvailableFunds(T, NORTE)
+  const conc = await computeRouteCashReconciliation({ tenantId: T, routeId: NORTE })
+  metric('Norte disponible (pantalla / conciliación)', `${fmt(antes)} / ${fmt(conc.disponible)}`)
+  assert(antes === conc.disponible && antes === 4 * M, 'el disponible mostrado no es el del servicio o incluye lo que tiene Fabio')
+  // Vista previa de la pantalla: «disponible después» = antes − valor. Debe coincidir
+  // con lo que el servicio calcula tras registrar.
+  const valor = 1_500_000
+  await registerTransfer({ actor: JUAN, tenantId: T, origen: { type: 'route', id: NORTE }, destino: { type: 'route', id: SUR }, valor })
+  const despues = await getRouteAvailableFunds(T, NORTE)
+  metric('Norte después (previsto / real)', `${fmt(antes - valor)} / ${fmt(despues)}`)
+  assert(despues === antes - valor && await getRouteAvailableFunds(T, SUR) === valor, 'la vista previa no coincide con el servicio')
+  // Ruta X → Ruta X (con o sin entrega en mano) y valor por encima del disponible: rechazados, sin escrituras.
+  const [nT, nC] = [await db.transfers.count(), await db.cashCustodyMovements.count()]
+  const mismo = await rechazo(() => registerTransfer({ actor: JUAN, tenantId: T, origen: { type: 'route', id: NORTE }, destino: { type: 'route', id: NORTE }, valor: 100, entregarA: { userId: FABIO.id } }))
+  const exceso = await rechazo(() => registerTransfer({ actor: JUAN, tenantId: T, origen: { type: 'route', id: NORTE }, destino: { type: 'route', id: SUR }, valor: despues + 1 }))
+  metric('Norte → Norte / exceso', `${mismo} / ${exceso}`)
+  assert(mismo !== 'ACEPTADO' && exceso !== 'ACEPTADO', 'se aceptó una transferencia prohibida')
+  assert(await db.transfers.count() === nT && await db.cashCustodyMovements.count() === nC, 'un rechazo dejó escrituras')
+  await invariantes()
+
+  // Pantallas: misma fuente que Retiros, solo rutas en alcance, sin cálculo ni escritura propia.
+  const t = src('src/pages/admin/TransfersPage.tsx')
+  assert(/scopedRoutes\.map\(r =>\s*getRouteAvailableFunds\(tenantId, r\.id\)/.test(t), 'el disponible no sale de getRouteAvailableFunds sobre rutas en alcance')
+  // Llamadas o importaciones (no menciones en comentarios).
+  assert(!/(computeRouteCashReconciliation|getRouteLedger|getRouteBase|assignBaseToWorker)\(|import[^\n]*(computeRouteCashReconciliation|getRouteLedger|getRouteBase|assignBaseToWorker)|db\.\w+\.(add|put|update)\(/.test(t), 'Transferencias calcula o escribe por su cuenta')
+  assert(!/>Saldo neto</.test(t) && /Neto de transferencias/.test(t) && /No es el efectivo en caja/.test(t), '«Saldo neto» sigue pareciendo el saldo de la caja')
+  assert(/origenOptions = endpointOptions\.filter\(o => o\.value !== form\.destino\)/.test(t) && /destinoOptions = endpointOptions\.filter\(o => o\.value !== form\.origen\)/.test(t), 'el formulario ofrece Ruta X → Ruta X')
+  assert(/Entregar Base a un trabajador/.test(t) && /«Entregar Base»/.test(t), 'falta la guía de entrega de Base')
+  const panel = src('src/components/settlement/WorkerCashSettlementPanel.tsx')
+  const liq = src('src/pages/admin/WeeklySettlementPage.tsx')
+  assert(/list\.some\(w => w\.user\.id === preseleccion\.userId\)/.test(panel) && /rts\.some\(r => r\.id === preseleccion\.routeId\)/.test(liq),
+    'la preselección desde Transferencias no se valida contra rutas/trabajadores autorizados')
 })
 
 // ############################################################

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ArrowRightLeft, CheckCircle2, Lock, LockOpen, UserRound, Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
@@ -21,6 +21,7 @@ import {
   assignBaseToWorker, custodianBlockedReason, getTransferableCash, listCustodyMovements, returnBaseFromWorker, transferBaseBetweenWorkers,
 } from '@/services/cashCustodyService'
 import { RouteCashReconciliationCard } from '@/components/settlement/RouteCashReconciliationCard'
+import { getRouteAvailableFunds } from '@/services/routeFundsService'
 import type { CashCustodyMovement, CashSettlement, Route, User } from '@/models/types'
 
 /**
@@ -31,7 +32,15 @@ import type { CashCustodyMovement, CashSettlement, Route, User } from '@/models/
  * se calcula nada financiero: la vista previa y el cierre salen del servicio, que
  * recalcula el esperado en el instante del cierre.
  */
-export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
+export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
+  routeId: string
+  /**
+   * Llegada desde Transferencias («Entregar Base a un trabajador»). Solo elige al
+   * trabajador si es uno de los cuadrables de ESTA ruta y señala el botón exacto;
+   * no abre ni registra nada. Se aplica una sola vez.
+   */
+  preseleccion?: { userId: string; accion?: 'entregar-base' }
+}) {
   const { user } = useAuth()
   const { tenantId, currency } = useTenant()
   const revision = useDataRevision()
@@ -54,12 +63,17 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
   const [reabrir, setReabrir] = useState<CashSettlement | null>(null)
   const [motivoReabrir, setMotivoReabrir] = useState('')
   const [reabriendo, setReabriendo] = useState(false)
+  /** Preselección consumida (una vez) y si se debe señalar «Entregar Base». */
+  const [preseleccionAplicada, setPreseleccionAplicada] = useState(false)
+  const [guiaEntregarBase, setGuiaEntregarBase] = useState(false)
 
   // Base física (v15): entregar / recibir devolución. Misma regla que el servicio.
   const [baseAccion, setBaseAccion] = useState<'entregar' | 'devolver' | null>(null)
   const [baseMonto, setBaseMonto] = useState(0)
   const [baseMotivo, setBaseMotivo] = useState('')
   const [baseGuardando, setBaseGuardando] = useState(false)
+  /** Caja sin asignar de la ruta al abrir «Entregar Base» (misma fuente que Retiros). */
+  const [baseDisponible, setBaseDisponible] = useState<number | null | undefined>(undefined)
   // v16: ENTREGAR Base saca efectivo de la caja de la ruta → solo su Administrador
   // responsable de capital. Recibir devolución y traspasar entre trabajadores operan
   // con Base ya entregada → también SuperAdmin y Supervisor de la ruta.
@@ -96,6 +110,15 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
       setNombres(new Map(users.map(u => [u.id, u.nombre])))
       setUsuarios(users)
       setRuta(r)
+      if (preseleccion && !preseleccionAplicada) {
+        setPreseleccionAplicada(true)
+        // Solo un trabajador cuadrable de ESTA ruta; si no, se ignora en silencio.
+        if (list.some(w => w.user.id === preseleccion.userId)) {
+          setUserId(preseleccion.userId)
+          setGuiaEntregarBase(preseleccion.accion === 'entregar-base')
+          return
+        }
+      }
       if (!list.some(w => w.user.id === userId)) setUserId('')
     })
     return () => { alive = false }
@@ -133,6 +156,13 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
 
   useEffect(() => {
     let alive = true
+    if (baseAccion !== 'entregar') { setBaseDisponible(undefined); return }
+    getRouteAvailableFunds(tenantId, routeId).then(v => { if (alive) setBaseDisponible(v) }, () => { if (alive) setBaseDisponible(null) })
+    return () => { alive = false }
+  }, [baseAccion, tenantId, routeId, revision])
+
+  useEffect(() => {
+    let alive = true
     listCustodyMovements(routeId).then(list => {
       if (alive) setMovsBase(list.filter(m => m.tenantId === tenantId).slice(0, 10))
     })
@@ -145,6 +175,10 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
     && traspasoMonto <= disponibleTraspaso && traspasoMotivo.trim().length >= 3
 
   const outcome = useMemo(() => preview ? settlementOutcome(preview.esperado, entregado) : null, [preview, entregado])
+  // Llegada desde Transferencias: la guía y el botón quedan a la vista (sin buscar).
+  const guiaRef = useRef<HTMLParagraphElement>(null)
+  const guiaVisible = guiaEntregarBase && preview?.userId === userId
+  useEffect(() => { if (guiaVisible) guiaRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }, [guiaVisible])
   const motivoRequerido = Boolean(outcome && outcome.diferencia !== 0)
   const motivoValido = !motivoRequerido || motivo.trim().length >= MIN_CASH_REASON
   const nombreDe = (id: string) => nombres.get(id) ?? id
@@ -246,7 +280,7 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
       <Select
         label="Trabajador"
         value={userId}
-        onChange={e => { setUserId(e.target.value); setEntregado(0); setMotivo('') }}
+        onChange={e => { setUserId(e.target.value); setEntregado(0); setMotivo(''); setGuiaEntregarBase(false) }}
         options={workers.map(w => ({
           value: w.user.id,
           label: `${w.user.nombre} · ${w.user.rol === 'supervisor' ? 'Supervisor' : 'Cobrador'}${w.esPropio ? ' (tú)' : ''}${w.user.status !== 'activo' ? ' · inactivo' : ''}`,
@@ -282,12 +316,20 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
             </div>
           </div>
 
+          {guiaEntregarBase && seleccionado && (
+            <p ref={guiaRef} className="text-sm text-primary-800 bg-primary-50 border border-primary-100 rounded-xl px-3 py-2" data-testid="guia-entregar-base">
+              {puedeEntregarBase
+                ? <>Vienes de Transferencias: pulsa <b>«Entregar Base»</b> para registrar la entrega a {seleccionado.user.nombre}.</>
+                : <>Solo el Administrador responsable de capital de esta ruta puede entregar Base.</>}
+            </p>
+          )}
           {(puedeBase || puedeEntregarBase) && seleccionado && (
             <div className="flex flex-wrap gap-2">
               {puedeEntregarBase && (
                 <Button variant="secondary" icon={<Wallet className="w-4 h-4" />}
+                  className={guiaEntregarBase ? 'ring-2 ring-primary-500 ring-offset-1' : undefined}
                   disabled={Boolean(custodianBlockedReason(seleccionado.user, routeId, tenantId))}
-                  onClick={() => { setBaseAccion('entregar'); setBaseMonto(0); setBaseMotivo('Base del día') }}>
+                  onClick={() => { setGuiaEntregarBase(false); setBaseAccion('entregar'); setBaseMonto(0); setBaseMotivo('Base del día') }}>
                   Entregar Base
                 </Button>
               )}
@@ -464,6 +506,17 @@ export function WorkerCashSettlementPanel({ routeId }: { routeId: string }) {
           <Button onClick={guardarBase} loading={baseGuardando} disabled={baseMonto <= 0 || baseMotivo.trim().length < 3}>Registrar</Button>
         </>}>
         <div className="space-y-3">
+          {baseAccion === 'entregar' ? (
+            <div className="flex items-center justify-between gap-2 rounded-xl bg-primary-50 px-3 py-2 text-sm" data-testid="base-modal-available">
+              <span className="text-gray-600">Disponible en la caja sin asignar</span>
+              <span className="font-bold text-primary-700">{baseDisponible === undefined ? '…' : baseDisponible === null ? 'No disponible' : money(baseDisponible)}</span>
+            </div>
+          ) : preview && preview.userId === userId ? (
+            <div className="flex items-center justify-between gap-2 rounded-xl bg-primary-50 px-3 py-2 text-sm" data-testid="return-modal-position">
+              <span className="text-gray-600">A cargo de {preview.userName}</span>
+              <span className="font-bold text-primary-700">{money(Math.max(0, preview.esperado))}</span>
+            </div>
+          ) : null}
           <MoneyInput label={baseAccion === 'entregar' ? 'Efectivo entregado' : 'Efectivo recibido'} value={baseMonto} onValueChange={setBaseMonto} currency={currency} min={0} />
           <div>
             <label className="block text-xs text-gray-500 mb-1.5">Motivo</label>

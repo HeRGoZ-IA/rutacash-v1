@@ -79,6 +79,13 @@ const MARCADORES = [
   ['El gasto supera el efectivo en manos de', false, 'bloqueo de gastos del cobrador retirado (≤2026-10-07)'],
   ['Ese identificador de operación ya corresponde a otro gasto.', true, 'gasto idempotente por id de operación (2026-10-08)'],
   ['Recaudado en efectivo por ti', true, 'Mi efectivo: recaudo solo en efectivo y saldo negativo visible (2026-10-08)'],
+  // Ronda 1/6 (2026-10-11): Transferencias con disponible real y guía «Entregar Base».
+  ['Neto de transferencias', true, 'tarjetas sin «Saldo neto» ambiguo (2026-10-11 R1/6)'],
+  ['Disponible para transferir', true, 'disponible real del origen en Transferencias (2026-10-11 R1/6)'],
+  ['Entregar Base a un trabajador', true, 'guía caja de ruta → trabajador desde Transferencias (2026-10-11 R1/6)'],
+  ['Vienes de Transferencias: pulsa', true, 'botón exacto señalado en el cuadre (2026-10-11 R1/6)'],
+  ['Entregar en mano a (opcional)', false, 'etiqueta ambigua de entrega en mano retirada (≤2026-10-10)'],
+  ['El efectivo entre trabajadores de una misma ruta se traspasa en', false, 'mensaje de rechazo que describía otra operación (≤2026-10-10)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')
