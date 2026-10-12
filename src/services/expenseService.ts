@@ -56,6 +56,7 @@ import { assertCan, assertRouteCashAuthority, AuthzError } from '@/services/auth
 import { logAction } from '@/services/auditService'
 import { assertRouteOperationalContext } from '@/services/officeService'
 import { custodianBlockedReason, reconciliationTables } from '@/services/cashCustodyService'
+import { closedPeriodBlockedReason } from '@/services/periodGuard'
 import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
 import { capitalTables, loadCapitalRows, type CapitalControlDatabase } from '@/services/capitalControlService'
 import { adminCapital, computeCapitalStructure } from '@/lib/capitalAllocation'
@@ -264,7 +265,8 @@ export async function createExpense(params: CreateExpenseParams, database: RutaC
   let reintento = false
   // Empresa: las tablas de CAPITAL entran en el bloqueo (el gasto compite por el
   // disponible de la bolsa con colocaciones, devoluciones y otros gastos).
-  const tablas = scope === 'empresa' ? tablasDeBolsa(database) : reconciliationTables(database)
+  // Con ruta, los cierres semanales entran en el bloqueo (D7).
+  const tablas = scope === 'empresa' ? tablasDeBolsa(database) : [...reconciliationTables(database), database.weeklySettlements]
   await database.transaction('rw', tablas, async () => {
     const previo = await database.expenses.get(fila.id)  // primera lectura: bloqueo obtenido
     const ahora = nowISO()
@@ -274,6 +276,12 @@ export async function createExpense(params: CreateExpenseParams, database: RutaC
       guardado = previo
       reintento = true
       return
+    }
+    // D7 (Ronda 6/6C): un gasto de ruta o de trabajador no entra en una semana ya
+    // cerrada de la ruta (cambiaría esa liquidación sin reabrirla).
+    if (scope !== 'empresa' && routeId) {
+      const cerrado = await closedPeriodBlockedReason(routeId, fila.fecha, database)
+      if (cerrado) throw new ExpenseError(cerrado)
     }
     // Gasto de TRABAJADOR: sin tope de efectivo en manos (ver cabecera); su posición
     // puede quedar negativa y se concilia en el cuadre.

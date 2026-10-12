@@ -287,6 +287,7 @@ await spec('SUP-BASE-007', 'Nueva venta: abierta con X, la Base cambia a Y → l
   assert(y === 160_000, `la guarda quedó en ${y}`)
   assert(revalida && guardaViva, 'Nueva venta decide con la cifra pintada')
   // Y la venta de 150.000 (> X, ≤ Y) se acepta.
+  await entregar(LAURA, 150_000)   // D25 (Ronda 6/6C): efectivo en mano antes del crédito
   const venta = await vender(150_000)
   metric('venta 150.000 con Base 160.000', venta.disbursementStatus)
 })
@@ -303,6 +304,7 @@ await spec('SUP-BASE-008', 'Nuevo cliente + venta usa la Base actual (y no deja 
   assert(/supera la Base de la ruta/.test(r), 'el servicio aceptó la venta con la Base vieja')
   assert(!huerfano, 'la transacción dejó el cliente sin su venta')
   await capital(100_000)
+  await entregar(LAURA, 80_000)   // D25 (Ronda 6/6C): efectivo en mano antes del crédito
   const c2 = nuevoCliente()
   const ok = await createDirectSale(inputs(c2.id, 80_000), LAURA, { newClient: c2 })
   metric('cliente + venta 80.000 con Base 130.000', ok.disbursementStatus)
@@ -460,12 +462,14 @@ await spec('SUP-BASE-016', 'el servicio no acepta un crédito con Base vieja (10
   // Concurrencia: la Base se lee DENTRO de la transacción de escritura.
   await empresa()
   await capital(100_000)
+  await entregar(LAURA, 100_000)   // D25: Laura tiene el efectivo; decide la Base de la ruta
   const [x, y] = await Promise.all([rechazo(() => vender(80_000)), rechazo(() => vender(80_000))])
   const base = await getRouteBase(R1)
   metric('dos ventas simultáneas de 80.000 con Base 100.000', `${x === 'ACEPTADO' ? 'ACEPTADA' : 'RECHAZADA'} + ${y === 'ACEPTADO' ? 'ACEPTADA' : 'RECHAZADA'} → Base ${base}`)
   assert([x, y].filter(z => z === 'ACEPTADO').length === 1 && base === 20_000, 'dos ventas simultáneas superaron la Base')
   await empresa()
   await capital(100_000)
+  await entregar(LAURA, 80_000)   // D25 (Ronda 6/6C): efectivo en mano antes del crédito
   const [v, w] = await Promise.all([rechazo(() => vender(80_000)), rechazo(() => retiro(80_000))])
   const base2 = await getRouteBase(R1)
   metric('venta 80.000 + retiro 80.000 simultáneos', `${v === 'ACEPTADO' ? 'venta OK' : 'venta rechazada'} · ${w === 'ACEPTADO' ? 'retiro OK' : 'retiro rechazado'} → Base ${base2}`)
@@ -477,6 +481,7 @@ await spec('SUP-BASE-017', 'el servicio permite el crédito si la Base aumentó 
   await capital(20_000)
   const capturada = await getRouteBase(R1)
   await capital(100_000)
+  await entregar(LAURA, 80_000)   // D25 (Ronda 6/6C): efectivo en mano antes del crédito
   const venta = await vender(80_000)
   metric('Base capturada / vigente', `${capturada} / ${await getRouteBase(R1)}`)
   metric('venta 80.000', venta.disbursementStatus)
@@ -546,6 +551,7 @@ await spec('SUP-BASE-020', 'aislamiento: cambios en A no alteran la Base mostrad
   await muestra(a, 100_000); await muestra(b, 40_000)
   await capital(10_000, R1)
   await retiro(5_000, R1)
+  await entregar(LAURA, 30_000)   // D25 (Ronda 6/6C): efectivo en mano antes del crédito
   await vender(30_000, R1)
   const va = await muestra(a, 75_000)
   await quieto()

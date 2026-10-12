@@ -233,6 +233,7 @@ await spec('ACTIVE-CREDIT-007', G_AC, 'Supervisor autorizado conserva el crédit
   await empresa()
   const { carlos } = await carlosConVentaA()
   const nuevo = await cliente(R_NORTE, 'Nuevo')
+  await assignBaseToWorker({ actor: ADMIN, tenantId: T, routeId: R_NORTE, recipientUserId: LAURA.id, amount: 600_000, motivo: 'Base para créditos' })   // D25 (Ronda 6/6C): efectivo en mano antes del crédito
   const conActivo = await createDirectSale(entrada(R_NORTE, carlos.id, LAURA), LAURA)
   const sinActivo = await createDirectSale(entrada(R_NORTE, nuevo.id, LAURA), LAURA)
   const sobreLimite = await rechazo(() => createDirectSale(entrada(R_NORTE, nuevo.id, LAURA, 600_000), LAURA))
@@ -920,6 +921,7 @@ await spec('SMOKE-A', G_SM, 'Juan (cobrador) intenta nueva venta a Carlos con Ve
 await spec('SMOKE-B', G_SM, 'Laura (supervisora) otorga crédito directo a Carlos con crédito activo, como antes', async () => {
   await empresa()
   const { carlos } = await carlosConVentaA()
+  await entregar(LAURA.id, 300_000)   // D25 (Ronda 6/6C): efectivo en mano antes del crédito
   const v = await createDirectSale(entrada(R_NORTE, carlos.id, LAURA), LAURA)
   metric('venta de Laura', `${v.status} · ${v.disbursementStatus} · efectivo de ${v.disbursedByCollectorId}`)
   assert(v.status === 'activa' && v.disbursedByCollectorId === LAURA.id && (await activasDe(carlos.id)).length === 2, 'SMOKE B falló')

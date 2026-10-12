@@ -35,9 +35,10 @@ export default function CollectorDisbursementsPage() {
   }
 
   async function handleConfirm(sale: Sale) {
+    if (!user) return
     setConfirmingId(sale.id)
     try {
-      await confirmDisbursement(sale.id, user ?? undefined)
+      await confirmDisbursement(sale.id, user)
       toast.success('Desembolso confirmado. La venta ya está activa para recaudo.')
       await load()
     } catch (e) {

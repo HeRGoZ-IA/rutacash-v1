@@ -11,6 +11,8 @@
 // ============================================================
 import 'fake-indexeddb/auto'
 import { db } from '../src/lib/db'
+import { sembrarResponsables } from './financial/capitalFixture'
+import { assignBaseToWorker } from '../src/services/cashCustodyService'
 import {
   approveSaleRequest, computeSaleFinancials, createDirectSale, createSaleRequest, type SaleInputs,
 } from '../src/services/saleRequestService'
@@ -69,6 +71,8 @@ async function empresa() {
   await db.routes.add({ id: R, tenantId: T, officeId: OF, nombre: 'Centro', codigo: 'C-1', status: 'activa', cobradorId: JUAN.id, capitalInicial: 0, capitalActual: 0, tasaInteres: 20, createdAt: '2026-09-01' } as never)
   await db.users.bulkAdd([ADMIN, JUAN, LAURA, SECRE])
   await db.capitalMovements.add({ id: 'cap', tenantId: T, routeId: R, tipo: 'ingresoCapital', valor: 50_000_000, fecha: '2026-09-01', createdAt: '' } as never)
+  // v16 (Ronda 6/6C): responsable de capital, para entregar Base por la vía autorizada.
+  await sembrarResponsables(db, T, { [R]: ADMIN.id })
 }
 
 let cliSeq = 0
@@ -158,6 +162,7 @@ await spec('TASA-004', 'Secretario conserva el 10% al autorizar (no regresión)'
   assert(venta.tasaInteres === 10 && venta.valorInteres === 100_000 && venta.valorTotal === 1_100_000, 'el Secretario no pudo aplicar el 10%')
   assert(res.requestedInterestRate === 20 && res.approvedInterestRate === 10, 'no quedó la trazabilidad solicitada/aprobada')
   // El catálogo global conserva el 10%; Supervisor y Admin siguen originando al 10%.
+  await assignBaseToWorker({ actor: ADMIN, tenantId: T, routeId: R, recipientUserId: LAURA.id, amount: 1_000_000, motivo: 'Base para el crédito' })   // D25 (Ronda 6/6C): efectivo en mano antes del crédito
   const sup = await createDirectSale(entrada(await cliente(), LAURA, 10), LAURA)
   const adm = await createDirectSale(entrada(await cliente(), ADMIN, 10), ADMIN)
   metric('catálogo global', ALLOWED_INTEREST_RATES.join('/'))

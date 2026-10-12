@@ -7,13 +7,17 @@ import { generateId } from '@/lib/utils'
 import { nowISO, today } from '@/lib/formatters'
 import { can } from '@/lib/permissions'
 import { hasPersonalCashbox } from '@/lib/collectorAttribution'
-import { assertCan } from '@/services/authz'
+import { assertCan, AuthzError } from '@/services/authz'
 import { logAction } from '@/services/auditService'
 import {
   calculateTotalWithInterest, calculateInstallmentValue,
-  estimateFinalDate, generateInstallments,
+  estimateFinalDate, generateInstallments, isSaleDisbursed,
 } from '@/services/installmentEngine'
-import { hasCapitalForSale } from '@/services/cashboxEngine'
+import { getRouteBase, hasCapitalForSale } from '@/services/cashboxEngine'
+import { reconciliationTables } from '@/services/cashCustodyService'
+import { personalCashPosition } from '@/services/cashSettlementService'
+import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
+import { closedPeriodBlockedReason } from '@/services/periodGuard'
 import type {
   Sale, Installment, SaleRequest, PaymentFrequency, DisbursementStatus, User, Client, Route,
 } from '@/models/types'
@@ -216,24 +220,24 @@ export async function createDirectSale(input: SaleInputs, actor: User, opts: { n
     throw new SaleRuleError(`El valor supera el límite de venta directa (${limite}). Envíala como solicitud.`)
   }
   const { sale, installments } = buildSaleWithInstallments(input, 'desembolsado')
-  // El libro completo de la ruta entra en la transacción: la Base se lee con el
-  // bloqueo de escritura ya obtenido (ver abajo).
-  await db.transaction('rw', [
-    db.sales, db.installments, db.clients,
-    db.capitalMovements, db.payments, db.expenses, db.transfers, db.withdrawals,
-  ], async () => {
+  // El libro completo de la ruta, la custodia, los cuadres y los cierres semanales
+  // entran en la transacción: Base, efectivo de quien entrega y periodo se leen con
+  // el bloqueo de escritura ya obtenido (ver abajo).
+  await db.transaction('rw', disbursementTables(), async () => {
     // Primera lectura: bloqueo de `sales` obtenido. Leer los créditos del cliente y
     // escribir la venta en la MISMA transacción impide que dos intentos simultáneos
     // vean "sin crédito" y creen dos ventas (IndexedDB serializa las transacciones
     // de escritura sobre el mismo almacén).
     const activos = activeCreditsOf(await db.sales.where('clientId').equals(input.clientId).toArray(), input.clientId, input.tenantId)
-    // CAPITAL con la Base VIGENTE (punto 5, 2026-10-02): se revalida aquí, no antes de
-    // abrir la transacción. Ningún retiro, transferencia ni otra venta (de esta u otra
-    // pestaña) puede colarse entre la lectura de la Base y la escritura de la venta,
-    // y la pantalla nunca decide con la cifra que tenía al abrirse.
-    if (!(await hasCapitalForSale(input.routeId, input.valorVenta))) {
-      throw new SaleRuleError('La venta supera la Base de la ruta: no hay capital suficiente.')
-    }
+    // D7: el préstamo cuenta en la liquidación de la semana de su fecha de inicio.
+    const periodo = await closedPeriodBlockedReason(input.routeId, input.fechaInicio)
+    if (periodo) throw new SaleRuleError(periodo)
+    // CAPITAL con la Base VIGENTE (punto 5, 2026-10-02) y EFECTIVO de quien entrega
+    // el dinero (D25/D26, Ronda 6/6C): se revalidan aquí, no antes de abrir la
+    // transacción. Ningún retiro, transferencia ni otra venta (de esta u otra
+    // pestaña) puede colarse entre la lectura y la escritura de la venta, y la
+    // pantalla nunca decide con la cifra que tenía al abrirse.
+    await assertDisbursementFunds(actor, input.routeId, input.tenantId, input.valorVenta, nowISO())
     const decision = decideSaleOrigination({
       actor, canCreateDirect: true, canCreateRequest: can(actor, 'sale.createRequest', ctx), activeCredits: activos.length,
     })
@@ -570,6 +574,77 @@ export class DisbursementStateError extends SaleRuleError {
 }
 
 /**
+ * No hay dinero para entregar este desembolso (D25/D26): la ruta no tiene Base
+ * suficiente (`ruta`), quien entrega no tiene ese efectivo en mano (`trabajador`) o
+ * la caja de la ruta no lo tiene sin asignar (`caja`, desembolso administrativo).
+ * La operación no escribe nada; una venta aprobada sigue aprobada y pendiente (D24).
+ */
+export class DisbursementFundsError extends SaleRuleError {
+  readonly kind: 'ruta' | 'trabajador' | 'caja'
+  constructor(message: string, kind: 'ruta' | 'trabajador' | 'caja') {
+    super(message)
+    this.name = 'DisbursementFundsError'
+    this.kind = kind
+  }
+}
+
+/**
+ * Tablas que lee un desembolso dentro de su transacción: libro de la ruta, custodia
+ * y cuadres por trabajador (`reconciliationTables`), solicitudes, la venta nueva de
+ * una venta directa y los cierres semanales (D7).
+ */
+function disbursementTables() {
+  return [...reconciliationTables(db), db.saleRequests, db.installments, db.clients, db.weeklySettlements]
+}
+
+/**
+ * FONDOS DE UN DESEMBOLSO (Ronda 6/6C). Se llama DENTRO de la transacción que
+ * escribe, con `disbursementTables()` en su ámbito, para que dos desembolsos
+ * —secuenciales o simultáneos en esta base— no usen el mismo dinero.
+ *
+ *  1. RUTA (D26): el importe no supera la Base de la ruta (`hasCapitalForSale`, la
+ *     regla que ya aplicaba la venta directa). Así ningún desembolso la deja negativa.
+ *  2. QUIEN ENTREGA EL DINERO (D25):
+ *     · Con caja personal (Cobrador, Supervisor): su efectivo EN MANO del ciclo
+ *       actual = recibido − devuelto + recaudado en efectivo − desembolsado − gastos
+ *       desde su último cuadre (`neto` de `getCollectorCashSummary`). El faltante
+ *       arrastrado NO cuenta: el cuadre recoge todo el efectivo y un faltante es una
+ *       deuda, no dinero disponible. Un gasto legítimo puede dejar ese saldo en
+ *       negativo (regla vigente); un desembolso, nunca.
+ *     · Sin caja personal (Admin, SuperAdmin): el dinero sale de la caja de la ruta
+ *       (desembolso administrativo, sin trabajador): se exige el "disponible" de la
+ *       conciliación —Sin asignar acotado por la Base—, la misma regla que la
+ *       entrega de Base.
+ *  No se crea ninguna entrega de Base automática: la Base se entrega con su propia
+ *  operación autorizada y después se reintenta.
+ *
+ * Las cifras solo se muestran a quien puede consultarlas (`cashbox.viewRoute` para
+ * la ruta; `cashSettlement.viewOwn` para el propio efectivo).
+ */
+async function assertDisbursementFunds(actor: User, routeId: string, tenantId: string, valor: number, hasta: string): Promise<void> {
+  const ctx = { routeId, tenantId }
+  const verRuta = can(actor, 'cashbox.viewRoute', ctx)
+  if (!(await hasCapitalForSale(routeId, valor))) {
+    const detalle = verRuta ? ` Base de la ruta: ${await getRouteBase(routeId)}; requerido: ${valor}.` : ''
+    throw new DisbursementFundsError(`La venta supera la Base de la ruta: no hay capital suficiente.${detalle}`, 'ruta')
+  }
+  if (hasPersonalCashbox(actor.rol)) {
+    const pos = await personalCashPosition({ tenantId, routeId, userId: actor.id, hasta })
+    const enMano = pos.esperado - pos.arrastreAnterior
+    if (valor > enMano) {
+      const detalle = can(actor, 'cashSettlement.viewOwn', ctx) ? ` Tienes ${Math.max(0, enMano)} y necesitas ${valor}.` : ''
+      throw new DisbursementFundsError(`No tienes efectivo suficiente para este desembolso.${detalle} Pide que te entreguen Base y vuelve a intentarlo.`, 'trabajador')
+    }
+    return
+  }
+  const r = await computeRouteCashReconciliation({ tenantId, routeId, hasta })
+  if (valor > r.disponible) {
+    const detalle = verRuta ? ` (disponible: ${r.disponible}; requerido: ${valor})` : ''
+    throw new DisbursementFundsError(`La caja de la ruta no tiene ese efectivo sin asignar${detalle}.`, 'caja')
+  }
+}
+
+/**
  * Motivo por el que una venta NO admite desembolso ahora (null = lo admite). Regla
  * pura y única: la aplica `confirmDisbursement` DENTRO de su transacción.
  *
@@ -615,15 +690,26 @@ export function disbursementBlockedReason(
  * otro trabajador que confirme la misma venta reciben `DisbursementStateError` y no
  * escriben nada: el responsable, el instante (frontera del cuadre) y la Base quedan
  * como los dejó el primer desembolso. Una venta perdida o finalizada no se desembolsa.
+ *
+ * FONDOS Y PERIODO (Ronda 6/6C): en la misma transacción se exige que la semana de la
+ * fecha de inicio no esté cerrada (D7) y que haya dinero para entregarlo
+ * (`assertDisbursementFunds`, D25/D26). Sin fondos se rechaza con
+ * `DisbursementFundsError` y la venta sigue aprobada y pendiente (D24: aprobar no
+ * reserva capital; la disponibilidad se mira al desembolsar).
+ *
+ * ACTOR OBLIGATORIO: sin usuario no hay desembolso (antes una llamada sin actor se
+ * saltaba la comprobación de permiso). Es un blindaje LOCAL: la autorización
+ * definitiva corresponderá al servidor.
  */
-export async function confirmDisbursement(saleId: string, actor?: User): Promise<void> {
+export async function confirmDisbursement(saleId: string, actor: User): Promise<void> {
+  if (!actor) throw new AuthzError('Acción no autorizada: falta el usuario que confirma el desembolso.')
   const previa = await db.sales.get(saleId)
   if (!previa) throw new Error('Venta no encontrada')
   // Ruta y empresa no cambian nunca: el permiso puede validarse con esta lectura.
-  if (actor) assertCan(actor, 'sale.confirmDisbursement', { routeId: previa.routeId, tenantId: previa.tenantId })
+  assertCan(actor, 'sale.confirmDisbursement', { routeId: previa.routeId, tenantId: previa.tenantId })
   // Oficina inactiva → no se entregan desembolsos nuevos en sus rutas.
   await assertRouteOperationalContext(previa.routeId)
-  await db.transaction('rw', [db.sales, db.saleRequests], async () => {
+  await db.transaction('rw', disbursementTables(), async () => {
     // Primera lectura DENTRO de la transacción: con el bloqueo ya obtenido, el
     // estado no puede cambiar entre la comprobación y la escritura, y el instante
     // sellado no puede quedar detrás de la frontera de un cuadre que se está
@@ -633,10 +719,13 @@ export async function confirmDisbursement(saleId: string, actor?: User): Promise
     const request = sale?.saleRequestId ? await db.saleRequests.get(sale.saleRequestId) : undefined
     const bloqueo = disbursementBlockedReason(sale, request)
     if (bloqueo) throw new DisbursementStateError(bloqueo)
+    const periodo = await closedPeriodBlockedReason(sale!.routeId, sale!.fechaInicio)
+    if (periodo) throw new DisbursementStateError(periodo)
+    await assertDisbursementFunds(actor, sale!.routeId, sale!.tenantId, sale!.valorVenta, ahora)
     await db.sales.update(saleId, {
       disbursementStatus: 'desembolsado',
-      disbursedByCollectorId: actor && hasPersonalCashbox(actor.rol) ? actor.id : undefined,
-      disbursedByUserId: actor?.id,
+      disbursedByCollectorId: hasPersonalCashbox(actor.rol) ? actor.id : undefined,
+      disbursedByUserId: actor.id,
       fechaDesembolso: today(),
       // Instante exacto: el cuadre por trabajador corta por instante, no por día.
       disbursedAt: ahora,
@@ -649,19 +738,23 @@ export async function confirmDisbursement(saleId: string, actor?: User): Promise
 }
 
 /**
- * Marca una venta ACTIVA como perdida (castigada) con motivo. Es la ÚNICA vía: antes
- * la pantalla de Ventas escribía `status: 'perdida'` directamente en la base.
+ * Marca una venta ACTIVA como perdida (castigo, D28) con motivo. Es la ÚNICA vía:
+ * antes la pantalla de Ventas escribía `status: 'perdida'` directamente en la base.
  *
- * PERMISO: `sale.cancel` sobre la ruta. Hoy coincide exactamente con quien podía
- * usar esa pantalla (Administrador y Super Admin, solo en sus rutas autorizadas);
- * redefinir quién puede castigar o cancelar es la decisión D28.
+ * PERMISO: `sale.cancel` sobre la ruta. Coincide exactamente con quien podía usar
+ * esa pantalla (Administrador y Super Admin, solo en sus rutas autorizadas); no se
+ * concede a ningún otro rol.
  *
- * EFECTO: solo cambia el estado. No mueve dinero, no toca el desembolso (`disbursed*`)
- * ni las parcelas: lo prestado sigue constando como desembolsado en la Base y en el
- * cuadre de quien lo entregó, y deja de contar en la cartera. Una venta aprobada aún
- * NO desembolsada que se marca perdida ya no admite desembolso
- * (`disbursementBlockedReason`). El estado se relee dentro de la transacción: una
- * venta que ya no está activa no cambia.
+ * Dos casos distintos, ambos auditados (`SALE_LOST`, con actor, instante y motivo,
+ * también guardados en la venta: `lostAt`, `lostByUserId`, `motivoPerdida`):
+ *  · Venta aprobada NUNCA desembolsada: no salió dinero; ya no admite desembolso
+ *    (`disbursementBlockedReason`). Su solicitud no cambia.
+ *  · Crédito YA desembolsado: castigo de cartera. No es cancelar el desembolso: no
+ *    devuelve dinero a la Base, no toca el desembolso (`disbursed*`), los pagos ni
+ *    las parcelas, ni ningún cuadre. Sale de la cartera activa y se sigue
+ *    consultando en el historial del cliente.
+ * El estado se relee dentro de la transacción: una venta que ya no está activa no
+ * cambia.
  */
 export async function markSaleLost(saleId: string, actor: User, motivo: string): Promise<void> {
   if (!actor) throw new SaleRuleError('No autorizado: falta el usuario que registra la pérdida.')
@@ -671,18 +764,23 @@ export async function markSaleLost(saleId: string, actor: User, motivo: string):
   const texto = (motivo ?? '').trim()
   if (!texto) throw new SaleRuleError('Ingresa el motivo')
   let antes!: Sale
+  let instante!: string
   await db.transaction('rw', [db.sales], async () => {
     const sale = await db.sales.get(saleId)
     if (!sale) throw new SaleRuleError('Venta no encontrada')
     if (sale.status !== 'activa') throw new SaleRuleError(`La venta ya está ${sale.status}.`)
     antes = sale
-    await db.sales.update(saleId, { status: 'perdida', motivoPerdida: texto, updatedAt: nowISO() })
+    instante = nowISO()
+    await db.sales.update(saleId, { status: 'perdida', motivoPerdida: texto, lostAt: instante, lostByUserId: actor.id, updatedAt: instante })
   })
+  const desembolsada = isSaleDisbursed(antes)
   // Fuera de la transacción, como el resto de auditorías de ventas.
   await logAction({
     tenantId: antes.tenantId, userId: actor.id, userRole: actor.rol, routeId: antes.routeId,
-    action: 'SALE_LOST', entityType: 'Sale', entityId: saleId, descripcion: 'Venta marcada como perdida', motivo: texto,
-    before: { status: antes.status, saldo: antes.saldo, disbursementStatus: antes.disbursementStatus },
-    after: { status: 'perdida' },
+    action: 'SALE_LOST', entityType: 'Sale', entityId: saleId, motivo: texto,
+    descripcion: desembolsada ? 'Crédito desembolsado castigado como perdido' : 'Venta aprobada sin desembolsar marcada como perdida',
+    before: { status: antes.status, saldo: antes.saldo, disbursementStatus: antes.disbursementStatus, disbursedByCollectorId: antes.disbursedByCollectorId },
+    after: { status: 'perdida', lostAt: instante, lostByUserId: actor.id },
+    metadata: { castigo: desembolsada },
   })
 }

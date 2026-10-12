@@ -12,6 +12,8 @@
 // ============================================================
 import 'fake-indexeddb/auto'
 import { db } from '../src/lib/db'
+import { sembrarResponsables } from './financial/capitalFixture'
+import { assignBaseToWorker } from '../src/services/cashCustodyService'
 import {
   approveSaleRequest, confirmDisbursement, createDirectSale, createSaleRequest, getActiveCreditContext,
   rejectSaleRequest, type SaleInputs,
@@ -83,6 +85,9 @@ async function empresas() {
   await db.capitalMovements.bulkAdd([R, R2, RB].map(r => ({
     id: `cap-${r}`, tenantId: r === RB ? TB : T, routeId: r, tipo: 'ingresoCapital', valor: 50_000_000, fecha: '2026-09-01', createdAt: '',
   })) as never[])
+  // v16 (Ronda 6/6C): responsables de capital, para entregar Base por la vía autorizada.
+  await sembrarResponsables(db, T, { [R]: ADMIN.id, [R2]: ADMIN.id })
+  await sembrarResponsables(db, TB, { [RB]: ADMIN_B.id })
 }
 
 let cliSeq = 0
@@ -293,6 +298,7 @@ await spec('CREDITO-ACTIVO-SEC-010', 'regresión segundo crédito: mismo estado 
     const req = await createSaleRequest(entrada(cli, JUAN, 500_000), JUAN)
     if (consultar) await getActiveCreditContext(req.id, SECRE)
     const venta = await approveSaleRequest(req.id, SECRE)
+    await assignBaseToWorker({ actor: ADMIN, tenantId: T, routeId: R, recipientUserId: JUAN.id, amount: 500_000, motivo: 'Base para el desembolso' })   // D25 (Ronda 6/6C): efectivo en mano antes del crédito
     await confirmDisbursement(venta.id, JUAN)
     const final = (await db.sales.get(venta.id))!
     const anterior = (await db.sales.get(a.id))!

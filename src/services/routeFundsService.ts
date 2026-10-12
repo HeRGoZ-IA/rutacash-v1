@@ -50,6 +50,7 @@ import { logAction } from '@/services/auditService'
 import { assertRouteOperationalContext } from '@/services/officeService'
 import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
 import { custodianBlockedReason, reconciliationTables } from '@/services/cashCustodyService'
+import { closedPeriodBlockedReason } from '@/services/periodGuard'
 import type {
   CapitalMovement, CashCustodyMovement, PartnerCashMovement, Route, Transfer, TransferEntityType, User, Withdrawal,
 } from '@/models/types'
@@ -96,7 +97,18 @@ async function auditar(params: Parameters<typeof logAction>[0]) {
 export function fundsTables(database: RutaCashDB) {
   return [...new Set([
     ...reconciliationTables(database), database.capitalLedger, database.routeCapitalControllerEvents,
+    database.weeklySettlements,
   ])]
+}
+
+/**
+ * D7 (Ronda 6/6C): un movimiento con fecha dentro de una semana CERRADA de la ruta
+ * cambiaría esa liquidación sin reabrirla. Se comprueba dentro de la transacción
+ * (`weeklySettlements` está en `fundsTables`).
+ */
+async function exigirPeriodoAbierto(routeId: string, fecha: string, database: RutaCashDB): Promise<void> {
+  const cerrado = await closedPeriodBlockedReason(routeId, fecha, database)
+  if (cerrado) throw new RouteFundsError(cerrado)
 }
 
 /** Autoridad estructural sobre la caja de la ruta, con datos releídos en la transacción. */
@@ -143,6 +155,7 @@ export async function registerCapital(
     // Responsable y bolsa RELEÍDOS dentro de la transacción: dos colocaciones
     // simultáneas no gastan el mismo disponible.
     await exigirResponsable(actor, routeId, tenantId, database)
+    await exigirPeriodoAbierto(routeId, fecha, database)
     const disponible = adminCapital(actor.id, await loadCapitalRows(tenantId, database as unknown as CapitalControlDatabase)).disponible
     if (valor > disponible) {
       throw new RouteFundsError(`Tu capital disponible no alcanza (disponible: ${disponible}). Pide al SuperAdmin que te asigne más capital o retíralo de otra de tus rutas.`)
@@ -267,6 +280,7 @@ export async function registerTransfer(
       return
     }
     for (const routeId of rutasImplicadas) await exigirResponsable(actor, routeId, tenantId, database)
+    for (const routeId of rutasImplicadas) await exigirPeriodoAbierto(routeId, fecha, database)
     // Socio → Ruta NO exige saldo en Caja socios (Ronda 5/6, revisado): es el aporte
     // de efectivo EXTERNO que el socio entrega (caso real Barreiro 21.000 + 21.500,
     // ajustes 2026-10-02). Si Caja socios debe tener fondos es la decisión D1: no se
@@ -353,6 +367,7 @@ export async function registerWithdrawal(
       return
     }
     await exigirResponsable(actor, routeId, tenantId, database)
+    await exigirPeriodoAbierto(routeId, fecha, database)
     const ahora = nowISO()
     const r = await computeRouteCashReconciliation({ tenantId, routeId, hasta: ahora }, database)
     if (valor > r.disponible) throw new RouteFundsError(`El retiro supera los fondos disponibles de la ruta (disponible: ${r.disponible}).`)

@@ -20,6 +20,7 @@ import 'fake-indexeddb/auto'
 import { db } from '../src/lib/db'
 import { sembrarResponsables } from './financial/capitalFixture'
 import { registerCapital } from '../src/services/routeFundsService'
+import { assignBaseToWorker } from '../src/services/cashCustodyService'
 import {
   confirmDisbursement, createDirectSale, createSaleRequest, approveSaleRequest, markSaleLost,
   disbursementBlockedReason, DisbursementStateError, type SaleInputs,
@@ -90,6 +91,9 @@ async function aprobada(by: User = JUAN, valor = 2000): Promise<Sale> {
   const req = await createSaleRequest(await entrada(by, valor), by)
   return approveSaleRequest(req.id, LAURA)
 }
+/** D25 (Ronda 6/6C): quien desembolsa debe tener el efectivo; el responsable le entrega Base antes. */
+const darBase = (u: User, amount: number) =>
+  assignBaseToWorker({ actor: ADMIN, tenantId: T, routeId: R1, recipientUserId: u.id, amount, motivo: 'Base para el desembolso' })
 async function rechazo(fn: () => Promise<unknown>): Promise<string> {
   try { await fn(); return 'ACEPTADO' } catch (e) { return e instanceof Error ? `${e.name}: ${e.message}` : String(e) }
 }
@@ -122,6 +126,7 @@ async function sinEfecto(fn: () => Promise<unknown>): Promise<string> {
 await spec('DISB-001', 'T1 normal', 'una venta aprobada se desembolsa una vez con los efectos esperados', async () => {
   await empresa()
   const s = await aprobada(JUAN, 2000)
+  await darBase(JUAN, 2000)
   const a = await saldos()
   await confirmDisbursement(s.id, JUAN)
   const b = await saldos()
@@ -138,6 +143,7 @@ await spec('DISB-001', 'T1 normal', 'una venta aprobada se desembolsa una vez co
 await spec('DISB-002', 'T2 doble confirmación', 'confirmar dos veces la misma venta: el segundo intento escribe 0', async () => {
   await empresa()
   const s = await aprobada(JUAN, 2000)
+  await darBase(JUAN, 2000)
   await confirmDisbursement(s.id, JUAN)
   const a = await saldos()
   const r = await sinEfecto(() => confirmDisbursement(s.id, JUAN))
@@ -150,6 +156,8 @@ await spec('DISB-002', 'T2 doble confirmación', 'confirmar dos veces la misma v
 await spec('DISB-003', 'T2 doble confirmación', 'dos confirmaciones SIMULTÁNEAS (doble clic): exactamente una se aplica', async () => {
   await empresa()
   const s = await aprobada(JUAN, 2000)
+  await darBase(JUAN, 2000)
+  await darBase(FABIO, 2000)
   const a = await saldos()
   const r = await Promise.allSettled([confirmDisbursement(s.id, JUAN), confirmDisbursement(s.id, JUAN), confirmDisbursement(s.id, FABIO)])
   const b = await saldos()
@@ -166,6 +174,8 @@ await spec('DISB-003', 'T2 doble confirmación', 'dos confirmaciones SIMULTÁNEA
 await spec('DISB-004', 'T3 otro trabajador', 'reconfirmar con OTRO trabajador: rechazado, el responsable sigue siendo el original', async () => {
   await empresa()
   const s = await aprobada(JUAN, 2000)
+  await darBase(JUAN, 2000)
+  await darBase(FABIO, 2000)
   await confirmDisbursement(s.id, JUAN)
   const original = (await db.sales.get(s.id))!
   const a = await saldos()
@@ -183,8 +193,9 @@ await spec('DISB-004', 'T3 otro trabajador', 'reconfirmar con OTRO trabajador: r
 await spec('DISB-005', 'T3 otro trabajador', 'reconfirmar DESPUÉS de cerrar el cuadre (caso I3 de la auditoría): cuadre y conciliación intactos', async () => {
   await empresa()
   const s = await aprobada(JUAN, 2000)
+  await darBase(JUAN, 2000)
   await confirmDisbursement(s.id, JUAN)
-  const cierre = await closeCashSettlement({ actor: LAURA, tenantId: T, routeId: R1, userId: JUAN.id, entregado: 0, motivo: 'Desembolsó sin Base registrada' })
+  const cierre = await closeCashSettlement({ actor: LAURA, tenantId: T, routeId: R1, userId: JUAN.id, entregado: 0 })
   waitClockPast(cierre.hasta)
   const a = await saldos()
   const r = await sinEfecto(() => confirmDisbursement(s.id, FABIO))
@@ -196,7 +207,7 @@ await spec('DISB-005', 'T3 otro trabajador', 'reconfirmar DESPUÉS de cerrar el 
   metric('reintento de Fabio', r.split(':')[0])
   metric('ciclo siguiente', `Juan desembolsado ${ciclo2Juan.desembolsado} · Fabio desembolsado ${ciclo2Fabio.desembolsado}`)
   metric('saldos', `${fila(a)} → ${fila(b)}`)
-  assert(docs.length === 1 && docs[0].id === cierre.id && docs[0].desembolsado === 2000, 'el cuadre cerrado cambió')
+  assert(docs.length === 1 && docs[0].id === cierre.id && docs[0].desembolsado === 2000 && docs[0].baseRecibida === 2000 && docs[0].diferencia === 0, 'el cuadre cerrado cambió')
   assert(ciclo2Juan.desembolsado === 0 && ciclo2Fabio.desembolsado === 0, 'el desembolso reapareció en un ciclo nuevo')
   assert(b.cuadra, 'la conciliación quedó NO CUADRA')
 })
@@ -238,6 +249,7 @@ await spec('DISB-007', 'T5 terminales', 'finalizada, refinanciada, solicitud can
 await spec('DISB-008', 'T7 atomicidad', 'un fallo a mitad de la confirmación no deja medio desembolso', async () => {
   await empresa()
   const s = await aprobada(JUAN, 2000)
+  await darBase(JUAN, 2000)
   const antes = await foto()
   // Fallo controlado en la SEGUNDA escritura (la solicitud), después de que la venta
   // ya se actualizó dentro de la misma transacción.
@@ -254,12 +266,13 @@ await spec('DISB-008', 'T7 atomicidad', 'un fallo a mitad de la confirmación no
   await confirmDisbursement(s.id, JUAN)
   const b = await saldos()
   metric('reintento sin fallo', fila(b))
-  assert(b.base === 3000 && b.juan === -2000, 'el reintento sin fallo no se aplicó una vez')
+  assert(b.base === 3000 && b.juan === 0 && b.sinAsignar === 3000, 'el reintento sin fallo no se aplicó una vez')
 })
 
 await spec('DISB-009', 'T8 regresión', 'Supervisor, Admin y venta directa siguen funcionando como antes', async () => {
   await empresa()
   const sup = await aprobada(FABIO, 1000)
+  await darBase(LAURA, 1700)
   await confirmDisbursement(sup.id, LAURA)
   const adm = await aprobada(JUAN, 500)
   const a = await saldos()
@@ -306,6 +319,7 @@ await spec('DISB-010', 'regla pura', 'disbursementBlockedReason solo admite acti
 await spec('LOST-001', 'T6 transición', 'venta YA desembolsada → perdida: castigo sin mover dinero ni cuadres, auditado', async () => {
   await empresa()
   const s = await aprobada(JUAN, 2000)
+  await darBase(JUAN, 2000)
   await confirmDisbursement(s.id, JUAN)
   const desembolso = (await db.sales.get(s.id))!
   const a = await saldos()

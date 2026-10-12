@@ -33,6 +33,7 @@ import {
   type CollectorAttributionSource,
 } from '@/lib/collectorAttribution'
 import { logAction } from '@/services/auditService'
+import { closedPeriodBlockedReason, type PeriodGuardDatabase } from '@/services/periodGuard'
 import {
   applyPaymentToInstallments, calculateSaleBalance,
   calculateCurrentInstallment, getLastPaidInstallmentNumber,
@@ -71,6 +72,12 @@ export interface PaymentDatabase {
   /** Solo LECTURA: ruta y Oficina de la venta, para la guarda de Oficina inactiva. */
   routes: { get(key: string): Promise<Route | undefined> }
   offices: { get(key: string): Promise<Office | undefined> }
+  /**
+   * Solo LECTURA: cierres semanales de la ruta, para no escribir pagos en una
+   * semana cerrada (D7). La base real siempre la tiene; las bases de prueba
+   * inyectadas que no la declaran no tienen periodos cerrados.
+   */
+  weeklySettlements?: PeriodGuardDatabase['weeklySettlements']
   transaction<U>(mode: 'rw', tables: any, scope: () => PromiseLike<U>): Promise<U>
 }
 
@@ -88,6 +95,7 @@ export type PaymentRejectionCode =
   | 'COLLECTOR_REQUIRED'  // hay más de un destino posible: hay que indicar quién recibió el dinero
   | 'COLLECTOR_INVALID'   // el responsable indicado no puede responder por el efectivo de esa ruta
   | 'OFFICE_INACTIVE'     // la Oficina de la ruta está inactiva: no admite operaciones nuevas
+  | 'PERIOD_CLOSED'       // la fecha del pago cae en una semana cerrada de la ruta (D7)
   | 'WRITE_FAILED'        // fallo de persistencia: se revirtió todo
 
 export interface RegisterPaymentInput {
@@ -187,6 +195,7 @@ const REJECTION_MESSAGES: Record<PaymentRejectionCode, string> = {
   COLLECTOR_REQUIRED: COLLECTOR_ATTRIBUTION_MESSAGE.ambiguous,
   COLLECTOR_INVALID: COLLECTOR_ATTRIBUTION_MESSAGE.invalid,
   OFFICE_INACTIVE: OFFICE_MESSAGES.inactiveOffice,
+  PERIOD_CLOSED: 'La semana de esta fecha está cerrada en la ruta: no admite pagos nuevos.',
   WRITE_FAILED: 'Error al registrar el pago. No se guardó ningún cambio.',
 }
 
@@ -224,7 +233,9 @@ export async function registerPayment(
     // `NotFoundError: Table users not part of transaction`, que no es un rechazo de
     // negocio y abortaba TODO el pago (incidente 15/09/2026, App Cobrador).
     // `users` solo se lee; ninguna escritura la toca.
-    consolidated = await database.transaction('rw', [database.payments, database.installments, database.sales, database.users, database.routes, database.offices], async () => {
+    // `weeklySettlements` (D7) solo existe en la base real; las bases inyectadas de
+    // prueba sin cierres no la declaran.
+    consolidated = await database.transaction('rw', [database.payments, database.installments, database.sales, database.users, database.routes, database.offices, ...(database.weeklySettlements ? [database.weeklySettlements] : [])], async () => {
       // ---- 1. LECTURA FRESCA DENTRO DE LA TRANSACCIÓN -----------------------
       // Nada de lo que envía la UI se usa como fuente de verdad. El intervalo
       // lectura → cálculo → escritura queda dentro del mismo ámbito atómico.
@@ -256,6 +267,12 @@ export async function registerPayment(
       // Una venta aprobada pero no desembolsada no es dinero prestado todavía.
       if (sale.disbursementStatus === 'pendiente') {
         throw new PaymentRejection('SALE_NOT_DISBURSED', REJECTION_MESSAGES.SALE_NOT_DISBURSED)
+      }
+      // D7 (Ronda 6/6C): un pago nuevo no entra en una semana ya cerrada de la ruta.
+      // Corregir pagos de una semana cerrada tiene su vía (solicitud de ajuste).
+      if (database.weeklySettlements) {
+        const cerrado = await closedPeriodBlockedReason(sale.routeId, input.fecha ?? today(), database as PeriodGuardDatabase)
+        if (cerrado) throw new PaymentRejection('PERIOD_CLOSED', cerrado)
       }
 
       const installments = await database.installments.where('saleId').equals(sale.id).toArray()

@@ -450,7 +450,9 @@ await spec('BASE-CROSS', 'Barreiro: ingreso, entrega, crédito, pago, devolució
   await paso('1 ingreso 200.000', () => capital(200_000))
   await paso('2 entrega 80.000 a Juan', () => entregar(JUAN, 80_000))
   let s!: Sale
-  await paso('3 crédito 50.000 (Laura, sin Base: queda en negativo)', async () => { s = await venta(LAURA, 50_000) })
+  // D25 (Ronda 6/6C): un crédito ya no puede dejar a quien lo entrega en negativo.
+  await paso('3 entrega 50.000 a Laura', () => entregar(LAURA, 50_000))
+  await paso('3b crédito 50.000 (Laura, con su Base)', async () => { s = await venta(LAURA, 50_000) })
   await paso('4 Juan cobra 6.000', () => cobrar(JUAN, s, 6_000))
   await paso('5 Juan devuelve 30.000', () => devolver(JUAN, 30_000))
   let t!: Transfer

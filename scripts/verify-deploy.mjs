@@ -109,6 +109,11 @@ const MARCADORES = [
   // Ronda 6/6B (2026-10-11): desembolso una sola vez y estados terminales por servicio.
   ['Esta venta ya fue desembolsada: no se puede confirmar otra vez.', true, 'desembolso único bajo bloqueo (2026-10-11 R6/6B)'],
   ['falta el usuario que registra la pérdida.', true, 'marcar perdida por servicio con permiso y auditoría (2026-10-11 R6/6B)'],
+  // Ronda 6/6C (2026-10-12): capital de ruta y efectivo de quien entrega (D25/D26), cierres (D7).
+  ['No tienes efectivo suficiente para este desembolso.', true, 'desembolso exige efectivo en mano (2026-10-12 R6/6C, D25)'],
+  ['La caja de la ruta no tiene ese efectivo sin asignar', true, 'desembolso administrativo contra la caja de la ruta (2026-10-12 R6/6C)'],
+  ['no admite movimientos con fecha', true, 'periodo cerrado protegido en servicios (2026-10-12 R6/6C, D7)'],
+  ['falta el usuario que confirma el desembolso.', true, 'desembolso sin usuario rechazado (2026-10-12 R6/6C)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

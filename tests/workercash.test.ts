@@ -19,6 +19,7 @@ import 'fake-indexeddb/auto'
 import Dexie, { liveQuery } from 'dexie'
 import { db } from '../src/lib/db'
 import { sembrarResponsables } from './financial/capitalFixture'
+import { assignBaseToWorker } from '../src/services/cashCustodyService'
 import { addExpenseStamped } from '../src/services/expenseService'
 import { registerPayment } from '../src/services/paymentService'
 import { getCashboxSummary, getCollectorDailyCashSummary, getCollectorCashSummary } from '../src/services/cashboxEngine'
@@ -33,7 +34,7 @@ import { filterAccessibleRoutes } from '../src/lib/permissions'
 import { hasPersonalCashbox } from '../src/lib/collectorAttribution'
 import { subscribeDataChanges, mutatedTables } from '../src/lib/dataRevision'
 import {
-  confirmDisbursement, createDirectSale, createSaleRequest, approveSaleRequest, rejectSaleRequest,
+  confirmDisbursement, createDirectSale, createSaleRequest, approveSaleRequest, rejectSaleRequest, DisbursementFundsError,
   listPendingSaleRequestsForRoute, countPendingSaleRequestsForRoute, countPendingSaleRequestsForUser, type SaleInputs,
 } from '../src/services/saleRequestService'
 import {
@@ -120,6 +121,10 @@ async function empresa(opts: { cobradoresActivosNorte?: string[] } = {}) {
     { id: 'cap-s', tenantId: T, routeId: R_SUR, tipo: 'ingresoCapital', valor: 10_000_000, fecha: '2026-09-01', createdAt: '' },
   ] as never[])
 }
+
+/** D25 (Ronda 6/6C): quien entrega un crédito debe tener el efectivo: el responsable de capital le entrega Base antes. */
+const darBase = (u: User, amount: number, routeId = R_NORTE) =>
+  assignBaseToWorker({ actor: ADMIN, tenantId: T, routeId, recipientUserId: u.id, amount, motivo: 'Base para el crédito' })
 
 /** Venta activa y desembolsada con parcelas, lista para cobrar. */
 async function venta(routeId: string, total = 2_000_000, cuotas = 10): Promise<Sale> {
@@ -1081,7 +1086,11 @@ await spec('CASH-BOUNDARY-008', 'Fronteras', 'escritor con bloqueo abierto mient
 await spec('CASH-BOUNDARY-009', 'Fronteras', 'cierres concurrentes con pagos, desembolsos y gastos: cada movimiento en UN ciclo', async () => {
   await empresa()
   const sale = await venta(R_NORTE, 50_000_000, 200)
+  // D26 (Ronda 6/6C): la venta sembrada de 50M dejaba la Base de Norte en −40M y
+  // ningún desembolso sería posible. Capital que la respalda:
+  await db.capitalMovements.add({ id: 'cap-n-frontera', tenantId: T, routeId: R_NORTE, tipo: 'ingresoCapital', valor: 100_000_000, fecha: '2026-09-01', createdAt: '' } as never)
   const esperado = { recaudado: 0, desembolsado: 0, gastos: 0 }
+  let aplicados = 0
   const cerrados: CashSettlement[] = []
   for (let i = 0; i < 10; i++) {
     const v = 1_000 + i
@@ -1092,9 +1101,12 @@ await spec('CASH-BOUNDARY-009', 'Fronteras', 'cierres concurrentes con pagos, de
       createdAt: new Date().toISOString(), updatedAt: '',
     } as unknown as Sale
     await db.sales.add(pendiente)
+    await darBase(JUAN, v)   // D25: el efectivo del desembolso de esta vuelta
+    // Si el cierre concurrente se serializa ANTES y recoge ese efectivo, D25 rechaza
+    // el desembolso (legítimo): la frontera se comprueba sobre los que se aplican.
     const [, , , doc] = await Promise.all([
       pagar(JUAN, sale, v).then(() => { esperado.recaudado += v }),
-      confirmDisbursement(pendiente.id, JUAN).then(() => { esperado.desembolsado += v }),
+      confirmDisbursement(pendiente.id, JUAN).then(() => { esperado.desembolsado += v; aplicados++ }, e => { if (!(e instanceof DisbursementFundsError)) throw e }),
       addExpenseStamped({
         id: `g-conc-${i}`, tenantId: T, routeId: R_NORTE, categoryId: 'cat-1', valor: v, fecha: HOY,
         userId: JUAN.id, collectorId: JUAN.id, syncStatus: 'synced',
@@ -1107,6 +1119,8 @@ await spec('CASH-BOUNDARY-009', 'Fronteras', 'cierres concurrentes con pagos, de
   const final = await previewDe(JUAN.id)
   const suma = (k: 'recaudado' | 'desembolsado' | 'gastos') => cerrados.reduce((s, c) => s + c[k], 0) + final[k]
   metric('cierres', cerrados.length)
+  metric('desembolsos aplicados / intentados', `${aplicados}/10`)
+  assert(aplicados > 0, 'ningún desembolso concurrente se aplicó: la frontera de desembolsos no quedó probada')
   metric('Σ ciclos vs registrado', `recaudado ${suma('recaudado')}/${esperado.recaudado} · desembolsado ${suma('desembolsado')}/${esperado.desembolsado} · gastos ${suma('gastos')}/${esperado.gastos}`)
   assert(suma('recaudado') === esperado.recaudado, 'pagos perdidos o duplicados en la frontera')
   assert(suma('desembolsado') === esperado.desembolsado, 'desembolsos perdidos o duplicados en la frontera')
@@ -1426,6 +1440,7 @@ await spec('SUP-AUTH-011', 'Autorizaciones', 'modificar condiciones y confirmar 
 // ---------------- SUP-CREDIT ----------------
 await spec('SUP-CREDIT-001', 'Crédito directo', 'el Supervisor otorga crédito directo (desembolsado por él)', async () => {
   await empresa()
+  await darBase(LAURA, 400_000)   // D25 (Ronda 6/6C): efectivo en mano antes del crédito
   const venta = await createDirectSale(entrada(R_NORTE, await clienteEn(R_NORTE), LAURA, 400_000), LAURA)
   metric('venta', `${venta.status} · ${venta.disbursementStatus} · entregó ${venta.disbursedByCollectorId} · ${venta.disbursedAt ? 'instante sellado' : 'SIN instante'}`)
   assert(venta.disbursementStatus === 'desembolsado' && venta.disbursedByCollectorId === LAURA.id && venta.disbursedAt, 'el crédito directo no quedó atribuido al Supervisor')
@@ -1434,6 +1449,7 @@ await spec('SUP-CREDIT-001', 'Crédito directo', 'el Supervisor otorga crédito 
 
 await spec('SUP-CREDIT-002', 'Crédito directo', 'el crédito directo NO crea una solicitud pendiente', async () => {
   await empresa()
+  await darBase(LAURA, 500_000)   // D25 (Ronda 6/6C): efectivo en mano antes del crédito
   const venta = await createDirectSale(entrada(R_NORTE, await clienteEn(R_NORTE), LAURA), LAURA)
   metric('solicitudes en la base', await db.saleRequests.count())
   metric('saleRequestId de la venta', venta.saleRequestId ?? 'ninguno')
@@ -1442,6 +1458,7 @@ await spec('SUP-CREDIT-002', 'Crédito directo', 'el crédito directo NO crea un
 
 await spec('SUP-CREDIT-003', 'Crédito directo', 'respeta la ruta autorizada (Laura en Sur también es suya)', async () => {
   await empresa()
+  await darBase(LAURA, 500_000, R_SUR)   // D25 (Ronda 6/6C): efectivo en mano antes del crédito
   const venta = await createDirectSale(entrada(R_SUR, await clienteEn(R_SUR), LAURA), LAURA)
   metric('Laura en Sur', venta.routeId)
   assert(venta.routeId === R_SUR, 'no pudo operar en otra ruta autorizada')
@@ -1531,6 +1548,7 @@ await spec('SUP-CREDIT-010', 'Crédito directo', 'autoría y efectivo: el desemb
 await spec('SUP-CREDIT-011', 'Crédito directo', 'alta de cliente + crédito pasa por el servicio y es atómica', async () => {
   await empresa()
   const nuevo = { id: 'cli-nuevo', tenantId: T, routeId: R_NORTE, nombre: 'Nuevo', documento: 'N-1', status: 'activo', createdAt: '' } as never as Client
+  await darBase(LAURA, 300_000)   // D25 (Ronda 6/6C): efectivo en mano antes del crédito
   const v = await createDirectSale(entrada(R_NORTE, nuevo.id, LAURA, 300_000), LAURA, { newClient: nuevo })
   const falla = { ...nuevo, id: 'cli-falla', documento: 'N-2' }
   const r = await rechazo(() => createDirectSale(entrada(R_NORTE, falla.id, LAURA, 90_000_000), LAURA, { newClient: falla }))
@@ -1679,6 +1697,7 @@ await spec('SMOKE-SA-01..06,08', 'Smoke', 'recorrido comercial completo del Supe
   const globoTras = await pendientes(LAURA, R_NORTE)
   // SA-05 crédito directo de Laura → sin solicitud
   const antesSolicitudes = await db.saleRequests.count()
+  await darBase(LAURA, 250_000)   // D25 (Ronda 6/6C): efectivo en mano antes del crédito
   const directa = await createDirectSale(entrada(R_NORTE, await clienteEn(R_NORTE), LAURA, 250_000), LAURA)
   // SA-06 Juan no puede saltar la autorización
   const juanDirecta = await rechazo(async () => createDirectSale(entrada(R_NORTE, await clienteEn(R_NORTE), JUAN), JUAN))

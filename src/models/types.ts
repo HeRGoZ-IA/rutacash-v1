@@ -392,6 +392,9 @@ export interface Sale {
   /** Solicitud de venta de origen, si la venta nació de una autorización. */
   saleRequestId?: string
   motivoPerdida?: string
+  /** Castigo (D28): instante y usuario que marcó la venta como perdida (`markSaleLost`). */
+  lostAt?: string
+  lostByUserId?: string
   createdAt: string
   updatedAt: string
 }
