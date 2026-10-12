@@ -114,6 +114,11 @@ const MARCADORES = [
   ['La caja de la ruta no tiene ese efectivo sin asignar', true, 'desembolso administrativo contra la caja de la ruta (2026-10-12 R6/6C)'],
   ['no admite movimientos con fecha', true, 'periodo cerrado protegido en servicios (2026-10-12 R6/6C, D7)'],
   ['falta el usuario que confirma el desembolso.', true, 'desembolso sin usuario rechazado (2026-10-12 R6/6C)'],
+  // Ronda 6/6C.1 (2026-10-12): cierre solo de periodos terminados (D29), caja de la ruta solo de su responsable (D30), anulaciones fuera de cierres (D7).
+  ['podrá cerrarse a partir del', true, 'cierre semanal solo de periodos terminados (2026-10-12 R6/6C.1, D29)'],
+  ['Desembolso desde la caja de la ruta:', true, 'caja de la ruta solo para su responsable o el SuperAdmin (2026-10-12 R6/6C.1, D30)'],
+  ['No se puede anular hoy.', true, 'anulaciones fuera de semanas cerradas (2026-10-12 R6/6C.1, D7)'],
+  ['No hay un periodo abierto para registrar el ajuste.', true, 'ajustes de pagos fuera de semanas cerradas (2026-10-12 R6/6C.1, D7)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

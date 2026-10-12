@@ -26,6 +26,7 @@ import {
   closureBlockedReason,
   isProtectingClosure,
   periodBadge,
+  periodNotEndedReason,
   settlementHistory,
   type SettlementHistoryRow,
 } from '@/lib/settlementPeriods'
@@ -287,8 +288,11 @@ export default function WeeklySettlementPage() {
     toast.success('CSV del cierre descargado')
   }
 
-  // Motivo del bloqueo del botón Cerrar (rango inválido o semana ya cerrada).
-  const bloqueoCierre = routeId ? closureBlockedReason(archivadas, routeId, semanaInicio, semanaFin) : null
+  // Motivo del bloqueo del botón Cerrar: rango inválido, semana ya cerrada o periodo
+  // que aún no terminó (D29). Es informativo: el servicio lo revalida al cerrar.
+  const bloqueoCierre = routeId
+    ? closureBlockedReason(archivadas, routeId, semanaInicio, semanaFin) ?? periodNotEndedReason(semanaFin, new Date().toISOString())
+    : null
   const historial = settlementHistory(archivadas, routes, allOffices)
 
   const Row = ({ label, value, tone = 'text-gray-700' }: { label: string; value: number; tone?: string }) => (

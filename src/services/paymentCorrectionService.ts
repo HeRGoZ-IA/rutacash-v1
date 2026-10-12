@@ -14,7 +14,7 @@
 // ============================================================
 import { db, type RutaCashDB } from '@/lib/db'
 import { generateId } from '@/lib/utils'
-import { formatCurrency, nowISO } from '@/lib/formatters'
+import { formatCurrency, nowISO, today } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { can } from '@/lib/permissions'
 import { normalizeReversalReason } from '@/lib/movementReversal'
@@ -25,6 +25,7 @@ import { recalculateSaleFromPayments, calculateSaleBalance } from '@/services/in
 import { dependentSyncStatus, effectivePayments as onlyEffective, isPaymentAnnullable, lastEffectivePaymentDate } from '@/lib/paymentState'
 import { resolveSealedCompletionDate } from '@/lib/creditHistory'
 import { protectingClosureFor } from '@/lib/settlementPeriods'
+import { closedPeriodBlockedReason } from '@/services/periodGuard'
 import type { Payment, PaymentAdjustmentRequest, Sale, User, WeeklySettlement } from '@/models/types'
 
 /** Lectura mínima de liquidaciones que necesita la comprobación de periodo. */
@@ -54,6 +55,40 @@ export async function isPaymentInClosedPeriod(
 ): Promise<boolean> {
   const settlements = await database.weeklySettlements.where('routeId').equals(payment.routeId).toArray()
   return protectingClosureFor(settlements, payment.routeId, payment.fecha) !== null
+}
+
+/** La corrección de un pago no puede registrarse (periodo cerrado o pago ya corregido). */
+export class PaymentCorrectionError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PaymentCorrectionError'
+  }
+}
+
+/**
+ * FECHA CONTABLE de un asiento de corrección o anulación de pago (D7, Ronda 6/6C.1).
+ * Se llama DENTRO de la transacción que escribe, con `weeklySettlements` en su ámbito.
+ *  · `preferida` en un periodo ABIERTO → se conserva (comportamiento de siempre:
+ *    la reversión lleva la fecha del pago que anula).
+ *  · `preferida` en una semana CERRADA y NO elegida por el usuario (es la del
+ *    original) → el asiento va a HOY, un periodo abierto. El original y las cifras
+ *    de la semana cerrada no cambian; el vínculo (`reversesPaymentId`,
+ *    `correctionOfPaymentId`) conserva la trazabilidad.
+ *  · Una fecha ELEGIDA dentro de una semana cerrada se rechaza: no se escoge una
+ *    fecha para entrar en un cierre.
+ *  · Si HOY también está cerrado no hay periodo abierto legítimo: se rechaza. Nunca
+ *    se inventa otra fecha (futura o pasada) para esquivar el cierre.
+ */
+export async function adjustmentEntryDate(
+  routeId: string, preferida: string, elegida: boolean, database: ClosedPeriodDatabase = db,
+): Promise<string> {
+  const cerrada = await closedPeriodBlockedReason(routeId, preferida, database)
+  if (!cerrada) return preferida
+  if (elegida) throw new PaymentCorrectionError(cerrada)
+  const hoy = today()
+  const hoyCerrado = await closedPeriodBlockedReason(routeId, hoy, database)
+  if (hoyCerrado) throw new PaymentCorrectionError(`No hay un periodo abierto para registrar el ajuste. ${hoyCerrado}`)
+  return hoy
 }
 
 /**
@@ -165,12 +200,19 @@ async function executeCorrection(original: Payment, actor: User, input: Correcti
   // UNA SOLA TRANSACCIÓN: reversión + pago corregido + recómputo de parcelas y venta.
   // Si cualquier paso falla, Dexie revierte TODO: nunca quedan pagos corregidos
   // conviviendo con parcelas y saldo antiguos.
-  await db.transaction('rw', [db.payments, db.installments, db.sales], async () => {
+  await db.transaction('rw', [db.payments, db.installments, db.sales, db.weeklySettlements], async () => {
     // Instante sellado BAJO BLOQUEO (primera lectura dentro de la transacción): la
     // reversión y la corrección nunca quedan detrás de la frontera de un cuadre por
     // trabajador que se esté cerrando a la vez (ver `closeCashSettlement`).
     const fresco = await db.payments.get(original.id)
     const sello = nowISO()
+    // Ronda 6/6C.1: el original sigue vigente AHORA (dos correcciones simultáneas no
+    // producen dos reversiones) y las fechas contables respetan los cierres (D7).
+    if (!fresco || fresco.state === 'reversed' || fresco.state === 'reversal') {
+      throw new PaymentCorrectionError('Este pago ya fue corregido o es un asiento de reversión.')
+    }
+    reversal.fecha = await adjustmentEntryDate(original.routeId, original.fecha, false)
+    corrected.fecha = await adjustmentEntryDate(original.routeId, input.newFecha ?? original.fecha, input.newFecha !== undefined && input.newFecha !== original.fecha)
     reversal.createdAt = reversal.correctedAt = sello
     corrected.createdAt = corrected.correctedAt = sello
     // CAUSALIDAD DE SINCRONIZACIÓN (punto 8): si el original aún no está confirmado,
@@ -227,8 +269,13 @@ export async function correctPayment(actor: User, paymentId: string, input: Corr
         : 'No tienes permiso para corregir este pago.',
     }
   }
-  const { reversalId, correctedId } = await executeCorrection(original, actor, input)
-  return { success: true, reversalId, correctedId }
+  try {
+    const { reversalId, correctedId } = await executeCorrection(original, actor, input)
+    return { success: true, reversalId, correctedId }
+  } catch (e) {
+    if (e instanceof PaymentCorrectionError) return { success: false, error: e.message }
+    throw e
+  }
 }
 
 /**
@@ -277,9 +324,17 @@ export async function approvePaymentAdjustment(actor: User, requestId: string): 
   if (!original) return { success: false, error: 'Pago original no encontrado' }
   if (original.state === 'reversed' || original.state === 'reversal') return { success: false, error: 'El pago ya fue corregido' }
 
-  const { reversalId, correctedId } = await executeCorrection(original, actor, {
-    newValor: req.newValor, newFecha: req.newFecha, reason: req.reason, observacion: req.observacion,
-  })
+  let reversalId: string
+  let correctedId: string
+  try {
+    ({ reversalId, correctedId } = await executeCorrection(original, actor, {
+      newValor: req.newValor, newFecha: req.newFecha, reason: req.reason, observacion: req.observacion,
+    }))
+  } catch (e) {
+    // La solicitud sigue pendiente: no se pierde lo que pidió el usuario.
+    if (e instanceof PaymentCorrectionError) return { success: false, error: e.message }
+    throw e
+  }
   await db.paymentAdjustmentRequests.update(requestId, {
     status: 'approved', reviewedBy: actor.id, reviewedAt: nowISO(),
     resultingReversalId: reversalId, resultingPaymentId: correctedId,
@@ -454,7 +509,9 @@ export async function annulPayment(
       tenantId, saleId: p.saleId, clientId: p.clientId, routeId: p.routeId,
       // Responsable heredado (se descuenta a quien recibió el dinero); autor = quien anula.
       collectorId: p.collectorId, createdByUserId: actor.id,
-      valor: -p.valor, fecha: p.fecha, tipo: p.tipo,
+      // D7 (Ronda 6/6C.1): fecha del original si su semana sigue abierta; si está
+      // cerrada, hoy; si hoy también, no hay anulación.
+      valor: -p.valor, fecha: await adjustmentEntryDate(p.routeId, p.fecha, false, database), tipo: p.tipo,
       observacion: `Anulación del pago ${p.id}`,
       // Hereda la confirmación del original (punto 8): la reversión de un pago aún
       // pendiente queda pendiente y se confirma junto con él, nunca antes.

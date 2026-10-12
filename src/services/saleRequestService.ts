@@ -5,7 +5,7 @@
 import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
 import { nowISO, today } from '@/lib/formatters'
-import { can } from '@/lib/permissions'
+import { can, routeCashAuthorityError } from '@/lib/permissions'
 import { hasPersonalCashbox } from '@/lib/collectorAttribution'
 import { assertCan, AuthzError } from '@/services/authz'
 import { logAction } from '@/services/auditService'
@@ -612,6 +612,7 @@ function disbursementTables() {
  *       deuda, no dinero disponible. Un gasto legítimo puede dejar ese saldo en
  *       negativo (regla vigente); un desembolso, nunca.
  *     · Sin caja personal (Admin, SuperAdmin): el dinero sale de la caja de la ruta
+ *       y solo puede usarla su responsable de capital o el SuperAdmin (D30)
  *       (desembolso administrativo, sin trabajador): se exige el "disponible" de la
  *       conciliación —Sin asignar acotado por la Base—, la misma regla que la
  *       entrega de Base.
@@ -623,6 +624,18 @@ function disbursementTables() {
  */
 async function assertDisbursementFunds(actor: User, routeId: string, tenantId: string, valor: number, hasta: string): Promise<void> {
   const ctx = { routeId, tenantId }
+  // D30 (Ronda 6/6C.1): sin caja personal, el dinero sale de la CAJA DE LA RUTA, y esa
+  // caja solo la usa su Administrador responsable de capital o el SuperAdmin de la
+  // empresa (autoridad `correct`). Un Administrador solo asociado no desembolsa desde
+  // ella; una ruta sin responsable válido no admite este desembolso (ni al
+  // SuperAdmin). Ruta y usuarios se releen aquí, dentro de la transacción: un cambio
+  // de responsable anterior a la confirmación ya cuenta.
+  if (!hasPersonalCashbox(actor.rol)) {
+    const route = await db.routes.get(routeId)
+    const users = await db.users.where('tenantId').equals(tenantId).toArray()
+    const autoridad = routeCashAuthorityError(actor, route, 'correct', users)
+    if (autoridad) throw new AuthzError(`Desembolso desde la caja de la ruta: ${autoridad}`)
+  }
   const verRuta = can(actor, 'cashbox.viewRoute', ctx)
   if (!(await hasCapitalForSale(routeId, valor))) {
     const detalle = verRuta ? ` Base de la ruta: ${await getRouteBase(routeId)}; requerido: ${valor}.` : ''

@@ -66,6 +66,39 @@ export function periodsOverlap(
 }
 
 // ------------------------------------------------------------
+// Fin del periodo (D29, Ronda 6/6C.1)
+// ------------------------------------------------------------
+/** Día siguiente a `fecha` (YYYY-MM-DD), en calendario local. */
+function diaSiguiente(fecha: string): string {
+  const d = new Date(`${fecha}T00:00:00`)
+  d.setDate(d.getDate() + 1)
+  const dos = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`
+}
+
+/**
+ * Instante desde el que el periodo que termina en `semanaFin` puede CERRARSE: la
+ * medianoche local que sigue a su último día. El rango es inclusivo por días
+ * (`coversDate`), así que todo el día `semanaFin` pertenece al periodo.
+ */
+export function periodClosableFrom(semanaFin: string): string {
+  return new Date(`${diaSiguiente(semanaFin)}T00:00:00`).toISOString()
+}
+
+/**
+ * D29: no se cierra definitivamente un periodo que no ha terminado. `null` = ya
+ * terminó. Usa el FIN DEL PROPIO RANGO (no asume lunes–sábado ni lunes–domingo).
+ * `ahora` lo pone el servicio; en local es el reloj del dispositivo (la autoridad
+ * temporal definitiva será el servidor). Calcular la liquidación provisional no
+ * pasa por aquí: solo el cierre definitivo.
+ */
+export function periodNotEndedReason(semanaFin: string, ahora: string): string | null {
+  if (!semanaFin) return null
+  if (ahora >= periodClosableFrom(semanaFin)) return null
+  return `El periodo termina el ${semanaFin} y podrá cerrarse a partir del ${diaSiguiente(semanaFin)} a las 00:00. Mientras tanto puedes generar y revisar la liquidación provisional.`
+}
+
+// ------------------------------------------------------------
 // Validación del rango a cerrar
 // ------------------------------------------------------------
 /**

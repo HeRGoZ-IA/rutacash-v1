@@ -32,7 +32,7 @@ import {
 import { closeCashSettlement, previewCashSettlement, waitClockPast } from '../src/services/cashSettlementService'
 import { computeRouteCashReconciliation } from '../src/services/routeCashReconciliation'
 import { carteraEnCalleOf, getRouteBase } from '../src/services/cashboxEngine'
-import { addDays, today } from '../src/lib/formatters'
+import { addDays, nowISO, today } from '../src/lib/formatters'
 import type { Sale, User } from '../src/models/types'
 
 // ============================================================
@@ -88,6 +88,18 @@ async function empresa(capitalInicial = 5000) {
 const capital = (valor: number, fecha?: string) => registerCapital({ actor: ADMIN, tenantId: T, routeId: R1, valor, fecha })
 const darBase = (u: User, amount: number) =>
   assignBaseToWorker({ actor: ADMIN, tenantId: T, routeId: R1, recipientUserId: u.id, amount, motivo: 'Base para el desembolso' })
+
+/**
+ * Cierre ANTICIPADO como los que la app permitía antes de D29 (Ronda 6/6C.1): hoy
+ * `closeSettlement` lo rechaza, pero esos documentos existen en datos históricos y
+ * siguen protegiendo su periodo. Se archiva con las cifras del motor, como lo hacía
+ * el servicio.
+ */
+async function cierreAnticipadoHistorico(semanaInicio: string, semanaFin: string) {
+  const calculo = await generateWeeklySettlement({ tenantId: T, routeId: R1, semanaInicio, semanaFin })
+  await db.weeklySettlements.add({ ...calculo, status: 'cerrada', closedAt: nowISO(), closedByUserId: ADMIN.id, createdByUserId: ADMIN.id, version: 1 } as never)
+  return calculo
+}
 
 let cli = 0
 async function entrada(by: User, valor: number): Promise<SaleInputs> {
@@ -469,7 +481,7 @@ await spec('CLOSE6C-002', 'Cierres', 'escrituras con fecha en un periodo cerrado
   // Semana en curso cerrada antes de tiempo: un desembolso de hoy tampoco entra.
   const hoyAprobada = await aprobada(FABIO, 500)
   await darBase(FABIO, 500)
-  await closeSettlement({ actor: ADMIN, tenantId: T, routeId: R1, semanaInicio: HOY, semanaFin: HOY })
+  await cierreAnticipadoHistorico(HOY, HOY)
   const d = await sinEfecto(() => confirmDisbursement(hoyAprobada.id, FABIO))
   const eDir = await entrada(ADMIN, 100)
   const directa = await sinEfecto(() => createDirectSale(eDir, ADMIN))
@@ -501,7 +513,7 @@ await spec('CLOSE6C-004', 'Cierres', 'castigar después de los cierres no altera
   const s = await creditoDesembolsado(2000)
   const cuadre = await closeCashSettlement({ actor: LAURA, tenantId: T, routeId: R1, userId: JUAN.id, entregado: 0 })
   waitClockPast(cuadre.hasta)
-  await closeSettlement({ actor: ADMIN, tenantId: T, routeId: R1, semanaInicio: HOY, semanaFin: HOY })
+  await cierreAnticipadoHistorico(HOY, HOY)
   const docs = JSON.stringify([await db.cashSettlements.toArray(), await db.weeklySettlements.toArray()])
   const vivoAntes = await generateWeeklySettlement({ tenantId: T, routeId: R1, semanaInicio: HOY, semanaFin: HOY })
   await markSaleLost(s.id, ADMIN, 'Cliente ilocalizable hace 45 días')

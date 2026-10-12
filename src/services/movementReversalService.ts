@@ -41,6 +41,7 @@ import { loadCapitalRows, type CapitalControlDatabase } from '@/services/capital
 import { logAction } from '@/services/auditService'
 import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
 import { reconciliationTables } from '@/services/cashCustodyService'
+import { closedPeriodBlockedReason } from '@/services/periodGuard'
 import type {
   CapitalMovement, CashCustodyMovement, MovementReversalFields, PartnerCashMovement, Route, Transfer, User, Withdrawal,
 } from '@/models/types'
@@ -75,7 +76,21 @@ function assertVigente(m: MovementReversalFields | undefined, tenantId: string, 
 
 /** Alcance de las anulaciones de fondos: conciliación + libro de capital. */
 function reversalTables(database: RutaCashDB) {
-  return [...new Set([...reconciliationTables(database), database.capitalLedger, database.routeCapitalControllerEvents])]
+  return [...new Set([...reconciliationTables(database), database.capitalLedger, database.routeCapitalControllerEvents, database.weeklySettlements])]
+}
+
+/**
+ * D7 (Ronda 6/6C.1): la anulación es un asiento NUEVO con la fecha de HOY. No puede
+ * entrar en una semana cerrada de ninguna ruta implicada; tampoco se le busca otra
+ * fecha: sin periodo abierto se rechaza (se reabre la semana con motivo). El
+ * original no se toca y su semana —abierta o cerrada— conserva sus cifras.
+ */
+async function exigirPeriodoAbiertoHoy(routeIds: (string | undefined)[], database: RutaCashDB): Promise<void> {
+  for (const routeId of routeIds) {
+    if (!routeId) continue
+    const cerrado = await closedPeriodBlockedReason(routeId, today(), database)
+    if (cerrado) throw new MovementReversalError(`No se puede anular hoy. ${cerrado}`)
+  }
 }
 
 /**
@@ -131,6 +146,7 @@ export async function reverseCapitalMovement(
   await database.transaction('rw', reversalTables(database), async () => {
     const m = await database.capitalMovements.get(movementId)
     assertVigente(m, tenantId, x => (x as CapitalMovement).tenantId)
+    await exigirPeriodoAbiertoHoy([m!.routeId], database)
     const responsable = await responsableParaCorregir(actor, m!.routeId, tenantId, database)
     const ahora = nowISO()
     await assertFondosParaRevertir(database, tenantId, m!.routeId, m!.valor, ahora)
@@ -166,6 +182,7 @@ export async function reverseWithdrawal(
   await database.transaction('rw', reversalTables(database), async () => {
     const w = await database.withdrawals.get(movementId)
     assertVigente(w, tenantId, x => (x as Withdrawal).tenantId)
+    await exigirPeriodoAbiertoHoy([w!.routeId], database)
     const responsable = await responsableParaCorregir(actor, w!.routeId, tenantId, database)
     const ahora = nowISO()
     // Anular un retiro DEVUELVE el dinero a la Route desde la bolsa del responsable
@@ -214,6 +231,7 @@ export async function reverseTransfer(
   await database.transaction('rw', [...reversalTables(database), database.partnerCashMovements], async () => {
     const t = await database.transfers.get(movementId)
     assertVigente(t, tenantId, x => (x as Transfer).tenantId)
+    await exigirPeriodoAbiertoHoy([t!.routeOrigenId, t!.routeDestinoId], database)
     // v16: corrige el responsable de CADA ruta implicada (o el SuperAdmin).
     const responsables: User[] = []
     for (const routeId of [t!.routeOrigenId, t!.routeDestinoId].filter(Boolean) as string[]) {

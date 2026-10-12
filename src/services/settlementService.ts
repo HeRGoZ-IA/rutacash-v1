@@ -39,6 +39,7 @@ import {
   isProtectingClosure,
   nextClosureVersion,
   officeSnapshotOf,
+  periodNotEndedReason,
   settlementStatus,
   supersededClosures,
 } from '@/lib/settlementPeriods'
@@ -94,10 +95,12 @@ export interface CloseSettlementParams {
 /**
  * CIERRA una semana de UNA ruta y archiva el documento.
  *
- * Orden deliberado: permisos → ruta y empresa → validación del periodo → cálculo
- * del motor → snapshot de Oficina → escritura. Todas las lecturas ocurren ANTES de
- * la transacción, porque una transacción de Dexie solo puede tocar las tablas que
- * declara y el cálculo financiero lee ocho tablas distintas.
+ * Orden deliberado: permisos → ruta y empresa → validación del periodo → snapshot
+ * de Oficina → (bajo bloqueo) revalidación, cálculo del motor y escritura.
+ *
+ * D29 (Ronda 6/6C.1): solo se cierra un periodo que YA TERMINÓ
+ * (`periodNotEndedReason`, sobre el fin del propio rango). La liquidación
+ * provisional (`generateWeeklySettlement`) sigue disponible en cualquier momento.
  */
 export async function closeSettlement(
   params: CloseSettlementParams,
@@ -120,38 +123,52 @@ export async function closeSettlement(
   //      responsable válido: fail closed.
   assertRouteCashAuthority(actor, route, 'correct', await database.users.where('tenantId').equals(tenantId).toArray())
 
-  // 3) Estado actual del periodo en esa ruta.
+  // 3) Estado actual del periodo en esa ruta: ya cerrado, solapado o sin terminar
+  //    (D29). Aviso temprano; la decisión definitiva se toma bajo bloqueo (5).
   const existentes = await database.weeklySettlements.where('routeId').equals(routeId).toArray()
-  const bloqueo = closureBlockedReason(existentes, routeId, semanaInicio, semanaFin)
+  const bloqueo = closureBlockedReason(existentes, routeId, semanaInicio, semanaFin) ?? periodNotEndedReason(semanaFin, nowISO())
   if (bloqueo) throw new SettlementError(bloqueo)
 
-  // 4) IMPORTES: los produce el motor financiero AHORA, no la pantalla.
-  const calculo = await generateWeeklySettlement({ tenantId, routeId, semanaInicio, semanaFin }, database)
-
-  // 5) SNAPSHOT DE OFICINA. Se congela el nombre y el código del momento; una ruta
+  // 4) SNAPSHOT DE OFICINA. Se congela el nombre y el código del momento; una ruta
   //    Sin Oficina se archiva como "Sin Oficina" sin inventar ninguna.
   const offices = await database.offices.where('tenantId').equals(tenantId).toArray()
   const snapshot = officeSnapshotOf(route, offices)
 
-  const version = nextClosureVersion(existentes, routeId, semanaInicio, semanaFin)
-  const sustituidos = supersededClosures(existentes, routeId, semanaInicio, semanaFin)
-
-  const documento: WeeklySettlement = {
-    ...calculo,
-    status: 'cerrada',
-    createdByUserId: actor?.id,
-    closedAt: nowISO(),
-    closedByUserId: actor?.id,
-    version,
-    ...snapshot,
-    // Foto del responsable de capital al cerrar: el histórico no se recalcula si
-    // después cambia el responsable de la ruta.
-    capitalControllerAdminIdAtClose: route.capitalControllerAdminId,
-  }
-
-  // 6) ESCRITURA ATÓMICA: el documento nuevo y el enlace de los sustituidos viajan
-  //    juntos. Si algo falla no queda un cierre huérfano ni un histórico a medias.
-  await database.transaction('rw', [database.weeklySettlements], async () => {
+  // 5) REVALIDACIÓN, IMPORTES Y ESCRITURA BAJO UN ÚNICO BLOQUEO (Ronda 6/6C.1).
+  //    · Fin del periodo (D29) y duplicado/solapamiento se comprueban otra vez con
+  //      los cierres releídos: dos cierres simultáneos no archivan dos documentos.
+  //    · Los importes los produce el motor financiero AHORA, con las tablas del
+  //      libro bloqueadas: ningún movimiento con fecha del periodo (que valida el
+  //      cierre dentro de su propia transacción, `periodGuard`) se cuela entre el
+  //      cálculo y el archivo.
+  //    · El documento nuevo y el enlace de los sustituidos viajan juntos: si algo
+  //      falla no queda un cierre huérfano ni un histórico a medias.
+  let documento!: WeeklySettlement
+  let sustituidos: WeeklySettlement[] = []
+  let version = 1
+  await database.transaction('rw', [
+    database.weeklySettlements, database.capitalMovements, database.payments, database.sales,
+    database.expenses, database.transfers, database.withdrawals,
+  ], async () => {
+    const vigentes = await database.weeklySettlements.where('routeId').equals(routeId).toArray()
+    const ahora = nowISO()
+    const motivo = closureBlockedReason(vigentes, routeId, semanaInicio, semanaFin) ?? periodNotEndedReason(semanaFin, ahora)
+    if (motivo) throw new SettlementError(motivo)
+    const calculo = await generateWeeklySettlement({ tenantId, routeId, semanaInicio, semanaFin }, database)
+    version = nextClosureVersion(vigentes, routeId, semanaInicio, semanaFin)
+    sustituidos = supersededClosures(vigentes, routeId, semanaInicio, semanaFin)
+    documento = {
+      ...calculo,
+      status: 'cerrada',
+      createdByUserId: actor?.id,
+      closedAt: ahora,
+      closedByUserId: actor?.id,
+      version,
+      ...snapshot,
+      // Foto del responsable de capital al cerrar: el histórico no se recalcula si
+      // después cambia el responsable de la ruta.
+      capitalControllerAdminIdAtClose: route.capitalControllerAdminId,
+    }
     await database.weeklySettlements.add(documento)
     for (const previo of sustituidos) {
       await database.weeklySettlements.update(previo.id, { supersededBy: documento.id })

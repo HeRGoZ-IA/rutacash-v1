@@ -27,3 +27,4 @@ tests/_out.transferops.mjs
 tests/_out.movementhistory.mjs
 tests/_out.disbursement.mjs
 tests/_out.capitalcustody.mjs
+tests/_out.periodauthority.mjs
