@@ -25,3 +25,4 @@ tests/_out.adminexpense.mjs
 tests/_out.adminpool.mjs
 tests/_out.transferops.mjs
 tests/_out.movementhistory.mjs
+tests/_out.disbursement.mjs

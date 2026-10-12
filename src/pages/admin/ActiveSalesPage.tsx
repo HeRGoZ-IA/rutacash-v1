@@ -14,7 +14,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useDataRevision } from '@/hooks/useDataRevision'
 import { useRouteCapital } from '@/hooks/useRouteCapital'
 import { generateId } from '@/lib/utils'
-import { formatCurrency, formatDate, today, nowISO } from '@/lib/formatters'
+import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import {
   generateInstallments, calculateTotalWithInterest,
   estimateFinalDate, calculateInstallmentValue,
@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/PaymentAnnulment'
 import { registerPayment, quickAmounts } from '@/services/paymentService'
 import { CollectorPicker } from '@/components/ui/CollectorPicker'
-import { createDirectSale, findActiveSaleForClient } from '@/services/saleRequestService'
+import { createDirectSale, findActiveSaleForClient, markSaleLost } from '@/services/saleRequestService'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
@@ -308,7 +308,15 @@ export default function ActiveSalesPage() {
 
   async function markLost() {
     if (!lostSale || !motivoPerdida) { toast.error('Ingresa el motivo'); return }
-    await db.sales.update(lostSale.id, { status: 'perdida', motivoPerdida, updatedAt: nowISO() })
+    if (!user) return
+    // El servicio valida permiso, estado vigente y audita (Ronda 6/6B).
+    try {
+      await markSaleLost(lostSale.id, user, motivoPerdida)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo marcar la venta como perdida')
+      await load()
+      return
+    }
     toast.success('Venta marcada como perdida')
     setLostOpen(false)
     setDetailSale(null)

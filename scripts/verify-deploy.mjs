@@ -106,6 +106,9 @@ const MARCADORES = [
   ['Comprobante de movimiento registrado', true, 'comprobante imprimible (2026-10-11 R5/6)'],
   ['No acredita la entrega ni la recepción física del efectivo', true, 'comprobante sin recepciones inventadas (2026-10-11 R5/6)'],
   ['Ese identificador de operación ya corresponde a otro movimiento de Caja socios.', true, 'Caja socios validada e idempotente en el servicio (2026-10-11 R5/6)'],
+  // Ronda 6/6B (2026-10-11): desembolso una sola vez y estados terminales por servicio.
+  ['Esta venta ya fue desembolsada: no se puede confirmar otra vez.', true, 'desembolso único bajo bloqueo (2026-10-11 R6/6B)'],
+  ['falta el usuario que registra la pérdida.', true, 'marcar perdida por servicio con permiso y auditoría (2026-10-11 R6/6B)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

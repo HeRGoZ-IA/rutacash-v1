@@ -7,7 +7,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { formatCurrency, formatDate } from '@/lib/formatters'
-import { confirmDisbursement } from '@/services/saleRequestService'
+import { confirmDisbursement, SaleRuleError } from '@/services/saleRequestService'
 import type { Sale, Client } from '@/models/types'
 
 export default function CollectorDisbursementsPage() {
@@ -40,7 +40,12 @@ export default function CollectorDisbursementsPage() {
       await confirmDisbursement(sale.id, user ?? undefined)
       toast.success('Desembolso confirmado. La venta ya está activa para recaudo.')
       await load()
-    } catch { toast.error('Error al confirmar el desembolso') } finally { setConfirmingId(null) }
+    } catch (e) {
+      // Ya desembolsada (otra pestaña u otro trabajador) o en un estado que no lo
+      // admite: el servicio no escribió nada; se muestra su motivo y se recarga.
+      toast.error(e instanceof SaleRuleError ? e.message : 'Error al confirmar el desembolso')
+      await load()
+    } finally { setConfirmingId(null) }
   }
 
   return (

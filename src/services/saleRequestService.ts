@@ -558,6 +558,41 @@ export async function countPendingSaleRequestsForRoute(
 }
 
 /**
+ * El desembolso no se admite en el estado ACTUAL de la venta: ya está desembolsada,
+ * no está activa (perdida, finalizada, refinanciada) o su solicitud ya no está
+ * aprobada. Error de dominio: la operación no escribe nada.
+ */
+export class DisbursementStateError extends SaleRuleError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'DisbursementStateError'
+  }
+}
+
+/**
+ * Motivo por el que una venta NO admite desembolso ahora (null = lo admite). Regla
+ * pura y única: la aplica `confirmDisbursement` DENTRO de su transacción.
+ *
+ *   · Ya desembolsada → nunca otra vez. Una venta sin `disbursementStatus` (anterior
+ *     al flujo de solicitudes) se considera desembolsada, igual que en la Base y en
+ *     los cobros (`isSaleDisbursed`).
+ *   · Solo una venta 'activa' se desembolsa: 'perdida', 'finalizada' y
+ *     'refinanciada' son estados terminales.
+ *   · Si nació de una solicitud, la solicitud debe seguir 'approved' (no
+ *     'cancelled', 'rejected' ni ya 'disbursed').
+ */
+export function disbursementBlockedReason(
+  sale: Pick<Sale, 'status' | 'disbursementStatus'> | null | undefined,
+  request?: Pick<SaleRequest, 'status'> | null,
+): string | null {
+  if (!sale) return 'Venta no encontrada'
+  if (sale.disbursementStatus !== 'pendiente') return 'Esta venta ya fue desembolsada: no se puede confirmar otra vez.'
+  if (sale.status !== 'activa') return `La venta está ${sale.status}: no admite desembolso.`
+  if (request && request.status !== 'approved') return `La solicitud de esta venta está '${request.status}': no admite desembolso.`
+  return null
+}
+
+/**
  * Confirma el desembolso de una venta aprobada: la venta queda desembolsada
  * (cobrable) y la solicitud asociada pasa a 'disbursed'.
  *
@@ -573,31 +608,81 @@ export async function countPendingSaleRequestsForRoute(
  * ninguna caja: recaudaba sin poder desembolsar y su arqueo nunca cerraba.
  * Si quien confirma no tiene caja personal (Admin, Super Admin), el desembolso NO
  * se atribuye a nadie: queda como entrega administrativa de la ruta.
+ *
+ * UNA SOLA VEZ (Ronda 6/6B): estado de la venta y de su solicitud se RELEEN dentro de
+ * la transacción, con el bloqueo de escritura ya obtenido, y solo se escribe si
+ * `disbursementBlockedReason` lo admite. Un doble clic, una pestaña desactualizada u
+ * otro trabajador que confirme la misma venta reciben `DisbursementStateError` y no
+ * escriben nada: el responsable, el instante (frontera del cuadre) y la Base quedan
+ * como los dejó el primer desembolso. Una venta perdida o finalizada no se desembolsa.
  */
 export async function confirmDisbursement(saleId: string, actor?: User): Promise<void> {
-  const sale = await db.sales.get(saleId)
-  if (!sale) throw new Error('Venta no encontrada')
-  if (actor) assertCan(actor, 'sale.confirmDisbursement', { routeId: sale.routeId, tenantId: sale.tenantId })
+  const previa = await db.sales.get(saleId)
+  if (!previa) throw new Error('Venta no encontrada')
+  // Ruta y empresa no cambian nunca: el permiso puede validarse con esta lectura.
+  if (actor) assertCan(actor, 'sale.confirmDisbursement', { routeId: previa.routeId, tenantId: previa.tenantId })
   // Oficina inactiva → no se entregan desembolsos nuevos en sus rutas.
-  await assertRouteOperationalContext(sale.routeId)
-  const fechaDesembolso = today()
+  await assertRouteOperationalContext(previa.routeId)
   await db.transaction('rw', [db.sales, db.saleRequests], async () => {
     // Primera lectura DENTRO de la transacción: con el bloqueo ya obtenido, el
-    // instante sellado no puede quedar detrás de la frontera de un cuadre que se
-    // está cerrando en otra pestaña (ver `closeCashSettlement`).
-    await db.sales.get(saleId)
+    // estado no puede cambiar entre la comprobación y la escritura, y el instante
+    // sellado no puede quedar detrás de la frontera de un cuadre que se está
+    // cerrando en otra pestaña (ver `closeCashSettlement`).
+    const sale = await db.sales.get(saleId)
     const ahora = nowISO()
+    const request = sale?.saleRequestId ? await db.saleRequests.get(sale.saleRequestId) : undefined
+    const bloqueo = disbursementBlockedReason(sale, request)
+    if (bloqueo) throw new DisbursementStateError(bloqueo)
     await db.sales.update(saleId, {
       disbursementStatus: 'desembolsado',
       disbursedByCollectorId: actor && hasPersonalCashbox(actor.rol) ? actor.id : undefined,
       disbursedByUserId: actor?.id,
-      fechaDesembolso,
+      fechaDesembolso: today(),
       // Instante exacto: el cuadre por trabajador corta por instante, no por día.
       disbursedAt: ahora,
       updatedAt: ahora,
     })
-    if (sale.saleRequestId) {
-      await db.saleRequests.update(sale.saleRequestId, { status: 'disbursed' })
+    if (request) {
+      await db.saleRequests.update(request.id, { status: 'disbursed' })
     }
+  })
+}
+
+/**
+ * Marca una venta ACTIVA como perdida (castigada) con motivo. Es la ÚNICA vía: antes
+ * la pantalla de Ventas escribía `status: 'perdida'` directamente en la base.
+ *
+ * PERMISO: `sale.cancel` sobre la ruta. Hoy coincide exactamente con quien podía
+ * usar esa pantalla (Administrador y Super Admin, solo en sus rutas autorizadas);
+ * redefinir quién puede castigar o cancelar es la decisión D28.
+ *
+ * EFECTO: solo cambia el estado. No mueve dinero, no toca el desembolso (`disbursed*`)
+ * ni las parcelas: lo prestado sigue constando como desembolsado en la Base y en el
+ * cuadre de quien lo entregó, y deja de contar en la cartera. Una venta aprobada aún
+ * NO desembolsada que se marca perdida ya no admite desembolso
+ * (`disbursementBlockedReason`). El estado se relee dentro de la transacción: una
+ * venta que ya no está activa no cambia.
+ */
+export async function markSaleLost(saleId: string, actor: User, motivo: string): Promise<void> {
+  if (!actor) throw new SaleRuleError('No autorizado: falta el usuario que registra la pérdida.')
+  const previa = await db.sales.get(saleId)
+  if (!previa) throw new SaleRuleError('Venta no encontrada')
+  assertCan(actor, 'sale.cancel', { routeId: previa.routeId, tenantId: previa.tenantId })
+  const texto = (motivo ?? '').trim()
+  if (!texto) throw new SaleRuleError('Ingresa el motivo')
+  let antes!: Sale
+  await db.transaction('rw', [db.sales], async () => {
+    const sale = await db.sales.get(saleId)
+    if (!sale) throw new SaleRuleError('Venta no encontrada')
+    if (sale.status !== 'activa') throw new SaleRuleError(`La venta ya está ${sale.status}.`)
+    antes = sale
+    await db.sales.update(saleId, { status: 'perdida', motivoPerdida: texto, updatedAt: nowISO() })
+  })
+  // Fuera de la transacción, como el resto de auditorías de ventas.
+  await logAction({
+    tenantId: antes.tenantId, userId: actor.id, userRole: actor.rol, routeId: antes.routeId,
+    action: 'SALE_LOST', entityType: 'Sale', entityId: saleId, descripcion: 'Venta marcada como perdida', motivo: texto,
+    before: { status: antes.status, saldo: antes.saldo, disbursementStatus: antes.disbursementStatus },
+    after: { status: 'perdida' },
   })
 }
