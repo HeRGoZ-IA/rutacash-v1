@@ -1,0 +1,27 @@
+{
+  "name": "adex-saas-phase0a-poc",
+  "private": true,
+  "version": "0.0.0",
+  "description": "ADEX SaaS Fase 0A: POC experimental y descartable. No forma parte de la aplicación publicada.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test:unit": "node --test --test-reporter=spec \"test/unit/*.test.ts\"",
+    "test:integration": "node scripts/run-integration.ts",
+    "test:auth-real": "node --test --test-reporter=spec \"test/auth-real/*.test.ts\"",
+    "test": "npm run typecheck && npm run test:unit && npm run test:integration && npm run test:auth-real"
+  },
+  "dependencies": {
+    "jose": "6.2.12",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.0",
+    "@types/pg": "8.23.0",
+    "embedded-postgres": "17.9.0-beta.17",
+    "typescript": "6.0.3"
+  }
+}
