@@ -4,13 +4,14 @@
 |---|---|
 | Fecha | 2026-10-12 · `main` @ `520a331` |
 | Estado | **Propuesta.** No se inicia ninguna fase sin aprobación expresa del propietario |
+| Documento rector | [VISION_Y_PRINCIPIOS_SAAS_ADEX.md](./VISION_Y_PRINCIPIOS_SAAS_ADEX.md): visión multiempresa e internacional y principios P1–P10 que encuadran este plan |
 | Supuesto de arquitectura | La recomendación de [ARQUITECTURA_SAAS_PROPUESTA_2026-10.md](./ARQUITECTURA_SAAS_PROPUESTA_2026-10.md) (Postgres + API TypeScript con comandos). Si se elige otra, cambian las herramientas, no las fases ni las puertas |
 
 ## 1. Principios
 
 1. **El servidor es el único que escribe dinero.** Durante la transición, cada tipo de operación pasa del modo local al modo servidor **de una sola vez y por empresa**; nunca coexisten escrituras locales y del servidor sobre el mismo tipo de dato.
 2. **Ningún navegador es fuente de verdad automática.** Cada base local es una copia parcial y posiblemente divergente: se diagnostica, se exporta, se valida y se concilia **antes** de importar.
-3. **Las reglas no se reinterpretan.** D1–D30 y D7 se trasladan tal cual. Las pruebas existentes se reutilizan como contrato del servidor.
+3. **Las reglas no se reinterpretan.** Las reglas **vigentes y aprobadas** (D7, D24, D25, D26, D28, D29, D30 y el capital por Administrador v16) se trasladan tal cual. Las decisiones **abiertas** (D1–D4, D19–D23, D27, Secretario) no quedan aprobadas por migrar: se trasladan con el comportamiento actual del motor y se deciden aparte ([decisiones pendientes](./DECISIONES_PENDIENTES_SAAS_2026-10.md) §3). Las pruebas existentes se reutilizan como contrato del servidor.
 4. **Cada fase tiene puerta de aceptación y reversión** antes de afectar a una empresa real.
 5. **Ningún dato real se modifica fuera de la importación aprobada.** Las anomalías se reportan y las decide el propietario.
 
@@ -18,7 +19,7 @@
 
 | Fase | Contenido | Depende de | Puerta de aceptación |
 |---|---|---|---|
-| **0 · Decisiones y preparación** | Aprobar DS-01…DS-12. Definir esquema SQL desde `types.ts` v16. Montar el banco de pruebas de contratos que ejecute las suites actuales contra un adaptador del servidor | — | Decisiones firmadas; el esquema revisado reproduce las 28 tablas (o justifica las que desaparecen, como `cashboxMovements`, legado sin escritores) |
+| **0 · Decisiones y preparación** | Aprobar las decisiones que bloquean el inicio (DS-01, aprobada; DS-02). Definir esquema SQL desde `types.ts` v16. Montar el banco de pruebas de contratos que ejecute las suites actuales contra un adaptador del servidor | — | Decisiones de las que depende esta fase firmadas; el esquema revisado reproduce las 28 tablas (o justifica las que desaparecen, como `cashboxMovements`, legado sin escritores) |
 | **1 · Identidad y empresas** | Identidad central (contraseñas con hash, sesiones revocables, recuperación); empresas, usuarios, roles y `authorizedRouteIds` en el servidor; integración con el plano de control | 0, DS-03, DS-05 | Pruebas de aislamiento: un token de A no accede a B; usuario desactivado rechazado; **ninguna contraseña en el cliente** (se eliminan `password` de la sesión y de IndexedDB) |
 | **2 · Estructura y catálogo** | Oficinas, rutas (con responsable de capital), asignaciones, categorías, clientes. Las 20 escrituras directas de pantallas pasan a comandos. Se acaban los borrados físicos de usuarios, rutas y clientes con historia (DS-11) | 1 | `permissions` (559) en verde contra el servidor; `withCapitalControllerGuard` como restricción transaccional |
 | **3 · Capital y caja** | Libro de capital y bolsas; colocación, retiro y transferencias (con Caja socios y entrega en mano); custodia de Base; filas de saldo con bloqueo ordenado | 2 | `capitalcontrol`, `adminpool`, `basecash`, `routebase`, `workertransfer`, `transferops`, `supervisorbase` en verde contra el servidor; pruebas distribuidas **R2, R4, R5** |
@@ -29,6 +30,10 @@
 | **8 · Despliegue gradual** | Empresa por empresa, con bandera por empresa; retirada del modo local para escrituras | 7 | Cero incidencias críticas en el piloto durante el periodo acordado (DS-12) |
 
 Las fases 1–6 se construyen y prueban en un entorno **de staging con datos sintéticos**. Ninguna empresa real usa el servidor hasta la fase 7.
+
+**Decisiones por fase.** No hace falta aprobar todas las DS-01…DS-12 antes de empezar: cada decisión se aprueba **antes de la implementación que depende de ella**, según la columna «Bloquea» de [decisiones pendientes](./DECISIONES_PENDIENTES_SAAS_2026-10.md) (por ejemplo, DS-03 y DS-05 antes de la Fase 1; DS-07 antes de la 4; DS-04 antes de la 6; DS-06 y DS-12 antes de la 7). Las puertas de aceptación de cada fase se mantienen.
+
+**POC frente a backend.** Las Fases 0A y 0A.1 ([0A](./SAAS_FASE_0A_RESULTADOS.md), [0A.1](./SAAS_FASE_0A1_RESULTADOS.md)) son una prueba de concepto transaccional **sintética y descartable**. Validan el patrón (transacción, bloqueo, idempotencia, auditoría, RLS), pero **el backend financiero multiusuario de ADEX todavía no existe**: se construye en las fases 1–6.
 
 ## 3. Estrategia sin conexión segura
 

@@ -1,5 +1,18 @@
 # RutaCash — Roadmap Futuro
 
+> **Documento histórico (junio de 2026).** Se conserva sin cambios como registro de ideas. **No es una hoja de ruta aprobada.** Lo encuadran el documento rector [VISION_Y_PRINCIPIOS_SAAS_ADEX.md](./VISION_Y_PRINCIPIOS_SAAS_ADEX.md) (principios P1–P10) y las [decisiones SaaS](./DECISIONES_PENDIENTES_SAAS_2026-10.md). Nota añadida el 2026-10-14.
+>
+> **Superado:**
+> - «API REST/RPC en Edge Functions»: sustituido por DS-01 (API TypeScript propia con comandos transaccionales + PostgreSQL gestionado).
+> - «Sync bidireccional (offline-first con Supabase Realtime)»: contradice P2 (PostgreSQL central como única fuente de verdad financiera). La operación sin conexión queda acotada por DS-07/DS-08.
+> - «Bases de datos dedicadas por cliente» como modelo: sustituido por DS-15 (tablas compartidas + RLS + autorización en la API). La infraestructura dedicada es solo una excepción justificada.
+>
+> **Sin aprobar, sujeto a decisión:**
+> - Supabase y Supabase Auth: candidatos validados técnicamente (Fase 0A.1), no elegidos (DS-02, DS-03). La RLS por empresa sí está aprobada (DS-15).
+> - «Multi-moneda»: P6 prevé una moneda por empresa. No hay conversión entre monedas aprobada.
+> - «Benchmarking entre empresas»: debe respetar el aislamiento de P1.
+> - Integraciones de pago, mensajería y contabilidad: requieren decisión por país (P6).
+
 ## V2 — Backend Real (Supabase)
 
 - [ ] Migrar de IndexedDB a Supabase/PostgreSQL

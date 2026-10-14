@@ -4,6 +4,7 @@
 |---|---|
 | Fecha | 2026-10-12 · `main` @ `520a331` |
 | Estado | **Propuesta para decisión del propietario.** Nada de esto está aprobado ni implementado |
+| Actualización 2026-10-14 | La Opción A recomendada en §4 (API TypeScript propia + PostgreSQL gestionado) fue **aprobada como DS-01**. DS-15 **aprobada**: tablas compartidas, aislamiento por empresa con RLS y autorización en la API (la RLS deja de ser opcional). El proveedor (DS-02) y la identidad (DS-03) siguen abiertos. Nada está implementado en producción. Documento rector: [VISION_Y_PRINCIPIOS_SAAS_ADEX.md](./VISION_Y_PRINCIPIOS_SAAS_ADEX.md) |
 | Entradas | [Auditoría](./AUDITORIA_PREPARACION_SAAS_2026-10.md) · [Invariantes](./INVARIANTES_FINANCIERAS_2026-10.md) · [Riesgos](./RIESGOS_CONCURRENCIA_SAAS_2026-10.md) · [Plano de control](./CONTROL_PLANE_BACKEND_REQUIREMENTS_2026-09.md) |
 
 ## 1. Requisitos que deciden la arquitectura
