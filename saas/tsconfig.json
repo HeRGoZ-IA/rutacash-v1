@@ -1,0 +1,24 @@
+{
+  // Typecheck del paquete SaaS. Node ≥ 24 ejecuta este TypeScript sin compilar.
+  // `bundler` + alias `@/` porque el servidor IMPORTA las reglas de CLEAN tal cual
+  // (src/lib, src/models): misma resolución que Vite. En ejecución lo resuelve
+  // scripts/alias-hooks.mjs.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": { "@/*": ["../src/*"] }
+  },
+  "include": ["src", "scripts", "test", "db"]
+}

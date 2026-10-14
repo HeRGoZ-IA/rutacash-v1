@@ -1,0 +1,29 @@
+{
+  "name": "adex-saas",
+  "private": true,
+  "version": "0.1.0",
+  "description": "ADEX SaaS · Fases 0 y 1: esquema PostgreSQL multiempresa, identidad central y autorización. Staging con datos sintéticos. No forma parte del bundle de CLEAN.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test:unit": "node --import ./scripts/register-alias.mjs --test --test-reporter=spec \"test/unit/*.test.ts\"",
+    "test:db": "node --import ./scripts/register-alias.mjs scripts/run-db-tests.ts",
+    "test:auth-real": "node --import ./scripts/register-alias.mjs --test --test-reporter=spec \"test/auth-real/*.test.ts\"",
+    "test": "npm run typecheck && npm run test:unit && npm run test:db",
+    "db:rebuild": "node --import ./scripts/register-alias.mjs scripts/rebuild-local.ts",
+    "staging:check": "node scripts/staging-check.ts"
+  },
+  "dependencies": {
+    "jose": "6.2.12",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.0",
+    "@types/pg": "8.23.0",
+    "embedded-postgres": "17.9.0-beta.17",
+    "typescript": "6.0.3"
+  }
+}

@@ -1,0 +1,79 @@
+// ============================================================
+// Banco de contratos (plan §5.1): las 26 suites del motor local como contrato del
+// servidor. Cada suite indica la FASE en la que debe pasar contra el servidor
+// (columna «Puerta» del plan §2) y la familia de comandos que la sustituirá.
+//
+// Estado honesto por suite:
+//   'local'  → hoy se ejecuta contra el motor local (Dexie). Es la línea base.
+//   'server' → se ejecuta contra el servidor a través del adaptador. Ninguna lo está
+//              todavía: las Fases 0 y 1 no implementan comandos financieros.
+// `scripts/run-contract-bench.ts` ejecuta las 26 y compara los casos con este
+// manifiesto: una suite que pierda casos o falle rompe el banco.
+// ============================================================
+
+export type Target = 'local' | 'server';
+
+export interface SuiteContract {
+  suite: string;
+  /** Script de `package.json` de CLEAN. */
+  script: string;
+  cases: number;
+  /** Fase del plan en cuya puerta debe pasar CONTRA EL SERVIDOR. */
+  serverPhase: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  commands: string;
+  target: Target;
+  note?: string;
+}
+
+export const SUITES: readonly SuiteContract[] = [
+  { suite: 'permissions', script: 'test:permissions', cases: 559, serverPhase: 2, commands: 'autorización de todos los comandos', target: 'local',
+    note: 'Desde la Fase 1 el servidor evalúa `can()` de src/lib/permissions.ts sin copiarlo (test/integration/authz-parity)' },
+  { suite: 'financial', script: 'test:financial', cases: 180, serverPhase: 4, commands: 'pagos y parcelas', target: 'local' },
+  { suite: 'bootstrap', script: 'test:bootstrap', cases: 159, serverPhase: 2, commands: 'alta de empresa y estructura inicial', target: 'local',
+    note: 'No figura en la tabla del plan; se asigna a la Fase 2 (estructura). El alta de empresa por el Owner existe desde la Fase 1' },
+  { suite: 'platform', script: 'test:platform', cases: 64, serverPhase: 2, commands: 'plano de control Owner', target: 'local',
+    note: 'Depende de DS-17 (plano integrado o separado)' },
+  { suite: 'settlements', script: 'test:settlements', cases: 40, serverPhase: 6, commands: 'liquidación y cierre semanal', target: 'local' },
+  { suite: 'migrations', script: 'test:migrations', cases: 62, serverPhase: 7, commands: 'exportación y diagnóstico de bases Dexie', target: 'local' },
+  { suite: 'workercash', script: 'test:workercash', cases: 123, serverPhase: 6, commands: 'cuadre por trabajador', target: 'local' },
+  { suite: 'basecash', script: 'test:basecash', cases: 45, serverPhase: 3, commands: 'Base y custodia', target: 'local' },
+  { suite: 'interestrate', script: 'test:interestrate', cases: 8, serverPhase: 4, commands: 'solicitudes de venta (tasas)', target: 'local' },
+  { suite: 'activecredit', script: 'test:activecredit', cases: 10, serverPhase: 4, commands: 'crédito activo y solicitudes', target: 'local' },
+  { suite: 'financialreversal', script: 'test:financialreversal', cases: 15, serverPhase: 5, commands: 'anulación de capital, retiro y transferencia', target: 'local' },
+  { suite: 'routebase', script: 'test:routebase', cases: 21, serverPhase: 3, commands: 'Base de la ruta y conciliación', target: 'local' },
+  { suite: 'supervisorbase', script: 'test:supervisorbase', cases: 20, serverPhase: 3, commands: 'custodia del Supervisor', target: 'local' },
+  { suite: 'workertransfer', script: 'test:workertransfer', cases: 22, serverPhase: 3, commands: 'traspaso entre trabajadores', target: 'local' },
+  { suite: 'paymentreversal', script: 'test:paymentreversal', cases: 31, serverPhase: 5, commands: 'corrección y anulación de pagos', target: 'local' },
+  { suite: 'paymentsync', script: 'test:paymentsync', cases: 31, serverPhase: 4, commands: 'pagos con operationId y estados', target: 'local' },
+  { suite: 'expenseclassification', script: 'test:expenseclassification', cases: 31, serverPhase: 5, commands: 'gastos clasificados', target: 'local' },
+  { suite: 'capitalcontrol', script: 'test:capitalcontrol', cases: 47, serverPhase: 3, commands: 'capital por Administrador', target: 'local' },
+  { suite: 'expensecash', script: 'test:expensecash', cases: 14, serverPhase: 5, commands: 'gastos del trabajador', target: 'local' },
+  { suite: 'adminexpense', script: 'test:adminexpense', cases: 19, serverPhase: 5, commands: 'gastos de bolsa', target: 'local' },
+  { suite: 'adminpool', script: 'test:adminpool', cases: 8, serverPhase: 3, commands: 'bolsas de Administrador', target: 'local' },
+  { suite: 'transferops', script: 'test:transferops', cases: 10, serverPhase: 3, commands: 'transferencias', target: 'local' },
+  { suite: 'movementhistory', script: 'test:movementhistory', cases: 10, serverPhase: 3, commands: 'historial y Caja socios', target: 'local' },
+  { suite: 'disbursement', script: 'test:disbursement', cases: 13, serverPhase: 4, commands: 'desembolso único (D24–D26, D30)', target: 'local' },
+  { suite: 'capitalcustody', script: 'test:capitalcustody', cases: 28, serverPhase: 4, commands: 'CAP/CASH/AUTH de desembolsos', target: 'local' },
+  { suite: 'periodauthority', script: 'test:periodauthority', cases: 30, serverPhase: 6, commands: 'D7, D29, cierres y autoridad de caja', target: 'local' },
+];
+
+export const TOTAL_CASES = SUITES.reduce((n, s) => n + s.cases, 0);
+
+/**
+ * Extrae «suite → (casos, fallos)» de la salida de `npm test` de CLEAN. Las suites
+ * imprimen su total con cuatro formatos distintos; un formato desconocido no cuenta.
+ */
+export function parseSuiteTotals(output: string): Map<string, { cases: number; failed: number }> {
+  const out = new Map<string, { cases: number; failed: number }>();
+  const sections = output.split(/^> rutacash@[\d.]+ (test:\w+)$/m);
+  for (let i = 1; i < sections.length; i += 2) {
+    const script = sections[i]!;
+    const body = sections[i + 1] ?? '';
+    let m: RegExpMatchArray | null;
+    if ((m = body.match(/PRUEBA DE PERMISOS: (\d+) OK, (\d+) FALLIDAS/))) out.set(script, { cases: +m[1]! + +m[2]!, failed: +m[2]! });
+    else if ((m = body.match(/TOTAL: (\d+) casos\s+(\d+) PASS\s+(\d+) FAIL/))) out.set(script, { cases: +m[1]!, failed: +m[3]! });
+    else if ((m = body.match(/(\d+)\/(\d+) casos OK/))) out.set(script, { cases: +m[2]!, failed: +m[2]! - +m[1]! });
+    else if ((m = body.match(/^(\d+)\/(\d+) PASS · (\d+) FAIL/m))) out.set(script, { cases: +m[2]!, failed: +m[3]! });
+  }
+  return out;
+}
