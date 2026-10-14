@@ -33,6 +33,8 @@ export interface SupabaseVerifierConfig {
   hs256Secret?: string;
   audience?: string;
   clockToleranceSec?: number;
+  /** Reloj de verificación (solo pruebas: comprobar la expiración de un token real sin esperar). */
+  now?: () => Date;
 }
 
 export type TokenVerifier = (token: string) => Promise<VerifiedIdentity>;
@@ -56,11 +58,12 @@ export function createSupabaseJwtVerifier(cfg: SupabaseVerifierConfig): TokenVer
     let payload: JWTPayload;
     try {
       const alg = readAlg(token);
+      const opts = cfg.now ? { ...options, currentDate: cfg.now() } : options;
       if (alg === 'HS256') {
         if (!hsKey) throw new Error('HS256 not configured');
-        ({ payload } = await jwtVerify(token, hsKey, { ...options, algorithms: ['HS256'] }));
+        ({ payload } = await jwtVerify(token, hsKey, { ...opts, algorithms: ['HS256'] }));
       } else {
-        ({ payload } = await jwtVerify(token, keySet, { ...options, algorithms: ['ES256', 'RS256'] }));
+        ({ payload } = await jwtVerify(token, keySet, { ...opts, algorithms: ['ES256', 'RS256'] }));
       }
     } catch {
       throw new ApiError(401, 'INVALID_TOKEN');

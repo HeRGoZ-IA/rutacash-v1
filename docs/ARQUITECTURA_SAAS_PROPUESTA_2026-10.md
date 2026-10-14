@@ -16,7 +16,7 @@ Salen del código y de las rondas anteriores, no de preferencias:
    - Es un **libro contable relacional**.
 2. **Reglas ya escritas y probadas en TypeScript:**
    - `src/lib/*.ts`: `permissions`, `cashSettlementRules`, `capitalAllocation`, `settlementPeriods`, `paymentState`, `activeCredit`…;
-   - `src/services/*.ts`: 1.490 pruebas.
+   - `src/services/*.ts`: 1.600 pruebas (corrección documental en la Fase 0A.1: antes decía 1.490; ver SAAS_FASE_0A1_RESULTADOS.md §19).
    - Reescribirlas en otro lenguaje duplica la fuente de verdad.
 3. **Aislamiento por empresa** con un modelo de roles por ruta y una autoridad de caja por responsable (`routeCashAuthorityError`).
 4. **Trabajo de campo con mala conectividad:** el Cobrador registra pagos y visitas sin conexión (`syncStatus: 'pending'`).
@@ -80,7 +80,7 @@ El proveedor de PostgreSQL gestionado queda **abierto** (DS-02).
 Un **híbrido A+B** es compatible: usar Supabase solo como Postgres gestionado + Auth + RLS, manteniendo los comandos de dinero en la API TypeScript con conexión directa. Se elegiría por coste u operación, no por el modelo de datos.
 
 **Por qué:**
-1. **Las reglas ya existen y están probadas en TypeScript.** Traducirlas a PL/pgSQL (B puro) reabriría D24–D30 y D7 en otro lenguaje sin las 1.490 pruebas que hoy las sostienen.
+1. **Las reglas ya existen y están probadas en TypeScript.** Traducirlas a PL/pgSQL (B puro) reabriría D24–D30 y D7 en otro lenguaje sin las 1.600 pruebas que hoy las sostienen.
 2. **Los comandos necesitan transacciones de varias filas con bloqueo**: es lo que A da de forma directa y B solo dentro de RPC o funciones con conexión directa.
 3. **El aislamiento por empresa merece dos barreras** (API + RLS), y PostgreSQL ofrece RLS en cualquier proveedor.
 4. **El trabajo sin conexión es acotado:** una cola propia con `operationId` para pocas operaciones (pagos y visitas) cubre el requisito sin incorporar la Opción C. C queda como evolución si la operación sin conexión necesita más que eso (DS-07).

@@ -89,7 +89,7 @@ Las fases 1–6 se construyen y prueban en un entorno **de staging con datos sin
 
 ## 5. Pruebas
 
-1. **Contratos:** las 26 suites (1.490 casos) se ejecutan contra el servidor a través de un adaptador de repositorio. Una aserción solo puede cambiar si una decisión aprobada lo exige, y se documenta (mismo criterio que en las rondas 6B–6C.1).
+1. **Contratos:** las 26 suites (1.600 casos) se ejecutan contra el servidor a través de un adaptador de repositorio. Una aserción solo puede cambiar si una decisión aprobada lo exige, y se documenta (mismo criterio que en las rondas 6B–6C.1).
 2. **Concurrencia distribuida:** una prueba por riesgo R1–R11 de [RIESGOS_CONCURRENCIA_SAAS_2026-10.md](./RIESGOS_CONCURRENCIA_SAAS_2026-10.md), con clientes paralelos reales contra la API (no contra una base local).
 3. **Doble dispositivo de extremo a extremo:** el protocolo de dos equipos automatizado (dos navegadores, dos usuarios, misma empresa).
 4. **Aislamiento:** batería que intenta leer y escribir entre empresas con tokens, identificadores y rutas ajenos.

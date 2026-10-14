@@ -4,7 +4,7 @@
 |---|---|
 | Fecha | 2026-10-12 |
 | Estado auditado | `main` @ `520a331` (= `origin/main`); producción sirve `index-b05G8Ybt.js` |
-| Pruebas de referencia | 26 suites · 1.490 casos · 0 fallos (`npm test`) |
+| Pruebas de referencia | 26 suites · 1.600 casos · 0 fallos (`npm test`) — corrección documental de la Fase 0A.1: antes decía 1.490 por un error de suma; el código de pruebas no cambió |
 | Alcance | **Solo análisis.** No se modificó código, esquema, dependencias ni datos |
 | Documentos relacionados | [Invariantes](./INVARIANTES_FINANCIERAS_2026-10.md) · [Riesgos de concurrencia](./RIESGOS_CONCURRENCIA_SAAS_2026-10.md) · [Arquitectura propuesta](./ARQUITECTURA_SAAS_PROPUESTA_2026-10.md) · [Plan de migración](./PLAN_MIGRACION_SAAS_2026-10.md) · [Decisiones pendientes](./DECISIONES_PENDIENTES_SAAS_2026-10.md) |
 
@@ -20,7 +20,7 @@ ADEX es hoy una aplicación **local-first sin servidor**:
 - Cada navegador guarda **todo** (empresa, usuarios, contraseñas, cartera, caja y cuadres) en su propia IndexedDB (`RutaCashDB`, Dexie, esquema **v16**, 28 tablas).
 - La "sincronización" no envía nada (`src/services/syncService.ts:1-20`).
 
-Las reglas financieras ya están **centralizadas en servicios** que validan permisos y estado dentro de transacciones Dexie: 40 transacciones en 17 archivos. Además están cubiertas por 1.490 pruebas. Es la mejor base posible para migrar, pero esas garantías **solo valen dentro de un navegador**.
+Las reglas financieras ya están **centralizadas en servicios** que validan permisos y estado dentro de transacciones Dexie: 40 transacciones en 17 archivos. Además están cubiertas por 1.600 pruebas. Es la mejor base posible para migrar, pero esas garantías **solo valen dentro de un navegador**.
 
 Para el SaaS hay cuatro hallazgos que condicionan el diseño:
 1. **Autenticación local en texto plano:**
