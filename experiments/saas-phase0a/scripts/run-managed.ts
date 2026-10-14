@@ -93,20 +93,37 @@ async function verifyProject(): Promise<Verified> {
     const p = await mgmt<{ id: string; name: string; region: string; organization_id: string; status: string; database?: { version?: string } }>(`/v1/projects/${ref}`);
     if (!p.body) fail(`Management API /v1/projects/${ref} → ${p.status}`);
     if (p.body.name !== EXPECTED_NAME) fail(`el proyecto se llama "${p.body.name}", no "${EXPECTED_NAME}"`);
+    // Un token limitado al proyecto (recomendado) no puede leer la organización: el plan lo declara entonces
+    // el propietario, y la región declarada debe coincidir con la que devuelve la API.
     const o = await mgmt<{ id: string; name: string; plan?: string }>(`/v1/organizations/${p.body.organization_id}`);
-    if (!o.body) fail(`Management API /v1/organizations → ${o.status}`);
-    if (o.body.plan !== 'free') fail(`la organización no está en plan Free (plan=${o.body.plan ?? 'desconocido'})`);
+    let orgName: string;
+    let plan: string;
+    let how = 'Management API';
+    if (o.body) {
+      if (o.body.plan !== 'free') fail(`la organización no está en plan Free (plan=${o.body.plan ?? 'desconocido'})`);
+      orgName = o.body.name;
+      plan = 'free';
+    } else {
+      const att = /^free:([a-z0-9]{20}):([a-z0-9-]+)$/.exec(process.env['ADEX_POC_OWNER_ATTESTATION']?.trim() ?? '');
+      if (!att) fail(`Management API /v1/organizations → ${o.status} (token limitado al proyecto): falta ADEX_POC_OWNER_ATTESTATION="free:<ref>:<región>" para el plan`);
+      if (att[1] !== ref) fail('la declaración del propietario no corresponde a este proyecto');
+      if (att[2] !== p.body.region) fail(`la región declarada (${att[2]}) no coincide con la de la API (${p.body.region})`);
+      orgName = `${p.body.organization_id} (sin lectura de la organización)`;
+      plan = 'free (declarado por el propietario; la organización no es legible con un token de proyecto)';
+      how = 'Management API (nombre, región, configuración) + declaración del propietario (plan)';
+    }
     const all = await mgmt<Array<{ id: string; name: string; organization_id: string }>>('/v1/projects');
-    const siblings = (all.body ?? []).filter((x) => x.organization_id === p.body!.organization_id);
-    const pocs = (all.body ?? []).filter((x) => x.name === EXPECTED_NAME);
-    if (pocs.length !== 1) fail(`hay ${pocs.length} proyectos llamados ${EXPECTED_NAME}; se autoriza exactamente uno`);
+    const visible = all.body ?? [];
+    const siblings = visible.filter((x) => x.organization_id === p.body!.organization_id);
+    const pocs = visible.filter((x) => x.name === EXPECTED_NAME);
+    if (all.body && pocs.length !== 1) fail(`hay ${pocs.length} proyectos llamados ${EXPECTED_NAME}; se autoriza exactamente uno`);
     const auth = await mgmt<{ jwt_exp?: number; disable_signup?: boolean }>(`/v1/projects/${ref}/config/auth`);
     const rest = await mgmt<{ db_schema?: string }>(`/v1/projects/${ref}/postgrest`);
     const keys = await mgmt<{ keys?: Array<{ id: string; algorithm: string; status: string }> } | Array<{ id: string; algorithm: string; status: string }>>(`/v1/projects/${ref}/config/auth/signing-keys`);
     const keyList = Array.isArray(keys.body) ? keys.body : keys.body?.keys;
-    note(`organización: ${o.body.name} · plan ${o.body.plan} · proyectos en la organización: ${siblings.length}`);
+    note(`organización: ${orgName} · proyectos visibles para el token: ${all.body ? siblings.length : `no legible (${all.status})`}`);
     return {
-      name: p.body.name, region: p.body.region, org: o.body.name, plan: o.body.plan, how: 'Management API',
+      name: p.body.name, region: p.body.region, org: orgName, plan, how,
       dbVersion: p.body.database?.version, authJwtExp: auth.body?.jwt_exp, signupDisabled: auth.body?.disable_signup,
       exposedSchemas: rest.body?.db_schema,
       signingKeys: keyList ? keyList.map((k) => `${k.algorithm}:${k.status}`).join(', ') : `no disponible (${keys.status})`,
