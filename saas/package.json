@@ -14,7 +14,10 @@
     "test:auth-real": "node --import ./scripts/register-alias.mjs --test --test-reporter=spec \"test/auth-real/*.test.ts\"",
     "test": "npm run typecheck && npm run test:unit && npm run test:db",
     "db:rebuild": "node --import ./scripts/register-alias.mjs scripts/rebuild-local.ts",
-    "staging:check": "node scripts/staging-check.ts"
+    "staging:check": "node --import ./scripts/register-alias.mjs scripts/staging.ts --check",
+    "staging:migrate": "node --import ./scripts/register-alias.mjs scripts/staging.ts --migrate",
+    "staging:test": "node --import ./scripts/register-alias.mjs scripts/staging.ts --test",
+    "bench": "node scripts/run-contract-bench.ts"
   },
   "dependencies": {
     "jose": "6.2.12",

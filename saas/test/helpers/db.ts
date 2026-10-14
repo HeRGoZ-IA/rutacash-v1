@@ -58,18 +58,31 @@ export async function createTestDb(label: string, opts: { seed?: boolean } = {})
   };
 }
 
+export interface DbContext {
+  identityId?: string;
+  membershipId?: string;
+  companyId?: string;
+  /** Sesión del token (Fase 1). Por defecto, una sesión fija por identidad. */
+  sessionId?: string | null;
+  /** `iat` del token en segundos. Por defecto, ahora. */
+  iat?: number | null;
+}
+
 /** Ejecuta `fn` como `adex_api` con el contexto RLS fijado SOLO para esa transacción. */
 export async function asApi<T>(
   pool: pg.Pool,
-  ctx: { identityId?: string; membershipId?: string; companyId?: string },
+  ctx: DbContext,
   fn: (c: pg.PoolClient) => Promise<T>,
 ): Promise<T> {
   const c = await pool.connect();
   try {
     await c.query('begin');
+    const session = ctx.sessionId === undefined ? (ctx.identityId ? defaultSession(ctx.identityId) : '') : (ctx.sessionId ?? '');
+    const iat = ctx.iat === undefined ? Math.floor(Date.now() / 1000) : ctx.iat;
     await c.query(
-      `select set_config('adex.identity_id', $1, true), set_config('adex.membership_id', $2, true), set_config('adex.company_id', $3, true)`,
-      [ctx.identityId ?? '', ctx.membershipId ?? '', ctx.companyId ?? ''],
+      `select set_config('adex.identity_id', $1, true), set_config('adex.membership_id', $2, true), set_config('adex.company_id', $3, true),
+              set_config('adex.session_id', $4, true), set_config('adex.token_iat', $5, true)`,
+      [ctx.identityId ?? '', ctx.membershipId ?? '', ctx.companyId ?? '', session, iat === null ? '' : String(iat)],
     );
     const out = await fn(c);
     await c.query('commit');
@@ -80,6 +93,11 @@ export async function asApi<T>(
   } finally {
     c.release();
   }
+}
+
+/** Sesión determinista por identidad (formato UUID). */
+export function defaultSession(identityId: string): string {
+  return `${identityId.slice(0, 24)}5e55${identityId.slice(28)}`;
 }
 
 export async function count(q: pg.ClientBase | pg.Pool, sql: string, params: unknown[] = []): Promise<number> {

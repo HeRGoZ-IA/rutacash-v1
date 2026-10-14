@@ -32,7 +32,8 @@ export function readMigrations(dir = MIGRATIONS_DIR): MigrationFile[] {
     .filter((f) => /^\d{4}_[a-z0-9_]+\.sql$/.test(f))
     .sort()
     .map((f) => {
-      const sql = readFileSync(path.join(dir, f), 'utf8');
+      // Fin de línea normalizado: un checkout con `core.autocrlf` no cambia la suma.
+      const sql = readFileSync(path.join(dir, f), 'utf8').replace(/\r\n/g, '\n');
       return { version: f.slice(0, 4), name: f, sql, checksum: createHash('sha256').update(sql).digest('hex') };
     });
 }

@@ -55,11 +55,18 @@ describe('Fase 0 · aislamiento por empresa y privilegios', () => {
     for (const r of rows) assert.ok(r.rls && r.force, `${r.t} must enable and force RLS`);
   });
 
-  test('TEN-003 · privilegios: sin DELETE/TRUNCATE; escrituras solo las de la fase; planos separados', async () => {
+  test('TEN-003 · privilegios: sin TRUNCATE ni DELETE financiero; escrituras solo las del contrato; planos separados', async () => {
+    // Privilegios de tabla Y de columna (un INSERT/UPDATE de columnas concretas no aparece en role_table_grants).
     const grants = (await db.admin.query(
-      `select grantee, table_schema || '.' || table_name t, privilege_type p from information_schema.role_table_grants
-        where table_schema in ('adex', 'adex_control') and grantee in ('adex_api', 'adex_control', 'anon', 'authenticated', 'service_role', 'authenticator', 'PUBLIC')`)).rows;
-    assert.deepEqual(grants.filter((g) => ['DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'].includes(g.p)), []);
+      `select distinct grantee, t, p from (
+         select grantee, table_schema || '.' || table_name t, privilege_type p, table_schema s from information_schema.role_table_grants
+         union all
+         select grantee, table_schema || '.' || table_name, privilege_type, table_schema from information_schema.column_privileges) g
+        where s in ('adex', 'adex_control')
+          and grantee in ('adex_api', 'adex_control', 'anon', 'authenticated', 'service_role', 'authenticator', 'PUBLIC')`)).rows;
+    assert.deepEqual(grants.filter((g) => ['TRUNCATE', 'REFERENCES', 'TRIGGER'].includes(g.p)), []);
+    // DELETE solo donde el contrato lo declara (asignación de rutas, nunca datos financieros).
+    assert.deepEqual(grants.filter((g) => g.p === 'DELETE' && !(EXPECTED_API_WRITES[g.t] ?? []).includes('DELETE')), []);
     assert.deepEqual(grants.filter((g) => !['adex_api', 'adex_control'].includes(g.grantee)), [], 'Data API roles and PUBLIC have nothing');
     const apiWrites: Record<string, string[]> = {};
     for (const g of grants.filter((x) => x.grantee === 'adex_api' && x.p !== 'SELECT')) (apiWrites[g.t] ??= []).push(g.p);

@@ -118,7 +118,8 @@ describe('Fase 0 · esquema completo frente a Dexie v16', () => {
         `select schemaname || '.' || tablename t from pg_tables where schemaname in ('adex', 'adex_control') order by 1`,
       )).rows.map((r) => r.t);
       const extra = real.filter((t) => !mapped.has(t)).sort();
-      assert.deepEqual(extra, ['adex.currencies', 'adex.identities', 'adex.membership_routes', 'adex.operations']);
+      // Fase 0: catálogo, identidad (DS-05), rutas autorizadas, idempotencia. Fase 1: sesiones revocadas.
+      assert.deepEqual(extra, ['adex.currencies', 'adex.identities', 'adex.membership_routes', 'adex.operations', 'adex.revoked_sessions']);
     });
 
     test('SCHEMA-006 · toda tabla operativa lleva company_id NOT NULL y clave (company_id, id)', async () => {
