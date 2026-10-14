@@ -53,9 +53,9 @@
 
 ---
 
-## Fase 1 — Identidad central y autorización multiempresa: **CONSTRUIDA · cierre BLOQUEADO por un criterio**
+## Fase 1 — Identidad central y autorización multiempresa: **CERRADA** (2026-10-14)
 
-Todos los criterios pasan con PostgreSQL real y la API real, salvo uno: **la autenticación con Supabase Auth real en staging no se pudo ejecutar**, porque ADEX-Staging no se puede crear sin una decisión del propietario (ver «Qué queda bloqueado»). La Fase 1 no se declara cerrada hasta que AUTH-STG-001…004 pasen.
+Todos los criterios pasan con PostgreSQL real, la API real y, desde el 2026-10-14, contra **Supabase gestionado real en ADEX-Staging** (ver «Validación remota en ADEX-Staging»).
 
 ### Decisiones aprobadas por el propietario (2026-10-14)
 
@@ -84,38 +84,43 @@ Todos los criterios pasan con PostgreSQL real y la API real, salvo uno: **la aut
 
 | Criterio | Pruebas | Estado |
 |---|---|---|
-| Autenticación con el proveedor central | Verificador: IDN-001. Cliente → proveedor → API: CLI-010. **Con Supabase Auth real:** AUTH-STG-001…004 preparadas | **PASS en local** · real **BLOQUEADO** (sin ADEX-Staging) |
+| Autenticación con el proveedor central | Verificador: IDN-001. Cliente → proveedor → API: CLI-010. **Con Supabase Auth real:** AUTH-STG-001…004 preparadas | PASS (local y Supabase Auth real) |
 | Tokens verificados correctamente | IDN-001: firma ajena, `alg none`, HS256, caducado, `iss`/`aud` ajenos, `anon`/`service_role`, sin `session_id` o `iat` → 401 | PASS (emisor local con formato Supabase; en 0A.1 ya se verificó con tokens reales de Supabase) |
-| La empresa A no accede a la B | IDN-020 (membresía, ruta, miembros y encabezados inyectados), TEN-004/005, OWN-003 | PASS |
+| La empresa A no accede a la B | IDN-020 (membresía, ruta, miembros y encabezados inyectados), TEN-004/005, OWN-003. En gestionado: STG-RLS-003…006 | PASS |
 | Un usuario desactivado no sigue operando | Membresía: IDN-033, REV-001/002. Persona: IDN-042, REV-005. Empresa suspendida: REV-004 | PASS |
 | Sin herencia ni acumulación | IDN-021 (Ana: cobradora, administradora, supervisora), IDN-022 (los claims del token no conceden nada), TEN-007, AUTHZ-001 (paridad con `can()` en 6 roles × todas las capacidades) | PASS |
 | Restricción por rutas | IDN-021, IDN-035 (quitar una ruta corta la siguiente petición), REV-003, TEN-006 | PASS |
 | Revocación de membresías y sesiones | REV-001…006 (REVOKE-004 por cada vía y `lock_timeout`), IDN-040/041 (cierre local y global; el mismo token deja de servir), OWN-007 | PASS |
 | Ninguna contraseña en el cliente de modo servidor | CLI-010: tras iniciar sesión, elegir y cambiar de contexto y cerrar sesión, la contraseña no aparece en la memoria de la sesión ni en ninguna base IndexedDB. CLI-002/003: el almacén rechaza claves de contraseña y no abre `RutaCashDB`. RT-005: ninguna columna de contraseña en PostgreSQL | PASS |
 | Plano Owner sin autoridad financiera | OWN-001…007: solo campos estructurales; el rol de control no lee nada de `adex`; sin impersonación; no puede darse membresía | PASS |
-| Reconstruible desde migraciones y semillas | MIG-001…005 con las 6 migraciones; `npm run db:rebuild` | PASS |
+| Reconstruible desde migraciones y semillas | MIG-001…005 con las 6 migraciones; `npm run db:rebuild`. ADEX-Staging construido desde vacío con `staging:migrate`; STG-RLS-001 comprueba las 6 huellas | PASS |
 | Independencia de CLEAN | Ver «Verificación final» | PASS |
 | Batería previa intacta y nuevas pruebas de aislamiento | Banco: 1.600/1.600. Paquete SaaS: 81 PASS, 0 FAIL | PASS |
 
-### Qué queda bloqueado y por qué
+### Validación remota en ADEX-Staging (2026-10-14)
 
-**ADEX-Staging no se pudo crear.** El plan Free admite **2 proyectos activos en total** entre todas las organizaciones en las que el propietario es Owner o Administrador; crear otra organización no da más plazas. La organización ya tiene 2 activos: `ADEX-SaaS-POC-0A1` y el proyecto DEV de otro producto (0A.1 §R.1). Sin autorización no se pausa, borra ni reutiliza ninguno de los dos.
+Proyecto `ADEX-Staging` (`hyqaufsagtsucztjfjvc`), São Paulo (`sa-east-1`), plan Free, datos sintéticos. La POC `ADEX-SaaS-POC-0A1` quedó pausada por el propietario para liberar la plaza.
 
-Consecuencias:
-- AUTH-STG-001…004 (inicio de sesión real ES256, cierre de sesión ADEX con token real, recuperación de acceso y aprovisionamiento) están **preparadas y NO EJECUTADAS**.
-- La API no se ha probado contra Supabase gestionado con las migraciones de las Fases 0 y 1; el clúster local imita sus roles (`postgres` sin superusuario, con BYPASSRLS) pero no es Supabase.
+| Paso | Resultado |
+|---|---|
+| `staging:check` | Nombre, región y estado `ACTIVE_HEALTHY` **demostrados** por la Management API (token obligatorio, solo lectura, limitado al proyecto); `public` vacío; 0 usuarios no sintéticos; Data API sin esquemas expuestos |
+| `staging:migrate` | 0001…0006 aplicadas sobre un proyecto vacío, 0 omitidas; semillas sintéticas importadas |
+| `staging:test` | **11/11 PASS** en tres ejecuciones consecutivas: AUTH-STG-001…004 y STG-RLS-001…007 |
 
-**Para desbloquear, el propietario decide una de estas opciones:**
-1. Pausar el proyecto DEV del otro producto (deja de contar mientras está pausado).
-2. Autorizar que la POC deje de ser POC: ejecutar su `--teardown` y pausarla o borrarla. Así queda libre la plaza para ADEX-Staging.
-3. Usar otra cuenta de Supabase cuyo propietario no tenga 2 proyectos Free activos.
+| Prueba | Qué demuestra |
+|---|---|
+| AUTH-STG-001 | Inicio de sesión real; token ES256 verificado por JWKS; sin claims de autoridad |
+| AUTH-STG-002 | Token real → API → membresía; contexto ajeno 403; el cierre de sesión ADEX corta el mismo token y el proveedor no renueva |
+| AUTH-STG-003 | El cliente ADEX responde igual exista o no el correo; recuperación completa real (token del proveedor → verificación → nueva contraseña; la anterior deja de servir) |
+| AUTH-STG-004 | Alta sin contraseña conocida y reutilización del `sub` existente |
+| STG-RLS-001…007 | Huellas de las 6 migraciones; roles sin superusuario/BYPASSRLS/herencia y no asumibles por la Data API; RLS forzada en todas las tablas; privilegios exactamente los del contrato; aislamiento por empresa; contexto falsificado sin filas; DS-05 (otra membresía, nunca la suma); membresía desactivada sin datos al instante |
 
-Después, pasos del propietario (sin compartir secretos en el chat):
-1. Crear el proyecto `ADEX-Staging` en *South America (São Paulo)*, plan Free y sin método de pago.
-2. En *Authentication*: desactivar el registro público y comprobar que la clave de firma en uso es ES256.
-3. En *Data API*: no exponer `adex` ni `adex_control` (o deshabilitar la Data API).
-4. Copiar `saas/.env.example` a `saas/.env.staging` y rellenarlo en local.
-5. Ejecutar en `saas/`: `npm run staging:check`, `npm run staging:migrate` y `npm run staging:test`.
+Ajustes del arnés durante la validación (sin cambios en `src/`):
+1. El token de la Management API es obligatorio: la identidad del destino se demuestra, no se declara.
+2. `--test` espera a que Supavisor acepte la contraseña rotada de `adex_api` (antes, 1 de cada 3 ejecuciones fallaba con `password authentication failed`).
+3. AUTH-STG-003: la respuesta cruda de `/recover` difiere para un correo existente porque el SMTP integrado de Supabase rechaza el dominio reservado `example.test` (`email_address_invalid`) o agota su cupo horario (`over_email_send_rate_limit`). La prueba admite solo esas dos diferencias y exige además la recuperación completa real.
+
+**Condición para producción (no bloquea la Fase 1):** con el SMTP integrado de Supabase, `/recover` responde distinto para correos existentes no entregables; además, solo envía a direcciones del equipo y con cupo horario mínimo. Producción exige SMTP propio y que el cliente use siempre la ruta de ADEX (ya normaliza la respuesta).
 
 ### Límites conocidos (no bloquean)
 
@@ -135,7 +140,7 @@ Después, pasos del propietario (sin compartir secretos en el chat):
 
 | Comprobación | Resultado |
 |---|---|
-| Paquete `saas/`: `npm test` (typecheck + unitarias + PostgreSQL 17 real) | 13 unitarias + 68 con base de datos = **81 PASS · 0 FAIL**. Supabase Auth real: **BLOQUEADA / NO EJECUTADA** |
+| Paquete `saas/`: `npm test` (typecheck + unitarias + PostgreSQL 17 real) | 13 unitarias + 68 con base de datos = **81 PASS · 0 FAIL**. Supabase real (ADEX-Staging, `npm run staging:test`): **11/11 PASS** en tres ejecuciones consecutivas |
 | Banco de contratos (`npm test` de CLEAN, 26 suites) | **1.600 / 1.600, 0 fallos** |
 | CLEAN `npx tsc --noEmit` | 0 errores |
 | CLEAN `npm run build` | Correcto. Bundle **`index-b05G8Ybt.js`**, el mismo que antes |

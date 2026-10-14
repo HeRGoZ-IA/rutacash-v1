@@ -38,7 +38,7 @@ El clúster local imita los roles de Supabase (`postgres` sin superusuario, con 
 | `src/identity/`, `src/control/`, `src/http/` | Fase 1: membresías y sesiones, plano Owner, API de empresa y API Owner (servidores separados) |
 | `src/client/` | Fase 1: cliente de modo servidor (solo tokens; IndexedDB `adex-server-mode`; selector) |
 | `test/integration/` | Fase 1: identidad, REVOKE-004, plano Owner, cliente sin contraseñas |
-| `test/auth-real/`, `scripts/staging.ts` | Supabase Auth real en ADEX-Staging. **Bloqueado** mientras no exista el proyecto |
+| `test/auth-real/`, `scripts/staging.ts` | Supabase Auth real y RLS gestionada en ADEX-Staging: 11/11 PASS (2026-10-14) |
 
 ## Roles de base de datos
 

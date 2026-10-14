@@ -98,11 +98,24 @@ try {
   }
   if (mode === '--test') {
     await migrate(admin, passwords);
+    // La contraseña de adex_api se rota en cada ejecución y Supavisor tarda unos segundos
+    // en olvidar la anterior: se espera a tres conexiones seguidas aceptadas (máx. 120 s).
+    const apiUrl = `postgres://adex_api.${ref}:${encodeURIComponent(passwords.api)}@${host}:6543/postgres`;
+    let streak = 0;
+    for (const deadline = Date.now() + 120_000; streak < 3; ) {
+      const probe = new pg.Client({ connectionString: apiUrl, ssl });
+      try { await probe.connect(); await probe.query('select 1'); streak++; } catch { streak = 0; }
+      await probe.end().catch(() => undefined);
+      if (streak < 3) {
+        if (Date.now() > deadline) blocked('el pooler no acepta la credencial rotada de adex_api');
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
     const code = await new Promise<number>((resolve) => {
       const child = spawn(process.execPath, ['--import', './scripts/register-alias.mjs', '--test', '--test-reporter=spec', '--test-concurrency=1',
         path.join('test', 'auth-real', 'staging-auth.test.ts'), path.join('test', 'auth-real', 'staging-rls.test.ts')], {
         cwd: root, stdio: 'inherit',
-        env: { ...process.env, ...env, ADEX_STAGING_API_URL: `postgres://adex_api.${ref}:${encodeURIComponent(passwords.api)}@${host}:6543/postgres`,
+        env: { ...process.env, ...env, ADEX_STAGING_API_URL: apiUrl,
           ADEX_STAGING_ADMIN_URL: adminUrl },
       });
       child.on('close', (c) => resolve(c ?? 1));
