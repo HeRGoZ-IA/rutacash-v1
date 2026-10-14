@@ -3,7 +3,7 @@
 //
 //   node scripts/staging.ts --check     → solo comprobaciones, sin escrituras
 //   node scripts/staging.ts --migrate   → migraciones + semillas sintéticas
-//   node scripts/staging.ts --test      → test/auth-real contra Supabase Auth real
+//   node scripts/staging.ts --test      → test/auth-real (Auth real + RLS gestionada)
 //
 // Variables en saas/.env.staging (ignorado por Git; ver .env.example). NUNCA se usa
 // el proyecto de la POC (ADEX-SaaS-POC-0A1) ni recursos de otros productos.
@@ -46,20 +46,21 @@ const ref = need('ADEX_STAGING_PROJECT_REF');
 if (ref === POC_REF) blocked('la referencia es la del proyecto de la POC: no se convierte en staging');
 if (need('SUPABASE_URL') !== `https://${ref}.supabase.co`) blocked('SUPABASE_URL no coincide con la referencia');
 
-// Proyecto: nombre, región y plan (Management API si hay token; si no, declaración).
-const token = env['SUPABASE_ACCESS_TOKEN'];
-if (token) {
-  const res = await fetch(`https://api.supabase.com/v1/projects/${ref}`, { headers: { authorization: `Bearer ${token}` } });
-  if (!res.ok) blocked(`Management API respondió ${res.status}`);
-  const p = (await res.json()) as { name?: string; region?: string };
-  if (p.name !== EXPECTED_NAME) blocked(`el proyecto se llama «${p.name}», no ${EXPECTED_NAME}`);
-  if (p.region !== REGION) blocked(`región ${p.region}, se exige ${REGION}`);
-  const api = await fetch(`https://api.supabase.com/v1/projects/${ref}/postgrest`, { headers: { authorization: `Bearer ${token}` } });
-  if (api.ok) {
-    const cfg = (await api.json()) as { db_schema?: string };
-    if (/\badex(_control)?\b/.test(cfg.db_schema ?? '')) blocked('la Data API expone adex o adex_control');
-  }
-}
+// Proyecto: nombre y región DEMOSTRADOS por la Management API (token obligatorio: sin él
+// la identidad del destino solo se declara y no se migra nada).
+const token = need('SUPABASE_ACCESS_TOKEN');
+const res = await fetch(`https://api.supabase.com/v1/projects/${ref}`, { headers: { authorization: `Bearer ${token}` } });
+if (!res.ok) blocked(`Management API respondió ${res.status}`);
+const p = (await res.json()) as { name?: string; region?: string; status?: string };
+if (p.name !== EXPECTED_NAME) blocked(`el proyecto se llama «${p.name}», no ${EXPECTED_NAME}`);
+if (p.region !== REGION) blocked(`región ${p.region}, se exige ${REGION}`);
+if (p.status !== 'ACTIVE_HEALTHY') blocked(`estado del proyecto ${p.status}`);
+// Data API: estado efectivo. Activa o no, nunca puede exponer adex/adex_control/adex_meta.
+const rest = await fetch(`${need('SUPABASE_URL')}/rest/v1/`, { headers: { apikey: need('SUPABASE_PUBLISHABLE_KEY') } });
+const api = await fetch(`https://api.supabase.com/v1/projects/${ref}/postgrest`, { headers: { authorization: `Bearer ${token}` } });
+const exposed = api.ok ? ((await api.json()) as { db_schema?: string }).db_schema ?? '' : `(config ${api.status})`;
+if (/adex(_control|_meta)?/.test(exposed)) blocked('la Data API expone adex, adex_control o adex_meta');
+const dataApi = `Data API ${rest.status === 503 ? 'desactivada' : `responde ${rest.status}`} · esquemas expuestos: ${exposed || 'ninguno'}`;
 const attestation = env['ADEX_STAGING_OWNER_ATTESTATION'];
 if (attestation !== `free:${ref}:${REGION}`) blocked(`falta la declaración del propietario free:${ref}:${REGION} (plan Free sin método de pago)`);
 
@@ -80,7 +81,7 @@ await admin.connect();
 try {
   const tables = await admin.query(`select count(*)::int n from pg_tables where schemaname = 'public'`);
   if (tables.rows[0].n > 0) blocked('el esquema public tiene tablas: el proyecto no está vacío');
-  console.log(`OK: ${EXPECTED_NAME} (${ref}, ${REGION}), ${list.length} usuario(s) sintético(s), public vacío`);
+  console.log(`OK: ${EXPECTED_NAME} (${ref}, ${REGION}, ${p.status}), ${list.length} usuario(s) sintético(s), public vacío · ${dataApi}`);
   if (mode === '--check') process.exit(0);
 
   const passwords = { api: randomSecret(), control: randomSecret() };
@@ -99,7 +100,7 @@ try {
     await migrate(admin, passwords);
     const code = await new Promise<number>((resolve) => {
       const child = spawn(process.execPath, ['--import', './scripts/register-alias.mjs', '--test', '--test-reporter=spec', '--test-concurrency=1',
-        path.join('test', 'auth-real', 'staging-auth.test.ts')], {
+        path.join('test', 'auth-real', 'staging-auth.test.ts'), path.join('test', 'auth-real', 'staging-rls.test.ts')], {
         cwd: root, stdio: 'inherit',
         env: { ...process.env, ...env, ADEX_STAGING_API_URL: `postgres://adex_api.${ref}:${encodeURIComponent(passwords.api)}@${host}:6543/postgres`,
           ADEX_STAGING_ADMIN_URL: adminUrl },
