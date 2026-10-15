@@ -27,6 +27,7 @@
 import { expenseFundingOf, poolExpenseStateOf } from '@/lib/expenseFunding'
 import { expenseAttribution } from '@/lib/expenseAttribution'
 import type {
+  CentralCapitalKind,
   CapitalLedgerEntry, CapitalMovement, CashCustodyMovement, Expense, PartnerCashMovement, Transfer, Withdrawal,
 } from '@/models/types'
 
@@ -99,6 +100,23 @@ const LEDGER_TIPO: Record<CapitalLedgerEntry['tipo'], string> = {
   PARTNER_CONTRIBUTION: 'Aporte de socio a la bolsa del Administrador',
 }
 
+/**
+ * Capital centralizado (C2): nombre real de un capital o retiro enlazado a su
+ * operación. Un retorno de cuadre o un cobro por transferencia no es un "retiro".
+ */
+const CENTRAL_TIPO: Record<CentralCapitalKind, string> = {
+  ENTREGA_TRABAJADOR: 'Entrega de capital a trabajador (desde la bolsa)',
+  ANULACION_ENTREGA: 'Anulación de entrega de capital',
+  DEVOLUCION_TRABAJADOR: 'Devolución de capital de trabajador a la bolsa',
+  CUADRE: 'Efectivo de cuadre devuelto a la bolsa',
+  REAPERTURA_CUADRE: 'Reapertura de cuadre: el efectivo vuelve al trabajador',
+  COBRO_NO_PERSONAL: 'Cobro no en efectivo enviado a la bolsa',
+  ANULACION_COBRO: 'Anulación de cobro no en efectivo',
+  DESEMBOLSO_ADMIN: 'Préstamo del Administrador pagado con su bolsa',
+  GASTO_RUTA: 'Gasto de ruta pagado con la bolsa',
+}
+const NOTA_CENTRAL: [string, string] = ['Efecto', 'Capital centralizado: mueve la bolsa del responsable; la caja de la ruta no cambia']
+
 /** Proyecta TODOS los registros (ya acotados por permisos) a entradas del historial. */
 export function buildMovementHistory(s: HistorySources): HistoryEntry[] {
   const out: HistoryEntry[] = []
@@ -128,8 +146,8 @@ export function buildMovementHistory(s: HistorySources): HistoryEntry[] {
     const rev = !!m.reversesId
     out.push({
       ...base('capitalMovements', m.id, m.createdAt, m.fecha), categoria: rev ? 'correccion' : 'capital',
-      tipo: rev ? 'Anulación de colocación de capital' : 'Colocación de capital en ruta',
-      importe: m.valor,
+      tipo: m.centralLink ? CENTRAL_TIPO[m.centralLink.kind] : rev ? 'Anulación de colocación de capital' : 'Colocación de capital en ruta',
+      importe: m.valor, extra: m.centralLink ? [NOTA_CENTRAL] : [],
       origen: rev ? { kind: 'caja-ruta', routeId: m.routeId } : m.adminId ? { kind: 'bolsa-admin', id: m.adminId } : { kind: 'sin-bolsa' },
       destino: rev ? (m.adminId ? { kind: 'bolsa-admin', id: m.adminId } : { kind: 'sin-bolsa' }) : { kind: 'caja-ruta', routeId: m.routeId },
       routeIds: [m.routeId], workerIds: [], adminIds: m.adminId ? [m.adminId] : [], registradoPor: m.userId,
@@ -141,8 +159,8 @@ export function buildMovementHistory(s: HistorySources): HistoryEntry[] {
     const rev = !!w.reversesId
     out.push({
       ...base('withdrawals', w.id, w.createdAt, w.fecha), categoria: rev ? 'correccion' : 'capital',
-      tipo: rev ? 'Anulación de retiro de capital' : 'Retiro de capital de ruta',
-      importe: w.valor,
+      tipo: w.centralLink ? CENTRAL_TIPO[w.centralLink.kind] : rev ? 'Anulación de retiro de capital' : 'Retiro de capital de ruta',
+      importe: w.valor, extra: w.centralLink ? [NOTA_CENTRAL] : [],
       origen: rev ? (w.adminId ? { kind: 'bolsa-admin', id: w.adminId } : { kind: 'sin-bolsa' }) : { kind: 'caja-ruta', routeId: w.routeId },
       destino: rev ? { kind: 'caja-ruta', routeId: w.routeId } : w.adminId ? { kind: 'bolsa-admin', id: w.adminId } : { kind: 'sin-bolsa' },
       routeIds: [w.routeId], workerIds: [], adminIds: w.adminId ? [w.adminId] : [], registradoPor: w.userId,
@@ -188,8 +206,10 @@ export function buildMovementHistory(s: HistorySources): HistoryEntry[] {
   // ---------- Base y custodia (las patas de transferencias ya están dentro) ----------
   for (const c of s.custody) {
     if (c.relatedTransferId && transferIds.has(c.relatedTransferId)) continue
-    const tipo = c.tipo === 'BASE_ASSIGNMENT' ? 'Entrega de Base a trabajador'
-      : c.tipo === 'BASE_RETURN' ? 'Devolución de Base a la caja de la ruta' : 'Traspaso de efectivo entre trabajadores'
+    const tipo = c.origen === 'admin-pool'
+      ? (c.reversesId ? 'Anulación de entrega de capital (custodia)' : c.tipo === 'BASE_ASSIGNMENT' ? 'Capital entregado al trabajador (custodia)' : 'Capital devuelto por el trabajador (custodia)')
+      : c.tipo === 'BASE_ASSIGNMENT' ? 'Entrega de Base a trabajador'
+        : c.tipo === 'BASE_RETURN' ? 'Devolución de Base a la caja de la ruta' : 'Traspaso de efectivo entre trabajadores'
     out.push({
       ...base('cashCustodyMovements', c.id, c.createdAt, c.fecha), categoria: 'custodia', tipo, importe: c.amount,
       origen: c.fromUserId ? { kind: 'trabajador', id: c.fromUserId, routeId: c.routeId } : { kind: 'caja-ruta', routeId: c.routeId },

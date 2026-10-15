@@ -11,14 +11,16 @@ import { can } from '@/lib/permissions'
 import { formatCurrency, formatDateTime } from '@/lib/formatters'
 import { generateId } from '@/lib/utils'
 import {
-  TRANSFER_CATEGORIES, TRANSFER_OPERATIONS, availableOperations, confirmationSentence, previewTransferOperation, routesForOperation,
-  type RouteBalances, type TransferOperationKind,
+  availableOperations, confirmationSentence, operationDef, previewTransferOperation, routesForOperation, transferCategories,
+  type RouteBalances, type TransferMode, type TransferOperationKind,
 } from '@/lib/transferOperations'
 import { assignBaseToWorker, custodianBlockedReason, returnBaseFromWorker } from '@/services/cashCustodyService'
+import { deliverCapitalToWorker, returnCapitalFromWorker } from '@/services/centralCapitalService'
+import { db } from '@/lib/db'
 import { registerCapital, registerTransfer, registerWithdrawal } from '@/services/routeFundsService'
 import { getRouteCashReconciliation } from '@/services/routeCashReconciliation'
 import { getAdminAvailableCapital } from '@/services/capitalControlService'
-import type { Route, User } from '@/models/types'
+import type { Route, SaleRequest, User } from '@/models/types'
 
 type Paso = 'tipo' | 'datos' | 'confirmar' | 'resultado'
 
@@ -49,7 +51,7 @@ async function saldosDe(actor: User | null | undefined, tenantId: string, routeI
  * se registra con SU servicio existente; un id de operación por asistente abierto
  * (un doble clic o un reintento devuelven el mismo registro).
  */
-export function OperationWizard({ open, onClose, onDone, routes, users, inicial }: {
+export function OperationWizard({ open, onClose, onDone, routes, users, inicial, modo }: {
   open: boolean
   onClose: () => void
   /** Tras una operación confirmada (para recargar la página). */
@@ -57,6 +59,8 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial 
   routes: Route[]
   users: User[]
   inicial?: { kind?: TransferOperationKind; routeId?: string; trabajadorId?: string }
+  /** Capital centralizado (C2): solo las operaciones válidas en ese modelo. Sin él, v16. */
+  modo?: TransferMode
 }) {
   const { user } = useAuth()
   const { tenantId, currency } = useTenant()
@@ -76,18 +80,24 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [resultado, setResultado] = useState<Resultado | null>(null)
+  /** Entrega de capital: solicitud de venta para la que se anticipa (opcional; no crea venta). */
+  const [solicitudId, setSolicitudId] = useState('')
+  const [solicitudes, setSolicitudes] = useState<SaleRequest[]>([])
 
-  const disponibles = availableOperations(user, routes, users, tenantId)
-  const rutas = kind ? routesForOperation(kind, user, routes, users, tenantId) : []
+  const disponibles = availableOperations(user, routes, users, tenantId, modo)
+  const rutas = kind ? routesForOperation(kind, user, routes, users, tenantId, modo) : []
+  const def = (k: TransferOperationKind) => operationDef(k, modo)
+  const entregaKinds: TransferOperationKind[] = ['entregar-base', 'entregar-capital']
+  const devolucionKinds: TransferOperationKind[] = ['devolver-base', 'devolver-capital']
   const destinos = kind === 'ruta-ruta' ? rutas.filter(r => r.id !== routeId) : []
   const nombre = (id: string) => users.find(u => u.id === id)?.nombre ?? id
   const rutaNombre = (id: string) => routes.find(r => r.id === id)?.nombre ?? id
   const rol = (u: User) => (u.rol === 'supervisor' ? 'Supervisor' : 'Cobrador')
 
   // Personas elegibles según la operación (mismas reglas que el servicio).
-  const trabajadores: User[] = !kind || !routeId ? [] : kind === 'entregar-base'
+  const trabajadores: User[] = !kind || !routeId ? [] : entregaKinds.includes(kind)
     ? users.filter(u => !custodianBlockedReason(u, routeId, tenantId))
-    : kind === 'devolver-base'
+    : devolucionKinds.includes(kind)
       ? users.filter(u => u.id !== user?.id && (ruta?.posiciones[u.id] ?? 0) > 0)
       : []
   const receptoresDestino = kind === 'ruta-ruta' && destinoId && can(user, 'cashCustody.manage', { routeId: destinoId, tenantId })
@@ -99,10 +109,10 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial 
     const k = inicial?.kind && disponibles.includes(inicial.kind) ? inicial.kind : null
     setKind(k)
     setPaso(k ? 'datos' : 'tipo')
-    const rs = k ? routesForOperation(k, user, routes, users, tenantId) : []
+    const rs = k ? routesForOperation(k, user, routes, users, tenantId, modo) : []
     setRouteId(inicial?.routeId && rs.some(r => r.id === inicial.routeId) ? inicial.routeId : rs.length === 1 ? rs[0].id : '')
     setTrabajadorId(inicial?.trabajadorId ?? '')
-    setDestinoId(''); setImporte(0); setConcepto(''); setConfirmado(false); setError(null); setResultado(null)
+    setDestinoId(''); setImporte(0); setConcepto(''); setConfirmado(false); setError(null); setResultado(null); setSolicitudId('')
     setOperationId(generateId())
   }, [open])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -124,15 +134,28 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial 
   useEffect(() => {
     let alive = true
     setBolsa(undefined)
-    if (!open || !user || (kind !== 'colocar' && kind !== 'retirar')) return
+    // La bolsa solo se consulta para el propio Administrador (nunca para otros roles).
+    if (!open || !user || user.rol !== 'admin' || !kind || !['colocar', 'retirar', 'entregar-capital', 'devolver-capital'].includes(kind)) return
     getAdminAvailableCapital(tenantId, user.id).then(v => { if (alive) setBolsa(v) }, () => { if (alive) setBolsa(null) })
     return () => { alive = false }
   }, [open, kind, user, tenantId])
 
-  const necesitaTrabajador = kind === 'entregar-base' || kind === 'devolver-base'
+  // Solicitudes de venta del trabajador en la ruta (referencia opcional de la entrega).
+  useEffect(() => {
+    let alive = true
+    setSolicitudes([]); setSolicitudId('')
+    if (!open || kind !== 'entregar-capital' || !routeId || !trabajadorId) return
+    db.saleRequests.where('routeId').equals(routeId).toArray().then(list => {
+      if (alive) setSolicitudes(list.filter(r => r.tenantId === tenantId && r.collectorId === trabajadorId && (r.status === 'pending' || r.status === 'approved')))
+    })
+    return () => { alive = false }
+  }, [open, kind, routeId, trabajadorId, tenantId])
+
+  const necesitaTrabajador = !!kind && (entregaKinds.includes(kind) || devolucionKinds.includes(kind))
   const nombres = {
     ruta: rutaNombre(routeId), rutaDestino: destinoId ? rutaNombre(destinoId) : '',
-    trabajador: trabajadorId ? nombre(trabajadorId) : '', bolsa: 'Mi bolsa (Caja principal)',
+    trabajador: trabajadorId ? nombre(trabajadorId) : '',
+    bolsa: user?.rol === 'admin' ? 'Mi bolsa (Caja principal)' : 'Bolsa del Administrador responsable',
   }
   const preview = kind ? previewTransferOperation({
     kind, importe, ruta: ruta ?? null, rutaDestino: rutaDestino ?? null,
@@ -145,9 +168,9 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial 
 
   function elegir(k: TransferOperationKind) {
     setKind(k)
-    const rs = routesForOperation(k, user, routes, users, tenantId)
+    const rs = routesForOperation(k, user, routes, users, tenantId, modo)
     setRouteId(rs.length === 1 ? rs[0].id : '')
-    setDestinoId(''); setTrabajadorId(''); setImporte(0); setConcepto(''); setConfirmado(false); setError(null)
+    setDestinoId(''); setTrabajadorId(''); setImporte(0); setConcepto(''); setConfirmado(false); setError(null); setSolicitudId('')
     setOperationId(generateId())
     setPaso('datos')
   }
@@ -158,7 +181,13 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial 
     try {
       let id = ''
       let createdAt = ''
-      if (kind === 'entregar-base') {
+      if (kind === 'entregar-capital') {
+        const d = await deliverCapitalToWorker({ actor: user, tenantId, routeId, recipientUserId: trabajadorId, amount: importe, motivo: concepto, operationId, saleRequestId: solicitudId || undefined })
+        id = d.capital.id; createdAt = d.capital.createdAt
+      } else if (kind === 'devolver-capital') {
+        const d = await returnCapitalFromWorker({ actor: user, tenantId, routeId, fromUserId: trabajadorId, amount: importe, motivo: concepto, operationId })
+        id = d.withdrawal.id; createdAt = d.withdrawal.createdAt
+      } else if (kind === 'entregar-base') {
         const m = await assignBaseToWorker({ actor: user, tenantId, routeId, recipientUserId: trabajadorId, amount: importe, motivo: concepto, operationId })
         id = m.id; createdAt = m.createdAt
       } else if (kind === 'devolver-base') {
@@ -181,14 +210,14 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial 
       const [o, d, b] = await Promise.all([
         saldosDe(user, tenantId, routeId),
         destinoId ? saldosDe(user, tenantId, destinoId) : Promise.resolve(null),
-        kind === 'colocar' || kind === 'retirar' ? getAdminAvailableCapital(tenantId, user!.id) : Promise.resolve(null),
+        user?.rol === 'admin' && ['colocar', 'retirar', 'entregar-capital', 'devolver-capital'].includes(kind) ? getAdminAvailableCapital(tenantId, user!.id) : Promise.resolve(null),
       ])
       const ahora = previewTransferOperation({
         kind, importe: 0, ruta: o, rutaDestino: d, bolsa: b,
         trabajadorId: necesitaTrabajador || (kind === 'ruta-ruta' && trabajadorId) ? trabajadorId || undefined : undefined, nombres,
       })
       setResultado({
-        id, createdAt, tipo: TRANSFER_OPERATIONS[kind].titulo, origen: preview.origen.cuenta, destino: preview.destino.cuenta,
+        id, createdAt, tipo: def(kind).titulo, origen: preview.origen.cuenta, destino: preview.destino.cuenta,
         importe, concepto: concepto.trim(), responsable: user?.nombre ?? '', origenAhora: ahora.origen.antes, destinoAhora: ahora.destino.antes,
       })
       setPaso('resultado')
@@ -201,7 +230,7 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial 
   }
 
   const cifra = (n: number | null) => (n == null ? 'Se calcula al registrar' : money(n))
-  const titulo = paso === 'tipo' ? 'Nueva operación' : paso === 'resultado' ? 'Operación registrada' : kind ? TRANSFER_OPERATIONS[kind].titulo : ''
+  const titulo = paso === 'tipo' ? 'Nueva operación' : paso === 'resultado' ? 'Operación registrada' : kind ? def(kind).titulo : ''
 
   const footer = paso === 'tipo'
     ? <Button variant="secondary" onClick={onClose}>Cerrar</Button>
@@ -219,15 +248,15 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial 
             <p className="text-sm text-gray-600 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
               No tienes operaciones de caja disponibles: solo el Administrador responsable de capital de una ruta mueve su efectivo.
             </p>
-          ) : TRANSFER_CATEGORIES.filter(c => c.kinds.some(k => disponibles.includes(k))).map(c => (
+          ) : transferCategories(modo).filter(c => c.kinds.some(k => disponibles.includes(k))).map(c => (
             <div key={c.categoria} className="space-y-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{c.titulo}</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {c.kinds.filter(k => disponibles.includes(k)).map(k => (
                   <button key={k} type="button" onClick={() => elegir(k)} data-testid={`op-${k}`}
                     className="text-left rounded-xl border border-gray-200 bg-white px-3 py-2.5 hover:border-primary-400 hover:bg-primary-50 focus:outline-none focus:ring-2 focus:ring-primary-500">
-                    <span className="block text-sm font-semibold text-gray-900">{TRANSFER_OPERATIONS[k].titulo}</span>
-                    <span className="block text-xs text-gray-500 mt-0.5">{TRANSFER_OPERATIONS[k].ayuda}</span>
+                    <span className="block text-sm font-semibold text-gray-900">{def(k).titulo}</span>
+                    <span className="block text-xs text-gray-500 mt-0.5">{def(k).ayuda}</span>
                   </button>
                 ))}
               </div>
@@ -238,7 +267,7 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial 
 
       {paso === 'datos' && kind && (
         <div className="space-y-4" data-testid="op-form">
-          <p className="text-xs text-gray-500">{TRANSFER_OPERATIONS[kind].ayuda}</p>
+          <p className="text-xs text-gray-500">{def(kind).ayuda}</p>
           {error && <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2" role="alert">{error}</p>}
           <div className="grid grid-cols-1 gap-3">
             <Select label={kind === 'ruta-ruta' ? 'Ruta origen' : 'Ruta'} value={routeId} required
@@ -250,10 +279,15 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial 
                 hint="Solo rutas de las que también eres responsable de capital: el capital no cambia de bolsa." />
             )}
             {necesitaTrabajador && (
-              <Select label={kind === 'entregar-base' ? 'Trabajador que recibe' : 'Trabajador que devuelve'} value={trabajadorId} required
+              <Select label={entregaKinds.includes(kind) ? 'Trabajador que recibe' : 'Trabajador que devuelve'} value={trabajadorId} required
                 onChange={e => setTrabajadorId(e.target.value)} disabled={!routeId}
                 options={trabajadores.map(u => ({ value: u.id, label: `${u.nombre} · ${rol(u)}` }))}
-                placeholder={!routeId ? 'Primero elige la ruta' : trabajadores.length ? 'Seleccionar trabajador' : kind === 'devolver-base' ? 'Nadie tiene efectivo a cargo en esta ruta' : 'Sin trabajadores activos en la ruta'} />
+                placeholder={!routeId ? 'Primero elige la ruta' : trabajadores.length ? 'Seleccionar trabajador' : devolucionKinds.includes(kind) ? 'Nadie tiene efectivo a cargo en esta ruta' : 'Sin trabajadores activos en la ruta'} />
+            )}
+            {kind === 'entregar-capital' && solicitudes.length > 0 && (
+              <Select label="¿Para qué solicitud de venta? (opcional)" value={solicitudId} onChange={e => setSolicitudId(e.target.value)}
+                options={solicitudes.map(r => ({ value: r.id, label: `${money(r.amount)} · ${r.status === 'approved' ? 'aprobada' : 'pendiente'} · ${r.startDate}` }))}
+                placeholder="Sin referencia" hint="Solo deja constancia: la entrega no crea la venta ni una deuda del cliente." />
             )}
             {kind === 'ruta-ruta' && receptoresDestino.length > 0 && (
               <Select label="¿Quién recibe el efectivo en la ruta destino? (opcional)" value={trabajadorId}
@@ -286,7 +320,7 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial 
               </p>
             </div>
           )}
-          {kind === 'entregar-base' && (
+          {kind === 'entregar-base' && !modo?.central && (
             <p className="text-[11px] text-gray-400">
               También puedes entregar Base desde Liquidación → Cuadre por trabajador (botón «Entregar Base»). Es la misma operación y no exige cerrar ningún cuadre.
               {routeId && trabajadorId && <> <Link className="text-primary-700 hover:underline" to={`/admin/weekly-settlement?vista=trabajadores&routeId=${encodeURIComponent(routeId)}&userId=${encodeURIComponent(trabajadorId)}&accion=entregar-base`}>Ver su cuadre</Link></>}

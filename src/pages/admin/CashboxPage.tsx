@@ -8,7 +8,9 @@ import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { useDataRevision } from '@/hooks/useDataRevision'
-import { getCashboxSummary } from '@/services/cashboxEngine'
+import { getCapitalFlowBreakdown, getCashboxSummary } from '@/services/cashboxEngine'
+import type { CapitalFlowBreakdown } from '@/lib/capitalFlowBreakdown'
+import { CapitalFlowDetail } from '@/components/capital/CapitalFlowDetail'
 import { filterAccessibleRoutes, canAccessRoute } from '@/lib/permissions'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeSelector } from '@/components/ui/OfficeSelector'
@@ -16,13 +18,15 @@ import { formatCurrency, getWeekStart, getWeekEnd, formatDate } from '@/lib/form
 import type { Route, CashboxSummary } from '@/models/types'
 
 export default function CashboxPage() {
-  const { tenantId } = useTenant()
+  const { tenantId, currency } = useTenant()
   const { user } = useAuth()
   // Selector propio sustituido por el patrón compartido Oficina → Ruta.
   const officeFilter = useOfficeRouteFilter()
   const [routes, setRoutes] = useState<Route[]>([])
   const [selectedRoute, setSelectedRoute] = useState('')
   const [summary, setSummary] = useState<CashboxSummary | null>(null)
+  // C2: desglose de capital y retiros (mismos totales, por operación).
+  const [flujo, setFlujo] = useState<CapitalFlowBreakdown | null>(null)
   const [loading, setLoading] = useState(false)
   const [fechaDesde, setFechaDesde] = useState(getWeekStart())
   const [fechaHasta, setFechaHasta] = useState(getWeekEnd())
@@ -59,8 +63,12 @@ export default function CashboxPage() {
     // Guard de datos: nunca calcular caja de una ruta no autorizada.
     if (!canAccessRoute(user, selectedRoute)) { setSummary(null); return }
     setLoading(true)
-    const s = await getCashboxSummary(selectedRoute, fechaDesde, fechaHasta)
+    const [s, f] = await Promise.all([
+      getCashboxSummary(selectedRoute, fechaDesde, fechaHasta),
+      getCapitalFlowBreakdown(selectedRoute, fechaDesde, fechaHasta),
+    ])
     setSummary(s)
+    setFlujo(f)
     setLoading(false)
   }
 
@@ -103,13 +111,13 @@ export default function CashboxPage() {
           <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
             <div className="divide-y divide-gray-50">
               <CashboxRow label="Saldo anterior" value={summary.saldoAnterior} type="neutral" />
-              <CashboxRow label="(+) Ingreso capital" value={summary.ingresoCapital} type="positive" />
+              <CashboxRow label={flujo?.hayCentralizados ? '(+) Ingreso de capital (ver detalle)' : '(+) Ingreso capital'} value={summary.ingresoCapital} type="positive" />
               <CashboxRow label="(+) Cobros recibidos" value={summary.cobros} type="positive" />
               <CashboxRow label="(+) Transferencias entrantes" value={summary.transferenciasEntradas} type="positive" />
               <CashboxRow label="(-) Préstamos entregados" value={summary.prestamosEntregados} type="negative" />
               <CashboxRow label="(-) Gastos" value={summary.gastos} type="negative" />
               <CashboxRow label="(−) Transferencias salientes" value={summary.transferenciasSalidas} type="negative" />
-              <CashboxRow label="(-) Retiros" value={summary.retiros} type="negative" />
+              <CashboxRow label={flujo?.hayCentralizados ? '(-) Retiros y retornos a la bolsa (ver detalle)' : '(-) Retiros'} value={summary.retiros} type="negative" />
             </div>
             <div className="px-4 py-4 bg-primary-50 border-t-2 border-primary-200">
               <div className="flex justify-between items-center">
@@ -121,12 +129,14 @@ export default function CashboxPage() {
             </div>
           </div>
 
+          <CapitalFlowDetail breakdown={flujo} currency={currency} />
+
           {/* KPI grid */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <MiniKPI label="Total cobrado" value={formatCurrency(summary.cobros)} color="green" />
             <MiniKPI label="Total gastos" value={formatCurrency(summary.gastos)} color="red" />
             <MiniKPI label="Préstamos" value={formatCurrency(summary.prestamosEntregados)} color="blue" />
-            <MiniKPI label="Retiros" value={formatCurrency(summary.retiros)} color="yellow" />
+            <MiniKPI label={flujo?.hayCentralizados ? 'Retiros y retornos' : 'Retiros'} value={formatCurrency(summary.retiros)} color="yellow" />
           </div>
         </div>
       ) : (

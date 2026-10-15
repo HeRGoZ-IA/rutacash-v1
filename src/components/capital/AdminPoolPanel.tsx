@@ -14,7 +14,15 @@ const FILTROS: { value: string; label: string; kinds: PoolMovementKind[] }[] = [
   { value: 'rutas', label: 'Colocado / retirado de rutas', kinds: ['colocacion', 'retiroRuta'] },
   { value: 'responsable', label: 'Cambio de responsable de ruta', kinds: ['rutaRecibida', 'rutaEntregada'] },
   { value: 'gastos', label: 'Gastos, anulaciones y reintegros', kinds: ['gasto', 'anulacionGasto', 'reintegro'] },
+  { value: 'trabajadores', label: 'Capital entregado / devuelto por trabajadores', kinds: ['entregaTrabajador', 'devolucionTrabajador'] },
+  { value: 'cuadres', label: 'Efectivo recibido en cuadres', kinds: ['retornoCuadre'] },
+  { value: 'cobros', label: 'Cobros no en efectivo', kinds: ['cobroNoPersonal'] },
+  { value: 'operacion', label: 'Préstamos y gastos de ruta con la bolsa', kinds: ['desembolsoAdmin', 'gastoRuta'] },
+  { value: 'socios', label: 'Aportes de socios', kinds: ['aporteSocio'] },
 ]
+
+/** Entradas a la bolsa que vienen de las rutas (v16: retiros; centralizado: su operación real). */
+const DESDE_RUTAS: PoolMovementKind[] = ['retiroRuta', 'devolucionTrabajador', 'retornoCuadre', 'cobroNoPersonal']
 
 function Cifra({ label, value, tone = 'text-gray-900', bg = 'bg-gray-50', testId, hint }: { label: string; value: string; tone?: string; bg?: string; testId?: string; hint?: string }) {
   return (
@@ -32,7 +40,7 @@ function Cifra({ label, value, tone = 'text-gray-900', bg = 'bg-gray-50', testId
  * financiera se calcula aquí, salvo filtrar y sumar movimientos ya clasificados
  * para el resumen del período (`poolExpensesInPeriod`).
  */
-export function AdminPoolPanel({ statement, routes, users, categories, currency, titular, onRegistrarGasto, onDistribuir, puedeDistribuir }: {
+export function AdminPoolPanel({ statement, routes, users, categories, currency, titular, onRegistrarGasto, onDistribuir, puedeDistribuir, central = false }: {
   statement: PoolStatement
   routes: Route[]
   users: User[]
@@ -43,6 +51,8 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
   onRegistrarGasto?: () => void
   onDistribuir?: () => void
   puedeDistribuir: boolean
+  /** Capital centralizado (C2): la bolsa entrega a trabajadores; las rutas no tienen caja. */
+  central?: boolean
 }) {
   const money = (n: number) => formatCurrency(n, currency)
   const signed = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${money(Math.abs(n))}`
@@ -67,7 +77,7 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
     (!kinds || kinds.includes(m.kind)) && (!rutaFiltro || m.routeId === rutaFiltro)
     && (!desde || m.fecha >= desde) && (!hasta || m.fecha <= hasta))
   const rutasConMovs = [...new Set(movimientos.map(m => m.routeId).filter(Boolean) as string[])]
-  const devoluciones = movimientos.filter(m => m.kind === 'retiroRuta')
+  const devoluciones = movimientos.filter(m => DESDE_RUTAS.includes(m.kind))
 
   return (
     <div className="space-y-6" data-testid="admin-pool">
@@ -76,13 +86,13 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0" data-testid="my-available">
             <p className="text-sm text-gray-600 flex items-center gap-1.5"><Wallet className="w-4 h-4 text-primary-600" />Disponible en caja{titular ? ` · ${titular}` : ''}</p>
-            <p className="text-xs text-gray-400">Para distribuir a tus rutas o pagar gastos administrativos.</p>
+            <p className="text-xs text-gray-400">{central ? 'Para entregar capital a tus trabajadores o pagar gastos.' : 'Para distribuir a tus rutas o pagar gastos administrativos.'}</p>
             <p className={`text-3xl font-bold tracking-tight ${negativo ? 'text-red-700' : 'text-gray-900'}`}>{money(c.disponible)}</p>
           </div>
           {(onRegistrarGasto || onDistribuir) && (
             <div className="flex flex-col gap-2 sm:flex-row">
               {onRegistrarGasto && <Button variant="secondary" onClick={onRegistrarGasto} disabled={c.disponible <= 0} icon={<Receipt className="w-4 h-4" />}>Registrar gasto</Button>}
-              {onDistribuir && <Button onClick={onDistribuir} disabled={c.disponible <= 0 || !puedeDistribuir} icon={<ArrowUpRight className="w-4 h-4" />}>Distribuir capital</Button>}
+              {onDistribuir && <Button onClick={onDistribuir} disabled={c.disponible <= 0 || !puedeDistribuir} icon={<ArrowUpRight className="w-4 h-4" />}>{central ? 'Entregar capital' : 'Distribuir capital'}</Button>}
             </div>
           )}
         </div>
@@ -93,14 +103,16 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
           </p>
         )}
         {!negativo && c.disponible === 0 && (onRegistrarGasto || onDistribuir) && (
-          <p className="mt-3 text-xs text-gray-500">Sin disponible: para gastar o distribuir, retira capital de una ruta o pide una asignación al SuperAdmin.</p>
+          <p className="mt-3 text-xs text-gray-500">{central
+            ? 'Sin disponible: para gastar o entregar, recibe devoluciones o cuadres de tus trabajadores o pide una asignación al SuperAdmin.'
+            : 'Sin disponible: para gastar o distribuir, retira capital de una ruta o pide una asignación al SuperAdmin.'}</p>
         )}
       </section>
 
       {/* INDICADORES */}
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-2" data-testid="my-capital">
         <Cifra label="Capital recibido" hint="Asignado por el SuperAdmin, neto de devoluciones" value={money(p.recibidoSA)} testId="pool-received" />
-        <Cifra label="Colocado en rutas" hint="Neto: colocado − retirado" value={money(c.enRutas)} tone="text-indigo-700" bg="bg-indigo-50" testId="my-in-routes" />
+        <Cifra label={central ? 'Capital en rutas' : 'Colocado en rutas'} hint={central ? 'En manos de trabajadores y prestado, neto de lo devuelto' : 'Neto: colocado − retirado'} value={money(c.enRutas)} tone="text-indigo-700" bg="bg-indigo-50" testId="my-in-routes" />
         <Cifra label="Gastos administrativos" hint="Acumulado neto" value={money(c.gastos)} tone="text-red-700" bg="bg-red-50" testId="pool-expenses" />
         <Cifra label="Capital bajo mi responsabilidad" hint="Disponible + en rutas" value={money(c.asignado)} tone="text-primary-700" bg="bg-primary-50" testId="my-assigned" />
       </section>
@@ -116,6 +128,7 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
         <div className="divide-y divide-gray-50 text-sm">
           <Linea label="Asignado por el SuperAdmin" value={money(p.asignaciones)} />
           {p.devolucionesSA !== 0 && <Linea label="(−) Devuelto al SuperAdmin" value={money(p.devolucionesSA)} />}
+          {p.aportesSocios !== 0 && <Linea label="(+) Aportes de socios" value={money(p.aportesSocios)} />}
           {p.rutasRecibidas !== 0 && <Linea label="(+) Capital recibido con rutas (cambio de responsable)" value={money(p.rutasRecibidas)} />}
           {p.rutasEntregadas !== 0 && <Linea label="(−) Capital entregado con rutas (cambio de responsable)" value={money(p.rutasEntregadas)} />}
           <Linea label="= Capital a explicar" value={money(k.entradas)} strong />
@@ -142,13 +155,13 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
 
       {/* DEVOLUCIONES DESDE RUTAS */}
       <section className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-2" data-testid="pool-returns">
-        <h2 className="text-sm font-semibold text-gray-900">Devoluciones de capital desde rutas</h2>
+        <h2 className="text-sm font-semibold text-gray-900">{central ? 'Dinero recibido desde rutas' : 'Devoluciones de capital desde rutas'}</h2>
         {devoluciones.length === 0 ? <p className="text-sm text-gray-400">Sin devoluciones.</p> : (
           <div className="divide-y divide-gray-50">
             {devoluciones.map(m => (
               <div key={m.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 py-2">
                 <div className="min-w-0">
-                  <p className="text-sm text-gray-900 flex items-center gap-1.5"><ArrowDownLeft className="w-4 h-4 text-emerald-600" />{ruta(m.routeId)}{m.estado !== 'vigente' ? ` · ${m.estado === 'anulado' ? 'anulado' : 'reversión'}` : ''}</p>
+                  <p className="text-sm text-gray-900 flex items-center gap-1.5"><ArrowDownLeft className="w-4 h-4 text-emerald-600" />{ruta(m.routeId)}{m.kind !== 'retiroRuta' ? ` · ${POOL_MOVEMENT_LABEL[m.kind]}` : ''}{m.estado !== 'vigente' ? ` · ${m.estado === 'anulado' ? 'anulado' : 'reversión'}` : ''}</p>
                   <p className="text-xs text-gray-400 break-words">{formatDate(m.fecha)} · registró {nombre(m.actorId)} · Ref. {m.id.slice(0, 8).toUpperCase()}</p>
                 </div>
                 <span className={`text-sm font-semibold ${m.estado === 'anulado' ? 'text-gray-400 line-through' : m.monto >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>{signed(m.monto)}</span>

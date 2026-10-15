@@ -19,7 +19,7 @@
 import { generateId } from '@/lib/utils'
 import { nowISO, today } from '@/lib/formatters'
 import { adminCapital } from '@/lib/capitalAllocation'
-import { isCentralCapitalActive } from '@/lib/centralCapital'
+import { CENTRAL_CAPITAL_MESSAGES, isCentralCapitalActive } from '@/lib/centralCapital'
 import { NO_CAPITAL_CONTROLLER_MESSAGE, routeCapitalController } from '@/lib/permissions'
 import { loadCapitalRows, type CapitalControlDatabase } from '@/services/capitalControlService'
 import type { RutaCashDB } from '@/lib/db'
@@ -89,9 +89,16 @@ export async function creditControllerPool(database: RutaCashDB, p: PoolMovePara
   return w
 }
 
-/** Bolsa del responsable → ruta. Rechaza si la bolsa no alcanza. `amount` > 0. */
+/**
+ * Bolsa del responsable → ruta. Rechaza si la bolsa no alcanza o si la ruta quedó
+ * BLOQUEADA al activar (C2: inconsistente o sin responsable, hasta su liberación).
+ * `amount` > 0.
+ */
 export async function debitControllerPool(database: RutaCashDB, p: PoolMoveParams): Promise<CapitalMovement> {
   if (!(p.amount > 0)) throw new CentralCapitalError('El importe que sale de la bolsa debe ser mayor a 0.')
+  if ((await database.tenants.get(p.tenantId))?.centralCapitalRouteBlocks?.[p.routeId]) {
+    throw new CentralCapitalError(CENTRAL_CAPITAL_MESSAGES.rutaBloqueada)
+  }
   const controller = p.controller ?? await controllerForCentral(database, p.tenantId, p.routeId)
   const disponible = await poolAvailable(database, p.tenantId, controller.id)
   if (p.amount > disponible) {

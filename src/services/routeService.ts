@@ -50,7 +50,8 @@ import {
 } from '@/services/capitalControlService'
 import { controlPlane } from '@/platform/controlPlane'
 import type { ControlEventType } from '@/platform/types'
-import type { CapitalMovement, Office, Route, User } from '@/models/types'
+import { CENTRAL_CAPITAL_MESSAGES, isCentralCapitalActive } from '@/lib/centralCapital'
+import type { CapitalMovement, Office, Route, Tenant, User } from '@/models/types'
 
 // ------------------------------------------------------------
 // Contrato de base de datos (mismo patrón que `PaymentDatabase`)
@@ -72,6 +73,8 @@ export interface RouteDatabase extends Omit<CapitalControlDatabase, 'routes' | '
   capitalMovements: CapitalControlDatabase['capitalMovements'] & { add(item: CapitalMovement): Promise<unknown> }
   /** Solo LECTURA: validar que la Oficina indicada existe y es del mismo tenant. */
   offices: { get(key: string): Promise<Office | undefined> }
+  /** Capital centralizado (C2): ¿la empresa ya no admite capital en la caja de la ruta? Opcional en bases inyectadas. */
+  tenants?: { get(key: string): Promise<Tenant | undefined> }
   transaction<U>(mode: 'rw', tables: unknown, scope: () => PromiseLike<U>): Promise<U>
 }
 
@@ -147,6 +150,11 @@ export async function createRouteWithAdmins(
   // 1) Administradores responsables: OPCIONALES. Si el actor es Administrador,
   //    queda autoasignado SIEMPRE (evita que se auto-bloquee por el fail-closed).
   const adminIds = resolveRouteAdminIds(input.adminIds, actor)
+  // Capital centralizado (C2): la ruta nace sin capital en su caja; el responsable
+  // entrega capital a los trabajadores desde su bolsa.
+  if (input.capitalInicial > 0 && isCentralCapitalActive(await database.tenants?.get(input.tenantId))) {
+    throw new CapitalControlError(CENTRAL_CAPITAL_MESSAGES.noCajaDeRuta)
+  }
 
   // 2) Cada responsable indicado debe ser Administrador activo del tenant y asignable
   //    por el actor (o el propio actor, para el Administrador creador que se autoasigna).

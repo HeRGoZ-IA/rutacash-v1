@@ -7,11 +7,15 @@ import { formatCurrency } from '@/lib/formatters'
 import {
   canViewRouteReconciliation, getRouteCashReconciliation, type RouteCashReconciliation,
 } from '@/services/routeCashReconciliation'
+import { useCentralCapital } from '@/hooks/useCentralCapital'
 
 /**
  * ¿DÓNDE ESTÁ EL EFECTIVO DE LA RUTA? Base de la ruta = sin asignar + Σ personas.
  * Todo el cálculo sale de `routeCashReconciliation`; aquí solo se presenta.
  * La cartera (deuda de clientes) se muestra aparte: no es efectivo.
+ *
+ * CAPITAL CENTRALIZADO (C2): "Sin asignar" ya no es una caja operativa. Se presenta
+ * como SALDO HEREDADO de la antigua caja (con su valor al activar), que solo baja.
  */
 export function RouteCashReconciliationCard({ routeId }: { routeId: string }) {
   const { user } = useAuth()
@@ -20,6 +24,7 @@ export function RouteCashReconciliationCard({ routeId }: { routeId: string }) {
   const money = (n: number) => formatCurrency(n, currency)
   const [r, setR] = useState<RouteCashReconciliation | null>(null)
   const [detalle, setDetalle] = useState(false)
+  const central = useCentralCapital(tenantId)
   const visible = canViewRouteReconciliation(user, routeId, tenantId)
 
   useEffect(() => {
@@ -54,10 +59,22 @@ export function RouteCashReconciliationCard({ routeId }: { routeId: string }) {
       <Linea label="Base de la ruta" value={money(r.libro.saldo)} strong />
       {r.personas.filter(p => p.posicion !== 0 || p.baseRecibida > 0).map(p => (
         <Linea key={p.userId}
-          label={`En manos de ${p.nombre}${p.baseRecibida ? ` (Base entregada ${money(p.baseRecibida - p.baseDevuelta)})` : ''}`}
+          label={`En manos de ${p.nombre}${p.baseRecibida ? ` (${central.activo ? 'capital recibido neto' : 'Base entregada'} ${money(p.baseRecibida - p.baseDevuelta)})` : ''}`}
           value={money(p.posicion)} tone={p.posicion < 0 ? 'text-red-600' : 'text-gray-800'} />
       ))}
-      <Linea label="Sin asignar (caja de la ruta)" value={money(r.noAsignado)} tone="text-primary-700" strong />
+      {central.activo ? (
+        <>
+          <Linea label="Saldo heredado de la antigua caja" value={money(r.noAsignado)} tone="text-primary-700" strong />
+          {central.heredadoAlActivar[routeId] !== undefined && (
+            <Linea label="Saldo heredado al activar (solo puede bajar)" value={money(central.heredadoAlActivar[routeId])} tone="text-gray-500" />
+          )}
+          {central.bloqueos[routeId] && (
+            <p className="px-4 py-2 text-xs font-medium text-amber-700" data-testid="reconciliation-blocked">Ruta bloqueada para capital nuevo desde la activación ({central.bloqueos[routeId].estado}).</p>
+          )}
+        </>
+      ) : (
+        <Linea label="Sin asignar (caja de la ruta)" value={money(r.noAsignado)} tone="text-primary-700" strong />
+      )}
       {r.faltantes.map(f => (
         <Linea key={f.settlementId} label={`Faltante pendiente · ${f.nombre}`} value={money(f.monto)} tone="text-amber-600" />
       ))}
@@ -66,7 +83,7 @@ export function RouteCashReconciliationCard({ routeId }: { routeId: string }) {
       )}
       <Linea label="Cartera en calle (no es efectivo)" value={money(r.cartera.carteraEnCalle)} tone="text-indigo-600" />
       <button onClick={() => setDetalle(d => !d)} className="w-full flex items-center justify-between px-4 py-2 text-xs text-gray-500">
-        Cómo se explica lo no asignado {detalle ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        {central.activo ? 'Cómo se explica el saldo heredado' : 'Cómo se explica lo no asignado'} {detalle ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
       </button>
       {detalle && (
         <div className="divide-y divide-gray-50 bg-gray-50/50">
@@ -75,7 +92,7 @@ export function RouteCashReconciliationCard({ routeId }: { routeId: string }) {
           <Linea label="(−) Base entregada neta" value={money(e.baseEntregadaNeta)} />
           <Linea label="(+) Entregado en cuadres" value={money(e.entregadoEnCuadres)} />
           <Linea label="(−) Sobrantes (no se suman al libro)" value={money(e.sobrantesRegistrados)} />
-          <Linea label="= Sin asignar" value={money(e.total)} strong />
+          <Linea label={central.activo ? '= Saldo heredado' : '= Sin asignar'} value={money(e.total)} strong />
         </div>
       )}
     </div>

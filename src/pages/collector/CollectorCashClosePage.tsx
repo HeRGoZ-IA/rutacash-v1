@@ -14,7 +14,9 @@ import { useDataRevision } from '@/hooks/useDataRevision'
 import { useOpBase } from '@/hooks/useOpBase'
 import { can } from '@/lib/permissions'
 import { formatCurrency, formatDate, formatDateTime, today } from '@/lib/formatters'
-import type { CashSettlement, CollectorCashSummary, RouteFinancialSummary } from '@/models/types'
+import type { CashCustodyMovement, CashSettlement, CollectorCashSummary, RouteFinancialSummary } from '@/models/types'
+import { useCentralCapital } from '@/hooks/useCentralCapital'
+import { listCustodyMovements } from '@/services/cashCustodyService'
 
 /**
  * MI EFECTIVO — CICLO PERSONAL DESDE EL ÚLTIMO CUADRE (v14).
@@ -38,6 +40,11 @@ import type { CashSettlement, CollectorCashSummary, RouteFinancialSummary } from
  * consulta: el motor personal no lee `capitalMovements`. El bloque de ruta solo se
  * calcula para quien tiene `cashbox.viewRoute` (Supervisor, Administrador, Super
  * Admin). Ocultar la tarjeta no habría bastado: el dato no se pide.
+ *
+ * CAPITAL CENTRALIZADO (C2): el capital que entrega el Administrador se llama
+ * «Capital recibido». Las filas son ENTRADAS y SALIDAS del periodo, no saldos que
+ * se puedan usar por separado: el único saldo es «Efectivo a tu cargo». La bolsa
+ * del Administrador nunca se consulta aquí.
  */
 export default function CollectorCashClosePage() {
   const { user } = useAuth()
@@ -49,6 +56,9 @@ export default function CollectorCashClosePage() {
   const [misCuadres, setMisCuadres] = useState<CashSettlement[]>([])
   const [route, setRoute] = useState<RouteFinancialSummary | null>(null)
   const [loading, setLoading] = useState(true)
+  const central = useCentralCapital(tenantId)
+  /** Entregas y devoluciones de capital propias del periodo (solo custodia; nunca la bolsa). */
+  const [misMovs, setMisMovs] = useState<CashCustodyMovement[]>([])
 
   const routeId = activeRouteId ?? user?.routeId ?? null
   // Solo quien puede ver la caja FINANCIERA de la ruta obtiene ese bloque.
@@ -82,7 +92,11 @@ export default function CollectorCashClosePage() {
       .filter(c => c.userId === user.id && c.routeId === routeId).slice(0, 5)
     // Fail-closed: si no tiene la capacidad, el dato financiero NO se pide.
     const ruta = verCajaRuta ? await getRouteFinancialSummary(routeId) : null
+    const desde = nuevoCiclo?.desde ?? ''
+    const movs = (await listCustodyMovements(routeId))
+      .filter(m => m.tenantId === user.tenantId && (m.toUserId === user.id || m.fromUserId === user.id) && m.createdAt > desde)
     if (!vigente()) return
+    setMisMovs(movs)
     setCiclo(nuevoCiclo)
     setHoy(nuevoHoy)
     setMisCuadres(cuadres)
@@ -111,15 +125,18 @@ export default function CollectorCashClosePage() {
 
         {ciclo && (
           <>
+            {central.activo && (
+              <p className="text-[11px] text-gray-500" data-testid="cycle-flows-note">Entradas y salidas de este periodo. No son saldos separados: el único saldo es tu efectivo a cargo.</p>
+            )}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-card divide-y divide-gray-50">
               {ciclo.arrastreAnterior > 0 && (
                 <Row icon={<AlertTriangle className="w-4 h-4 text-amber-600" />} label="Faltante pendiente del cuadre anterior" value={`+${money(ciclo.arrastreAnterior)}`} color="text-amber-600" />
               )}
               {ciclo.baseRecibida > 0 && (
-                <Row icon={<Wallet className="w-4 h-4 text-primary-600" />} label="Base recibida" value={`+${money(ciclo.baseRecibida)}`} color="text-primary-700" />
+                <Row icon={<Wallet className="w-4 h-4 text-primary-600" />} label={central.activo ? 'Capital recibido del Administrador' : 'Base recibida'} value={`+${money(ciclo.baseRecibida)}`} color="text-primary-700" />
               )}
               {ciclo.baseDevuelta > 0 && (
-                <Row icon={<Wallet className="w-4 h-4 text-gray-500" />} label="Base devuelta / traspasada" value={`-${money(ciclo.baseDevuelta)}`} color="text-gray-600" />
+                <Row icon={<Wallet className="w-4 h-4 text-gray-500" />} label={central.activo ? 'Capital devuelto / traspasado' : 'Base devuelta / traspasada'} value={`-${money(ciclo.baseDevuelta)}`} color="text-gray-600" />
               )}
               <Row icon={<TrendingUp className="w-4 h-4 text-emerald-600" />} label="Recaudado en efectivo por ti" value={`+${money(ciclo.recaudado)}`} color="text-emerald-600" />
               <Row icon={<Banknote className="w-4 h-4 text-primary-600" />} label="Desembolsado por ti" value={`-${money(ciclo.desembolsado)}`} color="text-primary-600" />
@@ -128,10 +145,12 @@ export default function CollectorCashClosePage() {
 
             <div className="bg-gradient-to-r from-primary-600 to-primary-800 rounded-2xl p-5 text-white">
               <div className="flex items-center gap-2 text-primary-200 text-sm">
-                <Calculator className="w-4 h-4" /> Efectivo a entregar
+                <Calculator className="w-4 h-4" /> {central.activo ? 'Efectivo a tu cargo' : 'Efectivo a entregar'}
               </div>
               <p className="text-3xl font-bold mt-1">{money(ciclo.esperado)}</p>
-              <p className="text-primary-200 text-xs mt-2">Faltante pendiente + Base recibida − Base devuelta + recaudado en efectivo − desembolsado − gastos, desde tu último cuadre</p>
+              <p className="text-primary-200 text-xs mt-2">{central.activo
+                ? 'Faltante pendiente + capital recibido − capital devuelto + recaudado en efectivo − desembolsado − gastos, desde tu último cuadre. Con este efectivo financias las ventas autorizadas de esta ruta.'
+                : 'Faltante pendiente + Base recibida − Base devuelta + recaudado en efectivo − desembolsado − gastos, desde tu último cuadre'}</p>
             </div>
 
             {/* Saldo negativo: gastos por encima del efectivo registrado. No es dinero
@@ -146,6 +165,18 @@ export default function CollectorCashClosePage() {
               </div>
             )}
           </>
+        )}
+
+        {central.activo && misMovs.length > 0 && (
+          <div className="space-y-1.5" data-testid="my-capital-movements">
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Capital recibido y devuelto en este periodo</h2>
+            {misMovs.map(m => (
+              <div key={m.id} className="flex items-center justify-between rounded-lg bg-white border border-gray-100 px-3 py-2 text-xs">
+                <span className="text-gray-600 min-w-0 break-words">{formatDateTime(m.createdAt)} · {m.toUserId === user?.id ? (m.tipo === 'PERSON_TO_PERSON' ? 'Recibido de un compañero' : 'Capital recibido') : (m.tipo === 'PERSON_TO_PERSON' ? 'Entregado a un compañero' : 'Capital devuelto')} · {m.motivo}</span>
+                <span className={`font-semibold whitespace-nowrap ${m.toUserId === user?.id ? 'text-primary-700' : 'text-gray-600'}`}>{m.toUserId === user?.id ? '+' : '−'}{money(m.amount)}</span>
+              </div>
+            ))}
+          </div>
         )}
 
         {/* KPI DIARIO — separado a propósito de "Mi efectivo". */}

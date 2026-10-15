@@ -30,6 +30,7 @@ import { db } from '@/lib/db'
 import { effectivePayments } from '@/lib/paymentState'
 import { isExpenseOf } from '@/lib/expenseAttribution'
 import { today as todayLocal } from '@/lib/formatters'
+import { capitalFlowBreakdown, type CapitalFlowBreakdown } from '@/lib/capitalFlowBreakdown'
 import {
   personalPaymentLedger, isCashPayment, disbursementInstant, expenseInstant, inCycle, custodyInCycle,
 } from '@/lib/cashSettlementRules'
@@ -167,6 +168,20 @@ export async function getCashboxSummary(
     retiros,
     saldoActual,
   }
+}
+
+/**
+ * Desglose de "Ingreso capital" y "Retiros" por operación (C2). Mismo rango que
+ * `getCashboxSummary` con las mismas fechas por defecto: sus sumas coinciden.
+ */
+export async function getCapitalFlowBreakdown(
+  routeId: string, fechaDesde?: string, fechaHasta?: string, database: CashboxDatabase = db,
+): Promise<CapitalFlowBreakdown> {
+  const [caps, wds] = await Promise.all([
+    database.capitalMovements.where('routeId').equals(routeId).toArray(),
+    database.withdrawals.where('routeId').equals(routeId).toArray(),
+  ])
+  return capitalFlowBreakdown(caps, wds, fechaDesde ?? '2000-01-01', fechaHasta ?? todayLocal())
 }
 
 /**

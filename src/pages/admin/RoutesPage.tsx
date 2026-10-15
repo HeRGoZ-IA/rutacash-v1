@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useCentralCapital } from '@/hooks/useCentralCapital'
 import { Plus, MapPin, Users, DollarSign, Edit, ToggleLeft, ToggleRight, Trash2, AlertTriangle, Building2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -38,6 +39,8 @@ import type { Office, Route, User, RouteFinancialSummary } from '@/models/types'
 export default function RoutesPage() {
   const { user, refreshUser } = useAuth()
   const { tenantId, currency } = useTenant()
+  // Capital centralizado (C2): sin capital inicial en la caja de la ruta; bloqueos visibles.
+  const central = useCentralCapital(tenantId)
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [routes, setRoutes] = useState<Route[]>([])
@@ -518,6 +521,9 @@ export default function RoutesPage() {
                   <p className="text-sm font-bold text-indigo-600 truncate">{formatCurrency(summaryByRoute[route.id]?.carteraEnCalle ?? 0, currency)}</p>
                   <p className="text-xs text-gray-400">Cartera Activa</p>
                 </div>
+                {central.bloqueos[route.id] && (
+                  <p className="col-span-2 text-xs font-medium text-amber-700" data-testid={`routes-blocked-${route.id}`}>Bloqueada para capital nuevo desde la activación del capital centralizado.</p>
+                )}
               </div>
               <div className="bg-gray-50 rounded-xl p-2.5 flex items-center justify-between">
                 <p className="text-xs text-gray-400">Total controlado</p>
@@ -645,7 +651,7 @@ export default function RoutesPage() {
           {/* v16: el capital inicial sale de la bolsa del responsable de capital y solo
               lo coloca él (el Administrador que crea la ruta). El SuperAdmin asigna
               capital al Administrador desde Capital; no lo coloca en rutas. */}
-          {!editing && lockAdminToSelf && (
+          {!editing && lockAdminToSelf && central.listo && !central.activo && (
             <MoneyInput label="Capital inicial" currency={currency} value={form.capitalInicial} onValueChange={v => setForm(f => ({ ...f, capitalInicial: v }))} hint="Sale de tu bolsa de capital (Capital → Disponible)" />
           )}
           <div className="flex items-center gap-3">

@@ -36,6 +36,9 @@ import { downloadCSV } from '@/lib/utils'
 import { WorkerCashSettlementPanel, PendingShortagesNotice } from '@/components/settlement/WorkerCashSettlementPanel'
 import { listCashSettlementsForUser } from '@/services/cashSettlementService'
 import type { WeeklySettlement, Route, CashSettlement, User } from '@/models/types'
+import { getCapitalFlowBreakdown } from '@/services/cashboxEngine'
+import type { CapitalFlowBreakdown } from '@/lib/capitalFlowBreakdown'
+import { CapitalFlowDetail } from '@/components/capital/CapitalFlowDetail'
 
 /**
  * LIQUIDACIÓN SEMANAL — SIEMPRE DE UNA RUTA.
@@ -86,6 +89,15 @@ export default function WeeklySettlementPage() {
   const [semanaInicio, setSemanaInicio] = useState(getWeekStart())
   const [semanaFin, setSemanaFin] = useState(getWeekEnd())
   const [settlement, setSettlement] = useState<WeeklySettlement | null>(null)
+  // C2: desglose de capital y retiros del periodo (retornos de cuadre ≠ retiros voluntarios).
+  const [flujo, setFlujo] = useState<CapitalFlowBreakdown | null>(null)
+  useEffect(() => {
+    let alive = true
+    if (!settlement?.routeId) { setFlujo(null); return }
+    getCapitalFlowBreakdown(settlement.routeId, settlement.semanaInicio, settlement.semanaFin)
+      .then(b => { if (alive) setFlujo(b) }, () => { if (alive) setFlujo(null) })
+    return () => { alive = false }
+  }, [settlement])
   /** Ruta con la que se generó la liquidación mostrada (para encabezado y CSV). */
   const [generatedRoute, setGeneratedRoute] = useState<Route | null>(null)
   const [loading, setLoading] = useState(false)
@@ -424,7 +436,7 @@ export default function WeeklySettlementPage() {
           {/* Detalle completo de la ruta liquidada */}
           <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden divide-y divide-gray-50">
             <Row label="Saldo anterior" value={settlement.saldoAnterior} />
-            <Row label="(+) Ingreso capital" value={settlement.ingresoCapital} tone="text-emerald-600" />
+            <Row label={flujo?.hayCentralizados ? '(+) Ingreso de capital (ver detalle)' : '(+) Ingreso capital'} value={settlement.ingresoCapital} tone="text-emerald-600" />
             <Row label="(+) Cobros" value={settlement.cobros} tone="text-emerald-600" />
             {/* ETIQUETA NEUTRA (decisión D-6): NO se renombra a "Base recibida" porque
                 este total agrega naturalezas distintas — una transferencia socio→ruta
@@ -435,7 +447,7 @@ export default function WeeklySettlementPage() {
             <Row label="(−) Préstamos entregados" value={settlement.prestamosEntregados} tone="text-blue-600" />
             <Row label="(−) Gastos" value={settlement.gastos} tone="text-red-500" />
             <Row label="(−) Transferencias salientes" value={settlement.transferenciasSalidas} tone="text-red-500" />
-            <Row label="(−) Retiros" value={settlement.retiros} tone="text-amber-600" />
+            <Row label={flujo?.hayCentralizados ? '(−) Retiros y retornos a la bolsa (ver detalle)' : '(−) Retiros'} value={settlement.retiros} tone="text-amber-600" />
             <div className="flex items-center justify-between px-4 py-3.5 bg-gray-50">
               <span className="text-sm font-semibold text-gray-800">Saldo final</span>
               <span className={`text-base font-bold ${settlement.saldoFinal >= 0 ? 'text-primary-700' : 'text-red-600'}`}>
@@ -443,6 +455,8 @@ export default function WeeklySettlementPage() {
               </span>
             </div>
           </div>
+
+          <CapitalFlowDetail breakdown={flujo} currency={currency} />
 
           {/* INFORMATIVO: cuadres de trabajadores cerrados en el rango. No se suman
               ni se concilian contra la liquidación: son otro documento. */}

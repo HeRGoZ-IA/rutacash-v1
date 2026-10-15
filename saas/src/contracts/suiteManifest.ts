@@ -1,5 +1,5 @@
 // ============================================================
-// Banco de contratos (plan §5.1): las 26 suites del motor local como contrato del
+// Banco de contratos (plan §5.1): las 27 suites del motor local como contrato del
 // servidor. Cada suite indica la FASE en la que debe pasar contra el servidor
 // (columna «Puerta» del plan §2) y la familia de comandos que la sustituirá.
 //
@@ -7,7 +7,7 @@
 //   'local'  → hoy se ejecuta contra el motor local (Dexie). Es la línea base.
 //   'server' → además de su línea base local, su contrato se verifica contra el
 //              servidor real (API + PostgreSQL) en `serverEvidence`.
-// `scripts/run-contract-bench.ts` ejecuta las 26 y compara los casos con este
+// `scripts/run-contract-bench.ts` ejecuta las 27 y compara los casos con este
 // manifiesto: una suite que pierda casos o falle rompe el banco.
 // ============================================================
 
@@ -58,6 +58,8 @@ export const SUITES: readonly SuiteContract[] = [
   { suite: 'disbursement', script: 'test:disbursement', cases: 13, serverPhase: 4, commands: 'desembolso único (D24–D26, D30)', target: 'local' },
   { suite: 'capitalcustody', script: 'test:capitalcustody', cases: 28, serverPhase: 4, commands: 'CAP/CASH/AUTH de desembolsos', target: 'local' },
   { suite: 'periodauthority', script: 'test:periodauthority', cases: 30, serverPhase: 6, commands: 'D7, D29, cierres y autoridad de caja', target: 'local' },
+  // C1/C2 (2026-10-15): capital centralizado en el Administrador. Contrato del modelo que la Fase 3 implementa desde cero.
+  { suite: 'centralcapital', script: 'test:centralcapital', cases: 37, serverPhase: 3, commands: 'capital centralizado: entrega, devolución, cuadre a la bolsa, aportes de socio, transición', target: 'local' },
 ];
 
 export const TOTAL_CASES = SUITES.reduce((n, s) => n + s.cases, 0);

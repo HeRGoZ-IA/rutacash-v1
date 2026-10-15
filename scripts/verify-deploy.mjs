@@ -119,6 +119,15 @@ const MARCADORES = [
   ['Desembolso desde la caja de la ruta:', true, 'caja de la ruta solo para su responsable o el SuperAdmin (2026-10-12 R6/6C.1, D30)'],
   ['No se puede anular hoy.', true, 'anulaciones fuera de semanas cerradas (2026-10-12 R6/6C.1, D7)'],
   ['No hay un periodo abierto para registrar el ajuste.', true, 'ajustes de pagos fuera de semanas cerradas (2026-10-12 R6/6C.1, D7)'],
+  // C1/C2 (2026-10-15): capital centralizado en el Administrador (desactivado por defecto; se activa por empresa).
+  ['Con capital centralizado la ruta no recibe capital en su caja', true, 'motor de capital centralizado (C1)'],
+  ['adex-respaldo-capital-centralizado-v1', true, 'respaldo verificable previo a la activación (C2)'],
+  ['Capital centralizado', true, 'pantalla de diagnóstico y activación (C2)'],
+  ['Entregar capital a un trabajador', true, 'entrega de capital bolsa → trabajador (C2)'],
+  ['Traspasar saldo heredado a mi bolsa', true, 'vaciado del saldo heredado de la caja de ruta (C2)'],
+  ['Capital recibido del Administrador', true, '«Mi efectivo» con capital recibido separado del recaudo (C2)'],
+  ['Efectivo de cuadres devuelto a la bolsa', true, 'retornos de cuadre separados de los retiros (C2)'],
+  ['Esta ruta quedó bloqueada al activar el capital centralizado', true, 'rutas inconsistentes bloqueadas para capital nuevo (C2)'],
 ]
 
 const url = (process.argv[2] ?? '').replace(/\/+$/, '')

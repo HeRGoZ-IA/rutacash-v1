@@ -90,7 +90,7 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       f('direccion', 'address'), f('responsable', 'contact_name'), instant('cashModelStartAt', 'cash_model_start_at'),
       instant('baseCustodyStartAt', 'base_custody_start_at'), created, updated,
     ],
-    omitted: [],
+    omitted: [{ field: 'centralCapitalStartAt', reason: 'Capital centralizado C1/C2 de CLEAN (2026-10-15): estado local por navegador. El SaaS empieza de cero y la Fase 3 implementa el modelo en PostgreSQL con su propio esquema; no se importa' }, { field: 'centralCapitalBackup', reason: 'Capital centralizado C1/C2 de CLEAN (2026-10-15): estado local por navegador. El SaaS empieza de cero y la Fase 3 implementa el modelo en PostgreSQL con su propio esquema; no se importa' }, { field: 'centralCapitalRouteBlocks', reason: 'Capital centralizado C1/C2 de CLEAN (2026-10-15): estado local por navegador. El SaaS empieza de cero y la Fase 3 implementa el modelo en PostgreSQL con su propio esquema; no se importa' }, { field: 'centralCapitalHeritage', reason: 'Capital centralizado C1/C2 de CLEAN (2026-10-15): estado local por navegador. El SaaS empieza de cero y la Fase 3 implementa el modelo en PostgreSQL con su propio esquema; no se importa' }],
     added: [
       { column: 'country_code', reason: 'P6: país ISO 3166-1. `Tenant.pais` es texto libre y se conserva en country_label; el código lo fija el alta o la importación' },
       { column: 'timezone', reason: 'P6/DS-04: zona IANA de la empresa, reloj de los periodos. No existe en Dexie (hoy manda el dispositivo)' },
@@ -215,7 +215,7 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       id('id', 'id'), tenant, id('routeId', 'route_id'), f('tipo', 'kind'), money('valor', 'amount_minor'), f('descripcion', 'description'),
       date('fecha', 'movement_date'), id('userId', 'registered_by_membership_id'), created, id('adminId', 'admin_membership_id'), ...REVERSAL,
     ],
-    omitted: [], added: [],
+    omitted: [{ field: 'centralLink', reason: 'Capital centralizado C1/C2 de CLEAN (2026-10-15): estado local por navegador. El SaaS empieza de cero y la Fase 3 implementa el modelo en PostgreSQL con su propio esquema; no se importa' }], added: [],
   },
   {
     dexieTable: 'transfers', entity: 'Transfer', source: 'models', sqlTable: 'adex.transfers',
@@ -233,7 +233,7 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       id('id', 'id'), tenant, id('routeId', 'route_id'), money('valor', 'amount_minor'), f('descripcion', 'description'),
       date('fecha', 'withdrawal_date'), id('userId', 'registered_by_membership_id'), created, id('adminId', 'admin_membership_id'), ...REVERSAL,
     ],
-    omitted: [], added: [],
+    omitted: [{ field: 'centralLink', reason: 'Capital centralizado C1/C2 de CLEAN (2026-10-15): estado local por navegador. El SaaS empieza de cero y la Fase 3 implementa el modelo en PostgreSQL con su propio esquema; no se importa' }], added: [],
   },
   {
     dexieTable: 'cashboxMovements', entity: 'CashboxMovement', source: 'models', sqlTable: null,
@@ -290,7 +290,7 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       f('description', 'description'), id('relatedTransferId', 'related_transfer_id'), date('fecha', 'movement_date'), created,
       id('createdBy', 'created_by_membership_id'), ...REVERSAL,
     ],
-    omitted: [], added: [],
+    omitted: [{ field: 'relatedLedgerEntryId', reason: 'Capital centralizado C1/C2 de CLEAN (2026-10-15): estado local por navegador. El SaaS empieza de cero y la Fase 3 implementa el modelo en PostgreSQL con su propio esquema; no se importa' }], added: [],
   },
   {
     dexieTable: 'paymentAdjustmentRequests', entity: 'PaymentAdjustmentRequest', source: 'models', sqlTable: 'adex.payment_adjustment_requests',
@@ -326,7 +326,7 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       id('toUserId', 'to_membership_id'), f('origen', 'origin'), id('relatedTransferId', 'related_transfer_id'), f('motivo', 'reason'),
       date('fecha', 'movement_date'), created, id('createdByUserId', 'created_by_membership_id'), ...REVERSAL,
     ],
-    omitted: [], added: [],
+    omitted: [{ field: 'centralLink', reason: 'Capital centralizado C1/C2 de CLEAN (2026-10-15): estado local por navegador. El SaaS empieza de cero y la Fase 3 implementa el modelo en PostgreSQL con su propio esquema; no se importa' }, { field: 'saleRequestId', reason: 'Capital centralizado C1/C2 de CLEAN (2026-10-15): estado local por navegador. El SaaS empieza de cero y la Fase 3 implementa el modelo en PostgreSQL con su propio esquema; no se importa' }], added: [],
   },
   {
     dexieTable: 'capitalLedger', entity: 'CapitalLedgerEntry', source: 'models', sqlTable: 'adex.capital_ledger',
@@ -336,7 +336,7 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       f('descripcion', 'description'), date('fecha', 'entry_date'), created, f('actorUserId', 'actor', 'actor'), f('actorRole', 'actor_role'),
       f('status', 'status'), f('syncStatus', 'sync_status'), ...REVERSAL,
     ],
-    omitted: [], added: [],
+    omitted: [{ field: 'partnerId', reason: 'Capital centralizado C1/C2 de CLEAN (2026-10-15): estado local por navegador. El SaaS empieza de cero y la Fase 3 implementa el modelo en PostgreSQL con su propio esquema; no se importa' }], added: [],
   },
   {
     dexieTable: 'routeCapitalControllerEvents', entity: 'RouteCapitalControllerEvent', source: 'models', sqlTable: 'adex.route_capital_controller_events',

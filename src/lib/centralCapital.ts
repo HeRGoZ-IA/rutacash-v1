@@ -95,12 +95,47 @@ export interface RouteTransitionInput {
   tieneResponsable: boolean
   cuadra: boolean
   noAsignado: number
+  /**
+   * "Sin asignar" + sobrantes registrados (efectivo físico que debería haber en la
+   * caja). Opcional: sin él, todo negativo se trata como inconsistencia.
+   */
+  efectivoFisicoNoAsignado?: number
 }
 
+/**
+ * Clasificación de la ruta para la transición (C1/C2):
+ *   · sin-responsable  → nadie puede operar su capital.
+ *   · inconsistente    → la conciliación no cuadra, o "Sin asignar" es negativo SIN
+ *                        explicación (el efectivo físico también sería negativo).
+ *   · saldo-heredado   → hay saldo en la caja de la ruta. Incluye el NEGATIVO
+ *                        explicado por sobrantes registrados (cuadres con esperado
+ *                        negativo, 73209ce): no es dinero de nadie, ninguna operación
+ *                        nueva lo consume (disponible 0) y el sobrante sigue documentado.
+ *   · limpia           → nada en la caja de la ruta.
+ */
 export function classifyRouteTransition(r: RouteTransitionInput): RouteTransitionStatus {
   if (!r.tieneResponsable) return 'sin-responsable'
-  if (!r.cuadra || r.noAsignado < 0) return 'inconsistente'
+  if (!r.cuadra) return 'inconsistente'
+  if (r.noAsignado < 0 && (r.efectivoFisicoNoAsignado ?? r.noAsignado) < 0) return 'inconsistente'
   return r.noAsignado === 0 ? 'limpia' : 'saldo-heredado'
+}
+
+/** Explicación legible del estado de una ruta (diagnóstico y activación). */
+export function routeTransitionExplanation(estado: RouteTransitionStatus, r: { noAsignado: number; cuadra: boolean; bloqueada?: boolean }): string {
+  switch (estado) {
+    case 'sin-responsable':
+      return 'Sin Administrador responsable de capital: nadie puede entregarle capital. Al activar queda bloqueada hasta asignar un responsable y liberarla.'
+    case 'inconsistente':
+      return r.cuadra
+        ? 'El efectivo sin asignar es negativo y no lo explican sobrantes registrados. Requiere revisión: al activar queda bloqueada para capital nuevo.'
+        : 'La conciliación de la ruta no cuadra. Requiere revisión: al activar queda bloqueada para capital nuevo. Nada se corrige automáticamente.'
+    case 'saldo-heredado':
+      return r.noAsignado > 0
+        ? 'Tiene efectivo en la antigua caja de la ruta. Queda identificado como saldo heredado: solo puede bajar (traspaso a la bolsa del responsable o entrega a un trabajador).'
+        : 'Tiene un saldo negativo explicado por sobrantes registrados en cuadres (gastos pagados por el trabajador). No es dinero disponible y ninguna operación nueva lo usa.'
+    default:
+      return r.bloqueada ? 'Sin saldo en la caja de la ruta, pero bloqueada desde la activación.' : 'Sin saldo en la caja de la ruta: lista para el modelo centralizado.'
+  }
 }
 
 export const CENTRAL_CAPITAL_MESSAGES = {
@@ -110,4 +145,5 @@ export const CENTRAL_CAPITAL_MESSAGES = {
   trasladoEntreRutas: 'Con capital centralizado no hay traslados entre cajas de ruta: el responsable recibe la devolución en una ruta y entrega el capital en la otra.',
   anulacionQueRellenaCaja: 'Con capital centralizado una anulación no puede devolver dinero a la caja de la ruta.',
   operacionEmparejada: 'Este movimiento forma parte de una operación del capital centralizado: anúlalo desde esa operación, no por separado.',
+  rutaBloqueada: 'Esta ruta quedó bloqueada al activar el capital centralizado (inconsistente o sin responsable). El SuperAdmin debe revisarla y liberarla antes de entregarle capital.',
 } as const

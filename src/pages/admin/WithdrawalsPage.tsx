@@ -22,9 +22,16 @@ import { CapitalControllerBadge } from '@/components/ui/CapitalControllerBadge'
 import { canReverseRouteFund, reverseWithdrawal } from '@/services/movementReversalService'
 import { pairReversals, reversalStateOf } from '@/lib/movementReversal'
 import { AnnulledBadge, ReversalDetail, ReverseButton, ReverseMovementModal, signedMoney } from '@/components/ui/MovementReversal'
+import { useCentralCapital } from '@/hooks/useCentralCapital'
+import { Link } from 'react-router-dom'
 
 // Revisión socio 25-jun — Retiros agrupados por ruta (presentación similar a Capital).
 // NO cambia la lógica contable de retiros: solo organiza la vista por ruta.
+//
+// CAPITAL CENTRALIZADO (C2): esta pantalla es de RETIROS DE LA CAJA DE LA RUTA. Los
+// registros del modelo centralizado (retornos de cuadre, devoluciones de trabajadores,
+// cobros no en efectivo) no son retiros voluntarios: se ven en Caja principal, Caja e
+// Historial con su nombre. Con el modelo activo, el retiro solo vacía el saldo heredado.
 interface WithdrawalGroup {
   routeId: string
   nombre: string
@@ -40,6 +47,7 @@ export default function WithdrawalsPage() {
   const { tenantId, currency } = useTenant()
   const officeFilter = useOfficeRouteFilter()
   const { user } = useAuth()
+  const central = useCentralCapital(tenantId)
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
   const [users, setUsers] = useState<User[]>([])
@@ -74,7 +82,8 @@ export default function WithdrawalsPage() {
     ])
     // RESTRICCIÓN POR RUTAS: retiros y rutas limitados a los autorizados.
     const scopedRts = filterAccessibleRoutes(user, rts)
-    setWithdrawals(filterByAccessibleRoute(user, ws).sort((a, b) => b.fecha.localeCompare(a.fecha)))
+    // Solo retiros de caja: las patas del capital centralizado tienen su propia vista.
+    setWithdrawals(filterByAccessibleRoute(user, ws).filter(w => !w.centralLink).sort((a, b) => b.fecha.localeCompare(a.fecha)))
     setRoutes(scopedRts)
     setUsers(us)
     const base: Record<string, number> = {}
@@ -106,7 +115,8 @@ export default function WithdrawalsPage() {
   const getUserName = (id?: string) => users.find(u => u.id === id)?.nombre
   // v16: solo se retira de las rutas cuyo capital controla el actor; el retiro
   // vuelve a SU bolsa. El SuperAdmin no retira de rutas: recoge capital del Admin.
-  const rutasControladas = routes.filter(r => canManageRouteFunds(user, r, tenantId, users))
+  // Con capital centralizado, solo las rutas que aún tienen saldo heredado.
+  const rutasControladas = routes.filter(r => canManageRouteFunds(user, r, tenantId, users) && (!central.activo || (disponibleByRoute[r.id] ?? 0) > 0))
 
   // Retiros dentro del rango de fecha (los totales agrupados lo respetan;
   // la Base de la ruta es un saldo a la fecha y no depende del filtro).
@@ -162,11 +172,17 @@ export default function WithdrawalsPage() {
           <h1 className="text-xl font-bold text-gray-900">Retiros</h1>
           <p className="text-sm text-gray-500 mt-0.5">{withdrawals.length} retiro(s) · {routes.length} ruta(s)</p>
         </div>
-        {rutasControladas.length > 0 && (
-          <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>Nuevo retiro</Button>
+        {central.listo && rutasControladas.length > 0 && (
+          <Button onClick={() => setModalOpen(true)} icon={<Plus className="w-4 h-4" />}>{central.activo ? 'Traspasar saldo heredado' : 'Nuevo retiro'}</Button>
         )}
       </div>
-      {!loading && rutasControladas.length === 0 && (
+      {central.activo && (
+        <p className="text-xs text-gray-600 bg-primary-50 border border-primary-100 rounded-xl px-3 py-2" data-testid="withdrawals-central">
+          Capital centralizado: las rutas ya no tienen caja propia. Aquí solo se traspasa a tu bolsa el saldo heredado de la antigua caja.
+          Los retornos de cuadre, las devoluciones de trabajadores y los cobros no en efectivo están en <Link className="text-primary-700 hover:underline" to="/admin/capital">Caja principal</Link>.
+        </p>
+      )}
+      {!loading && !central.activo && rutasControladas.length === 0 && (
         <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2" data-testid="withdrawals-readonly">
           {user?.rol === 'superadmin'
             ? 'Los retiros de una ruta los registra su Administrador responsable de capital y vuelven a su bolsa. Para recoger capital de un Administrador usa Capital.'
@@ -240,7 +256,7 @@ export default function WithdrawalsPage() {
       )}
 
       {/* Registrar retiro (sin cambios de lógica contable) */}
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Registrar retiro"
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={central.activo ? 'Traspasar saldo heredado a mi bolsa' : 'Registrar retiro'}
         footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={handleSave} loading={saving}>Registrar</Button></>}>
         <div className="space-y-4">
           <Select label="Ruta" value={form.routeId} onChange={e => setForm(f => ({ ...f, routeId: e.target.value }))}
@@ -248,7 +264,7 @@ export default function WithdrawalsPage() {
           <p className="text-xs text-gray-500">El retiro vuelve a tu bolsa de capital (Capital → Disponible).</p>
           {form.routeId && disponibleByRoute[form.routeId] !== undefined && (
             <p className={`text-xs ${form.valor > disponibleByRoute[form.routeId] ? 'text-red-600' : 'text-gray-500'}`}>
-              Disponible para retiro (caja no asignada): <b>{formatCurrency(disponibleByRoute[form.routeId], currency)}</b>
+              {central.activo ? 'Saldo heredado disponible' : 'Disponible para retiro (caja no asignada)'}: <b>{formatCurrency(disponibleByRoute[form.routeId], currency)}</b>
             </p>
           )}
           <div className="grid grid-cols-2 gap-3">
@@ -290,7 +306,7 @@ export default function WithdrawalsPage() {
                           </div>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
-                          {canReverseRouteFund(user, w, routes, users) && <ReverseButton onClick={() => setReversing(w)} />}
+                          {!central.activo && canReverseRouteFund(user, w, routes, users) && <ReverseButton onClick={() => setReversing(w)} />}
                           <span className={`text-sm font-bold ${estado === 'anulado' ? 'text-gray-400 line-through' : w.valor >= 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{signedMoney(-w.valor, currency)}</span>
                         </div>
                       </div>

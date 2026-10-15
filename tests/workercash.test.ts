@@ -1130,7 +1130,13 @@ await spec('CASH-BOUNDARY-009', 'Fronteras', 'cierres concurrentes con pagos, de
 await spec('CASH-BOUNDARY-010', 'Fronteras', 'contrato: cierre bajo bloqueo y escritores sellando bajo bloqueo', () => {
   const svc = readSource('src/services/cashSettlementService.ts')
   // v15: la custodia de Base también sella instantes → su tabla entra al bloqueo.
-  const cierreBloquea = svc.includes('[database.cashSettlements, database.payments, database.sales, database.expenses, database.tenants, database.cashCustodyMovements]')
+  // C2: la lista de la frontera debe existir Y ser el alcance de la transacción del
+  // cierre (puede ampliarse con más tablas, nunca reducirse). Antes bastaba el texto.
+  const frontera = '[database.cashSettlements, database.payments, database.sales, database.expenses, database.tenants, database.cashCustodyMovements]'
+  const cierre = svc.slice(svc.indexOf('export async function closeCashSettlement'), svc.indexOf('export async function reopenCashSettlement'))
+  const cierreBloquea = cierre.includes(`const frontera = ${frontera}`)
+    ? /database\.transaction\(\s*'rw',[\s\S]{0,200}?\[\.\.\.frontera\b/.test(cierre)
+    : /database\.transaction\(\s*'rw',\s*\[database\.cashSettlements, database\.payments, database\.sales, database\.expenses, database\.tenants, database\.cashCustodyMovements\]/.test(cierre)
   const guarda = svc.includes('waitClockPast(hasta)')
   const antes = Date.now()
   waitClockPast(new Date(antes).toISOString())

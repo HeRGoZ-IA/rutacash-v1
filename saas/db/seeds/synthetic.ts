@@ -105,6 +105,9 @@ function companyRecords(c: CompanySpec): DexieSnapshot {
     telefono: '+00 000 0000', plan: 'operativo', status: 'activa', fechaVencimiento: '2027-12-31', logo: 'data:image/png;base64,AAAA',
     pais: c.country, ciudad: 'Ciudad Sintética', moneda: c.currency, direccion: 'Calle Ficticia 1', responsable: 'Responsable Sintético',
     cashModelStartAt: at(0), baseCustodyStartAt: at(0), createdAt: at(-30), updatedAt: at(0),
+    // Capital centralizado C1/C2 (estado local de CLEAN, omitido en el servidor: ver dexieV16.ts).
+    centralCapitalStartAt: at(0), centralCapitalRouteBlocks: {}, centralCapitalHeritage: {},
+    centralCapitalBackup: { integridad: 'sintetica', huellaFinanciera: 'sintetica', exportedAt: at(0), exportedByUserId: 'sintetico', conteos: {}, verifiedAt: at(0), verifiedByUserId: 'sintetico' },
   };
   const offices: Required<Office>[] = [
     { id: id('office:1'), tenantId, nombre: 'Oficina Centro', codigo: 'OF-1', status: 'activa', createdAt: at(-30), updatedAt: at(-30) },

@@ -20,7 +20,9 @@ import { getAdminAvailableCapital } from '@/services/capitalControlService'
 import { listCustodyMovements } from '@/services/cashCustodyService'
 import { pairReversals, reversalStateOf } from '@/lib/movementReversal'
 import { transferTotalsFor } from '@/lib/transferTotals'
-import { TRANSFER_CATEGORIES, TRANSFER_OPERATIONS, availableOperations, routesForOperation, type TransferOperationKind } from '@/lib/transferOperations'
+import { availableOperations, operationButtonLabel, operationsOfMode, routesForOperation, transferCategories, type TransferMode, type TransferOperationKind } from '@/lib/transferOperations'
+import { useCentralCapital } from '@/hooks/useCentralCapital'
+import { registerPartnerContribution } from '@/services/centralCapitalService'
 import { AnnulledBadge, ReversalDetail, ReverseButton, ReverseMovementModal, signedMoney } from '@/components/ui/MovementReversal'
 import { OperationWizard } from '@/components/transfers/OperationWizard'
 import { generateId } from '@/lib/utils'
@@ -70,6 +72,11 @@ function decodeEndpoint(v: string): { type: TransferEntityType; id: string } | n
  *  · Operaciones con SOCIOS: se conservan como estaban (sección propia), sin nuevos
  *    accesos, por los riesgos R1/R2 de la auditoría (decisión D1 pendiente).
  *  · Entre bolsas de Administradores distintos: no existe (D2 pendiente).
+ *
+ * CAPITAL CENTRALIZADO (C2): con el modelo activo la caja de la ruta no es una
+ * bolsa. Se ofrecen entregar y recibir capital (bolsa ⇄ trabajador) y, solo donde
+ * queda, vaciar el saldo heredado. No aparecen Ruta → Ruta, colocar en la caja ni
+ * Socio → Ruta: el aporte de un socio entra a la bolsa del responsable.
  */
 export default function TransfersPage() {
   const { tenantId, currency } = useTenant()
@@ -99,6 +106,11 @@ export default function TransfersPage() {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ origen: '', destino: '', valor: 0, descripcion: '', fecha: today() })
   const [socioOpId, setSocioOpId] = useState('')
+  // Capital centralizado: aporte de socio a la bolsa del responsable de una ruta.
+  const central = useCentralCapital(tenantId)
+  const [aporteOpen, setAporteOpen] = useState(false)
+  const [aporte, setAporte] = useState({ partnerId: '', routeId: '', valor: 0, descripcion: '', fecha: today() })
+  const [aporteOpId, setAporteOpId] = useState('')
 
   // Reactiva: otra pestaña del mismo navegador registra y esta vista se entera sin F5.
   const revision = useDataRevision()
@@ -153,10 +165,14 @@ export default function TransfersPage() {
     return 'Externo/Socio'
   }
 
-  // Operaciones que el actor puede iniciar (mismas reglas que cada servicio).
-  const operaciones = availableOperations(user, routes, users, tenantId)
-  const opsDeRuta = (r: Route) => (Object.keys(TRANSFER_OPERATIONS) as TransferOperationKind[])
-    .filter(k => operaciones.includes(k) && routesForOperation(k, user, [r], users, tenantId).length > 0)
+  // Operaciones que el actor puede iniciar (mismas reglas que cada servicio). Hasta
+  // saber qué modelo rige la empresa no se ofrece ninguna (nunca el circuito equivocado).
+  const modo: TransferMode | undefined = central.activo
+    ? { central: true, heredado: Object.fromEntries(routes.map(r => [r.id, Math.max(0, resumen[r.id]?.sinAsignar ?? 0)])) }
+    : undefined
+  const operaciones = central.listo ? availableOperations(user, routes, users, tenantId, modo) : []
+  const opsDeRuta = (r: Route) => operationsOfMode(modo)
+    .filter(k => operaciones.includes(k) && routesForOperation(k, user, [r], users, tenantId, modo).length > 0)
 
   // ---------- Operación con socio (sin cambios de reglas; sin nuevos accesos) ----------
   const rutasControladas = routes.filter(r => canOperateRouteCash(user, r, 'structural', users))
@@ -168,7 +184,9 @@ export default function TransfersPage() {
   // Origen y destino se excluyen entre sí, y al menos un extremo es un socio
   // (Ruta → Ruta va por el asistente, con su vista previa).
   const origenOptions = endpointOptions.filter(o => o.value !== form.destino)
+  // Capital centralizado: ninguna ruta como destino (Socio → Ruta no existe; el aporte va a la bolsa).
   const destinoOptions = endpointOptions.filter(o => o.value !== form.origen)
+    .filter(o => !(central.activo && o.value.startsWith('route:')))
   const origenSel = decodeEndpoint(form.origen)
   const destinoSel = decodeEndpoint(form.destino)
   const origenDisponible = origenSel?.type === 'route' ? resumen[origenSel.id]?.disponible ?? null : null
@@ -186,6 +204,19 @@ export default function TransfersPage() {
       const r = await registerTransfer({ actor: user, tenantId, origen: origenSel, destino: destinoSel, valor: form.valor, descripcion: form.descripcion, fecha: form.fecha, operationId: socioOpId })
       toast.success(`Transferencia registrada · Ref. ${r.transfer.id.slice(0, 8).toUpperCase()}`)
       setSocioOpen(false)
+      await load()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error') } finally { setSaving(false) }
+  }
+
+  // ---------- Aporte de socio a la bolsa (capital centralizado) ----------
+  async function guardarAporte() {
+    if (!aporte.partnerId || !aporte.routeId || aporte.valor <= 0) { toast.error('Socio, ruta y valor son obligatorios'); return }
+    setSaving(true)
+    try {
+      // Alcance, responsable, empresa y fecha: en el servicio.
+      const r = await registerPartnerContribution({ actor: user, tenantId, partnerId: aporte.partnerId, routeId: aporte.routeId, amount: aporte.valor, descripcion: aporte.descripcion, fecha: aporte.fecha, operationId: aporteOpId })
+      toast.success(`Aporte registrado en tu bolsa · Ref. ${r.entry.id.slice(0, 8).toUpperCase()}`)
+      setAporteOpen(false)
       await load()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Error') } finally { setSaving(false) }
   }
@@ -217,18 +248,23 @@ export default function TransfersPage() {
   }
 
   const etiquetaCustodia = (m: CashCustodyMovement) =>
-    m.tipo === 'BASE_ASSIGNMENT' ? `Entrega de Base · caja de ${routeNombre(m.routeId)} → ${userName(m.toUserId)}`
+    m.origen === 'admin-pool' && m.tipo === 'BASE_ASSIGNMENT' ? `${m.reversesId ? 'Anulación de entrega' : 'Entrega de capital'} · bolsa → ${userName(m.toUserId)} (${routeNombre(m.routeId)})`
+      : m.origen === 'admin-pool' && m.tipo === 'BASE_RETURN' ? `${m.reversesId ? 'Anulación de entrega' : 'Devolución de capital'} · ${userName(m.fromUserId)} → bolsa (${routeNombre(m.routeId)})`
+      : m.tipo === 'BASE_ASSIGNMENT' ? `Entrega de Base · caja de ${routeNombre(m.routeId)} → ${userName(m.toUserId)}`
       : m.tipo === 'BASE_RETURN' ? `Devolución · ${userName(m.fromUserId)} → caja de ${routeNombre(m.routeId)}`
         : `Traspaso · ${userName(m.fromUserId)} → ${userName(m.toUserId)} (${routeNombre(m.routeId)})`
 
   const sumaRutas = (k: keyof RouteSummary) => rutasVisibles.reduce((s, r) => s + (resumen[r.id]?.[k] ?? 0), 0)
+  const heredadoTotal = rutasVisibles.reduce((s, r) => s + Math.max(0, resumen[r.id]?.sinAsignar ?? 0), 0)
 
   return (
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Transferencias</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Mover efectivo entre la caja de tus rutas, sus trabajadores y tu bolsa. Cada operación usa su registro de siempre.</p>
+          <p className="text-sm text-gray-500 mt-0.5">{central.activo
+            ? 'Capital centralizado: entregas capital de tu bolsa a los trabajadores de tus rutas y recibes sus devoluciones. Las rutas ya no tienen caja propia.'
+            : 'Mover efectivo entre la caja de tus rutas, sus trabajadores y tu bolsa. Cada operación usa su registro de siempre.'}</p>
         </div>
         <div className="flex flex-wrap gap-2 sm:justify-end">
           {user?.rol === 'admin' && (
@@ -252,7 +288,7 @@ export default function TransfersPage() {
       {/* ---------- OPERACIONES (solo las autorizadas) ---------- */}
       {operaciones.length > 0 && (
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" data-testid="op-categories">
-          {TRANSFER_CATEGORIES.filter(c => c.kinds.some(k => operaciones.includes(k))).map(c => (
+          {transferCategories(modo).filter(c => c.kinds.some(k => operaciones.includes(k))).map(c => (
             <button key={c.categoria} type="button" onClick={() => setWizard(c.kinds.filter(k => operaciones.includes(k)).length === 1 ? { kind: c.kinds.find(k => operaciones.includes(k)) } : {})}
               className="text-left rounded-2xl border border-gray-100 bg-white shadow-card p-4 hover:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-500">
               <span className="block text-sm font-semibold text-gray-900">{c.titulo}</span>
@@ -284,14 +320,22 @@ export default function TransfersPage() {
           <div className="rounded-2xl bg-primary-50 border border-primary-100 p-4">
             <p className="text-xs text-gray-600">Mi bolsa (Caja principal)</p>
             <p className="text-lg font-bold text-primary-700" data-testid="summary-pool">{bolsa == null ? 'No disponible' : money(bolsa)}</p>
-            <p className="text-[11px] text-gray-500">Para distribuir a tus rutas o pagar gastos administrativos.</p>
+            <p className="text-[11px] text-gray-500">{central.activo ? 'Para entregar capital a tus trabajadores o pagar gastos.' : 'Para distribuir a tus rutas o pagar gastos administrativos.'}</p>
           </div>
         )}
-        <div className="rounded-2xl bg-white border border-gray-100 shadow-card p-4">
-          <p className="text-xs text-gray-600">Disponible en cajas de ruta</p>
-          <p className="text-lg font-bold text-gray-900" data-testid="summary-routes">{money(sumaRutas('disponible'))}</p>
-          <p className="text-[11px] text-gray-500">{rutasVisibles.length} ruta(s) en tu alcance. Caja sin asignar, acotada por la Base.</p>
-        </div>
+        {central.activo ? (
+          <div className="rounded-2xl bg-white border border-gray-100 shadow-card p-4">
+            <p className="text-xs text-gray-600">Saldo heredado de cajas de ruta</p>
+            <p className="text-lg font-bold text-gray-900" data-testid="summary-heritage">{money(heredadoTotal)}</p>
+            <p className="text-[11px] text-gray-500">Lo que quedó en la antigua caja de {rutasVisibles.length} ruta(s). Solo puede bajar.</p>
+          </div>
+        ) : (
+          <div className="rounded-2xl bg-white border border-gray-100 shadow-card p-4">
+            <p className="text-xs text-gray-600">Disponible en cajas de ruta</p>
+            <p className="text-lg font-bold text-gray-900" data-testid="summary-routes">{money(sumaRutas('disponible'))}</p>
+            <p className="text-[11px] text-gray-500">{rutasVisibles.length} ruta(s) en tu alcance. Caja sin asignar, acotada por la Base.</p>
+          </div>
+        )}
         <div className="rounded-2xl bg-white border border-gray-100 shadow-card p-4">
           <p className="text-xs text-gray-600">En manos de trabajadores</p>
           <p className="text-lg font-bold text-gray-900" data-testid="summary-workers">{money(sumaRutas('enTrabajadores'))}</p>
@@ -301,7 +345,7 @@ export default function TransfersPage() {
 
       {/* ---------- CAJAS DE RUTA ---------- */}
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-gray-900">Cajas de ruta</h2>
+        <h2 className="text-sm font-semibold text-gray-900">{central.activo ? 'Rutas' : 'Cajas de ruta'}</h2>
         {loading ? (
           <div className="flex justify-center py-10"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
         ) : rutasVisibles.length === 0 ? (
@@ -322,21 +366,29 @@ export default function TransfersPage() {
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-primary-50 rounded-xl p-2.5" data-testid="route-available">
-                      <p className="text-xs text-gray-600">Disponible para mover</p>
-                      <p className="text-sm font-bold text-primary-700">{s == null ? 'No disponible' : money(s.disponible)}</p>
-                    </div>
+                    {central.activo ? (
+                      <div className="bg-primary-50 rounded-xl p-2.5" data-testid="route-heritage">
+                        <p className="text-xs text-gray-600">Saldo heredado</p>
+                        <p className="text-sm font-bold text-primary-700">{s == null ? 'No disponible' : money(s.sinAsignar)}</p>
+                      </div>
+                    ) : (
+                      <div className="bg-primary-50 rounded-xl p-2.5" data-testid="route-available">
+                        <p className="text-xs text-gray-600">Disponible para mover</p>
+                        <p className="text-sm font-bold text-primary-700">{s == null ? 'No disponible' : money(s.disponible)}</p>
+                      </div>
+                    )}
                     <div className="bg-gray-50 rounded-xl p-2.5">
                       <p className="text-xs text-gray-600">En manos de trabajadores</p>
                       <p className="text-sm font-bold text-gray-800">{s == null ? 'No disponible' : money(s.enTrabajadores)}</p>
                     </div>
                   </div>
+                  {central.bloqueos[r.id] && <p className="text-[11px] font-medium text-amber-700" data-testid="route-blocked">Bloqueada para capital nuevo hasta que el SuperAdmin la revise.</p>}
                   <p className="text-[11px] text-gray-400">Neto de transferencias: {money(neto)} (entrante − saliente). No es el efectivo en caja.</p>
                   {ops.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {ops.map(k => (
-                        <Button key={k} size="sm" variant={k === 'entregar-base' ? 'primary' : 'secondary'} onClick={() => setWizard({ kind: k, routeId: r.id })}>
-                          {k === 'entregar-base' ? 'Entregar Base' : k === 'devolver-base' ? 'Recibir devolución' : k === 'ruta-ruta' ? 'Transferir a otra ruta' : k === 'colocar' ? 'Colocar capital' : 'Retirar capital'}
+                        <Button key={k} size="sm" variant={k === 'entregar-base' && !central.activo || k === 'entregar-capital' ? 'primary' : 'secondary'} onClick={() => setWizard({ kind: k, routeId: r.id })}>
+                          {operationButtonLabel(k, modo)}
                         </Button>
                       ))}
                     </div>
@@ -350,11 +402,22 @@ export default function TransfersPage() {
       </section>
 
       {/* ---------- OPERACIONES CON SOCIOS (existentes; sin nuevos accesos) ---------- */}
+      {puedeSocios && central.activo && rutasControladas.length > 0 && (
+        <section className="rounded-2xl border border-purple-200 bg-purple-50 p-4 space-y-2" data-testid="partner-contribution">
+          <p className="flex items-center gap-2 text-sm font-semibold text-purple-900"><Users className="w-4 h-4" />Aporte de socio a mi bolsa</p>
+          <p className="text-xs text-purple-900">El capital que un socio aporta para trabajar una ruta entra primero a tu bolsa (Caja principal). Desde ahí lo entregas a los trabajadores.</p>
+          <Button size="sm" variant="secondary" onClick={() => { setAporte({ partnerId: '', routeId: rutasControladas.length === 1 ? rutasControladas[0].id : '', valor: 0, descripcion: '', fecha: today() }); setAporteOpId(generateId()); setAporteOpen(true) }}
+            icon={<Plus className="w-4 h-4" />}>Registrar aporte de socio</Button>
+        </section>
+      )}
+
       {puedeSocios && (
         <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-2" data-testid="partner-ops">
           <p className="flex items-center gap-2 text-sm font-semibold text-amber-900"><AlertTriangle className="w-4 h-4" />Operaciones con socios</p>
           <p className="text-xs text-amber-900">
-            Se conservan como estaban. Pendientes de revisión (D1): una salida Ruta → Socio no pasa por tu bolsa y un aporte Socio → Ruta no comprueba el saldo de Caja socios. Por eso no forman parte del asistente.
+            {central.activo
+              ? 'Con capital centralizado solo quedan la salida desde el saldo heredado de una ruta hacia un socio y los movimientos entre socios. Pendiente de revisión (D1).'
+              : 'Se conservan como estaban. Pendientes de revisión (D1): una salida Ruta → Socio no pasa por tu bolsa y un aporte Socio → Ruta no comprueba el saldo de Caja socios. Por eso no forman parte del asistente.'}
           </p>
           <Button size="sm" variant="secondary" onClick={() => { setForm({ origen: '', destino: '', valor: 0, descripcion: '', fecha: today() }); setSocioOpId(generateId()); setSocioOpen(true) }}
             icon={<Users className="w-4 h-4" />}>Operación con socio</Button>
@@ -443,13 +506,32 @@ export default function TransfersPage() {
 
       {/* Asistente: cada operación con su servicio existente */}
       <OperationWizard open={!!wizard} onClose={() => setWizard(null)} onDone={() => { void load() }}
-        routes={routes} users={users} inicial={wizard ?? undefined} />
+        routes={routes} users={users} inicial={wizard ?? undefined} modo={modo} />
+
+      {/* Aporte de socio a la bolsa del responsable (capital centralizado) */}
+      <Modal open={aporteOpen} onClose={() => { if (!saving) setAporteOpen(false) }} title="Aporte de socio a mi bolsa"
+        footer={<><Button variant="secondary" onClick={() => setAporteOpen(false)}>Cancelar</Button><Button onClick={guardarAporte} loading={saving}>Registrar aporte</Button></>}>
+        <div className="space-y-4" data-testid="partner-contribution-form">
+          <p className="text-xs text-purple-800 bg-purple-50 border border-purple-100 rounded-xl px-3 py-2">Entra a tu bolsa, no a la ruta ni a un trabajador. Queda también en Caja socios como salida del socio.</p>
+          <Select label="Socio" value={aporte.partnerId} onChange={e => setAporte(a => ({ ...a, partnerId: e.target.value }))} required placeholder="Seleccionar socio"
+            options={partners.map(p => ({ value: p.id, label: p.nombre }))} />
+          <Select label="Ruta que el aporte va a operar" value={aporte.routeId} onChange={e => setAporte(a => ({ ...a, routeId: e.target.value }))} required placeholder="Seleccionar ruta"
+            options={rutasControladas.map(r => ({ value: r.id, label: r.nombre }))} hint="Solo rutas de las que eres responsable de capital." />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <MoneyInput label="Valor" currency={currency} value={aporte.valor} onValueChange={v => setAporte(a => ({ ...a, valor: v }))} required />
+            <Input label="Fecha" type="date" value={aporte.fecha} onChange={e => setAporte(a => ({ ...a, fecha: e.target.value }))} />
+          </div>
+          <Textarea label="Descripción" value={aporte.descripcion} onChange={e => setAporte(a => ({ ...a, descripcion: e.target.value }))} rows={2} />
+        </div>
+      </Modal>
 
       {/* Operación con socio (formulario y reglas existentes) */}
       <Modal open={socioOpen} onClose={() => { if (!saving) setSocioOpen(false) }} title="Operación con socio"
         footer={<><Button variant="secondary" onClick={() => setSocioOpen(false)}>Cancelar</Button><Button onClick={guardarSocio} loading={saving} disabled={superaDisponible}>Registrar</Button></>}>
         <div className="space-y-4">
-          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">Al menos un extremo es un socio; se registra también en Caja socios. Entre rutas usa el asistente.</p>
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">{central.activo
+            ? 'Al menos un extremo es un socio. Una ruta solo puede ser origen y por su saldo heredado.'
+            : 'Al menos un extremo es un socio; se registra también en Caja socios. Entre rutas usa el asistente.'}</p>
           <div className="grid grid-cols-1 gap-3">
             <Select label="Origen (sale de)" value={form.origen} onChange={e => setForm(f => ({ ...f, origen: e.target.value }))} options={origenOptions} placeholder="Seleccionar origen" required />
             <Select label="Destino (llega a)" value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value }))} options={destinoOptions} placeholder="Seleccionar destino" required />

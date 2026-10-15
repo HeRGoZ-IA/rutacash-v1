@@ -30,7 +30,10 @@ import { generateId } from '@/lib/utils'
 import { nowISO, today } from '@/lib/formatters'
 import { authorizedRouteIdsOf, can, isTransferInScope, routeCapitalController } from '@/lib/permissions'
 import { adminCapital } from '@/lib/capitalAllocation'
-import { centralIds, classifyRouteTransition, isCentralCapitalActive, type RouteTransitionStatus } from '@/lib/centralCapital'
+import {
+  centralIds, classifyRouteTransition, isCentralCapitalActive, isPersonalCashPayment, routeTransitionExplanation, type RouteTransitionStatus,
+} from '@/lib/centralCapital'
+import { centralCapitalBackupStatus } from '@/services/centralCapitalBackupService'
 import { normalizeReversalReason } from '@/lib/movementReversal'
 import { assertCan, assertRouteAccess, assertRouteCashAuthority, AuthzError } from '@/services/authz'
 import { logAction } from '@/services/auditService'
@@ -45,7 +48,7 @@ import {
   CentralCapitalError, centralLedgerTables, creditControllerPool, debitControllerPool, reverseCentralCapitalMovement,
 } from '@/services/centralCapitalLedger'
 import type {
-  CapitalLedgerEntry, CapitalMovement, CashCustodyMovement, PartnerCashMovement, Route, Tenant, User, Withdrawal,
+  CapitalLedgerEntry, CapitalMovement, CashCustodyMovement, CentralCapitalRouteBlock, PartnerCashMovement, Route, Tenant, User, Withdrawal,
 } from '@/models/types'
 
 export { CentralCapitalError }
@@ -123,26 +126,114 @@ export async function activateCentralCapitalModel(
   if (actor.tenantId !== tenantId) throw new AuthzError('Empresa no autorizada.')
   assertCan(actor, 'capital.allocateAdmins', { tenantId })
   const motivo = validarMotivo(params.motivo)
+  const previa = await database.tenants.get(tenantId)
+  if (previa?.centralCapitalStartAt) return previa   // idempotente: nada cambia
+  // C2: con datos financieros, exige un respaldo exportado, recargado y vigente.
+  if (await tieneDatosFinancieros(tenantId, database)) {
+    const respaldo = await centralCapitalBackupStatus(tenantId, database)
+    if (!respaldo.vigente) throw new CentralCapitalError(`No se puede activar sin respaldo verificado: ${respaldo.motivo}`)
+  }
   const foto = await diagnoseCentralCapitalTransition({ actor, tenantId }, database)
+  const ahora = nowISO()
+  const bloqueos: Record<string, CentralCapitalRouteBlock> = {}
+  for (const r of foto.rutas) {
+    if (r.estado === 'inconsistente' || r.estado === 'sin-responsable') bloqueos[r.routeId] = { estado: r.estado, motivo: r.explicacion, desde: ahora }
+  }
+  const heredado = Object.fromEntries(foto.rutas.map(r => [r.routeId, r.sinAsignar]))
   let tenant!: Tenant
   let yaActivo = false
   await database.transaction('rw', [database.tenants], async () => {
     const t = await database.tenants.get(tenantId)
     if (!t) throw new CentralCapitalError('La empresa no existe.')
     if (t.centralCapitalStartAt) { tenant = t; yaActivo = true; return }
-    const ahora = nowISO()
-    tenant = { ...t, centralCapitalStartAt: ahora, updatedAt: ahora }
+    tenant = { ...t, centralCapitalStartAt: ahora, centralCapitalRouteBlocks: bloqueos, centralCapitalHeritage: heredado, updatedAt: ahora }
     await database.tenants.put(tenant)
   })
   if (yaActivo) return tenant
   await auditar({
     tenantId, userId: actor.id, userRole: actor.rol, action: 'CENTRAL_CAPITAL_ACTIVATED', entityType: 'tenant', entityId: tenantId,
-    descripcion: `Capital centralizado activado. Rutas: ${foto.rutas.length}; con saldo heredado: ${foto.rutas.filter(r => r.estado === 'saldo-heredado').length}; inconsistentes: ${foto.rutas.filter(r => r.estado === 'inconsistente').length}.`,
+    descripcion: `Capital centralizado activado. Rutas: ${foto.rutas.length}; con saldo heredado: ${foto.rutas.filter(r => r.estado === 'saldo-heredado').length}; bloqueadas: ${Object.keys(bloqueos).length}.`,
     motivo,
-    after: { centralCapitalStartAt: tenant.centralCapitalStartAt },
-    metadata: { rutas: foto.rutas.map(r => ({ routeId: r.routeId, estado: r.estado, base: r.base, saldoHeredado: r.sinAsignar, cuadra: r.cuadra })) },
+    after: { centralCapitalStartAt: tenant.centralCapitalStartAt, rutasBloqueadas: Object.keys(bloqueos) },
+    metadata: {
+      respaldo: tenant.centralCapitalBackup ? { integridad: tenant.centralCapitalBackup.integridad, huellaFinanciera: tenant.centralCapitalBackup.huellaFinanciera } : null,
+      rutas: foto.rutas.map(r => ({ routeId: r.routeId, estado: r.estado, base: r.base, saldoHeredado: r.sinAsignar, cuadra: r.cuadra })),
+    },
   })
   return tenant
+}
+
+export interface ActivationReadiness {
+  activo: boolean
+  /** Con movimientos financieros la activación exige respaldo verificado y vigente. */
+  requiereRespaldo: boolean
+  respaldo: Awaited<ReturnType<typeof centralCapitalBackupStatus>>
+  puedeActivar: boolean
+  /** Rutas que quedarían bloqueadas al activar (inconsistentes o sin responsable). */
+  rutasABloquear: string[]
+}
+
+/** ¿Se puede activar ya? Solo lectura (SuperAdmin), para la pantalla de transición. */
+export async function getActivationReadiness(
+  params: { actor: User | null | undefined; tenantId: string },
+  database: RutaCashDB = db,
+): Promise<ActivationReadiness> {
+  const actor = exigirActor(params.actor)
+  if (actor.tenantId !== params.tenantId) throw new AuthzError('Empresa no autorizada.')
+  assertCan(actor, 'capital.allocateAdmins', { tenantId: params.tenantId })
+  const tenant = await database.tenants.get(params.tenantId)
+  const requiereRespaldo = await tieneDatosFinancieros(params.tenantId, database)
+  const respaldo = await centralCapitalBackupStatus(params.tenantId, database)
+  const d = await diagnoseCentralCapitalTransition({ actor, tenantId: params.tenantId }, database)
+  const activo = isCentralCapitalActive(tenant)
+  return {
+    activo, requiereRespaldo, respaldo,
+    puedeActivar: !activo && (!requiereRespaldo || respaldo.vigente),
+    rutasABloquear: d.rutas.filter(r => r.estado === 'inconsistente' || r.estado === 'sin-responsable').map(r => r.routeId),
+  }
+}
+
+/** ¿La empresa tiene algún movimiento financiero? (sin datos no hace falta respaldo). */
+async function tieneDatosFinancieros(tenantId: string, database: RutaCashDB): Promise<boolean> {
+  const tablas = [database.sales, database.payments, database.expenses, database.capitalMovements, database.transfers, database.withdrawals,
+    database.cashSettlements, database.cashCustodyMovements, database.capitalLedger, database.partnerCashMovements, database.weeklySettlements]
+  for (const t of tablas) if (await (t as unknown as { where(i: string): { equals(v: string): { count(): Promise<number> } } }).where('tenantId').equals(tenantId).count() > 0) return true
+  return false
+}
+
+/**
+ * Libera una ruta bloqueada al activar, tras revisión humana (solo SuperAdmin, motivo
+ * de al menos 10 caracteres). Nada se corrige: si la ruta sigue inconsistente, hay
+ * que declararlo expresamente (`aceptarInconsistencia`) y queda en la auditoría.
+ * Sin responsable válido no se libera.
+ */
+export async function releaseCentralCapitalRoute(
+  params: { actor: User | null | undefined; tenantId: string; routeId: string; motivo: string; aceptarInconsistencia?: boolean },
+  database: RutaCashDB = db,
+): Promise<Tenant> {
+  const actor = exigirActor(params.actor)
+  const { tenantId, routeId } = params
+  if (actor.tenantId !== tenantId) throw new AuthzError('Empresa no autorizada.')
+  assertCan(actor, 'capital.allocateAdmins', { tenantId })
+  const motivo = (params.motivo ?? '').trim()
+  if (motivo.length < 10) throw new CentralCapitalError('Explica la revisión realizada (mínimo 10 caracteres).')
+  const t = await database.tenants.get(tenantId)
+  const bloqueo = t?.centralCapitalRouteBlocks?.[routeId]
+  if (!t || !bloqueo) throw new CentralCapitalError('La ruta no está bloqueada.')
+  const d = (await diagnoseCentralCapitalTransition({ actor, tenantId }, database)).rutas.find(r => r.routeId === routeId)
+  if (!d || d.estado === 'sin-responsable') throw new CentralCapitalError('Asigna primero un Administrador responsable de capital a la ruta.')
+  if (d.estado === 'inconsistente' && !params.aceptarInconsistencia) {
+    throw new CentralCapitalError('La ruta sigue inconsistente. Para liberarla igualmente, confirma que la revisaste y aceptas la diferencia.')
+  }
+  const { [routeId]: _liberada, ...resto } = t.centralCapitalRouteBlocks!
+  const actualizado: Tenant = { ...t, centralCapitalRouteBlocks: resto, updatedAt: nowISO() }
+  await database.tenants.put(actualizado)
+  await auditar({
+    tenantId, userId: actor.id, userRole: actor.rol, routeId, action: 'CENTRAL_CAPITAL_ROUTE_RELEASED', entityType: 'Route', entityId: routeId,
+    descripcion: `Ruta liberada para capital nuevo (estaba ${bloqueo.estado}; hoy ${d.estado}).`, motivo,
+    before: { bloqueo }, after: { estado: d.estado, sinAsignar: d.sinAsignar, cuadra: d.cuadra, aceptarInconsistencia: !!params.aceptarInconsistencia },
+  })
+  return actualizado
 }
 
 export interface RouteTransitionDiagnosis {
@@ -150,13 +241,29 @@ export interface RouteTransitionDiagnosis {
   nombre: string
   controllerAdminId?: string
   estado: RouteTransitionStatus
+  /** Por qué la ruta está en ese estado y qué implica (texto para la pantalla). */
+  explicacion: string
   base: number
   /** "Sin asignar": con el modelo activo, es el saldo heredado de la caja de la ruta. */
   sinAsignar: number
+  /** "Sin asignar" al activar (foto). Ausente antes de activar. */
+  heredadoAlActivar?: number
+  /** "Sin asignar" + sobrantes registrados: efectivo físico que debería haber en la caja. */
+  efectivoFisicoNoAsignado: number
   enTrabajadores: number
   cuadra: boolean
   faltantesPendientes: number
   sobrantesRegistrados: number
+  /** Cobros que no entran a ninguna caja personal (transferencias, cobros de un Admin). */
+  cobrosNoPersonales: { cantidad: number; total: number }
+  /**
+   * Correcciones o anulaciones registradas DESPUÉS de activar sobre cobros no
+   * personales ANTERIORES a la activación: siguen el circuito histórico y mueven el
+   * saldo heredado. Se listan aparte para que no se confundan con operaciones nuevas.
+   */
+  ajustesHistoricos: { cantidad: number; total: number }
+  /** Bloqueada al activar (inconsistente o sin responsable) y aún no liberada. */
+  bloqueada: boolean
   /** Movimientos de capital/retiro/custodia del modelo centralizado vs. anteriores. */
   movimientosCentralizados: number
   movimientosHistoricos: number
@@ -193,6 +300,8 @@ export async function diagnoseCentralCapitalTransition(
   const visibles = routes
     .filter(r => sa || r.capitalControllerAdminId === actor.id)
     .sort((a, b) => a.nombre.localeCompare(b.nombre))
+  const rolDe = new Map(users.map(u => [u.id, u.rol]))
+  const inicio = tenant?.centralCapitalStartAt
   const rutas: RouteTransitionDiagnosis[] = []
   for (const route of visibles) {
     const r = await computeRouteCashReconciliation({ tenantId, routeId: route.id }, database)
@@ -201,12 +310,29 @@ export async function diagnoseCentralCapitalTransition(
       ...r.movimientosEstructurales.capital, ...r.movimientosEstructurales.retiros, ...r.custodia,
     ].filter(m => (m as { centralLink?: unknown }).centralLink).length
     const totales = r.movimientosEstructurales.capital.length + r.movimientosEstructurales.retiros.length + r.custodia.length
+    // Cobros: los que no entran a una caja personal y, tras activar, los ajustes de
+    // cadenas anteriores a la activación (circuito histórico).
+    const pagos = (await database.payments.where('routeId').equals(route.id).toArray()).filter(p => p.tenantId === tenantId)
+    const porId = new Map(pagos.map(p => [p.id, p]))
+    const raiz = (p: typeof pagos[number]) => {
+      let a = p
+      for (let i = 0; i < 50; i++) { const prev = porId.get(a.reversesPaymentId ?? a.correctionOfPaymentId ?? ''); if (!prev) break; a = prev }
+      return a
+    }
+    const noPersonales = pagos.filter(p => !isPersonalCashPayment(p, rolDe.get(p.collectorId)))
+    const ajustes = inicio ? noPersonales.filter(p => (p.reversesPaymentId || p.correctionOfPaymentId) && p.createdAt > inicio && raiz(p).createdAt <= inicio) : []
+    const bloqueada = !!tenant?.centralCapitalRouteBlocks?.[route.id]
+    const estado = classifyRouteTransition({ tieneResponsable: !!controller, cuadra: r.cuadra, noAsignado: r.noAsignado, efectivoFisicoNoAsignado: r.efectivoFisicoNoAsignado })
     rutas.push({
-      routeId: route.id, nombre: route.nombre, controllerAdminId: controller?.id,
-      estado: classifyRouteTransition({ tieneResponsable: !!controller, cuadra: r.cuadra, noAsignado: r.noAsignado }),
-      base: r.libro.saldo, sinAsignar: r.noAsignado, enTrabajadores: r.enPersonas, cuadra: r.cuadra,
+      routeId: route.id, nombre: route.nombre, controllerAdminId: controller?.id, estado,
+      explicacion: routeTransitionExplanation(estado, { noAsignado: r.noAsignado, cuadra: r.cuadra, bloqueada }),
+      base: r.libro.saldo, sinAsignar: r.noAsignado, heredadoAlActivar: tenant?.centralCapitalHeritage?.[route.id],
+      efectivoFisicoNoAsignado: r.efectivoFisicoNoAsignado, enTrabajadores: r.enPersonas, cuadra: r.cuadra,
       faltantesPendientes: r.faltantes.reduce((s, f) => s + f.monto, 0),
       sobrantesRegistrados: r.sobrantes.reduce((s, x) => s + x.monto, 0),
+      cobrosNoPersonales: { cantidad: noPersonales.filter(p => !p.reversesPaymentId).length, total: noPersonales.reduce((s, p) => s + p.valor, 0) },
+      ajustesHistoricos: { cantidad: ajustes.length, total: ajustes.reduce((s, p) => s + p.valor, 0) },
+      bloqueada,
       movimientosCentralizados: centralizados, movimientosHistoricos: totales - centralizados,
     })
   }

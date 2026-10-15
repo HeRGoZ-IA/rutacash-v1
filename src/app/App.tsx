@@ -32,6 +32,7 @@ import RoutesPage from '@/pages/admin/RoutesPage'
 import ClientsPage from '@/pages/admin/ClientsPage'
 import ActiveSalesPage from '@/pages/admin/ActiveSalesPage'
 import CapitalPage from '@/pages/admin/CapitalPage'
+import CentralCapitalTransitionPage from '@/pages/admin/CentralCapitalTransitionPage'
 import ExpensesPage from '@/pages/admin/ExpensesPage'
 import TransfersPage from '@/pages/admin/TransfersPage'
 import MovementHistoryPage from '@/pages/admin/MovementHistoryPage'
@@ -240,6 +241,7 @@ export default function App() {
           <Route path="sale-authorizations" element={<SaleAuthorizationsPage />} />
           <Route path="payment-adjustments" element={<PaymentAdjustmentsPage />} />
           <Route path="capital" element={<CapitalPage />} />
+          <Route path="capital/transicion" element={<CentralCapitalTransitionPage />} />
           <Route path="expenses" element={<ExpensesPage />} />
           <Route path="expense-categories" element={<ExpenseCategoriesPage />} />
           <Route path="transfers" element={<TransfersPage />} />

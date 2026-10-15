@@ -23,6 +23,9 @@ import {
 import { RouteCashReconciliationCard } from '@/components/settlement/RouteCashReconciliationCard'
 import { getRouteAvailableFunds } from '@/services/routeFundsService'
 import type { CashCustodyMovement, CashSettlement, Route, User } from '@/models/types'
+import { useCentralCapital } from '@/hooks/useCentralCapital'
+import { deliverCapitalToWorker, returnCapitalFromWorker } from '@/services/centralCapitalService'
+import { getAdminAvailableCapital } from '@/services/capitalControlService'
 
 /**
  * CUADRE POR TRABAJADOR — Ruta → Trabajador → Vista previa → Entregado → Confirmar.
@@ -31,6 +34,10 @@ import type { CashCustodyMovement, CashSettlement, Route, User } from '@/models/
  * La RUTA la decide quien lo monta (selector Oficina → Ruta o ruta activa). Aquí no
  * se calcula nada financiero: la vista previa y el cierre salen del servicio, que
  * recalcula el esperado en el instante del cierre.
+ *
+ * CAPITAL CENTRALIZADO (C2): con el modelo activo, «Entregar capital» sale de la bolsa
+ * del Administrador responsable y «Recibir devolución» vuelve a ella (servicios C1);
+ * el efectivo del cierre también vuelve a esa bolsa. Nada pasa por la caja de la ruta.
  */
 export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
   routeId: string
@@ -45,6 +52,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
   const { tenantId, currency } = useTenant()
   const revision = useDataRevision()
   const money = (n: number) => formatCurrency(n, currency)
+  const central = useCentralCapital(tenantId)
 
   const [workers, setWorkers] = useState<{ user: User; esPropio: boolean }[]>([])
   /** Nombres de la empresa (trabajadores y quien cerró: Admin, Super Admin…). */
@@ -157,9 +165,15 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
   useEffect(() => {
     let alive = true
     if (baseAccion !== 'entregar') { setBaseDisponible(undefined); return }
+    // Centralizado: disponible de MI bolsa (solo el Administrador responsable entrega).
+    if (central.activo) {
+      if (user?.rol !== 'admin') { setBaseDisponible(null); return }
+      getAdminAvailableCapital(tenantId, user.id).then(v => { if (alive) setBaseDisponible(v) }, () => { if (alive) setBaseDisponible(null) })
+      return () => { alive = false }
+    }
     getRouteAvailableFunds(tenantId, routeId).then(v => { if (alive) setBaseDisponible(v) }, () => { if (alive) setBaseDisponible(null) })
     return () => { alive = false }
-  }, [baseAccion, tenantId, routeId, revision])
+  }, [baseAccion, tenantId, routeId, revision, central.activo, user])
 
   useEffect(() => {
     let alive = true
@@ -223,7 +237,13 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
     if (!baseAccion || !userId) return
     setBaseGuardando(true)
     try {
-      if (baseAccion === 'entregar') {
+      if (central.activo && baseAccion === 'entregar') {
+        await deliverCapitalToWorker({ actor: user, tenantId, routeId, recipientUserId: userId, amount: baseMonto, motivo: baseMotivo })
+        toast.success(`Capital entregado a ${seleccionado?.user.nombre ?? 'la persona'}.`)
+      } else if (central.activo) {
+        await returnCapitalFromWorker({ actor: user, tenantId, routeId, fromUserId: userId, amount: baseMonto, motivo: baseMotivo })
+        toast.success(`Devolución de ${seleccionado?.user.nombre ?? 'la persona'} registrada en la bolsa del responsable.`)
+      } else if (baseAccion === 'entregar') {
         await assignBaseToWorker({ actor: user, tenantId, routeId, recipientUserId: userId, amount: baseMonto, motivo: baseMotivo })
         toast.success(`Base entregada a ${seleccionado?.user.nombre ?? 'la persona'}.`)
       } else {
@@ -256,7 +276,9 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
   }
 
   const etiquetaMov = (m: CashCustodyMovement) =>
-    m.tipo === 'PERSON_TO_PERSON' ? `Traspaso · ${nombreDe(m.fromUserId ?? '')} → ${nombreDe(m.toUserId ?? '')}`
+    m.origen === 'admin-pool' && m.tipo === 'BASE_ASSIGNMENT' ? `Entrega de capital · bolsa → ${nombreDe(m.toUserId ?? '')}`
+      : m.origen === 'admin-pool' && m.tipo === 'BASE_RETURN' ? `${m.reversesId ? 'Anulación de entrega' : 'Devolución de capital'} · ${nombreDe(m.fromUserId ?? '')} → bolsa`
+      : m.tipo === 'PERSON_TO_PERSON' ? `Traspaso · ${nombreDe(m.fromUserId ?? '')} → ${nombreDe(m.toUserId ?? '')}`
       : m.tipo === 'BASE_ASSIGNMENT' ? `Entrega de Base · caja de la ruta → ${nombreDe(m.toUserId ?? '')}`
         : `Devolución · ${nombreDe(m.fromUserId ?? '')} → caja de la ruta`
 
@@ -305,8 +327,8 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
               <span>Hasta: <b className="text-gray-700">{formatDateTime(preview.hasta)}</b></span>
             </div>
             <Row label="Arrastre pendiente (faltante anterior)" value={money(preview.arrastreAnterior)} tone={preview.arrastreAnterior > 0 ? 'text-amber-600' : 'text-gray-800'} />
-            <Row label="(+) Base recibida" value={money(preview.baseRecibida)} tone="text-primary-700" />
-            {preview.baseDevuelta > 0 && <Row label="(−) Base devuelta / traspasada" value={money(preview.baseDevuelta)} tone="text-gray-600" />}
+            <Row label={central.activo ? '(+) Capital recibido' : '(+) Base recibida'} value={money(preview.baseRecibida)} tone="text-primary-700" />
+            {preview.baseDevuelta > 0 && <Row label={central.activo ? '(−) Capital devuelto / traspasado' : '(−) Base devuelta / traspasada'} value={money(preview.baseDevuelta)} tone="text-gray-600" />}
             <Row label="(+) Recaudado" value={money(preview.recaudado)} tone="text-emerald-600" />
             <Row label="(−) Desembolsado" value={money(preview.desembolsado)} tone="text-blue-600" />
             <Row label="(−) Gastos" value={money(preview.gastos)} tone="text-red-500" />
@@ -319,24 +341,24 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
           {guiaEntregarBase && seleccionado && (
             <p ref={guiaRef} className="text-sm text-primary-800 bg-primary-50 border border-primary-100 rounded-xl px-3 py-2" data-testid="guia-entregar-base">
               {puedeEntregarBase
-                ? <>Vienes de Transferencias: pulsa <b>«Entregar Base»</b> para registrar la entrega a {seleccionado.user.nombre}.</>
+                ? <>Vienes de Transferencias: pulsa <b>«{central.activo ? 'Entregar capital' : 'Entregar Base'}»</b> para registrar la entrega a {seleccionado.user.nombre}.</>
                 : <>Solo el Administrador responsable de capital de esta ruta puede entregar Base.</>}
             </p>
           )}
-          {(puedeBase || puedeEntregarBase) && seleccionado && (
+          {central.listo && (puedeBase || puedeEntregarBase) && seleccionado && (
             <div className="flex flex-wrap gap-2">
               {puedeEntregarBase && (
                 <Button variant="secondary" icon={<Wallet className="w-4 h-4" />}
                   className={guiaEntregarBase ? 'ring-2 ring-primary-500 ring-offset-1' : undefined}
-                  disabled={Boolean(custodianBlockedReason(seleccionado.user, routeId, tenantId))}
-                  onClick={() => { setGuiaEntregarBase(false); setBaseAccion('entregar'); setBaseMonto(0); setBaseMotivo('Base del día') }}>
-                  Entregar Base
+                  disabled={Boolean(custodianBlockedReason(seleccionado.user, routeId, tenantId)) || (central.activo && !!central.bloqueos[routeId])}
+                  onClick={() => { setGuiaEntregarBase(false); setBaseAccion('entregar'); setBaseMonto(0); setBaseMotivo(central.activo ? 'Capital para ventas' : 'Base del día') }}>
+                  {central.activo ? 'Entregar capital' : 'Entregar Base'}
                 </Button>
               )}
               {!seleccionado.esPropio && (
                 <Button variant="secondary" icon={<Wallet className="w-4 h-4" />}
-                  onClick={() => { setBaseAccion('devolver'); setBaseMonto(0); setBaseMotivo('Devolución de Base') }}>
-                  Recibir devolución
+                  onClick={() => { setBaseAccion('devolver'); setBaseMonto(0); setBaseMotivo(central.activo ? 'Devolución de capital' : 'Devolución de Base') }}>
+                  {central.activo ? 'Recibir devolución de capital' : 'Recibir devolución'}
                 </Button>
               )}
               {!seleccionado.esPropio && (
@@ -482,6 +504,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
             <p>Esperado: <b>{money(preview.esperado)}</b></p>
             <p>Entregado: <b>{money(entregado)}</b></p>
             {outcome.resultado === 'exacto' && <p className="text-emerald-700 font-semibold">Cuadre exacto.</p>}
+            {central.activo && <p className="text-xs text-gray-600 bg-primary-50 rounded-lg px-3 py-2" data-testid="cuadre-to-pool">El efectivo entregado vuelve a la bolsa del Administrador responsable de la ruta (no a la caja de la ruta).</p>}
             {outcome.resultado === 'faltante' && (
               <>
                 <p className="text-red-600 font-semibold">Faltante: {money(outcome.faltante)}</p>
@@ -500,7 +523,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
 
       {/* ---------- REAPERTURA ---------- */}
       <Modal open={Boolean(baseAccion)} onClose={() => setBaseAccion(null)}
-        title={baseAccion === 'entregar' ? `Entregar Base a ${seleccionado?.user.nombre ?? ''}` : `Devolución de ${seleccionado?.user.nombre ?? ''}`}
+        title={baseAccion === 'entregar' ? `${central.activo ? 'Entregar capital' : 'Entregar Base'} a ${seleccionado?.user.nombre ?? ''}` : `Devolución de ${seleccionado?.user.nombre ?? ''}`}
         footer={<>
           <Button variant="secondary" onClick={() => setBaseAccion(null)}>Cancelar</Button>
           <Button onClick={guardarBase} loading={baseGuardando} disabled={baseMonto <= 0 || baseMotivo.trim().length < 3}>Registrar</Button>
@@ -508,7 +531,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
         <div className="space-y-3">
           {baseAccion === 'entregar' ? (
             <div className="flex items-center justify-between gap-2 rounded-xl bg-primary-50 px-3 py-2 text-sm" data-testid="base-modal-available">
-              <span className="text-gray-600">Disponible en la caja sin asignar</span>
+              <span className="text-gray-600">{central.activo ? 'Disponible en tu bolsa' : 'Disponible en la caja sin asignar'}</span>
               <span className="font-bold text-primary-700">{baseDisponible === undefined ? '…' : baseDisponible === null ? 'No disponible' : money(baseDisponible)}</span>
             </div>
           ) : preview && preview.userId === userId ? (
@@ -541,7 +564,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
             <p className="text-lg font-bold text-gray-900">Traspasar {money(traspasoMonto)}</p>
             <p className="text-gray-700">De <b>{seleccionado?.user.nombre}</b> a <b>{nombreDe(traspasoDestino)}</b></p>
             <p className="text-gray-500">Ruta {preview?.routeName ?? ''} · {traspasoMotivo.trim()}</p>
-            <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">No cambia la Base ni la caja sin asignar de la ruta: solo quién tiene el efectivo.</p>
+            <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">{central.activo ? 'No cambia la Base ni la bolsa: solo quién tiene el efectivo.' : 'No cambia la Base ni la caja sin asignar de la ruta: solo quién tiene el efectivo.'}</p>
           </div>
         ) : (
           <div className="space-y-3">

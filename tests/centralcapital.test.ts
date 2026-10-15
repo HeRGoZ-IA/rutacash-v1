@@ -42,6 +42,11 @@ import {
   returnCapitalFromWorker, reverseCapitalDelivery, reversePartnerContribution,
 } from '../src/services/centralCapitalService'
 import { centralIds } from '../src/lib/centralCapital'
+import { buildCentralCapitalBackup, centralCapitalBackupStatus, verifyCentralCapitalBackup } from '../src/services/centralCapitalBackupService'
+import { getActivationReadiness, releaseCentralCapitalRoute } from '../src/services/centralCapitalService'
+import { getCapitalFlowBreakdown, getCashboxSummary } from '../src/services/cashboxEngine'
+import { availableOperations, previewTransferOperation, routesForOperation } from '../src/lib/transferOperations'
+import { createRouteWithAdmins } from '../src/services/routeService'
 import type { PaymentType, Sale, User } from '../src/models/types'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -124,7 +129,18 @@ async function empresa(opts: { activar?: boolean; heredado?: number; bolsa?: num
   if (opts.heredado) await registerCapital({ actor: ADMIN, tenantId: T, routeId: R1, valor: opts.heredado })
   if (opts.activar !== false) await activar()
 }
-const activar = () => activateCentralCapitalModel({ actor: SA, tenantId: T, motivo: 'Prueba C1: capital centralizado' })
+/**
+ * C2: con datos financieros la activación exige un respaldo exportado y verificado.
+ * El helper hace el recorrido real: exportar → volver a cargar → activar.
+ */
+async function activar() {
+  // Ya activa: la llamada debe ser idempotente (sin respaldo nuevo).
+  if ((await db.tenants.get(T))?.centralCapitalStartAt) return activateCentralCapitalModel({ actor: SA, tenantId: T, motivo: 'Prueba C1: capital centralizado' })
+  const { text } = await buildCentralCapitalBackup({ actor: SA, tenantId: T })
+  const v = await verifyCentralCapitalBackup({ actor: SA, tenantId: T, text })
+  if (!v.ok) throw new Error(`respaldo no verificado: ${v.problemas.join(' | ')}`)
+  return activateCentralCapitalModel({ actor: SA, tenantId: T, motivo: 'Prueba C1: capital centralizado' })
+}
 
 let cli = 0
 async function entrada(by: User, valor: number, routeId = R1): Promise<SaleInputs> {
@@ -559,6 +575,7 @@ await spec('CC-D02', 'activación explícita: solo el SuperAdmin; idempotente; n
       .map(t => t.toArray())))
   const antes = await financieras()
   metric('Admin intenta activar', await sinEfecto(() => activateCentralCapitalModel({ actor: ADMIN, tenantId: T, motivo: 'No autorizado' })))
+  metric('SuperAdmin sin respaldo', await sinEfecto(() => activateCentralCapitalModel({ actor: SA, tenantId: T, motivo: 'Sin respaldo' })))
   const t1 = await activar()
   const t2 = await activar()
   const audit = (await db.auditLogs.toArray()).filter(l => l.action === 'CENTRAL_CAPITAL_ACTIVATED')
@@ -571,16 +588,22 @@ await spec('CC-D02', 'activación explícita: solo el SuperAdmin; idempotente; n
 
 await spec('CC-D03', 'diagnóstico de transición: limpia, saldo heredado, inconsistente y sin responsable (solo lectura)', async () => {
   await empresa({ activar: false, heredado: 800 })
-  // Dos: posición negativa cuadrada → "Sin asignar" negativo documentado (revisión manual).
-  await createExpense({ actor: FABIO, tenantId: T, scope: 'trabajador', routeId: R2, collectorId: FABIO.id, categoryId: CAT, valor: 60, descripcion: 'Combustible' })
-  await closeCashSettlement({ actor: ADMIN, tenantId: T, routeId: R2, userId: FABIO.id, entregado: 0, motivo: 'Pagó de su bolsillo el combustible' })
+  // Dos: un cuadre archivado con cifras imposibles (dato histórico corrupto sintético):
+  // entregó 500 con esperado 0 y sin sobrante → la conciliación deja de cuadrar.
+  const ahora = nowISO()
+  await db.cashSettlements.add({
+    id: 'cs-forjado', tenantId: T, routeId: R2, userId: JUAN.id, desde: '2026-01-01T00:00:00.000Z', hasta: ahora, origenDesde: 'inicio-modelo',
+    arrastreAnterior: 0, recaudado: 0, desembolsado: 0, gastos: 0, esperado: 0, entregado: 500, diferencia: 0, faltante: 0, sobrante: 0,
+    status: 'cerrada', version: 1, createdAt: ahora, closedAt: ahora, closedByUserId: ADMIN.id,
+  } as never)
   const antes = await foto()
   const d = await diagnoseCentralCapitalTransition({ actor: SA, tenantId: T })
   const deAdmin = await diagnoseCentralCapitalTransition({ actor: ADMIN_2, tenantId: T })
-  for (const r of d.rutas) metric(r.nombre, `${r.estado} · Sin asignar ${r.sinAsignar} · cuadra ${r.cuadra}`)
+  for (const r of d.rutas) metric(r.nombre, `${r.estado} · Sin asignar ${r.sinAsignar} · cuadra ${r.cuadra} · ${r.explicacion}`)
   const estado = (id: string) => d.rutas.find(r => r.routeId === id)?.estado
   assert(estado(R1) === 'saldo-heredado' && estado(R2) === 'inconsistente' && estado(R3) === 'sin-responsable', 'clasificación incorrecta')
   assert(deAdmin.rutas.length === 0, 'un Administrador ve rutas que no controla')
+  assert(d.rutas.every(r => r.explicacion.length > 20), 'falta la explicación de alguna ruta')
   assert(await foto() === antes, 'el diagnóstico escribió en la base')
   assert(!d.activo, 'el diagnóstico activó el modelo')
 })
@@ -615,7 +638,7 @@ await spec('CC-D05', 'esquema: Dexie sigue en v16 y abrir la base no activa el m
   assert(!fs.readFileSync(path.resolve('src/lib/db.ts'), 'utf8').includes('version(17'), 'existe una versión Dexie nueva')
 })
 
-await spec('CC-D06', 'permisos de venta e interés sin cambios; ninguna pantalla activa ni usa el modelo en C1', async () => {
+await spec('CC-D06', 'permisos de venta e interés sin cambios; solo la pantalla de transición activa el modelo y nada lo activa al cargar', async () => {
   const ctx = { tenantId: T, routeId: R1 }
   metric('Cobrador · venta directa', can(JUAN, 'sale.createDirect', ctx))
   metric('Cobrador · solicitar', can(JUAN, 'sale.createRequest', ctx))
@@ -631,9 +654,250 @@ await spec('CC-D06', 'permisos de venta e interés sin cambios; ninguna pantalla
     }
   }
   for (const d of ['src/pages', 'src/components', 'src/app', 'src/hooks']) recorrer(path.resolve(d))
-  const usan = archivos.filter(f => /centralCapitalService|activateCentralCapitalModel/.test(fs.readFileSync(f, 'utf8')))
-  metric('pantallas que usan el modelo', usan.length)
-  assert(usan.length === 0, `una pantalla usa el capital centralizado: ${usan.join(', ')}`)
+  // C2: las pantallas usan los servicios del modelo, pero SOLO la de transición puede activarlo.
+  const activan = archivos.filter(f => /activateCentralCapitalModel/.test(fs.readFileSync(f, 'utf8')))
+  metric('archivos de UI que activan', activan.map(f => path.basename(f)).join(', '))
+  assert(activan.length === 1 && activan[0].endsWith('CentralCapitalTransitionPage.tsx'), `la activación se invoca fuera de la pantalla de transición: ${activan.join(', ')}`)
+  // Nada la invoca al arrancar ni al abrir la base.
+  for (const f of ['src/main.tsx', 'src/app/App.tsx', 'src/lib/db.ts', 'src/hooks/useAuth.ts', 'src/services/authService.ts']) {
+    if (fs.existsSync(path.resolve(f))) assert(!/activateCentralCapitalModel|centralCapitalStartAt\s*=/.test(fs.readFileSync(path.resolve(f), 'utf8')), `${f} activa el modelo`)
+  }
+})
+
+// ============================================================
+// E. TRANSICIÓN CONTROLADA (C2): respaldo, activación, bloqueos y liberación
+// ============================================================
+await spec('CC-E01', 'respaldo: completo, sin contraseñas ni otras empresas; se rechaza alterado, ajeno o desactualizado', async () => {
+  await empresa({ activar: false, heredado: 1000 })
+  await db.tenants.add({ id: 't-otra', nombre: 'Otra', status: 'activa', plan: 'profesional', createdAt: '2026-01-01' } as never)
+  await db.users.add({ ...persona('u-ajeno', 'Ajeno', 'admin', []), tenantId: 't-otra' } as User)
+  const { file, text } = await buildCentralCapitalBackup({ actor: SA, tenantId: T })
+  metric('tablas / registros', `${Object.keys(file.tablas).length} / ${Object.values(file.conteos).reduce((a, b) => a + b, 0)}`)
+  assert(file.tablas.capitalMovements.length === 1 && file.tablas.capitalLedger.length > 0 && 'installments' in file.tablas, 'faltan tablas en el respaldo')
+  assert(!text.includes('"password"'), 'el respaldo contiene contraseñas')
+  assert(!text.includes('u-ajeno'), 'el respaldo contiene datos de otra empresa')
+  // Archivo alterado: una cifra cambiada.
+  const alterado = JSON.parse(text); alterado.tablas.capitalMovements[0].valor = 999999
+  const v1 = await verifyCentralCapitalBackup({ actor: SA, tenantId: T, text: JSON.stringify(alterado) })
+  metric('alterado', v1.problemas.join(' | '))
+  assert(!v1.ok, 'se aceptó un respaldo alterado')
+  const ajeno = JSON.parse(text); ajeno.tenantId = 't-otra'
+  assert(!(await verifyCentralCapitalBackup({ actor: SA, tenantId: T, text: JSON.stringify(ajeno) })).ok, 'se aceptó un respaldo de otra empresa')
+  assert(!(await verifyCentralCapitalBackup({ actor: SA, tenantId: T, text: '{no es json' })).ok, 'se aceptó un archivo ilegible')
+  metric('Admin exporta', await rechazo(() => buildCentralCapitalBackup({ actor: ADMIN, tenantId: T })))
+  // Correcto y vigente.
+  const ok = await verifyCentralCapitalBackup({ actor: SA, tenantId: T, text })
+  assert(ok.ok && (await centralCapitalBackupStatus(T)).vigente, 'el respaldo correcto no quedó vigente')
+  // Movimiento posterior: deja de estar vigente y la activación se rechaza.
+  await registerCapital({ actor: ADMIN, tenantId: T, routeId: R1, valor: 50 })
+  const st = await centralCapitalBackupStatus(T)
+  metric('tras un movimiento', st.motivo)
+  assert(!st.vigente, 'el respaldo siguió vigente tras un movimiento')
+  metric('activar con respaldo desactualizado', await sinEfecto(() => activateCentralCapitalModel({ actor: SA, tenantId: T, motivo: 'Desactualizado' })))
+  const viejo = await verifyCentralCapitalBackup({ actor: SA, tenantId: T, text })
+  assert(!viejo.ok, 'se verificó un respaldo anterior a los movimientos')
+})
+
+await spec('CC-E02', 'activación: foto del saldo heredado, rutas inconsistentes y sin responsable bloqueadas; auditoría con las huellas', async () => {
+  await empresa({ activar: false, heredado: 700 })
+  const ahora = nowISO()
+  await db.cashSettlements.add({
+    id: 'cs-forjado', tenantId: T, routeId: R2, userId: JUAN.id, desde: '2026-01-01T00:00:00.000Z', hasta: ahora, origenDesde: 'inicio-modelo',
+    arrastreAnterior: 0, recaudado: 0, desembolsado: 0, gastos: 0, esperado: 0, entregado: 500, diferencia: 0, faltante: 0, sobrante: 0,
+    status: 'cerrada', version: 1, createdAt: ahora, closedAt: ahora, closedByUserId: ADMIN.id,
+  } as never)
+  const listo = await getActivationReadiness({ actor: SA, tenantId: T })
+  metric('antes: requiere respaldo / puede activar / a bloquear', `${listo.requiereRespaldo} / ${listo.puedeActivar} / ${listo.rutasABloquear.join(',')}`)
+  assert(listo.requiereRespaldo && !listo.puedeActivar, 'se podía activar sin respaldo')
+  const t = await activar()
+  metric('bloqueos', JSON.stringify(Object.fromEntries(Object.entries(t.centralCapitalRouteBlocks ?? {}).map(([k, v]) => [k, v.estado]))))
+  metric('heredado al activar', JSON.stringify(t.centralCapitalHeritage))
+  assert(t.centralCapitalHeritage?.[R1] === 700, 'no quedó la foto del saldo heredado')
+  assert(t.centralCapitalRouteBlocks?.[R2]?.estado === 'inconsistente' && t.centralCapitalRouteBlocks?.[R3]?.estado === 'sin-responsable', 'bloqueos incorrectos')
+  assert(!t.centralCapitalRouteBlocks?.[R1], 'una ruta con saldo heredado consistente quedó bloqueada')
+  const audit = (await db.auditLogs.toArray()).find(l => l.action === 'CENTRAL_CAPITAL_ACTIVATED')
+  assert(audit && JSON.stringify(audit.metadata).includes(t.centralCapitalBackup!.integridad), 'la auditoría no guarda la huella del respaldo')
+})
+
+await spec('CC-E03', 'ruta bloqueada: no recibe capital nuevo; cuadres y devoluciones siguen; liberación revisada por el SuperAdmin', async () => {
+  await empresa({ activar: false })
+  // Uno con capital y efectivo en manos de Juan (v16), luego se forja la inconsistencia.
+  await registerCapital({ actor: ADMIN, tenantId: T, routeId: R1, valor: 600 })
+  await assignBaseToWorker({ actor: ADMIN, tenantId: T, routeId: R1, recipientUserId: JUAN.id, amount: 400, motivo: 'Base' })
+  const ahora = nowISO()
+  await db.cashSettlements.add({
+    id: 'cs-forjado', tenantId: T, routeId: R1, userId: FABIO.id, desde: '2026-01-01T00:00:00.000Z', hasta: ahora, origenDesde: 'inicio-modelo',
+    arrastreAnterior: 0, recaudado: 0, desembolsado: 0, gastos: 0, esperado: 0, entregado: 300, diferencia: 0, faltante: 0, sobrante: 0,
+    status: 'cerrada', version: 1, createdAt: ahora, closedAt: ahora, closedByUserId: ADMIN.id,
+  } as never)
+  await activar()
+  metric('entregar capital', await sinEfecto(() => entregar(JUAN, 100)))
+  metric('venta del Admin', await sinEfecto(async () => createDirectSale(await entrada(ADMIN, 100), ADMIN)).catch(() => 'rechazado'))
+  metric('gasto de ruta', await sinEfecto(() => createExpense({ actor: ADMIN, tenantId: T, scope: 'ruta', routeId: R1, categoryId: CAT, valor: 10, descripcion: 'Papel' })))
+  // El efectivo que ya existe sigue su curso: devolución y cuadre van a la bolsa.
+  const b = await bolsa()
+  await returnCapitalFromWorker({ actor: ADMIN, tenantId: T, routeId: R1, fromUserId: JUAN.id, amount: 100, motivo: 'Devolución en ruta bloqueada' })
+  await closeCashSettlement({ actor: ADMIN, tenantId: T, routeId: R1, userId: JUAN.id, entregado: 300 })
+  assert(await bolsa() === b + 400, 'la devolución o el cuadre no llegaron a la bolsa en la ruta bloqueada')
+  // Liberación: Admin no; motivo corto no; inconsistente sin aceptación no.
+  metric('Admin libera', await sinEfecto(() => releaseCentralCapitalRoute({ actor: ADMIN, tenantId: T, routeId: R1, motivo: 'Revisión completa realizada' })))
+  metric('motivo corto', await sinEfecto(() => releaseCentralCapitalRoute({ actor: SA, tenantId: T, routeId: R1, motivo: 'ok' })))
+  metric('sin aceptar la diferencia', await sinEfecto(() => releaseCentralCapitalRoute({ actor: SA, tenantId: T, routeId: R1, motivo: 'Revisión completa realizada' })))
+  metric('ruta sin responsable', await sinEfecto(() => releaseCentralCapitalRoute({ actor: SA, tenantId: T, routeId: R3, motivo: 'Revisión completa realizada', aceptarInconsistencia: true })))
+  await releaseCentralCapitalRoute({ actor: SA, tenantId: T, routeId: R1, motivo: 'Revisión completa: cuadre forjado documentado', aceptarInconsistencia: true })
+  await entregar(JUAN, 100)
+  assert(!(await db.tenants.get(T))?.centralCapitalRouteBlocks?.[R1], 'la ruta sigue bloqueada')
+  assert((await db.auditLogs.toArray()).some(l => l.action === 'CENTRAL_CAPITAL_ROUTE_RELEASED' && l.routeId === R1), 'la liberación no quedó auditada')
+})
+
+await spec('CC-E04', 'empresa sin movimientos: se activa sin respaldo; la ruta nueva nace sin capital en su caja', async () => {
+  await Promise.all(db.tables.map(t => t.clear()))
+  await db.tenants.add({ id: T, nombre: 'Nueva', status: 'activa', plan: 'profesional', createdAt: '2026-01-01', cashModelStartAt: '2026-01-01T00:00:00.000Z' } as never)
+  await db.users.bulkAdd([SA, ADMIN])
+  const l = await getActivationReadiness({ actor: SA, tenantId: T })
+  assert(!l.requiereRespaldo && l.puedeActivar, 'una empresa vacía exigía respaldo')
+  await activateCentralCapitalModel({ actor: SA, tenantId: T, motivo: 'Empresa nueva' })
+  const conCapital = await rechazo(() => createRouteWithAdmins({ tenantId: T, nombre: 'Cinco', codigo: 'R5', tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 1000, capitalInicial: 500, adminIds: [ADMIN.id] } as never, ADMIN, db as never, async () => undefined, async () => undefined))
+  metric('ruta con capital inicial', conCapital)
+  assert(conCapital !== 'ACEPTADO' && await db.capitalMovements.count() === 0, 'se colocó capital inicial en la caja de una ruta')
+  const r = await createRouteWithAdmins({ tenantId: T, nombre: 'Cinco', codigo: 'R5', tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 1000, capitalInicial: 0, adminIds: [ADMIN.id] } as never, ADMIN, db as never, async () => undefined, async () => undefined)
+  assert(r.id && await db.capitalMovements.count() === 0, 'la ruta sin capital no se creó limpia')
+})
+
+await spec('CC-E05', 'esperado negativo antes de activar: saldo heredado explicado; no crea capital ni borra obligaciones', async () => {
+  await empresa({ activar: false })
+  // Uno: sin capital. Fabio gasta 80 sin efectivo y cuadra en 0 → "Sin asignar" −80 explicado por el sobrante.
+  await createExpense({ actor: FABIO, tenantId: T, scope: 'trabajador', routeId: R1, collectorId: FABIO.id, categoryId: CAT, valor: 80, descripcion: 'Combustible' })
+  await closeCashSettlement({ actor: ADMIN, tenantId: T, routeId: R1, userId: FABIO.id, entregado: 0, motivo: 'Pagó el combustible de su bolsillo' })
+  // Dos: Juan queda con un faltante de 50 (obligación pendiente).
+  await registerCapital({ actor: ADMIN, tenantId: T, routeId: R2, valor: 1000 })
+  await assignBaseToWorker({ actor: ADMIN, tenantId: T, routeId: R2, recipientUserId: JUAN.id, amount: 300, motivo: 'Base' })
+  await closeCashSettlement({ actor: ADMIN, tenantId: T, routeId: R2, userId: JUAN.id, entregado: 250, motivo: 'Faltaron cincuenta reales' })
+  const antes = await conciliacion(R1)
+  const diag = await diagnoseCentralCapitalTransition({ actor: SA, tenantId: T })
+  const d1 = diag.rutas.find(r => r.routeId === R1)!
+  const d2 = diag.rutas.find(r => r.routeId === R2)!
+  metric('Uno antes de activar', `Sin asignar ${antes.noAsignado} · físico ${antes.efectivoFisicoNoAsignado} · sobrantes ${d1.sobrantesRegistrados} · ${d1.estado}`)
+  metric('Dos antes de activar', `faltantes ${d2.faltantesPendientes} · ${d2.estado}`)
+  assert(antes.noAsignado === -80 && antes.efectivoFisicoNoAsignado === 0, 'el escenario no reproduce el negativo explicado')
+  assert(d1.estado === 'saldo-heredado' && d1.sobrantesRegistrados === 80, 'el negativo explicado no se clasificó como saldo heredado')
+  assert(d2.faltantesPendientes === 50, 'el faltante no aparece en el diagnóstico')
+  const t = await activar()
+  assert(!t.centralCapitalRouteBlocks?.[R1] && t.centralCapitalHeritage?.[R1] === -80, 'activación incorrecta para el negativo explicado')
+  const b0 = await bolsa()
+  // Operaciones nuevas en Uno: la bolsa cambia solo por lo real; el heredado no crece.
+  await entregar(JUAN, 200)
+  await createExpense({ actor: JUAN, tenantId: T, scope: 'trabajador', routeId: R1, collectorId: JUAN.id, categoryId: CAT, valor: 300, descripcion: 'Reparación' })
+  await closeCashSettlement({ actor: ADMIN, tenantId: T, routeId: R1, userId: JUAN.id, entregado: 0, motivo: 'Gastó más de lo que tenía a cargo' })
+  const despues = await conciliacion(R1)
+  metric('Uno después', `Sin asignar ${despues.noAsignado} · físico ${despues.efectivoFisicoNoAsignado} · bolsa ${b0} → ${await bolsa()}`)
+  assert(await bolsa() === b0 - 200, 'la bolsa cambió por algo distinto de la entrega real')
+  assert(despues.noAsignado <= antes.noAsignado && despues.efectivoFisicoNoAsignado === 0, 'el saldo heredado creció o se fabricó efectivo físico')
+  // Nada vacía un heredado negativo: su disponible es 0.
+  metric('retirar del heredado negativo', await sinEfecto(() => registerWithdrawal({ actor: ADMIN, tenantId: T, routeId: R1, valor: 1 })))
+  metric('entregar del heredado negativo', await sinEfecto(() => assignBaseToWorker({ actor: ADMIN, tenantId: T, routeId: R1, recipientUserId: FABIO.id, amount: 1, motivo: 'x' })))
+  // Obligaciones intactas: sobrantes documentados y el faltante de Juan sigue en su posición de Dos.
+  const cuadres = await db.cashSettlements.toArray()
+  assert(cuadres.some(c => c.userId === FABIO.id && c.sobrante === 80 && c.status === 'cerrada'), 'desapareció el sobrante documentado')
+  assert(cuadres.some(c => c.userId === JUAN.id && c.routeId === R2 && c.faltante === 50 && c.status === 'cerrada'), 'el faltante histórico se borró o reescribió')
+  const c2 = await conciliacion(R2)
+  assert(c2.faltantes.some(f => f.userId === JUAN.id && f.monto === 50) && await posicion(JUAN, R2) === 50, 'el faltante dejó de estar pendiente')
+  assert((await invariantes()).length === 0 && despues.cuadra && c2.cuadra, 'invariantes o conciliación rotos')
+})
+
+await spec('CC-E06', 'corrección de un cobro histórico: circuito histórico separado, identificado y sin tocar la bolsa', async () => {
+  await empresa({ activar: false, heredado: 2000 })
+  const v = await ventaAdmin(1000)   // v16: sale de la caja de la ruta
+  const historico = await cobra(JUAN, v, 300, 'transferencia')
+  await activar()
+  const b = await bolsa()
+  const heredadoAntes = (await conciliacion()).noAsignado
+  const c = await correctPayment(ADMIN, historico.paymentId, { newValor: 250, reason: 'Valor mal digitado' })
+  assert(c.success, `corrección rechazada: ${c.error}`)
+  const heredadoDespues = (await conciliacion()).noAsignado
+  const d = (await diagnoseCentralCapitalTransition({ actor: SA, tenantId: T })).rutas.find(r => r.routeId === R1)!
+  metric('heredado', `${heredadoAntes} → ${heredadoDespues}`)
+  metric('ajustes históricos', `${d.ajustesHistoricos.cantidad} por ${d.ajustesHistoricos.total}`)
+  assert(await bolsa() === b, 'la corrección histórica movió la bolsa')
+  assert(heredadoDespues === heredadoAntes - 50, 'el ajuste histórico no se reflejó en el saldo heredado')
+  assert(!(await db.withdrawals.toArray()).some(w => w.centralLink), 'la corrección se registró como operación de capital nueva')
+  assert(d.ajustesHistoricos.cantidad === 2 && d.ajustesHistoricos.total === -50, 'el ajuste histórico no quedó identificado')
+})
+
+// ============================================================
+// F. INTERFAZ: catálogos, informes y contratos de pantalla
+// ============================================================
+await spec('CC-F01', 'asistente: en modo centralizado solo entregar/recibir capital y vaciar el heredado donde existe', async () => {
+  await empresa()
+  const us = await db.users.toArray()
+  const rs = await db.routes.toArray()
+  const modo = { central: true, heredado: { [R1]: 500, [R2]: 0 } }
+  const opsAdmin = availableOperations(ADMIN, rs, us, T, modo)
+  const opsV16 = availableOperations(ADMIN, rs, us, T)
+  metric('Admin centralizado', opsAdmin.join(', '))
+  metric('Admin v16', opsV16.join(', '))
+  assert(JSON.stringify(opsAdmin.sort()) === JSON.stringify(['devolver-capital', 'entregar-base', 'entregar-capital', 'retirar']), 'operaciones centralizadas incorrectas')
+  assert(!opsAdmin.includes('ruta-ruta') && !opsAdmin.includes('colocar') && !opsAdmin.includes('devolver-base'), 'quedó una operación de caja de ruta')
+  assert(routesForOperation('retirar', ADMIN, rs, us, T, modo).map(r => r.id).join() === R1, 'el vaciado se ofrece en rutas sin heredado')
+  assert(JSON.stringify(opsV16.sort()) === JSON.stringify(['colocar', 'devolver-base', 'entregar-base', 'retirar', 'ruta-ruta']), 'el modo v16 cambió')
+  assert(availableOperations(JUAN, rs, us, T, modo).length === 0, 'el Cobrador puede mover capital')
+  assert(JSON.stringify(availableOperations(LAURA, rs, us, T, modo)) === JSON.stringify(['devolver-capital']), 'la Supervisora tiene operaciones de más')
+  assert(availableOperations(SA, rs, us, T, modo).includes('devolver-capital') && !availableOperations(SA, rs, us, T, modo).includes('entregar-capital'), 'el SuperAdmin entrega capital a trabajadores')
+  const p = previewTransferOperation({ kind: 'entregar-capital', importe: 300, ruta: { disponible: 0, sinAsignar: 0, posiciones: { [JUAN.id]: 200 } }, trabajadorId: JUAN.id, bolsa: 1000, nombres: {} })
+  assert(p.origen.despues === 700 && p.destino.despues === 500 && p.limite === 1000 && !p.excede, 'vista previa de la entrega incorrecta')
+})
+
+await spec('CC-F02', 'informes: retornos de cuadre y cobros no en efectivo separados de los retiros; sumas iguales a la caja', async () => {
+  await empresa({ activar: false, heredado: 400 })
+  await registerWithdrawal({ actor: ADMIN, tenantId: T, routeId: R1, valor: 100 })
+  await activar()
+  await entregar(JUAN, 500)
+  await cobra(JUAN, await ventaAdmin(300), 120, 'transferencia')
+  await closeCashSettlement({ actor: ADMIN, tenantId: T, routeId: R1, userId: JUAN.id, entregado: 500 })
+  await registerWithdrawal({ actor: ADMIN, tenantId: T, routeId: R1, valor: 50 })   // vaciado del heredado
+  const caja = await getCashboxSummary(R1)
+  const f = await getCapitalFlowBreakdown(R1)
+  metric('capital', JSON.stringify(f.capital))
+  metric('retiros', JSON.stringify(f.retiros))
+  const suma = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0)
+  assert(suma(f.capital) === caja.ingresoCapital && suma(f.retiros) === caja.retiros, 'el desglose no suma los totales de la caja')
+  assert(f.retiros.retornosDeCuadre === 500 && f.retiros.cobrosNoEnEfectivo === 120 && f.retiros.retirosDeCaja === 150, 'clasificación de retiros incorrecta')
+  assert(f.capital.entregasATrabajadores === 500 && f.capital.desembolsosDelAdministrador === 300 && f.capital.aCajaDeRuta === 400, 'clasificación de capital incorrecta')
+  // Estado de cuenta de la bolsa: cada operación con su nombre y la conciliación cuadra.
+  const st = await getAdminPoolStatement({ actor: ADMIN, tenantId: T, adminId: ADMIN.id })
+  const kinds = new Set(st.movimientos.map(m => m.kind))
+  metric('tipos en la bolsa', [...kinds].join(', '))
+  assert(kinds.has('retornoCuadre') && kinds.has('cobroNoPersonal') && kinds.has('entregaTrabajador') && kinds.has('desembolsoAdmin') && kinds.has('retiroRuta'), 'la bolsa no distingue las operaciones')
+  assert(st.conciliacion.diferencia === 0, `la conciliación de la bolsa no cuadra (${st.conciliacion.diferencia})`)
+})
+
+await spec('CC-F03', 'contratos de pantalla: servicios C1 en la interfaz, sin cálculos propios ni circuitos equivocados', async () => {
+  const src = (f: string) => fs.readFileSync(path.resolve(f), 'utf8')
+  const wizard = src('src/components/transfers/OperationWizard.tsx')
+  const capital = src('src/pages/admin/CapitalPage.tsx')
+  const transfers = src('src/pages/admin/TransfersPage.tsx')
+  const retiros = src('src/pages/admin/WithdrawalsPage.tsx')
+  const panel = src('src/components/settlement/WorkerCashSettlementPanel.tsx')
+  const cobrador = src('src/pages/collector/CollectorCashClosePage.tsx')
+  const transicion = src('src/pages/admin/CentralCapitalTransitionPage.tsx')
+  const checks: [string, boolean][] = [
+    ['asistente usa deliverCapitalToWorker/returnCapitalFromWorker', wizard.includes('deliverCapitalToWorker(') && wizard.includes('returnCapitalFromWorker(')],
+    ['asistente filtra por modo', wizard.includes('availableOperations(user, routes, users, tenantId, modo)')],
+    ['Capital: colocar/retirar solo fuera del modo centralizado', /central\.activo \? \([\s\S]*?Entregar capital[\s\S]*?\) : \([\s\S]*?Colocar capital/.test(capital)],
+    ['Capital: entrega anulada como par', capital.includes('reverseCapitalDelivery(')],
+    ['Transferencias: sin Socio → Ruta con el modelo activo', transfers.includes("!(central.activo && o.value.startsWith('route:'))")],
+    ['Transferencias: aporte de socio a la bolsa', transfers.includes('registerPartnerContribution(')],
+    ['Retiros: excluye patas centralizadas', retiros.includes('.filter(w => !w.centralLink)')],
+    ['Cuadre: servicios de capital en modo centralizado', panel.includes('deliverCapitalToWorker(') && panel.includes('returnCapitalFromWorker(')],
+    ['Cobrador: «Capital recibido» y sin bolsa', cobrador.includes('Capital recibido') && !/capitalControlService|getAdminAvailableCapital|adminCapital/.test(cobrador)],
+    ['Transición: respaldo y confirmación escrita', transicion.includes('verifyCentralCapitalBackup(') && transicion.includes('PALABRA')],
+    ['Ninguna pantalla escribe capital directamente', ![wizard, capital, transfers, retiros, panel, transicion].some(s => /db\.(capitalMovements|withdrawals|capitalLedger|cashCustodyMovements|tenants)\.(add|put|update)/.test(s))],
+  ]
+  for (const [k, v] of checks) metric(k, v)
+  assert(checks.every(([, v]) => v), 'contrato de pantalla incumplido')
+  // Marcadores de despliegue para C2 (presentes en el bundle cuando se publique).
+  const marcadores = src('scripts/verify-deploy.mjs')
+  assert(marcadores.includes('Capital centralizado') && marcadores.includes('Capital recibido del Administrador'), 'faltan marcadores de despliegue de C2')
 })
 
 // ============================================================
@@ -647,5 +911,7 @@ for (const r of results) {
   if (!r.passed) console.log(`     ✘ ${r.error}`)
 }
 const fallidas = results.length - ok
-console.log(`\nSUITE CAPITAL CENTRALIZADO: ${ok} OK, ${fallidas} FALLIDAS (${results.length} casos)`)
+// Formato de total que reconoce el banco de contratos (`parseSuiteTotals`).
+console.log(`\n  TOTAL: ${results.length} casos   ${ok} PASS   ${fallidas} FAIL`)
+console.log(`SUITE CAPITAL CENTRALIZADO: ${ok} OK, ${fallidas} FALLIDAS (${results.length} casos)`)
 if (fallidas > 0) process.exit(1)

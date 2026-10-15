@@ -126,6 +126,9 @@ export type AuditAction =
   | 'CENTRAL_CAPITAL_DELIVERY_REVERSED'
   | 'PARTNER_CONTRIBUTION_REGISTERED'
   | 'PARTNER_CONTRIBUTION_REVERSED'
+  | 'CENTRAL_CAPITAL_BACKUP_EXPORTED'
+  | 'CENTRAL_CAPITAL_BACKUP_VERIFIED'
+  | 'CENTRAL_CAPITAL_ROUTE_RELEASED'
 
 // --- ENTIDADES ---
 
@@ -167,6 +170,20 @@ export interface Tenant {
    * índice: no requiere versión Dexie.
    */
   centralCapitalStartAt?: string
+  /**
+   * C2: recibo del RESPALDO exigido antes de activar el capital centralizado. Las
+   * huellas se calculan sobre el contenido exportado; `verifiedAt` solo se fija
+   * cuando el archivo se vuelve a cargar y coincide. Sin índice.
+   */
+  centralCapitalBackup?: CentralCapitalBackupReceipt
+  /**
+   * C2: rutas que al activar estaban INCONSISTENTES o SIN RESPONSABLE. No reciben
+   * capital nuevo (entregas, desembolsos y gastos pagados con la bolsa) hasta que el
+   * SuperAdmin las libere con motivo. Nada se corrige automáticamente. Sin índice.
+   */
+  centralCapitalRouteBlocks?: Record<string, CentralCapitalRouteBlock>
+  /** C2: "Sin asignar" de cada ruta en el instante de activar (saldo heredado). Foto, no saldo vivo. */
+  centralCapitalHeritage?: Record<string, number>
   createdAt: string
   updatedAt: string
 }
@@ -729,6 +746,26 @@ export interface MovementReversalFields {
  *   DESEMBOLSO_ADMIN      préstamo entregado por el Admin/SuperAdmin (CapitalMovement)
  *   GASTO_RUTA            gasto de la ruta pagado con la bolsa (CapitalMovement)
  */
+/** Recibo del respaldo previo a la activación del capital centralizado (C2). */
+export interface CentralCapitalBackupReceipt {
+  /** SHA-256 del contenido exportado (todas las tablas de la empresa). */
+  integridad: string
+  /** SHA-256 de las tablas financieras: si cambia, hubo movimientos desde el respaldo. */
+  huellaFinanciera: string
+  exportedAt: string
+  exportedByUserId: string
+  conteos: Record<string, number>
+  verifiedAt?: string
+  verifiedByUserId?: string
+}
+
+/** Ruta bloqueada para capital nuevo al activar el modelo centralizado (C2). */
+export interface CentralCapitalRouteBlock {
+  estado: 'inconsistente' | 'sin-responsable'
+  motivo: string
+  desde: string
+}
+
 export type CentralCapitalKind =
   | 'ENTREGA_TRABAJADOR'
   | 'DEVOLUCION_TRABAJADOR'

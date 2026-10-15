@@ -1,10 +1,10 @@
-# Capital centralizado (C1) — 2026-10-15
+# Capital centralizado (C1 + C2) — 2026-10-15
 
 Decisión del propietario: la caja de la ruta deja de ser una bolsa intermediaria de capital. El Administrador responsable administra su bolsa y entrega capital directamente al trabajador, identificando la ruta. Lo que el trabajador devuelve o entrega en el cuadre vuelve a esa misma bolsa.
 
 La ruta sigue siendo la unidad de atribución: clientes, cartera, préstamos, recaudos, gastos, cuadres, liquidaciones e historial.
 
-**Estado.** Implementado en el motor local, solo con pruebas. **No está activo para ninguna empresa.** No hay cambios de interfaz ni despliegue. La activación y la transición de los datos reales pertenecen a C2.
+**Estado.** C1 (motor) y C2 (interfaz y transición) implementados y probados en local. **No está activo para ninguna empresa** y no se ha desplegado. La activación es una acción explícita del SuperAdmin en cada navegador (sección 4).
 
 ## 1. Cómo funciona
 
@@ -77,22 +77,70 @@ Cada operación que antes dejaba o tomaba dinero de "Sin asignar" se registra ah
 - **Excepción documentada:** una cadena de corrección de un cobro no personal **anterior** a la activación sigue su circuito histórico.
 - **Diagnóstico (`diagnoseCentralCapitalTransition`)**, solo lectura. Clasifica cada ruta en una de cuatro categorías:
   - `limpia`;
-  - `saldo-heredado`;
-  - `inconsistente`: la conciliación no cuadra o "Sin asignar" es negativo; requiere revisión humana;
+  - `saldo-heredado`: incluye el negativo explicado por sobrantes de cuadres con esperado negativo (C2: no es dinero disponible, nada lo consume y el sobrante sigue documentado);
+  - `inconsistente`: la conciliación no cuadra, o "Sin asignar" es negativo **sin** que lo expliquen sobrantes registrados; requiere revisión humana;
   - `sin-responsable`.
 - **Un cuadre anterior a la activación** solo se reabre si su efectivo sigue en la caja de la ruta.
 
 **No se convierte nada automáticamente.** Ningún saldo anterior se transforma en aportes ni en retiros.
 
-## 3. Pendiente fuera de C1
+## 3. Interfaz y transición (C2)
 
-- **C2:**
-  - pantallas (entregar, devolver, aporte de socio, «Mi efectivo» con "Capital recibido");
-  - diagnóstico visible;
-  - vaciado controlado del saldo heredado;
-  - activación por empresa;
-  - etiquetas de los informes (los retornos de cuadre se registran como retiros).
-- **Devolución de la bolsa a un socio:** no está definida por la decisión. No se implementó. La salida a socio solo opera sobre el saldo heredado.
-- **Traslado entre rutas:** son dos operaciones del responsable (devolución en una ruta y entrega en la otra). Entre responsables distintos sigue abierto como D2.
-- **`npm test` sigue encadenando las 26 suites:** el banco de contratos de `saas/` (BENCH-002) exige esa lista exacta. La suite nueva se ejecuta con `npm run test:centralcapital` y se incorporará al encadenado cuando se actualice el manifiesto SaaS en S3.
+**Cada pantalla elige el circuito según el estado de la empresa** (`useCentralCapital`). Sin activar, todo es v16. Mientras ese estado se carga, no se ofrece ninguna operación de capital.
+
+| Pantalla | Con el modelo activo |
+|---|---|
+| Capital / Caja principal | «Entregar capital», «Recibir devolución» y, si queda, «Traspasar heredado» (asistente → servicios C1). Sin «Colocar capital». Anular una entrega anula el par. La bolsa clasifica cada movimiento por su operación |
+| Transferencias (asistente) | Solo entregar y recibir capital, más el vaciado del heredado en las rutas que lo tienen. Sin Ruta → Ruta, sin colocar ni devolver a la caja. «Aporte de socio a mi bolsa». La operación con socio ya no ofrece una ruta como destino |
+| Retiros | Solo «Traspasar saldo heredado». Los retornos de cuadre, las devoluciones y los cobros no en efectivo no se listan como retiros |
+| Liquidación → cuadre por trabajador | «Capital recibido / devuelto», «Entregar capital», «Recibir devolución de capital». La confirmación indica que el efectivo vuelve a la bolsa |
+| Caja y Liquidación semanal | Desglose del ingreso de capital y de los retiros por operación (`capitalFlowBreakdown`; suma exactamente los totales) |
+| Conciliación de la ruta | «Saldo heredado de la antigua caja», su valor al activar y el bloqueo si lo hay |
+| Rutas | Sin «Capital inicial» (el servicio también lo rechaza); aviso de ruta bloqueada |
+| Historial | Cada registro centralizado con su nombre real |
+| «Mi efectivo» del Cobrador | «Capital recibido del Administrador» separado del recaudo. Las filas son entradas y salidas del periodo; el único saldo es «Efectivo a tu cargo». Lista de entregas y devoluciones del periodo. Nunca la bolsa |
+
+**Transición** (`/admin/capital/transicion`, enlace «Capital centralizado» en Capital):
+1. **Diagnóstico**, solo lectura. Por ruta muestra:
+   - responsable, Base, sin asignar o heredado, conciliación;
+   - faltantes, sobrantes y cobros no en efectivo;
+   - ajustes de cobros históricos;
+   - estado y explicación.
+
+   El Administrador solo ve sus rutas.
+2. **Respaldo** (`centralCapitalBackupService`):
+   - exporta todas las tablas de la empresa, sin contraseñas ni otras empresas, a un archivo en el equipo;
+   - al volver a cargarlo se comprueban el formato, la empresa, la huella de integridad (SHA-256) y que los datos financieros no cambiaron desde la exportación (huella financiera);
+   - un movimiento posterior invalida el respaldo.
+3. **Activación**: SuperAdmin, motivo, casilla de comprensión y palabra «ACTIVAR». Con movimientos financieros exige el respaldo verificado y vigente. Al activar:
+   - guarda la foto del heredado por ruta (`centralCapitalHeritage`);
+   - bloquea las rutas inconsistentes o sin responsable (`centralCapitalRouteBlocks`). Una ruta bloqueada no recibe capital nuevo (entregas, préstamos o gastos de ruta con la bolsa), pero sus cuadres y devoluciones siguen.
+4. **Liberación** (`releaseCentralCapitalRoute`): solo el SuperAdmin, tras revisar, con motivo de al menos 10 caracteres.
+   - Si la ruta sigue inconsistente, debe aceptarlo expresamente.
+   - Sin responsable no se libera.
+   - No corrige ningún saldo.
+
+**Correcciones históricas.** Corregir un cobro no en efectivo anterior a la activación mueve el saldo heredado, no la bolsa, y no crea `centralLink`. El diagnóstico lo lista aparte en «Ajustes de cobros históricos».
+
+## 4. Validación futura del socio (cuando se autorice publicar C2)
+
+1. Antes de nada, el socio sigue trabajando igual: sin activar, CLEAN se comporta como hoy.
+2. En **su** navegador, como SuperAdmin: Capital → «Capital centralizado».
+   - Revisar el diagnóstico.
+   - Si una ruta sale «Inconsistente» o «Sin responsable», queda bloqueada al activar hasta revisarla.
+3. «Exportar respaldo», guardar el archivo en el equipo y, sin registrar movimientos entre medias, «Cargar respaldo para verificar» con ese mismo archivo.
+4. Escribir el motivo, marcar la casilla, escribir ACTIVAR y «Activar capital centralizado».
+5. Comprobar en Capital:
+   - el saldo heredado de cada ruta;
+   - entregar un importe pequeño a un cobrador;
+   - verlo en su «Mi efectivo».
+6. El respaldo queda en el equipo del socio: no se envía a nadie. Conservarlo.
+
+## 5. Pendiente
+
+- **Publicación de C2:** push, despliegue y `verify:deploy` (8 marcadores nuevos), y luego la activación por el socio según la sección 4.
+- **Devolución de la bolsa a un socio:** no está definida por la decisión ni implementada. La salida a socio solo opera sobre el saldo heredado.
+- **Traslado entre rutas:** son dos operaciones del responsable. Entre responsables distintos sigue abierto como D2.
+- **Venta directa de ciertos Cobradores:** discrepancia funcional pendiente; sin cambios.
+- **`npm test` encadena 27 suites** (1.600 históricos + `centralcapital`). El manifiesto del banco de contratos de `saas/` se actualizó en consecuencia (solo infraestructura de pruebas).
 - **S3** implementará el mismo modelo en PostgreSQL desde cero, sin caja de ruta operativa.

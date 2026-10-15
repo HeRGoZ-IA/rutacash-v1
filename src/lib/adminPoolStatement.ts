@@ -23,7 +23,7 @@
 import { adminCapital, type AdminCapital, type CapitalRows } from '@/lib/capitalAllocation'
 import { expenseFundingOf, poolExpenseStateOf } from '@/lib/expenseFunding'
 import { reversalStateOf } from '@/lib/movementReversal'
-import type { CapitalLedgerEntry, CapitalMovement, Expense, Withdrawal } from '@/models/types'
+import type { CapitalLedgerEntry, CapitalMovement, CentralCapitalLink, Expense, Withdrawal } from '@/models/types'
 
 export type PoolMovementKind =
   | 'asignacion'       // SuperAdmin → bolsa
@@ -36,6 +36,14 @@ export type PoolMovementKind =
   | 'gasto'            // gasto administrativo
   | 'anulacionGasto'   // anulación de un gasto (asiento negado)
   | 'reintegro'        // reintegro de un gasto (asiento negado)
+  // Capital centralizado (C1/C2): mismos registros (capital/retiro), clasificados
+  // por la operación real para que un retorno de cuadre no parezca un retiro.
+  | 'entregaTrabajador'    // bolsa → trabajador (y su anulación)
+  | 'devolucionTrabajador' // trabajador → bolsa
+  | 'retornoCuadre'        // efectivo entregado en un cuadre → bolsa (y su reapertura)
+  | 'cobroNoPersonal'      // cobro por transferencia o recibido por un Admin → bolsa (y su anulación)
+  | 'desembolsoAdmin'      // préstamo entregado por el Admin/SuperAdmin con la bolsa
+  | 'gastoRuta'            // gasto de la ruta pagado con la bolsa
 
 export type PoolMovementState = 'vigente' | 'anulado' | 'reversion'
 
@@ -120,13 +128,13 @@ export function buildPoolStatement(adminId: string, rows: PoolSources): PoolStat
   }
   for (const m of rows.capitalMovements.filter(x => x.adminId === adminId)) {
     movimientos.push({
-      id: m.id, kind: 'colocacion', fecha: m.fecha, createdAt: m.createdAt, monto: -m.valor, afecta: 'disponible',
+      id: m.id, kind: centralPoolKind(m.centralLink, 'colocacion'), fecha: m.fecha, createdAt: m.createdAt, monto: -m.valor, afecta: 'disponible',
       estado: estadoDe(m), routeId: m.routeId, actorId: m.userId, descripcion: m.descripcion, corrigeId: m.reversesId,
     })
   }
   for (const w of rows.withdrawals.filter(x => x.adminId === adminId)) {
     movimientos.push({
-      id: w.id, kind: 'retiroRuta', fecha: w.fecha, createdAt: w.createdAt, monto: w.valor, afecta: 'disponible',
+      id: w.id, kind: centralPoolKind(w.centralLink, 'retiroRuta'), fecha: w.fecha, createdAt: w.createdAt, monto: w.valor, afecta: 'disponible',
       estado: estadoDe(w), routeId: w.routeId, actorId: w.userId, descripcion: w.descripcion, corrigeId: w.reversesId,
     })
   }
@@ -155,10 +163,26 @@ export function buildPoolStatement(adminId: string, rows: PoolSources): PoolStat
     adminId, capital,
     partidas: {
       asignaciones, devolucionesSA, recibidoSA: asignaciones - devolucionesSA, aportesSocios,
-      rutasRecibidas, rutasEntregadas, colocado: -de('colocacion'), retiradoDeRutas: de('retiroRuta'),
+      rutasRecibidas, rutasEntregadas,
+      // Totales de los registros reales (incluye las operaciones centralizadas).
+      colocado: sum(rows.capitalMovements.filter(x => x.adminId === adminId).map(x => x.valor)),
+      retiradoDeRutas: sum(rows.withdrawals.filter(x => x.adminId === adminId).map(x => x.valor)),
     },
     conciliacion: { entradas, explicado, diferencia: entradas - explicado },
     movimientos,
+  }
+}
+
+/** Tipo de movimiento de la bolsa según su operación centralizada (o el genérico v16). */
+export function centralPoolKind(link: CentralCapitalLink | undefined, generico: 'colocacion' | 'retiroRuta'): PoolMovementKind {
+  switch (link?.kind) {
+    case 'ENTREGA_TRABAJADOR': case 'ANULACION_ENTREGA': return 'entregaTrabajador'
+    case 'DEVOLUCION_TRABAJADOR': return 'devolucionTrabajador'
+    case 'CUADRE': case 'REAPERTURA_CUADRE': return 'retornoCuadre'
+    case 'COBRO_NO_PERSONAL': case 'ANULACION_COBRO': return 'cobroNoPersonal'
+    case 'DESEMBOLSO_ADMIN': return 'desembolsoAdmin'
+    case 'GASTO_RUTA': return 'gastoRuta'
+    default: return generico
   }
 }
 
@@ -186,4 +210,10 @@ export const POOL_MOVEMENT_LABEL: Record<PoolMovementKind, string> = {
   gasto: 'Gasto administrativo',
   anulacionGasto: 'Anulación de gasto',
   reintegro: 'Reintegro de gasto',
+  entregaTrabajador: 'Capital entregado a trabajador',
+  devolucionTrabajador: 'Devolución de capital de trabajador',
+  retornoCuadre: 'Efectivo recibido en cuadre',
+  cobroNoPersonal: 'Cobro no en efectivo (transferencia)',
+  desembolsoAdmin: 'Préstamo entregado desde la bolsa',
+  gastoRuta: 'Gasto de ruta pagado con la bolsa',
 }

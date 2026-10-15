@@ -32,6 +32,12 @@ import {
 import { canReverseRouteFund, reverseCapitalMovement } from '@/services/movementReversalService'
 import { pairReversals, reversalStateOf } from '@/lib/movementReversal'
 import { AnnulledBadge, ReversalDetail, ReverseButton, ReverseMovementModal, signedMoney } from '@/components/ui/MovementReversal'
+import { useCentralCapital } from '@/hooks/useCentralCapital'
+import { OperationWizard } from '@/components/transfers/OperationWizard'
+import type { TransferMode, TransferOperationKind } from '@/lib/transferOperations'
+import { reverseCapitalDelivery } from '@/services/centralCapitalService'
+import { getRouteCashReconciliation } from '@/services/routeCashReconciliation'
+import { Link } from 'react-router-dom'
 
 // ============================================================
 // CAPITAL (v16) — SuperAdmin → Administrador → Ruta
@@ -45,6 +51,12 @@ import { AnnulledBadge, ReversalDetail, ReverseButton, ReverseMovementModal, sig
 //   responsable se muestran en consulta, con el nombre del responsable.
 // Toda cifra sale de `capitalControlService` / `lib/capitalAllocation` (fuente única);
 // la pantalla no calcula saldos ni valida: el servicio revalida todo.
+//
+// CAPITAL CENTRALIZADO (C2): con el modelo activo el Administrador ya no coloca ni
+// retira capital de la caja de una ruta. Entrega capital de su bolsa a los
+// trabajadores y recibe sus devoluciones (asistente de operaciones, servicios C1);
+// el saldo heredado de una ruta solo se traspasa a su bolsa. El SuperAdmin prepara
+// y activa el modelo en «Capital centralizado» (diagnóstico, respaldo, activación).
 // ============================================================
 
 type SaOperation = 'COMPANY_DEPOSIT' | 'ADMIN_ALLOCATION' | 'ADMIN_RETURN' | 'COMPANY_WITHDRAWAL'
@@ -112,6 +124,10 @@ export default function CapitalPage() {
   const [historyRouteId, setHistoryRouteId] = useState<string | null>(null)
   const [detailRouteId, setDetailRouteId] = useState<string | null>(null)
   const [reversing, setReversing] = useState<CapitalMovement | null>(null)
+  // Capital centralizado: estado de la empresa, asistente y saldo heredado de mis rutas.
+  const central = useCentralCapital(tenantId)
+  const [wizard, setWizard] = useState<{ kind?: TransferOperationKind; routeId?: string } | null>(null)
+  const [heredado, setHeredado] = useState<Record<string, number>>({})
   /**
    * CAJA PRINCIPAL (Ronda 3/6): estado de cuenta de la bolsa, SIEMPRE del servicio
    * (`getAdminPoolStatement` → `adminCapital`). Administrador: la suya. SuperAdmin:
@@ -154,6 +170,12 @@ export default function CapitalPage() {
       const sum: Record<string, RouteFinancialSummary> = {}
       for (const r of scoped) sum[r.id] = await getRouteFinancialSummary(r.id)
       setSummaryByRoute(sum)
+      // Saldo heredado ("Sin asignar") de las rutas que controlo, con el permiso del servicio.
+      const her: Record<string, number> = {}
+      for (const r of scoped.filter(x => isRouteCapitalController(user, x))) {
+        try { her[r.id] = (await getRouteCashReconciliation({ actor: user, tenantId, routeId: r.id })).noAsignado } catch { /* sin permiso: no se muestra */ }
+      }
+      setHeredado(her)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo cargar el capital')
@@ -234,7 +256,12 @@ export default function CapitalPage() {
   async function handleReverse(reason: string) {
     if (!reversing) return
     // Permiso, responsable, estado vigente y fondos: en el servicio, atómico.
-    await reverseCapitalMovement({ actor: user, tenantId, movementId: reversing.id, reason })
+    if (reversing.centralLink?.kind === 'ENTREGA_TRABAJADOR') {
+      // Entrega centralizada: se anula el PAR (capital + custodia), solo si el trabajador aún la conserva.
+      await reverseCapitalDelivery({ actor: user, tenantId, operationId: reversing.centralLink.operationId, reason })
+    } else {
+      await reverseCapitalMovement({ actor: user, tenantId, movementId: reversing.id, reason })
+    }
     toast.success('Movimiento anulado')
     setReversing(null)
     await load()
@@ -251,6 +278,11 @@ export default function CapitalPage() {
   const candidatos = changingRoute ? validRouteAdmins(users, changingRoute).filter(a => a.id !== changingRoute.capitalControllerAdminId) : []
   const capitalColocado = (routeId: string) => overview?.routes.find(r => r.routeId === routeId)?.colocado ?? 0
   const detailMovs = detailRouteId ? movements.filter(m => m.routeId === detailRouteId) : []
+  const modo: TransferMode | undefined = central.activo ? { central: true, heredado: Object.fromEntries(Object.entries(heredado).map(([k, v]) => [k, Math.max(0, v)])) } : undefined
+  /** ¿Se puede anular este movimiento desde aquí? Patas centralizadas: solo la entrega, como par. */
+  const anulable = (m: CapitalMovement) => m.centralLink
+    ? m.centralLink.kind === 'ENTREGA_TRABAJADOR' && !m.reversesId && reversalStateOf(m) === 'vigente' && canReverseRouteFund(user, m, routes, users)
+    : !central.activo && canReverseRouteFund(user, m, routes, users)
 
   // ============================================================
   // RENDER
@@ -272,6 +304,7 @@ export default function CapitalPage() {
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h1 className="text-xl font-bold text-gray-900">{titularId ? 'Caja principal' : 'Capital'}</h1>
+        {central.activo && <p className="text-xs font-medium text-primary-700" data-testid="central-active">Capital centralizado activo{central.desde ? ` desde ${formatDateTime(central.desde)}` : ''}</p>}
         <p className="text-sm text-gray-500 mt-0.5">
           {verAdminId
             ? <>Consulta de la bolsa de <b>{nombre(verAdminId)}</b> (SuperAdmin). <button type="button" className="text-primary-700 hover:underline" onClick={() => setSearchParams({}, { replace: true })}>Volver a Capital</button></>
@@ -282,6 +315,9 @@ export default function CapitalPage() {
       </div>
       {esSuperAdmin && !verAdminId && (
         <div className="flex flex-wrap gap-2">
+          <Link to="/admin/capital/transicion" className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-lg bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 shadow-sm" data-testid="go-transition">
+            <ShieldAlert className="w-4 h-4" /> Capital centralizado
+          </Link>
           <Button variant="secondary" onClick={() => setSaOp({ tipo: 'COMPANY_DEPOSIT', adminId: '', amount: 0, descripcion: '', fecha: today() })} icon={<Plus className="w-4 h-4" />}>
             Ingresar capital
           </Button>
@@ -432,9 +468,11 @@ export default function CapitalPage() {
           {/* Administrador: su CAJA PRINCIPAL (una sola bolsa). */}
           {statement && (
             <AdminPoolPanel statement={statement} routes={routes} users={users} categories={categories} currency={currency}
-              onRegistrarGasto={() => setGastoAbierto(true)}
-              onDistribuir={() => setRouteOp({ tipo: 'colocar', routeId: misRutas.length === 1 ? misRutas[0].id : '', valor: 0, descripcion: '', fecha: today() })}
-              puedeDistribuir={misRutas.length > 0} />
+              onRegistrarGasto={() => setGastoAbierto(true)} central={central.activo}
+              onDistribuir={() => central.activo
+                ? setWizard({ kind: 'entregar-capital', routeId: misRutas.length === 1 ? misRutas[0].id : undefined })
+                : setRouteOp({ tipo: 'colocar', routeId: misRutas.length === 1 ? misRutas[0].id : '', valor: 0, descripcion: '', fecha: today() })}
+              puedeDistribuir={central.listo && misRutas.length > 0} />
           )}
 
           {filtroRutas}
@@ -450,15 +488,31 @@ export default function CapitalPage() {
                       <div className="w-9 h-9 bg-primary-100 rounded-xl flex items-center justify-center flex-shrink-0"><MapPin className="w-4 h-4 text-primary-600" /></div>
                       <div className="min-w-0"><p className="text-sm font-semibold text-gray-900 truncate">{r.nombre}</p><p className="text-xs text-gray-400">{r.codigo}</p></div>
                     </div>
+                    {central.bloqueos[r.id] && (
+                      <p className="mt-2 text-xs font-medium text-amber-700" data-testid={`route-blocked-${r.id}`}>Bloqueada para capital nuevo desde la activación ({central.bloqueos[r.id].estado}). El SuperAdmin debe revisarla y liberarla.</p>
+                    )}
                     <div className="grid grid-cols-3 gap-2 mt-3">
-                      <Stat label="Capital colocado" value={money(capitalColocado(r.id))} />
+                      <Stat label={central.activo ? 'Capital en la ruta' : 'Capital colocado'} value={money(capitalColocado(r.id))} />
                       <Stat label="Base de la ruta" value={money(summaryByRoute[r.id]?.baseActual ?? 0)} tone="text-primary-700" bg="bg-primary-50" />
                       <Stat label="Cartera Activa" value={money(summaryByRoute[r.id]?.carteraEnCalle ?? 0)} tone="text-indigo-700" bg="bg-indigo-50" />
                     </div>
+                    {central.activo && (heredado[r.id] ?? 0) !== 0 && (
+                      <p className="mt-2 text-xs text-gray-600" data-testid={`route-heritage-${r.id}`}>Saldo heredado de la antigua caja: <b>{money(heredado[r.id])}</b>{heredado[r.id] < 0 ? ' (explicado por sobrantes de cuadres; no es dinero disponible)' : ' · solo puede bajar'}</p>
+                    )}
                     <div className="flex flex-wrap justify-end gap-2 mt-3">
                       <Button size="sm" variant="ghost" onClick={() => setDetailRouteId(r.id)} icon={<ChevronRight className="w-3.5 h-3.5" />}>Movimientos</Button>
-                      <Button size="sm" variant="secondary" onClick={() => abrirRouteOp('retirar', r.id)} icon={<ArrowDownLeft className="w-3.5 h-3.5" />}>Retirar</Button>
-                      <Button size="sm" onClick={() => abrirRouteOp('colocar', r.id)} icon={<ArrowUpRight className="w-3.5 h-3.5" />}>Colocar capital</Button>
+                      {!central.listo ? null : central.activo ? (
+                        <>
+                          {(heredado[r.id] ?? 0) > 0 && <Button size="sm" variant="secondary" onClick={() => setWizard({ kind: 'retirar', routeId: r.id })} icon={<ArrowDownLeft className="w-3.5 h-3.5" />}>Traspasar heredado</Button>}
+                          <Button size="sm" variant="secondary" onClick={() => setWizard({ kind: 'devolver-capital', routeId: r.id })} icon={<ArrowDownLeft className="w-3.5 h-3.5" />}>Recibir devolución</Button>
+                          <Button size="sm" disabled={!!central.bloqueos[r.id]} onClick={() => setWizard({ kind: 'entregar-capital', routeId: r.id })} icon={<ArrowUpRight className="w-3.5 h-3.5" />}>Entregar capital</Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button size="sm" variant="secondary" onClick={() => abrirRouteOp('retirar', r.id)} icon={<ArrowDownLeft className="w-3.5 h-3.5" />}>Retirar</Button>
+                          <Button size="sm" onClick={() => abrirRouteOp('colocar', r.id)} icon={<ArrowUpRight className="w-3.5 h-3.5" />}>Colocar capital</Button>
+                        </>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -621,7 +675,7 @@ export default function CapitalPage() {
                 ))}
                 {movements.filter(m => m.adminId === detailAdmin.adminId).map(m => (
                   <div key={m.id} className="flex items-center justify-between gap-2 py-1.5 text-sm">
-                    <span className="min-w-0 truncate">Capital colocado · {routeName(m.routeId)} <span className="text-xs text-gray-400">{formatDate(m.fecha)}</span></span>
+                    <span className="min-w-0 truncate">{m.centralLink ? m.descripcion ?? 'Capital' : 'Capital colocado'} · {routeName(m.routeId)} <span className="text-xs text-gray-400">{formatDate(m.fecha)}</span></span>
                     <span className="font-semibold text-amber-600">{signedMoney(-m.valor, currency)}</span>
                   </div>
                 ))}
@@ -669,7 +723,7 @@ export default function CapitalPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
-                      {canReverseRouteFund(user, m, routes, users) && <ReverseButton onClick={() => setReversing(m)} />}
+                      {anulable(m) && <ReverseButton onClick={() => setReversing(m)} />}
                       <span className={`text-sm font-bold ${estado === 'anulado' ? 'text-gray-400 line-through' : m.valor >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>{signedMoney(m.valor, currency)}</span>
                     </div>
                   </div>
@@ -681,11 +735,15 @@ export default function CapitalPage() {
         )}
       </Modal>
 
+      {/* Capital centralizado: entregar / recibir capital y vaciar el saldo heredado (servicios C1) */}
+      <OperationWizard open={!!wizard} onClose={() => setWizard(null)} onDone={() => { void load() }}
+        routes={routes} users={users} inicial={wizard ?? undefined} modo={modo} />
+
       <AdminExpenseModal open={gastoAbierto} onClose={() => setGastoAbierto(false)} onSaved={() => { void load() }}
         users={users} categories={categories} bolsaInicial={titularId ? `admin:${titularId}` : undefined} />
 
       <ReverseMovementModal currency={currency} onCancel={() => setReversing(null)} onConfirm={handleReverse}
-        target={reversing && { tipo: 'Capital colocado', valor: reversing.valor, fecha: reversing.fecha, detalle: [routeName(reversing.routeId), reversing.descripcion].filter(Boolean).join(' · ') }} />
+        target={reversing && { tipo: reversing.centralLink ? 'Entrega de capital a trabajador' : 'Capital colocado', valor: reversing.valor, fecha: reversing.fecha, detalle: [routeName(reversing.routeId), reversing.descripcion].filter(Boolean).join(' · ') }} />
     </div>
   )
 }
