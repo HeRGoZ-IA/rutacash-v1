@@ -39,6 +39,7 @@ describe('Fase 1 · Supabase Auth real (ADEX-Staging)', { skip: SKIP }, () => {
     const ssl = { rejectUnauthorized: false };
     apiPool = new pg.Pool({ connectionString: env['ADEX_STAGING_API_URL'], ssl, max: 5 });
     adminPool = new pg.Pool({ connectionString: env['ADEX_STAGING_ADMIN_URL'], ssl, max: 2 });
+    for (const [name, pool] of [['admin', adminPool], ['api', apiPool]] as const) pool.on('error', (e) => console.error(`[pool ${name}]`, e.message));
     await adminPool.query('insert into adex.identities (id, email) values ($1, $2) on conflict do nothing', [userId, email]);
     await adminPool.query(`insert into adex.memberships (id, company_id, identity_id, role, status, display_name, created_at, updated_at)
                            values ($1, $2, $3, 'cobrador', 'activo', 'Staging', now(), now())`, [membership, companyId('c2'), userId]);

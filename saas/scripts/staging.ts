@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from '../src/db/pgTypes.ts';
-import { migrate } from '../src/db/migrate.ts';
+import { migrate, readMigrations } from '../src/db/migrate.ts';
 import { importSnapshot } from '../src/model/adapter.ts';
 import { syntheticDataset } from '../db/seeds/synthetic.ts';
 import { randomSecret } from './local-cluster.ts';
@@ -46,21 +46,42 @@ const ref = need('ADEX_STAGING_PROJECT_REF');
 if (ref === POC_REF) blocked('la referencia es la del proyecto de la POC: no se convierte en staging');
 if (need('SUPABASE_URL') !== `https://${ref}.supabase.co`) blocked('SUPABASE_URL no coincide con la referencia');
 
-// Proyecto: nombre y región DEMOSTRADOS por la Management API (token obligatorio: sin él
-// la identidad del destino solo se declara y no se migra nada).
-const token = need('SUPABASE_ACCESS_TOKEN');
-const res = await fetch(`https://api.supabase.com/v1/projects/${ref}`, { headers: { authorization: `Bearer ${token}` } });
-if (!res.ok) blocked(`Management API respondió ${res.status}`);
-const p = (await res.json()) as { name?: string; region?: string; status?: string };
-if (p.name !== EXPECTED_NAME) blocked(`el proyecto se llama «${p.name}», no ${EXPECTED_NAME}`);
-if (p.region !== REGION) blocked(`región ${p.region}, se exige ${REGION}`);
-if (p.status !== 'ACTIVE_HEALTHY') blocked(`estado del proyecto ${p.status}`);
-// Data API: estado efectivo. Activa o no, nunca puede exponer adex/adex_control/adex_meta.
-const rest = await fetch(`${need('SUPABASE_URL')}/rest/v1/`, { headers: { apikey: need('SUPABASE_PUBLISHABLE_KEY') } });
-const api = await fetch(`https://api.supabase.com/v1/projects/${ref}/postgrest`, { headers: { authorization: `Bearer ${token}` } });
-const exposed = api.ok ? ((await api.json()) as { db_schema?: string }).db_schema ?? '' : `(config ${api.status})`;
-if (/adex(_control|_meta)?/.test(exposed)) blocked('la Data API expone adex, adex_control o adex_meta');
-const dataApi = `Data API ${rest.status === 503 ? 'desactivada' : `responde ${rest.status}`} · esquemas expuestos: ${exposed || 'ninguno'}`;
+// Proyecto: identidad DEMOSTRADA antes de cualquier SQL. Dos vías:
+//   · con token de la Management API (solo lectura): nombre, región y estado;
+//   · sin token (Fase 2: el token temporal de la Fase 1 se retiró): la referencia
+//     documentada de ADEX-Staging, un pooler de sa-east-1 (enruta por referencia y
+//     solo acepta la contraseña de ESE proyecto), Auth del mismo proyecto con solo
+//     usuarios sintéticos, la huella EXACTA de las migraciones ya aplicadas (más
+//     abajo, antes de escribir) y la Data API sin acceso a los esquemas de ADEX.
+const STAGING_REF = 'hyqaufsagtsucztjfjvc';   // ADEX-Staging (docs/SAAS_FASES_0_1_RESULTADOS.md)
+const token = env['SUPABASE_ACCESS_TOKEN'];
+let projectLine: string;
+let dataApi: string;
+if (token) {
+  const res = await fetch(`https://api.supabase.com/v1/projects/${ref}`, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) blocked(`Management API respondió ${res.status}`);
+  const p = (await res.json()) as { name?: string; region?: string; status?: string };
+  if (p.name !== EXPECTED_NAME) blocked(`el proyecto se llama «${p.name}», no ${EXPECTED_NAME}`);
+  if (p.region !== REGION) blocked(`región ${p.region}, se exige ${REGION}`);
+  if (p.status !== 'ACTIVE_HEALTHY') blocked(`estado del proyecto ${p.status}`);
+  // Data API: estado efectivo. Activa o no, nunca puede exponer adex/adex_control/adex_meta.
+  const rest = await fetch(`${need('SUPABASE_URL')}/rest/v1/`, { headers: { apikey: need('SUPABASE_PUBLISHABLE_KEY') } });
+  const api = await fetch(`https://api.supabase.com/v1/projects/${ref}/postgrest`, { headers: { authorization: `Bearer ${token}` } });
+  const exposed = api.ok ? ((await api.json()) as { db_schema?: string }).db_schema ?? '' : `(config ${api.status})`;
+  if (/adex(_control|_meta)?/.test(exposed)) blocked('la Data API expone adex, adex_control o adex_meta');
+  dataApi = `Data API ${rest.status === 503 ? 'desactivada' : `responde ${rest.status}`} · esquemas expuestos: ${exposed || 'ninguno'}`;
+  projectLine = `${EXPECTED_NAME} (${ref}, ${REGION}, ${p.status}, Management API)`;
+} else {
+  if (ref !== STAGING_REF) blocked('sin token de la Management API solo se admite la referencia documentada de ADEX-Staging');
+  if (!need('SUPABASE_POOLER_HOST').includes(REGION)) blocked(`el pooler no es de ${REGION}`);
+  const probes = await Promise.all(['adex', 'adex_control', 'adex_meta'].map((schema) =>
+    fetch(`${need('SUPABASE_URL')}/rest/v1/companies?select=id&limit=1`, { headers: { apikey: need('SUPABASE_PUBLISHABLE_KEY'), 'accept-profile': schema } })
+      .then((r) => [schema, r.status] as const)));
+  const open = probes.filter(([, s]) => s >= 200 && s < 300);
+  if (open.length) blocked(`la Data API responde datos de ${open.map(([s]) => s).join(', ')}`);
+  dataApi = `Data API sin acceso a adex/adex_control/adex_meta (${probes.map(([s, st]) => `${s}:${st}`).join(' ')})`;
+  projectLine = `${ref} (${REGION} por el pooler; sin token de la Management API: identidad por referencia, contraseña del proyecto y huella de migraciones)`;
+}
 const attestation = env['ADEX_STAGING_OWNER_ATTESTATION'];
 if (attestation !== `free:${ref}:${REGION}`) blocked(`falta la declaración del propietario free:${ref}:${REGION} (plan Free sin método de pago)`);
 
@@ -81,7 +102,18 @@ await admin.connect();
 try {
   const tables = await admin.query(`select count(*)::int n from pg_tables where schemaname = 'public'`);
   if (tables.rows[0].n > 0) blocked('el esquema public tiene tablas: el proyecto no está vacío');
-  console.log(`OK: ${EXPECTED_NAME} (${ref}, ${REGION}, ${p.status}), ${list.length} usuario(s) sintético(s), public vacío · ${dataApi}`);
+  if (!token) {
+    // Huella: lo aplicado debe ser EXACTAMENTE un prefijo del repositorio que incluya la
+    // Fase 1 (0001…0006, mismos nombres y SHA-256). Otro proyecto no la tiene.
+    const has = await admin.query(`select to_regclass('adex_meta.schema_migrations') is not null ok`);
+    if (!has.rows[0].ok) blocked('sin token, el destino debe tener ya el historial de migraciones de ADEX-Staging');
+    const applied = (await admin.query('select version, name, checksum from adex_meta.schema_migrations order by version')).rows;
+    const repo = readMigrations();
+    const prefix = applied.length >= 6 && applied.every((a, i) => repo[i] && repo[i]!.version === a.version && repo[i]!.name === a.name && repo[i]!.checksum === a.checksum);
+    if (!prefix) blocked('la huella de migraciones aplicadas no coincide con el repositorio');
+    projectLine += ` · huella ${applied.map((a) => a.version).join(',')} verificada`;
+  }
+  console.log(`OK: ${projectLine}, ${list.length} usuario(s) sintético(s), public vacío · ${dataApi}`);
   if (mode === '--check') process.exit(0);
 
   const passwords = { api: randomSecret(), control: randomSecret() };
@@ -113,7 +145,8 @@ try {
     }
     const code = await new Promise<number>((resolve) => {
       const child = spawn(process.execPath, ['--import', './scripts/register-alias.mjs', '--test', '--test-reporter=spec', '--test-concurrency=1',
-        path.join('test', 'auth-real', 'staging-auth.test.ts'), path.join('test', 'auth-real', 'staging-rls.test.ts')], {
+        path.join('test', 'auth-real', 'staging-auth.test.ts'), path.join('test', 'auth-real', 'staging-rls.test.ts'),
+        path.join('test', 'auth-real', 'staging-phase2.test.ts')], {
         cwd: root, stdio: 'inherit',
         env: { ...process.env, ...env, ADEX_STAGING_API_URL: apiUrl,
           ADEX_STAGING_ADMIN_URL: adminUrl },

@@ -1,8 +1,8 @@
-# ADEX SaaS · backend multiempresa (Fases 0 y 1)
+# ADEX SaaS · backend multiempresa (Fases 0, 1 y 2)
 
 Paquete independiente de CLEAN: tiene su propio `package.json`, no lo importa `src/`, no entra en el `tsconfig.json` raíz ni en el bundle de Vite. Solo **lee** reglas de CLEAN (`src/lib`, `src/models`) para reutilizarlas como contrato (DS-01).
 
-Resultados y decisiones: [`docs/SAAS_FASES_0_1_RESULTADOS.md`](../docs/SAAS_FASES_0_1_RESULTADOS.md).
+Resultados y decisiones: [`docs/SAAS_FASES_0_1_RESULTADOS.md`](../docs/SAAS_FASES_0_1_RESULTADOS.md) · [`docs/SAAS_FASE_2_RESULTADOS.md`](../docs/SAAS_FASE_2_RESULTADOS.md).
 
 ## Requisitos
 
@@ -37,15 +37,16 @@ El clúster local imita los roles de Supabase (`postgres` sin superusuario, con 
 | `src/auth/`, `src/authz/` | Fase 1: verificación de tokens (ES256/JWKS), proveedor de identidad, contexto activo y reglas de CLEAN |
 | `src/identity/`, `src/control/`, `src/http/` | Fase 1: membresías y sesiones, plano Owner, API de empresa y API Owner (servidores separados) |
 | `src/client/` | Fase 1: cliente de modo servidor (solo tokens; IndexedDB `adex-server-mode`; selector) |
-| `test/integration/` | Fase 1: identidad, REVOKE-004, plano Owner, cliente sin contraseñas |
-| `test/auth-real/`, `scripts/staging.ts` | Supabase Auth real y RLS gestionada en ADEX-Staging: 11/11 PASS (2026-10-14) |
+| `src/structure/` | Fase 2: comandos de empresa, Oficinas, rutas, categorías, clientes (DS-10/DS-11) y responsable de capital (`capitalGuard.ts`) |
+| `test/integration/` | Fase 1: identidad, REVOKE-004, plano Owner, cliente sin contraseñas · Fase 2: estructura, clientes, DS-11, responsable de capital, matriz de permisos contra el servidor |
+| `test/auth-real/`, `scripts/staging.ts` | Supabase Auth real, RLS gestionada y Fase 2 en ADEX-Staging: 19/19 PASS en tres ejecuciones consecutivas (2026-10-14) |
 
 ## Roles de base de datos
 
 | Rol | Uso | Atributos |
 |---|---|---|
 | `adex_owner` | Dueño de los esquemas; sin login | Sin superusuario ni BYPASSRLS |
-| `adex_api` | API de empresa | Login, `NOINHERIT`, sin BYPASSRLS ni TRUNCATE; DELETE solo en la asignación de rutas; escrituras según `src/db/privileges.ts` |
+| `adex_api` | API de empresa | Login, `NOINHERIT`, sin BYPASSRLS ni TRUNCATE; DELETE solo en asignaciones y catálogo sin historia (DS-11); escrituras según `src/db/privileges.ts` |
 | `adex_control` | API del plano Owner | Login, `NOINHERIT`, sin ningún privilegio de tabla sobre `adex` |
 
 Las contraseñas de los roles se generan en cada ejecución y no se guardan.

@@ -32,14 +32,19 @@ describe('Fase 1 · RLS y aislamiento en PostgreSQL gestionado (ADEX-Staging)', 
     const ssl = { rejectUnauthorized: false };
     admin = new pg.Pool({ connectionString: env['ADEX_STAGING_ADMIN_URL'], ssl, max: 2 });
     api = new pg.Pool({ connectionString: env['ADEX_STAGING_API_URL'], ssl, max: 3 });
+    // Una conexión inactiva que el pooler o la red cortan emite 'error' en el pool: sin
+    // escucha, el proceso de la prueba muere sin rastro. Se registra; las consultas
+    // afectadas siguen fallando por su cuenta.
+    for (const [name, pool] of [['admin', admin], ['api', api]] as const) pool.on('error', (e) => console.error(`[pool ${name}]`, e.message));
   });
   after(async () => { await api?.end(); await admin?.end(); });
 
-  test('STG-RLS-001 · las seis migraciones versionadas, con la huella del repositorio', async () => {
+  test('STG-RLS-001 · todas las migraciones versionadas (0001…0007 desde la Fase 2), con la huella del repositorio', async () => {
     const applied = (await admin.query('select version, name, checksum from adex_meta.schema_migrations order by version')).rows;
     assert.deepEqual(applied.map((r) => ({ version: r.version, name: r.name, checksum: r.checksum })),
       readMigrations().map((m) => ({ version: m.version, name: m.name, checksum: m.checksum })));
-    assert.equal(applied.length, 6);
+    assert.equal(applied.length, readMigrations().length);
+    assert.ok(applied.length >= 7);
   });
 
   test('STG-RLS-002 · roles sin superusuario/BYPASSRLS/herencia; la Data API no puede asumirlos', async () => {
