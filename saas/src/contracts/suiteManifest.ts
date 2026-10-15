@@ -5,8 +5,8 @@
 //
 // Estado honesto por suite:
 //   'local'  → hoy se ejecuta contra el motor local (Dexie). Es la línea base.
-//   'server' → se ejecuta contra el servidor a través del adaptador. Ninguna lo está
-//              todavía: las Fases 0 y 1 no implementan comandos financieros.
+//   'server' → además de su línea base local, su contrato se verifica contra el
+//              servidor real (API + PostgreSQL) en `serverEvidence`.
 // `scripts/run-contract-bench.ts` ejecuta las 26 y compara los casos con este
 // manifiesto: una suite que pierda casos o falle rompe el banco.
 // ============================================================
@@ -22,17 +22,20 @@ export interface SuiteContract {
   serverPhase: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   commands: string;
   target: Target;
+  /** Prueba del paquete SaaS que verifica el contrato contra el servidor (solo `server`). */
+  serverEvidence?: string;
   note?: string;
 }
 
 export const SUITES: readonly SuiteContract[] = [
-  { suite: 'permissions', script: 'test:permissions', cases: 559, serverPhase: 2, commands: 'autorización de todos los comandos', target: 'local',
-    note: 'Desde la Fase 1 el servidor evalúa `can()` de src/lib/permissions.ts sin copiarlo (test/integration/authz-parity)' },
+  { suite: 'permissions', script: 'test:permissions', cases: 559, serverPhase: 2, commands: 'autorización de todos los comandos', target: 'server',
+    serverEvidence: 'test/integration/authz-matrix.test.ts',
+    note: 'Puerta de la Fase 2: cada comando de estructura y catálogo × 6 roles × ruta dentro/fuera de alcance, respuesta HTTP real = `can()` de src/lib/permissions.ts (importado, sin copiar). La matriz pura sigue en la suite local' },
   { suite: 'financial', script: 'test:financial', cases: 180, serverPhase: 4, commands: 'pagos y parcelas', target: 'local' },
   { suite: 'bootstrap', script: 'test:bootstrap', cases: 159, serverPhase: 2, commands: 'alta de empresa y estructura inicial', target: 'local',
-    note: 'No figura en la tabla del plan; se asigna a la Fase 2 (estructura). El alta de empresa por el Owner existe desde la Fase 1' },
+    note: 'Fuera de la puerta del plan. Equivalentes del servidor: alta de empresa y primer SuperAdmin por el Owner (OWN-004), categorías predeterminadas (CAT-001), estructura inicial (STR-*). La instalación local con Owner y contraseñas propias no existe en el servidor (DS-03)' },
   { suite: 'platform', script: 'test:platform', cases: 64, serverPhase: 2, commands: 'plano de control Owner', target: 'local',
-    note: 'Depende de DS-17 (plano integrado o separado)' },
+    note: 'Fuera de la puerta del plan. Plano Owner separado (DS-17) desde la Fase 1: OWN-001…008; `billableRouteCount` sobre las rutas de la API (STR-023)' },
   { suite: 'settlements', script: 'test:settlements', cases: 40, serverPhase: 6, commands: 'liquidación y cierre semanal', target: 'local' },
   { suite: 'migrations', script: 'test:migrations', cases: 62, serverPhase: 7, commands: 'exportación y diagnóstico de bases Dexie', target: 'local' },
   { suite: 'workercash', script: 'test:workercash', cases: 123, serverPhase: 6, commands: 'cuadre por trabajador', target: 'local' },

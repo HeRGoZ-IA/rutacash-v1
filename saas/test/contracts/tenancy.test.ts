@@ -140,10 +140,14 @@ describe('Fase 0 · aislamiento por empresa y privilegios', () => {
     });
   });
 
-  test('TEN-008 · la API no escribe datos operativos (Fase 0 solo lectura)', async () => {
+  test('TEN-008 · la API no escribe datos financieros ni catálogo de otra empresa (Fase 2: solo estructura propia)', async () => {
     await asApi(db.api, ctx.c1sa, async (q) => {
       for (const sql of [
-        `insert into adex.expense_categories (id, company_id, name, active) values ('x', '${companyId('c1')}', 'x', true)`,
+        `insert into adex.expense_categories (id, company_id, name, active) values ('x', '${companyId('c2')}', 'x', true)`,
+        `insert into adex.capital_movements (id, company_id, route_id, kind, amount_minor, movement_date, registered_by_membership_id, created_at)
+         values ('x', '${companyId('c1')}', '${routeId('c1', 1)}', 'ingresoCapital', 100, '2026-10-01', '${ctx.c1sa.membershipId}', now())`,
+        `insert into adex.capital_ledger (id, company_id, kind, amount_minor, entry_date, created_at, actor_membership_id, actor_role, status, sync_status)
+         values ('x', '${companyId('c1')}', 'COMPANY_DEPOSIT', 100, '2026-10-01', now(), '${ctx.c1sa.membershipId}', 'superadmin', 'aplicado', 'synced')`,
         `update adex.sales set balance_minor = 0`,
         `delete from adex.payments`,
       ]) {

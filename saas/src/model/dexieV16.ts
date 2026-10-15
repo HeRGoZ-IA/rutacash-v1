@@ -139,7 +139,12 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       f('direccionSecundaria', 'address_secondary'), f('negocio', 'business'), f('fotoDocumentoUrl', 'document_photo_url'),
       f('fotoNegocioUrl', 'business_photo_url'), f('status', 'status'), f('notas', 'notes'), created, updated,
     ],
-    omitted: [], added: [],
+    omitted: [],
+    added: [
+      { column: 'document_type', reason: 'DS-10 (Fase 2): tipo de documento del catálogo del país (adex.document_types). NULL = cliente importado de CLEAN sin tipo declarado' },
+      { column: 'document_normalized', reason: 'DS-10: número normalizado por PostgreSQL (disparador); clave de unicidad (empresa, tipo, número). El documento original sigue en `document`' },
+      { column: 'document_legacy_duplicate', reason: 'DS-10: duplicado histórico marcado en la importación (Fase 7); se conserva sin fusionar y queda fuera de la unicidad' },
+    ],
   },
   {
     dexieTable: 'sales', entity: 'Sale', source: 'models', sqlTable: 'adex.sales',

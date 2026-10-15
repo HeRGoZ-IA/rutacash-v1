@@ -117,12 +117,19 @@ describe('Fase 1 · identidad, contexto y membresías por la API', () => {
       body: { email: 'x@example.test', role: 'cobrador', displayName: 'X', companyId: companyId('c2') } })).status, 400, 'campo desconocido');
   });
 
-  test('IDN-032 · rutas de un Administrador: Fase 2 (responsable de capital); nunca en silencio', async () => {
+  // Fase 1 lo rechazaba con REQUIRES_PHASE_2_CAPITAL_GUARD; la Fase 2 lo implementa
+  // con el responsable de capital en la misma transacción (capital-guard.test.ts).
+  test('IDN-032 · rutas de un Administrador: el responsable de capital se protege; nunca se elige en silencio', async () => {
     const bruno = await issuer.issue('bruno');
-    assert.deepEqual((await api.call('PUT', `/v1/members/${M.anaAdmin}/routes`, { token: bruno, membership: M.brunoSa, body: { routeIds: [routeId('c1', 1)] } })).body,
-      { error: 'REQUIRES_PHASE_2_CAPITAL_GUARD' });
-    assert.equal((await api.call('POST', '/v1/members', { token: bruno, membership: M.brunoSa,
-      body: { email: 'adm@example.test', role: 'admin', displayName: 'A', routeIds: [routeId('c1', 1)] } })).status, 409);
+    const created = await api.call('POST', '/v1/members', { token: bruno, membership: M.brunoSa,
+      body: { email: 'adm@example.test', role: 'admin', displayName: 'A', routeIds: [routeId('c1', 1)] } });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.deepEqual(created.body['controllerEvents'], [], 'r1 ya tiene responsable válido (ana)');
+    const r = await api.call('PUT', `/v1/members/${M.anaAdmin}/routes`, { token: bruno, membership: M.brunoSa, body: { routeIds: [routeId('c1', 2)] } });
+    assert.equal(r.status, 409);
+    assert.equal(r.body['error'], 'CAPITAL_CONTROLLER_REQUIRED');
+    assert.deepEqual((r.body['details'] as { candidates: string[] }).candidates, [created.body['membershipId']]);
+    assert.equal(await count(db.admin, 'select 1 from adex.membership_routes where membership_id = $1', [M.anaAdmin]), 2, 'no se guardó nada');
   });
 
   test('IDN-033 · membresía desactivada: el MISMO token deja de operar con ella; las demás siguen', async () => {

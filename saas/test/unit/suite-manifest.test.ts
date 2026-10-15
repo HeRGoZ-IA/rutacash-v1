@@ -22,9 +22,17 @@ describe('banco de contratos · manifiesto', () => {
     assert.deepEqual([...SUITES.map((s) => s.script)].sort(), [...chained].sort());
   });
 
-  test('BENCH-003 · ninguna suite está declarada contra el servidor todavía (sin comandos financieros en las Fases 0–1)', () => {
-    assert.deepEqual(SUITES.filter((s) => s.target === 'server'), []);
-    for (const s of SUITES) assert.ok(s.serverPhase >= 2, `${s.suite} needs server commands from phase ≥ 2`);
+  test('BENCH-003 · Fase 2: solo `permissions` se declara contra el servidor, con su prueba; el resto sigue local y justificado', () => {
+    assert.deepEqual(SUITES.filter((s) => s.target === 'server').map((s) => s.suite), ['permissions']);
+    for (const s of SUITES) {
+      assert.ok(s.serverPhase >= 2, `${s.suite} needs server commands from phase ≥ 2`);
+      if (s.target === 'server') {
+        assert.ok(s.serverPhase <= 2 && s.serverEvidence, s.suite);
+        assert.ok(readFileSync(path.join(repo, 'saas', s.serverEvidence!), 'utf8').includes('can('), `${s.suite}: evidence compares with can()`);
+      } else if (s.serverPhase <= 2) {
+        assert.ok((s.note ?? '').length > 80, `${s.suite}: a phase-2 suite still local must justify it`);
+      }
+    }
   });
 
   test('BENCH-004 · el analizador reconoce los cuatro formatos de total y los fallos', () => {
