@@ -165,7 +165,7 @@ export async function getCapitalOverview(
   if (actor.rol === 'superadmin') return { ...s, issues: verifyCapitalInvariants(rows, adminIds) }
   const mias = new Set(rows.routes.filter(r => isRouteCapitalController(actor, r)).map(r => r.id))
   return {
-    company: { depositos: 0, retirosEmpresa: 0, asignadoAAdmins: 0, disponible: 0, historicoPreV16: 0, total: 0, sinResponsable: 0, gastos: 0, gastosAdministradores: 0 },
+    company: { depositos: 0, retirosEmpresa: 0, asignadoAAdmins: 0, disponible: 0, historicoPreV16: 0, total: 0, sinResponsable: 0, gastos: 0, gastosAdministradores: 0, aportesSocios: 0 },
     admins: s.admins.filter(a => a.adminId === actor.id),
     routes: s.routes.filter(r => mias.has(r.routeId)),
     issues: [],
@@ -323,6 +323,7 @@ async function registrarLedger(
     COMPANY_DEPOSIT: 'COMPANY_CAPITAL_DEPOSIT', COMPANY_WITHDRAWAL: 'COMPANY_CAPITAL_WITHDRAWAL',
     ADMIN_ALLOCATION: 'ADMIN_CAPITAL_ALLOCATED', ADMIN_RETURN: 'ADMIN_CAPITAL_RETURNED',
     ROUTE_CONTROL_TRANSFER: 'ROUTE_CAPITAL_CONTROLLER_CHANGED',
+    PARTNER_CONTRIBUTION: 'PARTNER_CONTRIBUTION_REGISTERED',
   } as const
   await auditar({
     tenantId, userId: actor.id, userRole: actor.rol, action: accion[tipo], entityType: 'capitalLedger', entityId: entry.id,

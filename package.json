@@ -35,7 +35,8 @@
     "test:movementhistory": "npx --yes esbuild tests/movementhistory.test.ts --bundle --format=esm --platform=node --alias:@=./src --external:fake-indexeddb --outfile=tests/_out.movementhistory.mjs && node tests/_out.movementhistory.mjs",
     "test:disbursement": "npx --yes esbuild tests/disbursement.test.ts --bundle --format=esm --platform=node --alias:@=./src --external:fake-indexeddb --outfile=tests/_out.disbursement.mjs && node tests/_out.disbursement.mjs",
     "test:capitalcustody": "npx --yes esbuild tests/capitalcustody.test.ts --bundle --format=esm --platform=node --alias:@=./src --external:fake-indexeddb --outfile=tests/_out.capitalcustody.mjs && node tests/_out.capitalcustody.mjs",
-    "test:periodauthority": "npx --yes esbuild tests/periodauthority.test.ts --bundle --format=esm --platform=node --alias:@=./src --external:fake-indexeddb --outfile=tests/_out.periodauthority.mjs && node tests/_out.periodauthority.mjs"
+    "test:periodauthority": "npx --yes esbuild tests/periodauthority.test.ts --bundle --format=esm --platform=node --alias:@=./src --external:fake-indexeddb --outfile=tests/_out.periodauthority.mjs && node tests/_out.periodauthority.mjs",
+    "test:centralcapital": "npx --yes esbuild tests/centralcapital.test.ts --bundle --format=esm --platform=node --alias:@=./src --external:fake-indexeddb --outfile=tests/_out.centralcapital.mjs && node tests/_out.centralcapital.mjs"
   },
   "keywords": [],
   "author": "",

@@ -96,6 +96,7 @@ const LEDGER_TIPO: Record<CapitalLedgerEntry['tipo'], string> = {
   ADMIN_ALLOCATION: 'Asignación de capital a Administrador',
   ADMIN_RETURN: 'Devolución de capital al SuperAdmin',
   ROUTE_CONTROL_TRANSFER: 'Cambio de responsable de capital',
+  PARTNER_CONTRIBUTION: 'Aporte de socio a la bolsa del Administrador',
 }
 
 /** Proyecta TODOS los registros (ya acotados por permisos) a entradas del historial. */
@@ -108,6 +109,7 @@ export function buildMovementHistory(s: HistorySources): HistoryEntry[] {
   for (const e of s.ledger) {
     const admins = [e.fromAdminId, e.toAdminId].filter(Boolean) as string[]
     const origen: HistoryAccount = e.tipo === 'COMPANY_DEPOSIT' ? { kind: 'externo' }
+      : e.tipo === 'PARTNER_CONTRIBUTION' ? { kind: 'socio', id: e.partnerId }
       : e.tipo === 'COMPANY_WITHDRAWAL' || e.tipo === 'ADMIN_ALLOCATION' ? { kind: 'bolsa-empresa' }
         : e.fromAdminId ? { kind: 'bolsa-admin', id: e.fromAdminId } : { kind: 'sin-bolsa' }
     const destino: HistoryAccount = e.tipo === 'COMPANY_WITHDRAWAL' ? { kind: 'externo' }

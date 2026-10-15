@@ -37,11 +37,18 @@
 //                       − gastos netos de la bolsa de la empresa (D10)
 //
 // IDENTIDAD DE CONSERVACIÓN (se verifica en `verifyCapitalInvariants`):
-//   depósitos − retirosEmpresa + capitalHistóricoPreV16
+//   depósitos − retirosEmpresa + capitalHistóricoPreV16 + aportesSocios
 //     = disponibleEmpresa + Σ asignado(a) + Σ sinResponsable(r)
 //       + gastosEmpresa + Σ gastos(a)
 // Ninguna operación de la cadena crea ni destruye dinero: solo lo cambia de bolsa.
 // Los gastos son el único CONSUMO: salen de una bolsa y no entran en otra.
+//
+// CAPITAL CENTRALIZADO (C1): un aporte de socio para operar una ruta entra a la
+// bolsa de su Administrador responsable (`PARTNER_CONTRIBUTION`, suma algebraica:
+// su anulación es un asiento negado). Es dinero EXTERNO que entra a la cadena,
+// igual que un depósito de la empresa. Las demás operaciones centralizadas usan
+// capital (`CapitalMovement`) y retiros (`Withdrawal`) con `adminId`: estas
+// fórmulas no cambian.
 // ============================================================
 import type {
   CapitalLedgerEntry, CapitalMovement, Expense, Route, RouteCapitalControllerEvent, Transfer, User, Withdrawal,
@@ -107,6 +114,8 @@ export interface AdminCapital {
   adminId: string
   /** Neto entregado por el SuperAdmin (asignaciones − devoluciones). */
   asignadoPorEmpresa: number
+  /** Aportes NETOS de socios recibidos en esta bolsa (C1). */
+  aportesSocios: number
   /** Capital bajo su responsabilidad = disponible + enRutas. */
   asignado: number
   enRutas: number
@@ -121,10 +130,11 @@ export function adminCapital(adminId: string, rows: CapitalRows): AdminCapital {
   const l = rows.ledger
   const asignaciones = sum(l.filter(e => e.tipo === 'ADMIN_ALLOCATION' && e.toAdminId === adminId), e => e.amount)
   const devoluciones = sum(l.filter(e => e.tipo === 'ADMIN_RETURN' && e.fromAdminId === adminId), e => e.amount)
+  const aportesSocios = sum(l.filter(e => e.tipo === 'PARTNER_CONTRIBUTION' && e.toAdminId === adminId), e => e.amount)
   const colocado = sum(rows.capitalMovements.filter(m => m.adminId === adminId), m => m.valor)
   const recibido = sum(rows.withdrawals.filter(w => w.adminId === adminId), w => w.valor)
   const gastos = adminPoolExpenses(adminId, rows.expenses ?? [])
-  const disponible = asignaciones - devoluciones - colocado + recibido - gastos
+  const disponible = asignaciones - devoluciones + aportesSocios - colocado + recibido - gastos
   const rutasIds = new Set<string>([
     ...rows.routes.filter(r => r.capitalControllerAdminId === adminId).map(r => r.id),
   ])
@@ -133,7 +143,7 @@ export function adminCapital(adminId: string, rows: CapitalRows): AdminCapital {
   for (const r of rows.routes) if (!rutasIds.has(r.id) && adminRoutePlacement(adminId, r.id, rows) !== 0) rutasIds.add(r.id)
   const rutas = [...rutasIds].map(routeId => ({ routeId, colocado: adminRoutePlacement(adminId, routeId, rows) }))
   const enRutas = sum(rutas, r => r.colocado)
-  return { adminId, asignadoPorEmpresa: asignaciones - devoluciones, asignado: disponible + enRutas, enRutas, disponible, gastos, rutas }
+  return { adminId, asignadoPorEmpresa: asignaciones - devoluciones, aportesSocios, asignado: disponible + enRutas, enRutas, disponible, gastos, rutas }
 }
 
 export interface CompanyCapital {
@@ -150,6 +160,8 @@ export interface CompanyCapital {
   gastos: number
   /** Gastos NETOS de todas las bolsas de Administradores. */
   gastosAdministradores: number
+  /** Aportes NETOS de socios a bolsas de Administradores (C1): dinero externo que entra. */
+  aportesSocios: number
 }
 
 export interface CapitalStructure {
@@ -175,6 +187,7 @@ export function computeCapitalStructure(rows: CapitalRows, adminIds: string[]): 
   // Toda bolsa con rastro cuenta, aunque el Admin ya no esté activo (nada se esconde).
   const conRastro = new Set<string>(adminIds)
   for (const e of l) { if (e.fromAdminId) conRastro.add(e.fromAdminId); if (e.toAdminId) conRastro.add(e.toAdminId) }
+  const aportesSocios = sum(l.filter(e => e.tipo === 'PARTNER_CONTRIBUTION'), e => e.amount)
   for (const m of rows.capitalMovements) if (m.adminId) conRastro.add(m.adminId)
   for (const w of rows.withdrawals) if (w.adminId) conRastro.add(w.adminId)
   for (const r of rows.routes) if (r.capitalControllerAdminId) conRastro.add(r.capitalControllerAdminId)
@@ -191,7 +204,7 @@ export function computeCapitalStructure(rows: CapitalRows, adminIds: string[]): 
     company: {
       depositos, retirosEmpresa, asignadoAAdmins: asignaciones - devoluciones, disponible, historicoPreV16,
       sinResponsable, total: disponible + sum(admins, a => a.asignado) + sinResponsable,
-      gastos: gastosEmpresa, gastosAdministradores: sum(admins, a => a.gastos),
+      gastos: gastosEmpresa, gastosAdministradores: sum(admins, a => a.gastos), aportesSocios,
     },
     admins, routes,
   }
@@ -224,7 +237,7 @@ export function verifyCapitalInvariants(rows: CapitalRows, adminIds: string[]): 
     if (controller && r.sinResponsable !== 0) issues.push(`La ruta ${r.nombre} tiene responsable pero ${r.sinResponsable} de capital sin reconocer.`)
   }
   // Lo que entró = lo que la empresa controla + lo que se CONSUMIÓ en gastos imputados.
-  const esperado = s.company.depositos - s.company.retirosEmpresa + s.company.historicoPreV16
+  const esperado = s.company.depositos - s.company.retirosEmpresa + s.company.historicoPreV16 + s.company.aportesSocios
   const consumido = s.company.gastos + s.company.gastosAdministradores
   if (esperado !== s.company.total + consumido) {
     issues.push(`Conservación rota: entradas ${esperado} ≠ capital controlado ${s.company.total} + gastos ${consumido}.`)

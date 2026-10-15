@@ -29,6 +29,13 @@
 // la ruta desde el último traspaso: anular un capital devuelve el dinero a su bolsa;
 // anular un retiro lo saca de su bolsa (no puede superar su disponible). Una ruta
 // sin responsable válido no admite anulaciones (fail closed).
+//
+// CAPITAL CENTRALIZADO (C1): un movimiento que es PATA de una operación
+// centralizada (`centralLink`) no se anula por separado (rompería el par): se anula
+// desde su operación. Con el modelo activo, tampoco se admite una anulación que
+// DEVUELVA dinero a la caja de la ruta (retiro histórico, transferencia que salió de
+// una ruta): haría crecer el saldo heredado. Anular un capital histórico sí: solo lo
+// consume.
 // ============================================================
 import { db, type RutaCashDB } from '@/lib/db'
 import { generateId } from '@/lib/utils'
@@ -42,6 +49,7 @@ import { logAction } from '@/services/auditService'
 import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
 import { reconciliationTables } from '@/services/cashCustodyService'
 import { closedPeriodBlockedReason } from '@/services/periodGuard'
+import { CENTRAL_CAPITAL_MESSAGES, isCentralCapitalActive } from '@/lib/centralCapital'
 import type {
   CapitalMovement, CashCustodyMovement, MovementReversalFields, PartnerCashMovement, Route, Transfer, User, Withdrawal,
 } from '@/models/types'
@@ -146,6 +154,7 @@ export async function reverseCapitalMovement(
   await database.transaction('rw', reversalTables(database), async () => {
     const m = await database.capitalMovements.get(movementId)
     assertVigente(m, tenantId, x => (x as CapitalMovement).tenantId)
+    if (m!.centralLink) throw new MovementReversalError(CENTRAL_CAPITAL_MESSAGES.operacionEmparejada)
     await exigirPeriodoAbiertoHoy([m!.routeId], database)
     const responsable = await responsableParaCorregir(actor, m!.routeId, tenantId, database)
     const ahora = nowISO()
@@ -182,6 +191,8 @@ export async function reverseWithdrawal(
   await database.transaction('rw', reversalTables(database), async () => {
     const w = await database.withdrawals.get(movementId)
     assertVigente(w, tenantId, x => (x as Withdrawal).tenantId)
+    if (w!.centralLink) throw new MovementReversalError(CENTRAL_CAPITAL_MESSAGES.operacionEmparejada)
+    if (isCentralCapitalActive(await database.tenants.get(tenantId))) throw new MovementReversalError(CENTRAL_CAPITAL_MESSAGES.anulacionQueRellenaCaja)
     await exigirPeriodoAbiertoHoy([w!.routeId], database)
     const responsable = await responsableParaCorregir(actor, w!.routeId, tenantId, database)
     const ahora = nowISO()
@@ -231,6 +242,10 @@ export async function reverseTransfer(
   await database.transaction('rw', [...reversalTables(database), database.partnerCashMovements], async () => {
     const t = await database.transfers.get(movementId)
     assertVigente(t, tenantId, x => (x as Transfer).tenantId)
+    // C1: anular una transferencia que SALIÓ de una ruta devolvería dinero a su caja.
+    if (t!.routeOrigenId && isCentralCapitalActive(await database.tenants.get(tenantId))) {
+      throw new MovementReversalError(CENTRAL_CAPITAL_MESSAGES.anulacionQueRellenaCaja)
+    }
     await exigirPeriodoAbiertoHoy([t!.routeOrigenId, t!.routeDestinoId], database)
     // v16: corrige el responsable de CADA ruta implicada (o el SuperAdmin).
     const responsables: User[] = []

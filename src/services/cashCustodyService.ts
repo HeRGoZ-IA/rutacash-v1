@@ -40,6 +40,12 @@
 //     Base que YA está en manos de alguien → 'settle': responsable, SuperAdmin y
 //     el Supervisor de la ruta (en campo). Otro Admin asignado: no.
 //   · Ruta sin responsable válido: nada procede (fail closed).
+//
+// CAPITAL CENTRALIZADO (C1): con el modelo activo, devolver a la CAJA de la ruta se
+// rechaza (haría crecer "Sin asignar"); la vía es `returnCapitalFromWorker`, que
+// devuelve a la bolsa del responsable. ENTREGAR desde la caja sigue permitido: solo
+// puede consumir el saldo heredado (tope: disponible). El traspaso entre
+// trabajadores no toca la caja y no cambia.
 // ============================================================
 import { db, type RutaCashDB } from '@/lib/db'
 import { generateId } from '@/lib/utils'
@@ -53,6 +59,7 @@ import { assertRouteOperationalContext } from '@/services/officeService'
 import { personalCashPosition } from '@/services/cashSettlementService'
 import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
 import { operationIdOf } from '@/services/capitalControlService'
+import { CENTRAL_CAPITAL_MESSAGES, isCentralCapitalActive } from '@/lib/centralCapital'
 import type { CashCustodyMovement, CashCustodyType, Route, User } from '@/models/types'
 
 export class CashCustodyError extends Error {
@@ -217,6 +224,7 @@ export async function returnBaseFromWorker(
   const persona = await database.users.get(fromUserId)
   if (!persona || persona.tenantId !== tenantId) throw new CashCustodyError('La persona indicada no existe en esta empresa.')
   return registrar('BASE_RETURN', { ...params, fromUserId }, database, async (hasta) => {
+    if (isCentralCapitalActive(await database.tenants.get(tenantId))) throw new CashCustodyError(CENTRAL_CAPITAL_MESSAGES.devolucionACaja)
     const pos = await personalCashPosition({ tenantId, routeId, userId: fromUserId, hasta }, database)
     if (Number(params.amount) > pos.esperado) {
       throw new CashCustodyError(`La devolución supera el efectivo a cargo de ${persona.nombre} (${Math.max(0, pos.esperado)}).`)

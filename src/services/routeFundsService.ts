@@ -38,6 +38,12 @@
 //     implicada. Ruta → Ruta solo entre rutas del MISMO responsable (si no, el
 //     capital cambiaría de bolsa sin pasar por el SuperAdmin).
 //   · Ruta sin responsable válido: todo falla cerrado.
+//
+// CAPITAL CENTRALIZADO (C1, `lib/centralCapital`): con el modelo activo en la
+// empresa, la caja de la ruta no RECIBE dinero nuevo. Se rechazan aquí el capital
+// a la caja, el aporte Socio → Ruta y el traslado Ruta → Ruta (sus vías son
+// `centralCapitalService`). Siguen permitidos el retiro a la bolsa y la salida a un
+// socio: solo pueden vaciar el saldo heredado (tope: disponible de la caja).
 // ============================================================
 import { db, type RutaCashDB } from '@/lib/db'
 import { generateId } from '@/lib/utils'
@@ -51,6 +57,7 @@ import { assertRouteOperationalContext } from '@/services/officeService'
 import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
 import { custodianBlockedReason, reconciliationTables } from '@/services/cashCustodyService'
 import { closedPeriodBlockedReason } from '@/services/periodGuard'
+import { CENTRAL_CAPITAL_MESSAGES, isCentralCapitalActive } from '@/lib/centralCapital'
 import type {
   CapitalMovement, CashCustodyMovement, PartnerCashMovement, Route, Transfer, TransferEntityType, User, Withdrawal,
 } from '@/models/types'
@@ -152,6 +159,7 @@ export async function registerCapital(
       reintento = true
       return
     }
+    if (isCentralCapitalActive(await database.tenants.get(tenantId))) throw new RouteFundsError(CENTRAL_CAPITAL_MESSAGES.noCajaDeRuta)
     // Responsable y bolsa RELEÍDOS dentro de la transacción: dos colocaciones
     // simultáneas no gastan el mismo disponible.
     await exigirResponsable(actor, routeId, tenantId, database)
@@ -278,6 +286,10 @@ export async function registerTransfer(
       custody = (await database.cashCustodyMovements.where('relatedTransferId').equals(previo.id).toArray()).find(c => c.tipo === 'BASE_ASSIGNMENT')
       reintento = true
       return
+    }
+    if (isCentralCapitalActive(await database.tenants.get(tenantId))) {
+      if (kind === 'aporte-socio') throw new RouteFundsError(CENTRAL_CAPITAL_MESSAGES.aporteSocioARuta)
+      if (kind === 'traslado-interno') throw new RouteFundsError(CENTRAL_CAPITAL_MESSAGES.trasladoEntreRutas)
     }
     for (const routeId of rutasImplicadas) await exigirResponsable(actor, routeId, tenantId, database)
     for (const routeId of rutasImplicadas) await exigirPeriodoAbierto(routeId, fecha, database)

@@ -46,8 +46,14 @@
 //     por esta vía (D9).
 //   · Corrección (D12, `expense.correct`): anulación total o reintegro parcial, como
 //     asientos negados ENLAZADOS al original. Nunca se edita ni borra un gasto.
+//
+// CAPITAL CENTRALIZADO (C1): con el modelo activo, el gasto de RUTA ya no consume la
+// caja de la ruta: lo paga la bolsa del responsable (capital enlazado `GASTO_RUTA`,
+// tope = disponible de la bolsa). El gasto de TRABAJADOR y el de empresa no cambian.
 // ============================================================
 import { db, type RutaCashDB } from '@/lib/db'
+import { centralIds, isCentralCapitalActive } from '@/lib/centralCapital'
+import { CentralCapitalError, centralLedgerTables, debitControllerPool } from '@/services/centralCapitalLedger'
 import { nowISO, today } from '@/lib/formatters'
 import { generateId } from '@/lib/utils'
 import { can, canOperateRouteCash, filterByAccessibleRoute } from '@/lib/permissions'
@@ -266,7 +272,7 @@ export async function createExpense(params: CreateExpenseParams, database: RutaC
   // Empresa: las tablas de CAPITAL entran en el bloqueo (el gasto compite por el
   // disponible de la bolsa con colocaciones, devoluciones y otros gastos).
   // Con ruta, los cierres semanales entran en el bloqueo (D7).
-  const tablas = scope === 'empresa' ? tablasDeBolsa(database) : [...reconciliationTables(database), database.weeklySettlements]
+  const tablas = scope === 'empresa' ? tablasDeBolsa(database) : [...new Set([...reconciliationTables(database), database.weeklySettlements, ...centralLedgerTables(database)])]
   await database.transaction('rw', tablas, async () => {
     const previo = await database.expenses.get(fila.id)  // primera lectura: bloqueo obtenido
     const ahora = nowISO()
@@ -285,7 +291,15 @@ export async function createExpense(params: CreateExpenseParams, database: RutaC
     }
     // Gasto de TRABAJADOR: sin tope de efectivo en manos (ver cabecera); su posición
     // puede quedar negativa y se concilia en el cuadre.
-    if (scope === 'ruta') {
+    if (scope === 'ruta' && isCentralCapitalActive(await database.tenants.get(tenantId))) {
+      // C1: el gasto de la ruta lo paga la BOLSA del responsable (capital enlazado):
+      // la Base baja una vez por el gasto y "Sin asignar" no cambia.
+      await debitControllerPool(database, {
+        tenantId, routeId: routeId!, amount: valor, actor, id: centralIds.gastoRuta(fila.id), fecha: fila.fecha,
+        descripcion: `Gasto de la ruta pagado con la bolsa del responsable${fila.descripcion ? `: ${fila.descripcion}` : ''}`,
+        link: { kind: 'GASTO_RUTA', operationId: fila.id, relatedId: fila.id },
+      }).catch(e => { throw e instanceof CentralCapitalError ? new ExpenseError(e.message) : e })
+    } else if (scope === 'ruta') {
       const r = await computeRouteCashReconciliation({ tenantId, routeId: routeId!, hasta: ahora }, database)
       if (valor > r.disponible) {
         throw new ExpenseError(`El gasto supera el efectivo sin asignar de la ruta (${r.disponible}).`)

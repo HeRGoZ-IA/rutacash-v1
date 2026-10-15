@@ -20,6 +20,14 @@
 // NUEVAS (cobrar, desembolsar); cuadrar no crea movimientos, solo registra la
 // entrega de efectivo que ya existe — impedirlo dejaría dinero sin conciliar
 // justo cuando se cierra una Oficina.
+//
+// CAPITAL CENTRALIZADO (C1): con el modelo activo, el efectivo entregado en el
+// cuadre (entregado − sobrante, `cuadreReturnToPool`) vuelve a la bolsa del
+// Administrador responsable con un retiro enlazado, en la MISMA transacción que el
+// documento. Faltantes, sobrantes y arrastre no cambian. Reabrir revierte ese
+// retiro (si la bolsa aún lo tiene; si no, se rechaza). Un cuadre ANTERIOR a la
+// activación dejó su efectivo en la caja de la ruta: reabrirlo exige que ese saldo
+// heredado siga allí.
 // ============================================================
 import { db, type RutaCashDB } from '@/lib/db'
 import { nowISO } from '@/lib/formatters'
@@ -46,6 +54,10 @@ import {
   validateDifferenceReason,
   type CashSettlementResult,
 } from '@/lib/cashSettlementRules'
+import { centralIds, cuadreReturnToPool, isCentralCapitalActive } from '@/lib/centralCapital'
+import { centralLedgerTables, creditControllerPool, reverseCentralWithdrawal } from '@/services/centralCapitalLedger'
+// Ciclo de módulos seguro: solo se usa en tiempo de llamada (reapertura, C1).
+import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
 import type { CashSettlement, Route, User } from '@/models/types'
 
 export { MIN_CASH_REASON }
@@ -262,9 +274,12 @@ export async function closeCashSettlement(
   let documento!: CashSettlement
   let outcome!: ReturnType<typeof settlementOutcome>
   let sustituye: CashSettlement[] = []
+  let devueltoABolsa = 0
+  const frontera = [database.cashSettlements, database.payments, database.sales, database.expenses, database.tenants, database.cashCustodyMovements]
   await database.transaction(
     'rw',
-    [database.cashSettlements, database.payments, database.sales, database.expenses, database.tenants, database.cashCustodyMovements],
+    // `withdrawals`, `routes` y `users`: retorno a la bolsa del responsable (C1).
+    [...frontera, database.withdrawals, database.routes, database.users],
     async () => {
       const antes = await settlementsOf(routeId, userId, database)   // obtiene el bloqueo
       const hasta = nowISO()
@@ -320,6 +335,16 @@ export async function closeCashSettlement(
       for (const previo of sustituye) {
         await database.cashSettlements.update(previo.id, { supersededBy: documento.id })
       }
+      // C1: el efectivo entregado vuelve a la bolsa del responsable (mismo bloqueo).
+      const aBolsa = cuadreReturnToPool(documento)
+      if (aBolsa > 0 && isCentralCapitalActive(await database.tenants.get(tenantId))) {
+        await creditControllerPool(database, {
+          tenantId, routeId, amount: aBolsa, actor: actor!, id: centralIds.cuadre(documento.id),
+          link: { kind: 'CUADRE', operationId: documento.id, relatedId: documento.id },
+          descripcion: `Efectivo entregado en el cuadre de ${target.nombre} (v${documento.version})`,
+        })
+        devueltoABolsa = aBolsa
+      }
       waitClockPast(hasta)
     },
   )
@@ -344,7 +369,10 @@ export async function closeCashSettlement(
       esperado: documento.esperado, entregado, diferencia: documento.diferencia, version,
     },
     motivo: documento.motivo,
-    metadata: { trabajador: userId, sustituye: sustituye.map(s => s.id) },
+    metadata: {
+      trabajador: userId, sustituye: sustituye.map(s => s.id),
+      ...(devueltoABolsa > 0 ? { devueltoABolsa, retornoId: centralIds.cuadre(documento.id) } : {}),
+    },
   })
 
   return documento
@@ -375,7 +403,30 @@ export async function reopenCashSettlement(
   const cambios: Partial<CashSettlement> = {
     status: 'reabierta', reopenedAt: nowISO(), reopenedByUserId: actor!.id, reopenReason: motivo,
   }
-  await database.transaction('rw', [database.cashSettlements], async () => {
+  await database.transaction('rw', [...new Set([database.cashSettlements, ...centralLedgerTables(database), database.payments,
+    database.sales, database.cashCustodyMovements])], async () => {
+    const vigente = await database.cashSettlements.get(settlementId)
+    if (!vigente || vigente.status !== 'cerrada') throw new CashSettlementError('Este cuadre ya no está cerrado.')
+    // C1: el efectivo que el cuadre devolvió a la bolsa vuelve a la posición del
+    // trabajador. Sin ese retorno (cuadre anterior a la activación), el efectivo
+    // está en la caja de la ruta: debe seguir ahí para reabrir.
+    if (isCentralCapitalActive(await database.tenants.get(doc.tenantId))) {
+      const retorno = await database.withdrawals.get(centralIds.cuadre(settlementId))
+      if (retorno && !retorno.reversalId) {
+        await reverseCentralWithdrawal(database, retorno, {
+          actor: actor!, motivo: `Reapertura del cuadre: ${motivo}`,
+          link: { kind: 'REAPERTURA_CUADRE', operationId: settlementId, relatedId: retorno.id },
+        })
+      } else if (!retorno) {
+        const enCaja = cuadreReturnToPool(vigente)
+        if (enCaja > 0) {
+          const r = await computeRouteCashReconciliation({ tenantId: doc.tenantId, routeId: doc.routeId }, database)
+          if (enCaja > r.disponible) {
+            throw new CashSettlementError(`El efectivo de este cuadre ya salió de la caja de la ruta (disponible: ${r.disponible}; requerido: ${enCaja}). No se puede reabrir sin devolverlo antes.`)
+          }
+        }
+      }
+    }
     await database.cashSettlements.update(settlementId, cambios)
   })
   await auditSink({

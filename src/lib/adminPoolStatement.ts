@@ -10,6 +10,7 @@
 //
 // CONCILIACIÓN (identidad del modelo, no un cuadre forzado):
 //   recibido del SuperAdmin (asignaciones − devoluciones)
+//   + aportes de socios (C1: `PARTNER_CONTRIBUTION`)
 //   + capital recibido con rutas − capital entregado con rutas   (cambio de
 //     responsable / migración v16: `ROUTE_CONTROL_TRANSFER`)
 //   = disponible + capital neto en rutas + gastos netos
@@ -27,6 +28,7 @@ import type { CapitalLedgerEntry, CapitalMovement, Expense, Withdrawal } from '@
 export type PoolMovementKind =
   | 'asignacion'       // SuperAdmin → bolsa
   | 'devolucionSA'     // bolsa → SuperAdmin
+  | 'aporteSocio'      // socio → bolsa (C1; su anulación es el asiento negado)
   | 'colocacion'       // bolsa → ruta
   | 'retiroRuta'       // ruta → bolsa (devolución de capital desde una ruta)
   | 'rutaRecibida'     // capital de una ruta que pasa a esta bolsa (cambio de responsable)
@@ -70,13 +72,15 @@ export interface PoolStatement {
     devolucionesSA: number
     /** Neto recibido del SuperAdmin = asignaciones − devoluciones. */
     recibidoSA: number
+    /** Aportes netos de socios (C1). */
+    aportesSocios: number
     rutasRecibidas: number
     rutasEntregadas: number
     colocado: number
     retiradoDeRutas: number
   }
   conciliacion: {
-    /** recibidoSA + rutasRecibidas − rutasEntregadas. */
+    /** recibidoSA + aportesSocios + rutasRecibidas − rutasEntregadas. */
     entradas: number
     /** disponible + enRutas + gastos. */
     explicado: number
@@ -104,6 +108,9 @@ export function buildPoolStatement(adminId: string, rows: PoolSources): PoolStat
     const base = { id: e.id, fecha: e.fecha, createdAt: e.createdAt, actorId: e.actorUserId, descripcion: e.descripcion, estado: estadoDe(e) }
     if (e.tipo === 'ADMIN_ALLOCATION' && e.toAdminId === adminId) movimientos.push({ ...base, kind: 'asignacion', monto: e.amount, afecta: 'disponible' })
     if (e.tipo === 'ADMIN_RETURN' && e.fromAdminId === adminId) movimientos.push({ ...base, kind: 'devolucionSA', monto: -e.amount, afecta: 'disponible' })
+    if (e.tipo === 'PARTNER_CONTRIBUTION' && e.toAdminId === adminId) {
+      movimientos.push({ ...base, kind: 'aporteSocio', monto: e.amount, afecta: 'disponible', routeId: e.routeId, corrigeId: e.reversesId })
+    }
     if (e.tipo === 'ROUTE_CONTROL_TRANSFER' && e.toAdminId === adminId) {
       movimientos.push({ ...base, kind: 'rutaRecibida', monto: e.amount, afecta: 'enRutas', routeId: e.routeId, relatedAdminId: e.fromAdminId })
     }
@@ -139,14 +146,15 @@ export function buildPoolStatement(adminId: string, rows: PoolSources): PoolStat
   const de = (k: PoolMovementKind) => sum(movimientos.filter(m => m.kind === k).map(m => m.monto))
   const asignaciones = de('asignacion')
   const devolucionesSA = -de('devolucionSA')
+  const aportesSocios = de('aporteSocio')
   const rutasRecibidas = de('rutaRecibida')
   const rutasEntregadas = -de('rutaEntregada')
-  const entradas = asignaciones - devolucionesSA + rutasRecibidas - rutasEntregadas
+  const entradas = asignaciones - devolucionesSA + aportesSocios + rutasRecibidas - rutasEntregadas
   const explicado = capital.disponible + capital.enRutas + capital.gastos
   return {
     adminId, capital,
     partidas: {
-      asignaciones, devolucionesSA, recibidoSA: asignaciones - devolucionesSA,
+      asignaciones, devolucionesSA, recibidoSA: asignaciones - devolucionesSA, aportesSocios,
       rutasRecibidas, rutasEntregadas, colocado: -de('colocacion'), retiradoDeRutas: de('retiroRuta'),
     },
     conciliacion: { entradas, explicado, diferencia: entradas - explicado },
@@ -170,6 +178,7 @@ export function poolExpensesInPeriod(movs: PoolMovement[], desde?: string, hasta
 export const POOL_MOVEMENT_LABEL: Record<PoolMovementKind, string> = {
   asignacion: 'Capital recibido del SuperAdmin',
   devolucionSA: 'Capital devuelto al SuperAdmin',
+  aporteSocio: 'Aporte de socio',
   colocacion: 'Capital colocado en ruta',
   retiroRuta: 'Capital retirado de ruta',
   rutaRecibida: 'Capital recibido con una ruta',

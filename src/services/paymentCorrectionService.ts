@@ -11,6 +11,12 @@
 // Periodo CERRADO  → el Secretario genera una SOLICITUD DE AJUSTE que aprueba un
 //                    Administrador autorizado o el Super Admin; al aprobar se
 //                    ejecuta la misma reversión + reemplazo.
+//
+// CAPITAL CENTRALIZADO (C1): si el pago original volvió a la bolsa del responsable
+// (`COBRO_NO_PERSONAL`), su anulación o corrección revierte ese retiro en la misma
+// transacción (solo si la bolsa aún lo tiene) y el pago corregido vuelve a la bolsa
+// por su nuevo importe. Un pago ANTERIOR a la activación no tiene retiro: su cadena
+// sigue el circuito histórico de la caja de la ruta (excepción documentada).
 // ============================================================
 import { db, type RutaCashDB } from '@/lib/db'
 import { generateId } from '@/lib/utils'
@@ -26,6 +32,8 @@ import { dependentSyncStatus, effectivePayments as onlyEffective, isPaymentAnnul
 import { resolveSealedCompletionDate } from '@/lib/creditHistory'
 import { protectingClosureFor } from '@/lib/settlementPeriods'
 import { closedPeriodBlockedReason } from '@/services/periodGuard'
+import { centralIds } from '@/lib/centralCapital'
+import { CentralCapitalError, centralLedgerTables, creditControllerPool, reverseCentralWithdrawal } from '@/services/centralCapitalLedger'
 import type { Payment, PaymentAdjustmentRequest, Sale, User, WeeklySettlement } from '@/models/types'
 
 /** Lectura mínima de liquidaciones que necesita la comprobación de periodo. */
@@ -200,7 +208,7 @@ async function executeCorrection(original: Payment, actor: User, input: Correcti
   // UNA SOLA TRANSACCIÓN: reversión + pago corregido + recómputo de parcelas y venta.
   // Si cualquier paso falla, Dexie revierte TODO: nunca quedan pagos corregidos
   // conviviendo con parcelas y saldo antiguos.
-  await db.transaction('rw', [db.payments, db.installments, db.sales, db.weeklySettlements], async () => {
+  await db.transaction('rw', [...new Set([db.payments, db.installments, db.sales, db.weeklySettlements, ...centralLedgerTables(db)])], async () => {
     // Instante sellado BAJO BLOQUEO (primera lectura dentro de la transacción): la
     // reversión y la corrección nunca quedan detrás de la frontera de un cuadre por
     // trabajador que se esté cerrando a la vez (ver `closeCashSettlement`).
@@ -224,6 +232,20 @@ async function executeCorrection(original: Payment, actor: User, input: Correcti
     })
     await db.payments.add(reversal)
     await db.payments.add(corrected)
+    // C1: el cobro original volvió a la bolsa → la corrección también, y el original se revierte.
+    const retorno = await db.withdrawals.get(centralIds.cobro(original.id))
+    if (retorno && !retorno.reversalId) {
+      const comoCorreccion = (e: unknown) => { throw e instanceof CentralCapitalError ? new PaymentCorrectionError(e.message) : e }
+      await creditControllerPool(db, {
+        tenantId: original.tenantId, routeId: original.routeId, amount: corrected.valor, actor, id: centralIds.cobro(corrected.id),
+        fecha: corrected.fecha, descripcion: `Cobro corregido (${corrected.tipo}) a la bolsa del responsable`,
+        link: { kind: 'COBRO_NO_PERSONAL', operationId: corrected.id, relatedId: corrected.id },
+      }).catch(comoCorreccion)
+      await reverseCentralWithdrawal(db, retorno, {
+        actor, motivo: `Corrección del pago: ${input.reason}`, fecha: reversal.fecha,
+        link: { kind: 'ANULACION_COBRO', operationId: reversal.id, relatedId: original.id },
+      }).catch(comoCorreccion)
+    }
     await recomputeSale(original.saleId)
   })
 
@@ -485,7 +507,7 @@ export async function annulPayment(
   let original!: Payment
   let reversal!: Payment
   let periodClosed = false
-  await database.transaction('rw', [...reconciliationTables(database), database.installments, database.weeklySettlements], async () => {
+  await database.transaction('rw', [...new Set([...reconciliationTables(database), database.installments, database.weeklySettlements, ...centralLedgerTables(database)])], async () => {
     // 1–3. Lectura fresca bajo bloqueo: existe, es de la empresa, sigue vigente.
     const p = await database.payments.get(paymentId)
     if (!p || p.tenantId !== tenantId) throw new PaymentAnnulmentError('El pago no existe.')
@@ -525,6 +547,14 @@ export async function annulPayment(
     }
     await database.payments.add(reversal)
     await database.payments.put(original)
+    // C1: si el cobro volvió a la bolsa del responsable, sale de ella (si aún lo tiene).
+    const retorno = await database.withdrawals.get(centralIds.cobro(p.id))
+    if (retorno && !retorno.reversalId) {
+      await reverseCentralWithdrawal(database, retorno, {
+        actor, motivo: `Anulación del pago: ${motivo}`, fecha: reversal.fecha,
+        link: { kind: 'ANULACION_COBRO', operationId: reversal.id, relatedId: p.id },
+      }).catch(e => { throw e instanceof CentralCapitalError ? new PaymentAnnulmentError(e.message) : e })
+    }
     await recomputeSale(p.saleId, database)
 
     // 9. Efectivo físico posible tras la anulación; si no, rollback completo.

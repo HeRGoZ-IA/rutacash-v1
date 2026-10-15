@@ -22,6 +22,13 @@
 //
 // El motor de distribución (`applyPaymentToInstallments`) se reutiliza tal cual: la
 // auditoría y la línea base demostraron que su reparto es correcto.
+//
+// CAPITAL CENTRALIZADO (C1): un cobro que no entra a la caja personal de nadie
+// (transferencia, o efectivo recibido por un Administrador) caía en la caja de la
+// ruta. Con el modelo activo va a la bolsa del Administrador responsable con un
+// retiro enlazado (`COBRO_NO_PERSONAL`) en la MISMA transacción. No se registra como
+// efectivo en manos de ningún trabajador. Sin responsable válido, ese cobro se
+// rechaza (fail closed); el efectivo de un Cobrador o Supervisor no cambia.
 // ============================================================
 import { db } from '@/lib/db'
 import { generateId } from '@/lib/utils'
@@ -39,8 +46,10 @@ import {
   calculateCurrentInstallment, getLastPaidInstallmentNumber,
 } from '@/services/installmentEngine'
 import { isRouteOperationBlocked, OFFICE_MESSAGES } from '@/services/officeService'
+import { centralIds, isCentralCapitalActive, isPersonalCashPayment } from '@/lib/centralCapital'
+import { NO_CAPITAL_CONTROLLER_MESSAGE, routeCapitalController } from '@/lib/permissions'
 import type {
-  Installment, Office, Payment, PaymentType, Route, Sale, SaleStatus, SyncStatus, User,
+  Installment, Office, Payment, PaymentType, Route, Sale, SaleStatus, SyncStatus, Tenant, User, Withdrawal,
 } from '@/models/types'
 
 // ------------------------------------------------------------
@@ -78,6 +87,13 @@ export interface PaymentDatabase {
    * inyectadas que no la declaran no tienen periodos cerrados.
    */
   weeklySettlements?: PeriodGuardDatabase['weeklySettlements']
+  /**
+   * Capital centralizado (C1): empresa (¿modelo activo?) y retiros (cobro no
+   * personal → bolsa del responsable). La base real siempre las tiene; las bases
+   * inyectadas que no las declaran operan como v16.
+   */
+  tenants?: { get(key: string): Promise<Tenant | undefined> }
+  withdrawals?: { add(item: Withdrawal): Promise<unknown> }
   transaction<U>(mode: 'rw', tables: any, scope: () => PromiseLike<U>): Promise<U>
 }
 
@@ -96,6 +112,7 @@ export type PaymentRejectionCode =
   | 'COLLECTOR_INVALID'   // el responsable indicado no puede responder por el efectivo de esa ruta
   | 'OFFICE_INACTIVE'     // la Oficina de la ruta está inactiva: no admite operaciones nuevas
   | 'PERIOD_CLOSED'       // la fecha del pago cae en una semana cerrada de la ruta (D7)
+  | 'CAPITAL_CONTROLLER_REQUIRED' // C1: cobro no personal en una ruta sin responsable de capital
   | 'WRITE_FAILED'        // fallo de persistencia: se revirtió todo
 
 export interface RegisterPaymentInput {
@@ -196,6 +213,7 @@ const REJECTION_MESSAGES: Record<PaymentRejectionCode, string> = {
   COLLECTOR_INVALID: COLLECTOR_ATTRIBUTION_MESSAGE.invalid,
   OFFICE_INACTIVE: OFFICE_MESSAGES.inactiveOffice,
   PERIOD_CLOSED: 'La semana de esta fecha está cerrada en la ruta: no admite pagos nuevos.',
+  CAPITAL_CONTROLLER_REQUIRED: NO_CAPITAL_CONTROLLER_MESSAGE,
   WRITE_FAILED: 'Error al registrar el pago. No se guardó ningún cambio.',
 }
 
@@ -235,7 +253,8 @@ export async function registerPayment(
     // `users` solo se lee; ninguna escritura la toca.
     // `weeklySettlements` (D7) solo existe en la base real; las bases inyectadas de
     // prueba sin cierres no la declaran.
-    consolidated = await database.transaction('rw', [database.payments, database.installments, database.sales, database.users, database.routes, database.offices, ...(database.weeklySettlements ? [database.weeklySettlements] : [])], async () => {
+    consolidated = await database.transaction('rw', [database.payments, database.installments, database.sales, database.users, database.routes, database.offices, ...(database.weeklySettlements ? [database.weeklySettlements] : []),
+      ...(database.tenants && database.withdrawals ? [database.tenants, database.withdrawals] : [])], async () => {
       // ---- 1. LECTURA FRESCA DENTRO DE LA TRANSACCIÓN -----------------------
       // Nada de lo que envía la UI se usa como fuente de verdad. El intervalo
       // lectura → cálculo → escritura queda dentro del mismo ámbito atómico.
@@ -302,7 +321,8 @@ export async function registerPayment(
       // Supervisor) responde él por su registro, sin selector y sin mirar cuántos
       // cobradores tenga la ruta. Los candidatos solo sirven para los actores
       // administrativos: "usuarios CON CAJA PERSONAL asignados a la ruta".
-      const routeCollectors = (await database.users.where('tenantId').equals(sale.tenantId).toArray())
+      const usuariosEmpresa = await database.users.where('tenantId').equals(sale.tenantId).toArray()
+      const routeCollectors = usuariosEmpresa
         .filter(u => hasPersonalCashbox(u.rol) && getAssignedRouteIds(u).includes(sale.routeId))
       const atribucion = resolveResponsibleCollector({
         actor: input.actor!,
@@ -357,6 +377,22 @@ export async function registerPayment(
         state: 'active',
       }
       await database.payments.add(payment)
+      // C1: el cobro que no entra a ninguna caja personal va a la bolsa del responsable.
+      if (database.tenants && database.withdrawals && isCentralCapitalActive(await database.tenants.get(sale.tenantId))) {
+        const rolResponsable = atribucion.collectorId === input.actor!.id
+          ? input.actor!.rol
+          : usuariosEmpresa.find(u => u.id === atribucion.collectorId)?.rol
+        if (!isPersonalCashPayment(payment, rolResponsable)) {
+          const controller = routeCapitalController(routeOfSale, usuariosEmpresa)
+          if (!controller) throw new PaymentRejection('CAPITAL_CONTROLLER_REQUIRED', REJECTION_MESSAGES.CAPITAL_CONTROLLER_REQUIRED)
+          await database.withdrawals.add({
+            id: centralIds.cobro(payment.id), tenantId: sale.tenantId, routeId: sale.routeId, valor: appliedAmount,
+            descripcion: `Cobro ${payment.tipo} (no entra a caja personal) a la bolsa del responsable`,
+            fecha: payment.fecha, userId: input.actor!.id, createdAt: payment.createdAt, adminId: controller.id,
+            centralLink: { kind: 'COBRO_NO_PERSONAL', operationId: payment.id, relatedId: payment.id },
+          })
+        }
+      }
       for (const inst of updatedInstallments) {
         await database.installments.update(inst.id, {
           pagado: inst.pagado, saldo: inst.saldo, status: inst.status, diasMora: inst.diasMora,

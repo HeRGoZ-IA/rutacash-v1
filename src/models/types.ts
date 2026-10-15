@@ -119,6 +119,13 @@ export type AuditAction =
   | 'ADMIN_CAPITAL_ALLOCATED'
   | 'ADMIN_CAPITAL_RETURNED'
   | 'ROUTE_CAPITAL_CONTROLLER_CHANGED'
+  // Capital centralizado (C1): bolsa del Administrador ⇄ trabajador.
+  | 'CENTRAL_CAPITAL_ACTIVATED'
+  | 'CENTRAL_CAPITAL_DELIVERED'
+  | 'CENTRAL_CAPITAL_RETURNED'
+  | 'CENTRAL_CAPITAL_DELIVERY_REVERSED'
+  | 'PARTNER_CONTRIBUTION_REGISTERED'
+  | 'PARTNER_CONTRIBUTION_REVERSED'
 
 // --- ENTIDADES ---
 
@@ -151,6 +158,15 @@ export interface Tenant {
    * existe registro de qué Base física tenía cada trabajador: no se reconstruye.
    */
   baseCustodyStartAt?: string
+  /**
+   * INICIO DEL CAPITAL CENTRALIZADO (C1, 2026-10). Desde este instante la caja de
+   * la ruta deja de ser una bolsa intermediaria: el capital va de la bolsa del
+   * Administrador responsable al trabajador y vuelve a ella (ver
+   * `lib/centralCapital`). Ausente = modelo v16 sin cambios. NUNCA se fija al cargar
+   * la aplicación: solo `activateCentralCapitalModel`, de forma explícita. Campo sin
+   * índice: no requiere versión Dexie.
+   */
+  centralCapitalStartAt?: string
   createdAt: string
   updatedAt: string
 }
@@ -698,6 +714,41 @@ export interface MovementReversalFields {
   reversesId?: string
 }
 
+/**
+ * OPERACIONES DEL CAPITAL CENTRALIZADO (C1). Cada una se registra con los mismos
+ * movimientos de siempre (capital, retiro, custodia), emparejados en UNA
+ * transacción para que la caja de la ruta no gane saldo:
+ *
+ *   ENTREGA_TRABAJADOR    bolsa del responsable → trabajador   (CapitalMovement + BASE_ASSIGNMENT)
+ *   DEVOLUCION_TRABAJADOR trabajador → bolsa del responsable   (BASE_RETURN + Withdrawal)
+ *   ANULACION_ENTREGA     anula una entrega aún no consumida   (CapitalMovement espejo + BASE_RETURN)
+ *   CUADRE                efectivo entregado en un cuadre → bolsa (Withdrawal)
+ *   REAPERTURA_CUADRE     reabrir ese cuadre                   (Withdrawal espejo)
+ *   COBRO_NO_PERSONAL     cobro que no entra a ninguna caja personal → bolsa (Withdrawal)
+ *   ANULACION_COBRO       anulación/corrección de ese cobro    (Withdrawal espejo)
+ *   DESEMBOLSO_ADMIN      préstamo entregado por el Admin/SuperAdmin (CapitalMovement)
+ *   GASTO_RUTA            gasto de la ruta pagado con la bolsa (CapitalMovement)
+ */
+export type CentralCapitalKind =
+  | 'ENTREGA_TRABAJADOR'
+  | 'DEVOLUCION_TRABAJADOR'
+  | 'ANULACION_ENTREGA'
+  | 'CUADRE'
+  | 'REAPERTURA_CUADRE'
+  | 'COBRO_NO_PERSONAL'
+  | 'ANULACION_COBRO'
+  | 'DESEMBOLSO_ADMIN'
+  | 'GASTO_RUTA'
+
+/** Vínculo de un movimiento con su operación del capital centralizado (sin índice). */
+export interface CentralCapitalLink {
+  kind: CentralCapitalKind
+  /** Operación lógica: todas sus patas comparten este id. */
+  operationId: string
+  /** Registro que la originó (cuadre, pago, venta, gasto o la entrega anulada). */
+  relatedId?: string
+}
+
 export interface CapitalMovement extends MovementReversalFields {
   id: string
   tenantId: string
@@ -715,6 +766,8 @@ export interface CapitalMovement extends MovementReversalFields {
    * `capitalLedger` ROUTE_CONTROL_TRANSFER).
    */
   adminId?: string
+  /** Operación del capital centralizado a la que pertenece (C1). Ausente = v16. */
+  centralLink?: CentralCapitalLink
 }
 
 /**
@@ -771,6 +824,8 @@ export interface Withdrawal extends MovementReversalFields {
    * ese momento. `undefined` = retiro anterior a v16 (salida sin destino registrado).
    */
   adminId?: string
+  /** Operación del capital centralizado a la que pertenece (C1). Ausente = v16. */
+  centralLink?: CentralCapitalLink
 }
 
 /**
@@ -796,6 +851,12 @@ export type CapitalLedgerType =
   | 'ADMIN_ALLOCATION'
   | 'ADMIN_RETURN'
   | 'ROUTE_CONTROL_TRANSFER'
+  /**
+   * C1: aporte de un SOCIO para operar una ruta. Entra a la bolsa del Administrador
+   * responsable de esa ruta (`toAdminId`, `routeId`, `partnerId`); nunca a la caja de
+   * la ruta ni a un trabajador. Su pata de Caja socios es una `salida` enlazada.
+   */
+  | 'PARTNER_CONTRIBUTION'
 
 export interface CapitalLedgerEntry extends MovementReversalFields {
   id: string
@@ -812,6 +873,8 @@ export interface CapitalLedgerEntry extends MovementReversalFields {
   routeId?: string
   /** RouteCapitalControllerEvent que originó un ROUTE_CONTROL_TRANSFER. */
   relatedEventId?: string
+  /** PARTNER_CONTRIBUTION: socio que aportó (sin índice). */
+  partnerId?: string
   descripcion?: string
   fecha: string
   createdAt: string
@@ -887,6 +950,8 @@ export interface PartnerCashMovement extends MovementReversalFields {
   description?: string
   /** Si el movimiento nació de una transferencia, su id (para trazabilidad). */
   relatedTransferId?: string
+  /** C1: aporte a la bolsa de un Administrador (`capitalLedger` PARTNER_CONTRIBUTION). */
+  relatedLedgerEntryId?: string
   fecha: string
   createdAt: string
   createdBy?: string
@@ -994,10 +1059,20 @@ export interface CashCustodyMovement extends MovementReversalFields {
   amount: number
   fromUserId?: string
   toUserId?: string
-  /** De dónde salió el efectivo: la caja de la Route o una Transferencia entrante. */
-  origen: 'route-cash' | 'transfer'
+  /**
+   * De dónde salió el efectivo: la caja de la Route, una Transferencia entrante o
+   * (C1) la bolsa del Administrador responsable / hacia ella.
+   */
+  origen: 'route-cash' | 'transfer' | 'admin-pool'
   /** Transferencia que entregó este efectivo en mano (origen 'transfer'). */
   relatedTransferId?: string
+  /** Operación del capital centralizado a la que pertenece (C1). Ausente = v15/v16. */
+  centralLink?: CentralCapitalLink
+  /**
+   * C1: solicitud de venta para la que se entregó el capital (referencia opcional).
+   * No crea venta ni deuda: el desembolso sigue siendo su propia operación.
+   */
+  saleRequestId?: string
   motivo: string
   /** Fecha contable local (yyyy-MM-dd). */
   fecha: string

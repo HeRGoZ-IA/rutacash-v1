@@ -62,6 +62,7 @@ const LEDGER_LABEL: Record<CapitalLedgerEntry['tipo'], string> = {
   ADMIN_ALLOCATION: 'Asignación a Administrador',
   ADMIN_RETURN: 'Devolución de Administrador',
   ROUTE_CONTROL_TRANSFER: 'Traspaso de responsabilidad de ruta',
+  PARTNER_CONTRIBUTION: 'Aporte de socio',
 }
 
 const EVENT_LABEL: Record<RouteCapitalControllerEvent['kind'], string> = {

@@ -18,6 +18,8 @@ import { reconciliationTables } from '@/services/cashCustodyService'
 import { personalCashPosition } from '@/services/cashSettlementService'
 import { computeRouteCashReconciliation } from '@/services/routeCashReconciliation'
 import { closedPeriodBlockedReason } from '@/services/periodGuard'
+import { centralIds, isCentralCapitalActive } from '@/lib/centralCapital'
+import { CentralCapitalError, debitControllerPool } from '@/services/centralCapitalLedger'
 import type {
   Sale, Installment, SaleRequest, PaymentFrequency, DisbursementStatus, User, Client, Route,
 } from '@/models/types'
@@ -237,7 +239,7 @@ export async function createDirectSale(input: SaleInputs, actor: User, opts: { n
     // transacción. Ningún retiro, transferencia ni otra venta (de esta u otra
     // pestaña) puede colarse entre la lectura y la escritura de la venta, y la
     // pantalla nunca decide con la cifra que tenía al abrirse.
-    await assertDisbursementFunds(actor, input.routeId, input.tenantId, input.valorVenta, nowISO())
+    await assertDisbursementFunds(actor, input.routeId, input.tenantId, input.valorVenta, nowISO(), { saleId: sale.id, fechaInicio: sale.fechaInicio })
     const decision = decideSaleOrigination({
       actor, canCreateDirect: true, canCreateRequest: can(actor, 'sale.createRequest', ctx), activeCredits: activos.length,
     })
@@ -594,7 +596,8 @@ export class DisbursementFundsError extends SaleRuleError {
  * una venta directa y los cierres semanales (D7).
  */
 function disbursementTables() {
-  return [...reconciliationTables(db), db.saleRequests, db.installments, db.clients, db.weeklySettlements]
+  // `capitalLedger`: bolsa del responsable en el desembolso administrativo (C1).
+  return [...reconciliationTables(db), db.saleRequests, db.installments, db.clients, db.weeklySettlements, db.capitalLedger]
 }
 
 /**
@@ -621,8 +624,17 @@ function disbursementTables() {
  *
  * Las cifras solo se muestran a quien puede consultarlas (`cashbox.viewRoute` para
  * la ruta; `cashSettlement.viewOwn` para el propio efectivo).
+ *
+ * CAPITAL CENTRALIZADO (C1): sin caja personal, el dinero ya no sale de la caja de
+ * la ruta sino de la BOLSA del Administrador responsable: se registra un capital
+ * enlazado (`DESEMBOLSO_ADMIN`) en esta misma transacción, con el disponible de la
+ * bolsa releído aquí. El trabajador sigue desembolsando de SU efectivo (recaudo +
+ * capital recibido): la bolsa no se toca otra vez.
  */
-async function assertDisbursementFunds(actor: User, routeId: string, tenantId: string, valor: number, hasta: string): Promise<void> {
+async function assertDisbursementFunds(
+  actor: User, routeId: string, tenantId: string, valor: number, hasta: string,
+  venta?: { saleId: string; fechaInicio: string },
+): Promise<void> {
   const ctx = { routeId, tenantId }
   // D30 (Ronda 6/6C.1): sin caja personal, el dinero sale de la CAJA DE LA RUTA, y esa
   // caja solo la usa su Administrador responsable de capital o el SuperAdmin de la
@@ -635,6 +647,23 @@ async function assertDisbursementFunds(actor: User, routeId: string, tenantId: s
     const users = await db.users.where('tenantId').equals(tenantId).toArray()
     const autoridad = routeCashAuthorityError(actor, route, 'correct', users)
     if (autoridad) throw new AuthzError(`Desembolso desde la caja de la ruta: ${autoridad}`)
+    if (venta && isCentralCapitalActive(await db.tenants.get(tenantId))) {
+      try {
+        await debitControllerPool(db, {
+          tenantId, routeId, amount: valor, actor, id: centralIds.desembolso(venta.saleId), fecha: venta.fechaInicio,
+          descripcion: 'Desembolso administrativo pagado con la bolsa del responsable',
+          link: { kind: 'DESEMBOLSO_ADMIN', operationId: venta.saleId, relatedId: venta.saleId },
+        })
+      } catch (e) {
+        if (e instanceof CentralCapitalError) throw new DisbursementFundsError(e.message, 'caja')
+        throw e
+      }
+      // D26 con la Base ya financiada: nunca queda negativa.
+      if (!(await hasCapitalForSale(routeId, valor))) {
+        throw new DisbursementFundsError('La venta supera la Base de la ruta: no hay capital suficiente.', 'ruta')
+      }
+      return
+    }
   }
   const verRuta = can(actor, 'cashbox.viewRoute', ctx)
   if (!(await hasCapitalForSale(routeId, valor))) {
@@ -734,7 +763,7 @@ export async function confirmDisbursement(saleId: string, actor: User): Promise<
     if (bloqueo) throw new DisbursementStateError(bloqueo)
     const periodo = await closedPeriodBlockedReason(sale!.routeId, sale!.fechaInicio)
     if (periodo) throw new DisbursementStateError(periodo)
-    await assertDisbursementFunds(actor, sale!.routeId, sale!.tenantId, sale!.valorVenta, ahora)
+    await assertDisbursementFunds(actor, sale!.routeId, sale!.tenantId, sale!.valorVenta, ahora, { saleId: sale!.id, fechaInicio: sale!.fechaInicio })
     await db.sales.update(saleId, {
       disbursementStatus: 'desembolsado',
       disbursedByCollectorId: hasPersonalCashbox(actor.rol) ? actor.id : undefined,
