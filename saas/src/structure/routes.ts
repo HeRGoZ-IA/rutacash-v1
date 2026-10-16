@@ -29,7 +29,7 @@ import { mayManage, routeUnrestricted, toCleanUser, type MembershipFacts } from 
 import { audit } from '../db/audit.ts';
 import { loadMembers, need, snapshot } from './common.ts';
 import { bool, has, idList, minor, oneOf, optId, optText, pathId, rate, reqId, reqText } from './input.ts';
-import { lockRoutes, reconcileControllers, setRouteController, type ControllerEvent } from './capitalGuard.ts';
+import { lockMembershipsForRevocation, lockRoutes, reconcileControllers, setRouteController, type ControllerEvent } from './capitalGuard.ts';
 
 interface Row {
   id: string; name: string; code: string; city: string | null; email: string | null; phone: string | null;
@@ -179,6 +179,15 @@ export const UPDATE_ROUTE_FIELDS = ['name', 'city', 'email', 'phone', 'interestR
  * ese universo no se tocan. Ausente = no se cambian asignaciones.
  */
 export async function updateRoute(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Record<string, unknown>) {
+  // Quien puede perder la ruta (lista nueva o cambio de Cobrador): su bloqueo de
+  // revocación ANTES que la fila de la ruta (orden global, ver capitalGuard.ts).
+  if (has(body, 'memberIds') || has(body, 'collectorId')) {
+    pathId(id);
+    const keep = new Set(has(body, 'memberIds') ? idList(body, 'memberIds') : []);
+    const current = await client.query<{ membership_id: string }>(
+      'select membership_id from adex.membership_routes where company_id = $1 and route_id = $2', [ctx.companyId, id]);
+    await lockMembershipsForRevocation(client, current.rows.map((x) => x.membership_id).filter((m) => !keep.has(m) && m !== ctx.membershipId));
+  }
   const prev = await load(client, ctx, id, true);
   need(ctx, 'route.edit', { routeId: prev.id });
   const next = {

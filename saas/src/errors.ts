@@ -17,6 +17,7 @@ const UNIQUE_CODES: Record<string, string> = {
   offices_company_name_key: 'OFFICE_NAME_DUPLICATE',
   offices_company_code_key: 'OFFICE_CODE_DUPLICATE',
   expense_categories_company_name_key: 'CATEGORY_NAME_DUPLICATE',
+  sale_requests_one_pending_per_client: 'PENDING_REQUEST_EXISTS',     // una solicitud pendiente por cliente
 };
 
 /** Traduce errores de PostgreSQL que la API sabe explicar; el resto es 500. */
@@ -48,6 +49,14 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX411': return new ApiError(400, 'INVALID_INPUT');
     case 'AX412': return new ApiError(404, 'NOT_FOUND');
     case 'AX413': return new ApiError(409, 'FUNDS_ALREADY_USED');
+    // Fase 4 · solicitudes y desembolsos.
+    case 'AX501': return new ApiError(409, 'REQUEST_STATE_INVALID');
+    case 'AX502': return new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED');
+    case 'AX503': return new ApiError(400, 'INVALID_CONDITIONS');
+    case 'AX504': return new ApiError(409, 'CLIENT_NOT_ACTIVE');
+    case 'AX505': return new ApiError(403, 'SELF_APPROVAL_FORBIDDEN');
+    case 'AX506': return new ApiError(409, 'REQUEST_NOT_DISBURSABLE');
+    case 'AX507': return new ApiError(409, 'DIRECT_SALE_LIMIT');
     default: return null;
   }
 }

@@ -13,6 +13,8 @@
 //   Fase 3 (0009): NINGÚN privilegio de escritura nuevo. El libro de capital y la
 //   custodia (capital_accounts, capital_operations, capital_entries) solo se escriben
 //   con la función SECURITY DEFINER `adex.capital_post` (EXECUTE, no tabla).
+//   Fase 4 (0010): solicitudes de crédito (alta y resolución, columnas concretas y
+//   guardia de transiciones). Créditos y cuotas: SOLO `adex.credit_disburse`.
 // Nunca TRUNCATE. Nunca DELETE ni UPDATE sobre datos financieros.
 export const EXPECTED_API_WRITES: Record<string, string[]> = {
   'adex.audit_log': ['INSERT'],
@@ -28,6 +30,7 @@ export const EXPECTED_API_WRITES: Record<string, string[]> = {
   'adex.revoked_sessions': ['INSERT'],
   'adex.route_capital_controller_events': ['INSERT'],
   'adex.routes': ['DELETE', 'INSERT', 'UPDATE'],
+  'adex.sale_requests': ['INSERT', 'UPDATE'],
 };
 
 /** Tablas financieras: la API nunca las borra ni las reescribe (D7, D28). */

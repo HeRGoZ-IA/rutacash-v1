@@ -35,6 +35,10 @@ import {
   allocateToAdmin, capitalReconciliation, capitalSummary, companyDeposit, companyWithdrawal, deliverToWorker, getOperation, listCustody,
   listOperations, partnerContribution, reassignBetweenRoutes, returnFromAdmin, returnFromWorker, reverseOperation, transferBetweenWorkers,
 } from '../capital/service.ts';
+import {
+  APPROVE_FIELDS, CREATE_REQUEST_FIELDS, DIRECT_FIELDS, approveRequest, cancelRequest, createRequest, directSale, disburseRequest, getCredit,
+  getRequest, listCredits, listRequests, rejectRequest,
+} from '../credits/service.ts';
 import { readJson, scopeOf, send } from './common.ts';
 
 export interface CompanyApiOptions {
@@ -159,6 +163,21 @@ const ENDPOINTS: readonly Endpoint[] = [
     idempotent: 'capital.route_reassignment', requiresOperation: true, handler: () => async (c, ctx, b, _q, op) => created(await reassignBetweenRoutes(c, ctx, b, op)) },
   { method: 'POST', pattern: new RegExp(`^/v1/capital/operations/${ID}/reverse$`), fields: ['reason'], idempotent: 'capital.reversal', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => created(await reverseOperation(c, ctx, id!, b, op)) },
+  // ---------- Créditos: solicitud, autorización y desembolso (Fase 4, solo en línea) ----------
+  { method: 'GET', pattern: new RegExp(`^/v1/credit-requests$`), fields: null, handler: () => async (c, ctx, _b, q) => ok({ requests: await listRequests(c, ctx, q) }) },
+  { method: 'POST', pattern: new RegExp(`^/v1/credit-requests$`), fields: CREATE_REQUEST_FIELDS, idempotent: 'credit_requests.create',
+    handler: () => async (c, ctx, b) => created(await createRequest(c, ctx, b)) },
+  { method: 'GET', pattern: new RegExp(`^/v1/credit-requests/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getRequest(c, ctx, id!)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/credit-requests/${ID}/approve$`), fields: APPROVE_FIELDS,
+    handler: ([id]) => async (c, ctx, b) => ok(await approveRequest(c, ctx, id!, b)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/credit-requests/${ID}/reject$`), fields: ['reason'], handler: ([id]) => async (c, ctx, b) => ok(await rejectRequest(c, ctx, id!, b)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/credit-requests/${ID}/cancel$`), fields: ['reason'], handler: ([id]) => async (c, ctx, b) => ok(await cancelRequest(c, ctx, id!, b)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/credit-requests/${ID}/disburse$`), fields: [], idempotent: 'credits.disburse', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, _b, _q, op) => created(await disburseRequest(c, ctx, id!, op)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/credits/direct$`), fields: DIRECT_FIELDS, idempotent: 'credits.direct', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await directSale(c, ctx, b, op)) },
+  { method: 'GET', pattern: new RegExp(`^/v1/credits$`), fields: null, handler: () => async (c, ctx, _b, q) => ok({ credits: await listCredits(c, ctx, q) }) },
+  { method: 'GET', pattern: new RegExp(`^/v1/credits/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getCredit(c, ctx, id!)) },
 ];
 
 function match(method: string, path: string): { e: Endpoint; params: string[] } | null {
@@ -181,8 +200,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * resultado guardado sin repetir nada; con otros parámetros (u otra membresía), 409.
  * Dos reintentos simultáneos se serializan en la clave primaria de `operations`.
  */
-async function withOperation(c: pg.PoolClient, ctx: ActiveContext, operationId: string, kind: string, body: unknown, run: () => Promise<Result>): Promise<Result> {
-  const hash = createHash('sha256').update(JSON.stringify([kind, body])).digest('hex');
+async function withOperation(c: pg.PoolClient, ctx: ActiveContext, operationId: string, kind: string, path: string, body: unknown, run: () => Promise<Result>): Promise<Result> {
+  // La ruta de la URL forma parte de los parámetros: en `…/:id/disburse` o `…/:id/reverse`
+  // el recurso va en la URL, no en el cuerpo (Fase 4, CC4-002).
+  const hash = createHash('sha256').update(JSON.stringify([kind, path, body])).digest('hex');
   const ins = await c.query(
     `insert into adex.operations (company_id, operation_id, kind, request_hash, membership_id, outcome)
      values ($1, $2, $3, $4, $5, 'pending') on conflict do nothing`, [ctx.companyId, operationId, kind, hash, ctx.membershipId]);
@@ -240,7 +261,7 @@ export function createCompanyApi(opts: CompanyApiOptions): http.Server {
           const ctx = await resolveContext(c, claims, membershipHeader.trim());
           await opts.afterContext?.(ctx, url.pathname);
           const run = () => handler(c, ctx, body, url.searchParams, operationId);
-          const out = operationId ? await withOperation(c, ctx, operationId, found.e.idempotent!, body, run) : await run();
+          const out = operationId ? await withOperation(c, ctx, operationId, found.e.idempotent!, url.pathname, body, run) : await run();
           await opts.beforeCommit?.(ctx, url.pathname);
           return out;
         }, txOpts);

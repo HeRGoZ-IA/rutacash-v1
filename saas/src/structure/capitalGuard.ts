@@ -151,6 +151,20 @@ async function transition(client: pg.PoolClient, ctx: ActiveContext, route: { id
   return { eventId, routeId: route.id, kind, fromMembershipId: fromAdminId, toMembershipId: toAdminId, capitalTransferredMinor: transferred };
 }
 
+/**
+ * REVOKE-004 ANTES que las rutas. Toda operación toma primero el bloqueo COMPARTIDO de
+ * su membresía y después las filas de las rutas (y, desde la Fase 3, las cuentas). Una
+ * revocación que bloqueara antes la ruta y luego, en el disparador, el EXCLUSIVO de la
+ * membresía formaría un ciclo con esa operación (hallado en la Fase 4, CC4-008). Por eso
+ * las vías que retiran acceso toman el exclusivo de las personas afectadas primero.
+ * Orden global: membresías (bloqueo consultivo) → rutas → solicitudes → cuentas.
+ */
+export async function lockMembershipsForRevocation(client: pg.PoolClient, membershipIds: readonly string[]): Promise<void> {
+  for (const id of [...new Set(membershipIds)].sort()) {
+    await client.query(`select pg_advisory_xact_lock(adex.lock_key('membership', $1))`, [id]);
+  }
+}
+
 /** Bloquea las filas de las rutas en orden de id (sin interbloqueos entre comandos). */
 export async function lockRoutes(client: pg.PoolClient, ctx: ActiveContext, routeIds: readonly string[]): Promise<void> {
   const ids = [...new Set(routeIds)].sort();

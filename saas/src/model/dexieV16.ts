@@ -159,7 +159,9 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       id('saleRequestId', 'sale_request_id'), f('motivoPerdida', 'lost_reason'), instant('lostAt', 'lost_at'),
       id('lostByUserId', 'lost_by_membership_id'), created, updated,
     ],
-    omitted: [], added: [],
+    omitted: [], added: [
+      { column: 'ledger_operation_id', reason: 'Fase 4: asiento de desembolso del libro de capital del servidor (capital_operations); CLEAN no tiene libro de doble entrada' },
+    ],
   },
   {
     dexieTable: 'installments', entity: 'Installment', source: 'models', sqlTable: 'adex.installments',
@@ -281,7 +283,11 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       f('activeCreditSaleIds', 'active_credit_sale_ids', 'texts'), f('activeCreditSnapshot', 'active_credit_snapshot_units', 'json'),
       f('authorizationReason', 'authorization_reason'),
     ],
-    omitted: [], added: [],
+    omitted: [], added: [
+      { column: 'cancelled_at', reason: 'Fase 4: cancelación auditada de una solicitud aprobada sin desembolsar (en CLEAN, venta pendiente marcada perdida)' },
+      { column: 'cancelled_by_membership_id', reason: 'Fase 4: quién canceló la solicitud aprobada (autoridad sale.cancel, Administrador o SuperAdmin)' },
+      { column: 'cancel_reason', reason: 'Fase 4: motivo obligatorio de la cancelación de una solicitud aprobada que no se entregará' },
+    ],
   },
   {
     dexieTable: 'partnerCashMovements', entity: 'PartnerCashMovement', source: 'models', sqlTable: 'adex.partner_cash_movements',

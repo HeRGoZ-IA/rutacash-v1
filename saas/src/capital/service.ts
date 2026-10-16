@@ -31,7 +31,7 @@ import { optId, pathId, reqId, reqText } from '../structure/input.ts';
 
 export type CapitalKind =
   | 'COMPANY_DEPOSIT' | 'COMPANY_WITHDRAWAL' | 'ADMIN_ALLOCATION' | 'ADMIN_RETURN' | 'PARTNER_CONTRIBUTION'
-  | 'WORKER_DELIVERY' | 'WORKER_RETURN' | 'WORKER_TRANSFER' | 'ROUTE_REASSIGNMENT' | 'REVERSAL';
+  | 'WORKER_DELIVERY' | 'WORKER_RETURN' | 'WORKER_TRANSFER' | 'ROUTE_REASSIGNMENT' | 'REVERSAL' | 'LOAN_DISBURSEMENT';
 
 const COMPANY_KINDS: readonly string[] = ['COMPANY_DEPOSIT', 'COMPANY_WITHDRAWAL', 'ADMIN_ALLOCATION', 'ADMIN_RETURN'];
 
@@ -74,10 +74,10 @@ const reasonOf = (body: Record<string, unknown>) => {
 
 // ---------- Hechos releídos en la transacción ----------
 
-interface RouteFacts { id: string; name: string; controller: string | null }
+export interface RouteFacts { id: string; name: string; controller: string | null }
 
 /** Ruta del alcance del actor (una ajena es indistinguible de una inexistente). */
-async function routeOf(client: pg.PoolClient, ctx: ActiveContext, id: string): Promise<RouteFacts> {
+export async function routeOf(client: pg.PoolClient, ctx: ActiveContext, id: string): Promise<RouteFacts> {
   if (!routeUnrestricted(ctx) && !ctx.routeIds.includes(id)) throw new ApiError(404, 'NOT_FOUND');
   const r = await client.query<{ id: string; name: string; capital_controller_membership_id: string | null }>(
     'select id, name, capital_controller_membership_id from adex.routes where company_id = $1 and id = $2', [ctx.companyId, id]);
@@ -124,7 +124,7 @@ interface PostParams {
   toRoute?: string | null; admin?: string | null; saleRequest?: string | null; reverses?: string | null;
 }
 
-function requireOperationId(operationId: string | null): string {
+export function requireOperationId(operationId: string | null): string {
   if (!operationId) throw new ApiError(400, 'OPERATION_ID_REQUIRED');
   return operationId;
 }
@@ -154,7 +154,7 @@ const ACTIONS: Record<CapitalKind, string> = {
   ADMIN_ALLOCATION: 'ADMIN_CAPITAL_ALLOCATED', ADMIN_RETURN: 'ADMIN_CAPITAL_RETURNED',
   PARTNER_CONTRIBUTION: 'PARTNER_CONTRIBUTION_REGISTERED', WORKER_DELIVERY: 'CENTRAL_CAPITAL_DELIVERED',
   WORKER_RETURN: 'CENTRAL_CAPITAL_RETURNED', WORKER_TRANSFER: 'CASH_CUSTODY_PERSON_TO_PERSON',
-  ROUTE_REASSIGNMENT: 'CENTRAL_CAPITAL_REASSIGNED', REVERSAL: 'CAPITAL_OPERATION_REVERSED',
+  ROUTE_REASSIGNMENT: 'CENTRAL_CAPITAL_REASSIGNED', REVERSAL: 'CAPITAL_OPERATION_REVERSED', LOAN_DISBURSEMENT: 'CONFIRM_DISBURSEMENT',
 };
 
 /** Escribe, audita (misma transacción) y responde con lo que el actor puede ver. */
@@ -336,6 +336,8 @@ export async function reverseOperation(client: pg.PoolClient, ctx: ActiveContext
   const r = await client.query<OpRow>('select * from adex.capital_operations where company_id = $1 and id = $2', [ctx.companyId, id]);
   const orig = r.rows[0];
   if (!orig) throw new ApiError(404, 'NOT_FOUND');
+  // Un crédito desembolsado no se «anula»: el dinero está en manos del cliente (cobros y castigo, fases 4–5).
+  if (orig.kind === 'LOAN_DISBURSEMENT') throw new ApiError(409, 'REVERSAL_NOT_ALLOWED');
   if (COMPANY_KINDS.includes(orig.kind)) need(ctx, 'capital.allocateAdmins');
   else if (orig.kind === 'PARTNER_CONTRIBUTION') need(ctx, 'transfer.create');
   else need(ctx, 'capital.manage', { routeId: orig.route_id ?? undefined });
@@ -441,6 +443,8 @@ export async function capitalSummary(client: pg.PoolClient, ctx: ActiveContext) 
         // Lo que entró a la cadena desde fuera (depósitos − retiros) y desde socios.
         externalNetInMinor: -total('external'), partnerContributionsMinor: -total('partner'),
         adminPoolsMinor: total('admin'), custodyMinor: total('custody'),
+        // Capital prestado pendiente de cobro (cartera de las rutas): deuda de clientes, no efectivo.
+        portfolioMinor: total('portfolio'),
       },
       admins: await adminPools(client, ctx, null),
     };
@@ -471,12 +475,36 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
     `select count(*)::text n from adex.capital_operations o join adex.companies c on c.id = o.company_id
       where o.company_id = $1 and o.currency_code <> c.currency_code`);
   const conservation = await q(`select coalesce(sum(balance_minor), 0)::text n from adex.capital_accounts where company_id = $1`);
+  // Crédito ↔ libro: cada desembolso con su crédito (mismo importe y ruta) y viceversa.
+  const unmatched = await q(
+    `select count(*)::text n from adex.capital_operations o
+      where o.company_id = $1 and o.kind = 'LOAN_DISBURSEMENT'
+        and not exists (select 1 from adex.sales s where s.company_id = o.company_id and s.id = o.sale_id and s.ledger_operation_id = o.id
+                          and s.sale_value_minor = o.amount_minor and s.route_id = o.route_id and s.disbursement_status = 'desembolsado')`);
+  const orphanCredits = await q(
+    `select count(*)::text n from adex.sales s
+      where s.company_id = $1 and s.ledger_operation_id is not null
+        and not exists (select 1 from adex.capital_operations o where o.company_id = s.company_id and o.id = s.ledger_operation_id
+                          and o.kind = 'LOAN_DISBURSEMENT' and o.sale_id = s.id)`);
+  const duplicated = await q(
+    `select count(*)::text n from (select sale_request_id from adex.sales where company_id = $1 and sale_request_id is not null
+                                    group by sale_request_id having count(*) > 1) d`);
+  // Fase 4 (sin cobros todavía): la cartera de cada ruta = capital prestado de sus créditos con asiento.
+  const portfolio = await q(
+    `select count(*)::text n from adex.capital_accounts a
+      where a.company_id = $1 and a.kind = 'portfolio'
+        and a.balance_minor <> coalesce((select sum(s.sale_value_minor) from adex.sales s
+                                          where s.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null), 0)`);
   const checks = [
     { name: 'positions-match-ledger', ok: mismatched === 0, detail: mismatched },
     { name: 'operations-balanced', ok: unbalanced === 0, detail: unbalanced },
     { name: 'no-overdraft', ok: overdrawn === 0, detail: overdrawn },
     { name: 'single-currency', ok: foreignCurrency === 0, detail: foreignCurrency },
     { name: 'capital-conserved', ok: conservation === 0, detail: conservation },
+    { name: 'disbursements-have-credit', ok: unmatched === 0, detail: unmatched },
+    { name: 'credits-have-disbursement', ok: orphanCredits === 0, detail: orphanCredits },
+    { name: 'one-credit-per-request', ok: duplicated === 0, detail: duplicated },
+    { name: 'portfolio-matches-credits', ok: portfolio === 0, detail: portfolio },
   ];
   return { ok: checks.every((c) => c.ok), checks };
 }

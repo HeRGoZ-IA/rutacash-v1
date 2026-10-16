@@ -146,7 +146,8 @@ try {
     const code = await new Promise<number>((resolve) => {
       const child = spawn(process.execPath, ['--import', './scripts/register-alias.mjs', '--test', '--test-reporter=spec', '--test-concurrency=1',
         path.join('test', 'auth-real', 'staging-auth.test.ts'), path.join('test', 'auth-real', 'staging-rls.test.ts'),
-        path.join('test', 'auth-real', 'staging-phase2.test.ts'), path.join('test', 'auth-real', 'staging-phase3.test.ts')], {
+        path.join('test', 'auth-real', 'staging-phase2.test.ts'), path.join('test', 'auth-real', 'staging-phase3.test.ts'),
+        path.join('test', 'auth-real', 'staging-phase4.test.ts')], {
         cwd: root, stdio: 'inherit',
         env: { ...process.env, ...env, ADEX_STAGING_API_URL: apiUrl,
           ADEX_STAGING_ADMIN_URL: adminUrl },

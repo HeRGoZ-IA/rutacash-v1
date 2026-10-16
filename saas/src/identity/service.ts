@@ -26,7 +26,7 @@ import {
 import type { SessionClaims } from '../db/tx.ts';
 import { audit } from '../db/audit.ts';
 import { randomUUID } from 'node:crypto';
-import { lockRoutes, reconcileControllers, type ControllerEvent } from '../structure/capitalGuard.ts';
+import { lockMembershipsForRevocation, lockRoutes, reconcileControllers, type ControllerEvent } from '../structure/capitalGuard.ts';
 import { has, idList, optText, pathId, reqId, reqText } from '../structure/input.ts';
 
 export interface MemberView {
@@ -179,7 +179,8 @@ export async function setMemberStatus(client: pg.PoolClient, ctx: ActiveContext,
   if (!allowed(ctx, 'user.block', { targetRole: peek.role }) || !mayManage(ctx, peek)) {
     throw new ApiError(403, 'PERMISSION_DENIED');
   }
-  // Orden de bloqueos de toda la Fase 2: rutas (por id) → membresías.
+  // Orden global: bloqueo de revocación de la persona → rutas (por id) → filas de membresías.
+  await lockMembershipsForRevocation(client, [peek.membershipId]);
   await lockRoutes(client, ctx, peek.routeIds);
   const target = await loadMember(client, ctx, membershipId, true);
   if (status === 'inactivo') {
@@ -213,6 +214,7 @@ export async function setMemberRoutes(client: pg.PoolClient, ctx: ActiveContext,
   const peek = await loadMember(client, ctx, membershipId);
   if (!mayManage(ctx, peek)) throw new ApiError(403, 'PERMISSION_DENIED');
   if (peek.role === 'superadmin') throw new ApiError(400, 'SUPERADMIN_IS_UNRESTRICTED');
+  await lockMembershipsForRevocation(client, [peek.membershipId]);
   await lockRoutes(client, ctx, [...peek.routeIds, ...next.filter((r) => ID_RE.test(r))]);
   const target = await loadMember(client, ctx, membershipId, true);
   const { events } = await applyMemberRoutes(client, ctx, target, next);
@@ -236,6 +238,7 @@ export async function setMemberOfficeRoutes(client: pg.PoolClient, ctx: ActiveCo
   if (!mayManage(ctx, peek)) throw new ApiError(403, 'PERMISSION_DENIED');
   if (peek.role === 'superadmin') throw new ApiError(400, 'SUPERADMIN_IS_UNRESTRICTED');
   const next = applyOfficeRouteSelection([...peek.routeIds], officeRoutes, selected);
+  await lockMembershipsForRevocation(client, [peek.membershipId]);
   await lockRoutes(client, ctx, [...peek.routeIds, ...next]);
   const target = await loadMember(client, ctx, membershipId, true);
   const { events } = await applyMemberRoutes(client, ctx, target, applyOfficeRouteSelection([...target.routeIds], officeRoutes, selected), 'desde una Oficina');
