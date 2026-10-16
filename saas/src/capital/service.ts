@@ -1,0 +1,482 @@
+// CAPITAL CENTRALIZADO Y CUSTODIA (Fase 3): Empresa → bolsa del Administrador →
+// custodia del trabajador por ruta. Sin caja financiera de ruta.
+//
+// Dos barreras:
+//   1. Aquí, con las reglas PURAS de CLEAN (`can`, `routeCashAuthorityError`,
+//      `isTransferInScope`, caja personal): errores claros antes de escribir.
+//   2. `adex.capital_post` (0009), la ÚNICA vía de escritura: relee responsable,
+//      custodio, ruta, periodo y fondos BAJO BLOQUEO y escribe operación + patas +
+//      posiciones en la transacción del comando. Lo que aquí se lee antes de bloquear
+//      (p. ej. el responsable) puede cambiar; lo que decide es la segunda barrera.
+//
+// Equivalencias con C1 de CLEAN (src/services/centralCapitalService.ts):
+//   deliverCapitalToWorker → WORKER_DELIVERY · returnCapitalFromWorker → WORKER_RETURN
+//   reverseCapitalDelivery → REVERSAL · registerPartnerContribution → PARTNER_CONTRIBUTION
+//   transferBaseBetweenWorkers → WORKER_TRANSFER · registrarLedger → COMPANY_* / ADMIN_*
+// y, nuevo en el servidor, ROUTE_REASSIGNMENT: la devolución en una ruta y la entrega
+// en otra del MISMO responsable en una sola operación (C1 lo hace en dos pasos).
+//
+// Visibilidad: toda lectura pasa por RLS con el contexto activo. El Cobrador solo ve
+// su custodia; nadie ve la bolsa de otro Administrador; los errores nunca llevan cifras.
+
+import type pg from 'pg';
+import { isTransferInScope, routeCashAuthorityError, type RouteCashOperation } from '@/lib/permissions';
+import { hasPersonalCashbox } from '@/lib/collectorAttribution';
+import { ApiError } from '../errors.ts';
+import type { ActiveContext } from '../authz/context.ts';
+import { allowed, routeUnrestricted, toCleanUser, type MembershipFacts } from '../authz/cleanRules.ts';
+import { audit } from '../db/audit.ts';
+import { loadMembers, need } from '../structure/common.ts';
+import { optId, pathId, reqId, reqText } from '../structure/input.ts';
+
+export type CapitalKind =
+  | 'COMPANY_DEPOSIT' | 'COMPANY_WITHDRAWAL' | 'ADMIN_ALLOCATION' | 'ADMIN_RETURN' | 'PARTNER_CONTRIBUTION'
+  | 'WORKER_DELIVERY' | 'WORKER_RETURN' | 'WORKER_TRANSFER' | 'ROUTE_REASSIGNMENT' | 'REVERSAL';
+
+const COMPANY_KINDS: readonly string[] = ['COMPANY_DEPOSIT', 'COMPANY_WITHDRAWAL', 'ADMIN_ALLOCATION', 'ADMIN_RETURN'];
+
+interface OpRow {
+  id: string; operation_id: string; kind: CapitalKind; amount_minor: string; currency_code: string; route_id: string | null;
+  to_route_id: string | null; admin_membership_id: string | null; worker_membership_id: string | null;
+  counterpart_membership_id: string | null; sale_request_id: string | null; reverses_operation_id: string | null;
+  reverses_kind: CapitalKind | null; reason: string; entry_date: string | Date; actor_membership_id: string; actor_role: string;
+  created_at: Date;
+}
+
+const ymd = (d: string | Date) => (typeof d === 'string' ? d : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+
+function opView(r: OpRow) {
+  return {
+    id: r.id, operationId: r.operation_id, kind: r.kind, amountMinor: Number(r.amount_minor), currencyCode: r.currency_code,
+    routeId: r.route_id, toRouteId: r.to_route_id, adminId: r.admin_membership_id, workerId: r.worker_membership_id,
+    counterpartId: r.counterpart_membership_id, saleRequestId: r.sale_request_id, reversesOperationId: r.reverses_operation_id,
+    reversesKind: r.reverses_kind, reason: r.reason, entryDate: ymd(r.entry_date), actorId: r.actor_membership_id,
+    actorRole: r.actor_role, createdAt: r.created_at.toISOString(),
+  };
+}
+
+// ---------- Entradas ----------
+
+/** Importe en unidades menores: entero positivo, sin decimales (nunca coma flotante). */
+function amountOf(body: Record<string, unknown>): number {
+  const v = body['amountMinor'];
+  if (typeof v !== 'number' || !Number.isSafeInteger(v) || v <= 0) {
+    throw new ApiError(400, 'INVALID_INPUT', 'amountMinor must be a positive integer (minor units)', { field: 'amountMinor' });
+  }
+  return v;
+}
+
+const reasonOf = (body: Record<string, unknown>) => {
+  const r = reqText(body, 'reason', 300);
+  if (r.length < 3) throw new ApiError(400, 'INVALID_INPUT', 'reason is required', { field: 'reason' });
+  return r;
+};
+
+// ---------- Hechos releídos en la transacción ----------
+
+interface RouteFacts { id: string; name: string; controller: string | null }
+
+/** Ruta del alcance del actor (una ajena es indistinguible de una inexistente). */
+async function routeOf(client: pg.PoolClient, ctx: ActiveContext, id: string): Promise<RouteFacts> {
+  if (!routeUnrestricted(ctx) && !ctx.routeIds.includes(id)) throw new ApiError(404, 'NOT_FOUND');
+  const r = await client.query<{ id: string; name: string; capital_controller_membership_id: string | null }>(
+    'select id, name, capital_controller_membership_id from adex.routes where company_id = $1 and id = $2', [ctx.companyId, id]);
+  const row = r.rows[0];
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  return { id: row.id, name: row.name, controller: row.capital_controller_membership_id };
+}
+
+/** `routeCashAuthorityError` de CLEAN con el responsable y las asignaciones del servidor. */
+function requireAuthority(ctx: ActiveContext, route: RouteFacts, op: RouteCashOperation, members: Map<string, MembershipFacts>): void {
+  const users = [...members.values()].map(toCleanUser);
+  const controller = route.controller ? members.get(route.controller) : undefined;
+  if (!controller || controller.role !== 'admin' || controller.status !== 'activo' || !controller.routeIds.includes(route.id)) {
+    throw new ApiError(409, 'CAPITAL_CONTROLLER_MISSING', 'the route has no valid capital controller');
+  }
+  const err = routeCashAuthorityError(toCleanUser(ctx), { id: route.id, tenantId: ctx.companyId, capitalControllerAdminId: route.controller ?? undefined }, op, users);
+  if (err) throw new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED', err);
+}
+
+/** `custodianBlockedReason` de CLEAN: activa, con caja personal y asignada a la ruta. */
+function requireCustodian(members: Map<string, MembershipFacts>, id: string, routeId: string): MembershipFacts {
+  const m = members.get(id);
+  if (!m) throw new ApiError(404, 'NOT_FOUND');
+  if (m.status !== 'activo' || !hasPersonalCashbox(m.role) || !m.routeIds.includes(routeId)) throw new ApiError(400, 'CUSTODIAN_INVALID');
+  return m;
+}
+
+function requireWorker(members: Map<string, MembershipFacts>, id: string): MembershipFacts {
+  const m = members.get(id);
+  if (!m) throw new ApiError(404, 'NOT_FOUND');
+  if (!hasPersonalCashbox(m.role)) throw new ApiError(400, 'CUSTODIAN_INVALID');
+  return m;
+}
+
+/** Nadie reduce su propia custodia (la registra otra persona). */
+function notSelf(ctx: ActiveContext, workerId: string): void {
+  if (workerId === ctx.membershipId) throw new ApiError(403, 'SELF_REDUCTION_FORBIDDEN');
+}
+
+// ---------- Escritura (segunda barrera) ----------
+
+interface PostParams {
+  kind: CapitalKind; amount?: number | null; reason: string; route?: string | null; worker?: string | null; counterpart?: string | null;
+  toRoute?: string | null; admin?: string | null; saleRequest?: string | null; reverses?: string | null;
+}
+
+function requireOperationId(operationId: string | null): string {
+  if (!operationId) throw new ApiError(400, 'OPERATION_ID_REQUIRED');
+  return operationId;
+}
+
+async function post(client: pg.PoolClient, operationId: string, p: PostParams): Promise<OpRow> {
+  const r = await client.query<OpRow>(
+    'select * from adex.capital_post($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)',
+    [operationId, p.kind, p.amount ?? null, p.reason, p.route ?? null, p.worker ?? null, p.counterpart ?? null, p.toRoute ?? null,
+      p.admin ?? null, p.saleRequest ?? null, p.reverses ?? null]);
+  return r.rows[0]!;
+}
+
+/** Patas de la operación VISIBLES para el actor (RLS: nunca la bolsa ajena). */
+async function visibleEntries(client: pg.PoolClient, ctx: ActiveContext, opId: string) {
+  const r = await client.query<{ leg: number; kind: string; membership_id: string | null; route_id: string | null; amount_minor: string; balance_after_minor: string }>(
+    `select e.leg, a.kind, a.membership_id, a.route_id, e.amount_minor, e.balance_after_minor
+       from adex.capital_entries e join adex.capital_accounts a on a.company_id = e.company_id and a.id = e.account_id
+      where e.company_id = $1 and e.operation_id = $2 order by e.leg`, [ctx.companyId, opId]);
+  return r.rows.map((x) => ({
+    leg: x.leg, account: { kind: x.kind, membershipId: x.membership_id, routeId: x.route_id },
+    amountMinor: Number(x.amount_minor), balanceAfterMinor: Number(x.balance_after_minor),
+  }));
+}
+
+const ACTIONS: Record<CapitalKind, string> = {
+  COMPANY_DEPOSIT: 'COMPANY_CAPITAL_DEPOSIT', COMPANY_WITHDRAWAL: 'COMPANY_CAPITAL_WITHDRAWAL',
+  ADMIN_ALLOCATION: 'ADMIN_CAPITAL_ALLOCATED', ADMIN_RETURN: 'ADMIN_CAPITAL_RETURNED',
+  PARTNER_CONTRIBUTION: 'PARTNER_CONTRIBUTION_REGISTERED', WORKER_DELIVERY: 'CENTRAL_CAPITAL_DELIVERED',
+  WORKER_RETURN: 'CENTRAL_CAPITAL_RETURNED', WORKER_TRANSFER: 'CASH_CUSTODY_PERSON_TO_PERSON',
+  ROUTE_REASSIGNMENT: 'CENTRAL_CAPITAL_REASSIGNED', REVERSAL: 'CAPITAL_OPERATION_REVERSED',
+};
+
+/** Escribe, audita (misma transacción) y responde con lo que el actor puede ver. */
+async function execute(client: pg.PoolClient, ctx: ActiveContext, operationId: string | null, p: PostParams, description: string) {
+  const op = await post(client, requireOperationId(operationId), p);
+  const view = opView(op);
+  await audit(client, ctx, {
+    action: ACTIONS[p.kind], entityType: 'capital_operation', entityId: op.id, routeId: op.route_id, description, reason: p.reason,
+    after: { kind: view.kind, amountMinor: view.amountMinor, currencyCode: view.currencyCode, routeId: view.routeId, toRouteId: view.toRouteId,
+      adminId: view.adminId, workerId: view.workerId, counterpartId: view.counterpartId, saleRequestId: view.saleRequestId,
+      reversesOperationId: view.reversesOperationId, entryDate: view.entryDate },
+    metadata: { operationId: op.operation_id },
+  });
+  return { operation: view, entries: await visibleEntries(client, ctx, op.id) };
+}
+
+// ============================================================
+// Comandos
+// ============================================================
+
+/** Capital nuevo de la empresa (aporte externo). SuperAdmin. */
+export async function companyDeposit(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
+  need(ctx, 'capital.allocateAdmins');
+  const amount = amountOf(body);
+  return execute(client, ctx, operationId, { kind: 'COMPANY_DEPOSIT', amount, reason: reasonOf(body) }, `Capital ${amount} depositado en la empresa.`);
+}
+
+/** Salida de capital de la empresa: solo lo NO asignado a Administradores. SuperAdmin. */
+export async function companyWithdrawal(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
+  need(ctx, 'capital.allocateAdmins');
+  const amount = amountOf(body);
+  return execute(client, ctx, operationId, { kind: 'COMPANY_WITHDRAWAL', amount, reason: reasonOf(body) }, `Capital ${amount} retirado de la empresa.`);
+}
+
+async function requireAdmin(client: pg.PoolClient, ctx: ActiveContext, adminId: string, mustBeActive: boolean): Promise<MembershipFacts> {
+  const a = (await loadMembers(client, ctx, [adminId])).get(adminId);
+  if (!a || a.role !== 'admin') throw new ApiError(404, 'NOT_FOUND');
+  if (mustBeActive && a.status !== 'activo') throw new ApiError(409, 'MEMBER_INACTIVE');
+  return a;
+}
+
+/** Empresa → bolsa del Administrador. SuperAdmin; no supera el disponible de la empresa. */
+export async function allocateToAdmin(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
+  need(ctx, 'capital.allocateAdmins');
+  const admin = await requireAdmin(client, ctx, reqId(body, 'adminId'), true);
+  const amount = amountOf(body);
+  return execute(client, ctx, operationId, { kind: 'ADMIN_ALLOCATION', amount, reason: reasonOf(body), admin: admin.membershipId },
+    `Capital ${amount} asignado a la bolsa de ${admin.displayName}.`);
+}
+
+/** Bolsa del Administrador → empresa. SuperAdmin; solo lo disponible (no lo que está en custodia). */
+export async function returnFromAdmin(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
+  need(ctx, 'capital.allocateAdmins');
+  const admin = await requireAdmin(client, ctx, reqId(body, 'adminId'), false);
+  const amount = amountOf(body);
+  return execute(client, ctx, operationId, { kind: 'ADMIN_RETURN', amount, reason: reasonOf(body), admin: admin.membershipId },
+    `Capital ${amount} devuelto por ${admin.displayName} a la empresa.`);
+}
+
+/**
+ * Socio → bolsa del Administrador responsable de la ruta que el aporte va a operar
+ * (C1). Lo registra ese responsable. Nunca entra a una ruta ni a un trabajador. Caja
+ * socios (D1) no se toca: si debe tener saldo sigue abierta.
+ */
+export async function partnerContribution(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
+  const route = await routeOf(client, ctx, reqId(body, 'routeId'));
+  const routeId = route.id;
+  need(ctx, 'transfer.create');
+  need(ctx, 'capital.manage', { routeId });
+  const members = await loadMembers(client, ctx);
+  requireAuthority(ctx, route, 'structural', members);
+  const partner = members.get(reqId(body, 'partnerId'));
+  if (!partner || partner.role !== 'socio') throw new ApiError(404, 'NOT_FOUND');
+  const inScope = isTransferInScope(toCleanUser(ctx), { origenType: 'partner', socioOrigenId: partner.membershipId, destinoType: 'route', routeDestinoId: routeId },
+    (id) => [...(members.get(id)?.routeIds ?? [])]);
+  if (!inScope) throw new ApiError(403, 'PERMISSION_DENIED');
+  const amount = amountOf(body);
+  return execute(client, ctx, operationId, { kind: 'PARTNER_CONTRIBUTION', amount, reason: reasonOf(body), route: routeId, counterpart: partner.membershipId },
+    `Aporte ${amount} de ${partner.displayName} a la bolsa del responsable de ${route.name}.`);
+}
+
+/**
+ * Bolsa del responsable → custodia del trabajador en ESA ruta. No crea venta ni
+ * deuda; la referencia a una solicitud es opcional. El importe lo decide el
+ * Administrador (anticipo del día, venta completa o solo la diferencia).
+ */
+export async function deliverToWorker(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
+  const route = await routeOf(client, ctx, reqId(body, 'routeId'));
+  const routeId = route.id;
+  need(ctx, 'capital.manage', { routeId });
+  need(ctx, 'cashCustody.manage', { routeId });
+  const members = await loadMembers(client, ctx);
+  requireAuthority(ctx, route, 'structural', members);
+  const worker = requireCustodian(members, reqId(body, 'workerId'), routeId);
+  const saleRequestId = optId(body, 'saleRequestId');
+  const amount = amountOf(body);
+  return execute(client, ctx, operationId,
+    { kind: 'WORKER_DELIVERY', amount, reason: reasonOf(body), route: routeId, worker: worker.membershipId, saleRequest: saleRequestId },
+    `Capital ${amount} entregado a ${worker.displayName} en ${route.name}.`);
+}
+
+/**
+ * Custodia del trabajador → bolsa del responsable. Autoridad `settle` (responsable,
+ * SuperAdmin o Supervisor de la ruta); nadie registra su propia devolución. No supera
+ * la custodia (la posición puede saldar el faltante arrastrado, como en CLEAN).
+ */
+export async function returnFromWorker(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
+  const route = await routeOf(client, ctx, reqId(body, 'routeId'));
+  const routeId = route.id;
+  need(ctx, 'cashCustody.manage', { routeId });
+  const members = await loadMembers(client, ctx);
+  requireAuthority(ctx, route, 'settle', members);
+  const worker = requireWorker(members, reqId(body, 'workerId'));
+  notSelf(ctx, worker.membershipId);
+  const amount = amountOf(body);
+  return execute(client, ctx, operationId, { kind: 'WORKER_RETURN', amount, reason: reasonOf(body), route: routeId, worker: worker.membershipId },
+    `Devolución ${amount} de ${worker.displayName} (${route.name}) a la bolsa del responsable.`);
+}
+
+/** Traspaso entre trabajadores de la MISMA ruta (no toca ninguna bolsa). */
+export async function transferBetweenWorkers(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
+  const route = await routeOf(client, ctx, reqId(body, 'routeId'));
+  const routeId = route.id;
+  need(ctx, 'cashCustody.manage', { routeId });
+  const members = await loadMembers(client, ctx);
+  requireAuthority(ctx, route, 'settle', members);
+  const from = requireWorker(members, reqId(body, 'fromWorkerId'));
+  if (!from.routeIds.includes(routeId)) throw new ApiError(400, 'CUSTODIAN_INVALID');
+  const to = requireCustodian(members, reqId(body, 'toWorkerId'), routeId);
+  if (from.membershipId === to.membershipId) throw new ApiError(400, 'INVALID_INPUT', 'origin and destination must differ');
+  notSelf(ctx, from.membershipId);
+  const amount = amountOf(body);
+  return execute(client, ctx, operationId,
+    { kind: 'WORKER_TRANSFER', amount, reason: reasonOf(body), route: routeId, worker: from.membershipId, counterpart: to.membershipId },
+    `Traspaso ${amount} de ${from.displayName} a ${to.displayName} en ${route.name}.`);
+}
+
+/**
+ * Reasignación entre rutas del MISMO responsable: la custodia de una ruta vuelve a
+ * su bolsa y sale hacia la custodia de otra ruta, en una sola operación (cada ruta
+ * conserva su atribución). Solo el responsable de ambas; el trabajador no se mueve
+ * dinero a sí mismo. Responsables distintos: decisión D2 abierta → 409.
+ */
+export async function reassignBetweenRoutes(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
+  const fromRouteId = reqId(body, 'fromRouteId');
+  const toRouteId = reqId(body, 'toRouteId');
+  if (fromRouteId === toRouteId) throw new ApiError(400, 'INVALID_INPUT', 'routes must differ');
+  // Ruta fuera del alcance = inexistente (404) antes de cualquier otra respuesta.
+  const [from, to] = [await routeOf(client, ctx, fromRouteId), await routeOf(client, ctx, toRouteId)];
+  for (const routeId of [fromRouteId, toRouteId]) {
+    need(ctx, 'capital.manage', { routeId });
+    need(ctx, 'cashCustody.manage', { routeId });
+  }
+  const members = await loadMembers(client, ctx);
+  if (from.controller !== to.controller) {
+    throw new ApiError(409, 'DECISION_PENDING_D2', 'moving cash between routes of different capital controllers depends on decision D2');
+  }
+  requireAuthority(ctx, from, 'structural', members);
+  requireAuthority(ctx, to, 'structural', members);
+  const worker = requireWorker(members, reqId(body, 'fromWorkerId'));
+  const recipient = requireCustodian(members, reqId(body, 'toWorkerId'), toRouteId);
+  notSelf(ctx, worker.membershipId);
+  const amount = amountOf(body);
+  return execute(client, ctx, operationId,
+    { kind: 'ROUTE_REASSIGNMENT', amount, reason: reasonOf(body), route: fromRouteId, toRoute: toRouteId, worker: worker.membershipId, counterpart: recipient.membershipId },
+    `Reasignación ${amount}: ${worker.displayName} (${from.name}) → ${recipient.displayName} (${to.name}).`);
+}
+
+/**
+ * Anulación con asiento espejo (nunca se borra ni se reescribe la original):
+ *   · entrega: solo si el trabajador aún conserva ese efectivo en la ruta;
+ *   · devolución, aporte, asignación, devolución a la empresa, depósito: solo si la
+ *     cuenta que recibió aún lo tiene (sin sobregiro);
+ *   · retiro de la empresa: NO (reintroduciría dinero; se registra un depósito);
+ *   · una anulación no se anula; cada operación se anula una sola vez.
+ */
+export async function reverseOperation(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Record<string, unknown>, operationId: string | null) {
+  pathId(id);
+  const r = await client.query<OpRow>('select * from adex.capital_operations where company_id = $1 and id = $2', [ctx.companyId, id]);
+  const orig = r.rows[0];
+  if (!orig) throw new ApiError(404, 'NOT_FOUND');
+  if (COMPANY_KINDS.includes(orig.kind)) need(ctx, 'capital.allocateAdmins');
+  else if (orig.kind === 'PARTNER_CONTRIBUTION') need(ctx, 'transfer.create');
+  else need(ctx, 'capital.manage', { routeId: orig.route_id ?? undefined });
+  if (orig.route_id && !COMPANY_KINDS.includes(orig.kind)) {
+    const members = await loadMembers(client, ctx);
+    const route = await routeOf(client, ctx, orig.route_id);
+    if (orig.kind !== 'REVERSAL') requireAuthority(ctx, route, 'correct', members);
+  }
+  const reason = reasonOf(body);
+  return execute(client, ctx, operationId, { kind: 'REVERSAL', reason, reverses: orig.id },
+    `Anulación de ${orig.kind} ${Number(orig.amount_minor)}.`);
+}
+
+// ============================================================
+// Consultas (todas filtradas por RLS en el contexto activo)
+// ============================================================
+
+/** Posiciones de custodia visibles: el Cobrador, solo la suya. */
+export async function listCustody(client: pg.PoolClient, ctx: ActiveContext, q: URLSearchParams) {
+  const routeId = q.get('routeId');
+  if (routeId !== null) pathId(routeId);
+  const r = await client.query<{ route_id: string; membership_id: string; display_name: string; role: string; balance_minor: string; carried_minor: string; updated_at: Date }>(
+    `select a.route_id, a.membership_id, m.display_name, m.role, a.balance_minor, a.carried_minor, a.updated_at
+       from adex.capital_accounts a join adex.memberships m on m.company_id = a.company_id and m.id = a.membership_id
+      where a.company_id = $1 and a.kind = 'custody' ${routeId ? 'and a.route_id = $2' : ''}
+      order by a.route_id, m.display_name, a.membership_id`, routeId ? [ctx.companyId, routeId] : [ctx.companyId]);
+  return r.rows.map((x) => ({
+    routeId: x.route_id, workerId: x.membership_id, workerName: x.display_name, role: x.role,
+    balanceMinor: Number(x.balance_minor), carriedMinor: Number(x.carried_minor),
+    // Lo que puede traspasar o anularse: billetes, no deuda arrastrada (`transferableCash`).
+    transferableMinor: Math.max(0, Number(x.balance_minor) - Number(x.carried_minor)),
+    updatedAt: x.updated_at.toISOString(),
+  }));
+}
+
+export async function listOperations(client: pg.PoolClient, ctx: ActiveContext, q: URLSearchParams) {
+  const routeId = q.get('routeId');
+  if (routeId !== null) pathId(routeId);
+  const limit = Math.min(Math.max(Number(q.get('limit') ?? 100) || 100, 1), 500);
+  const r = await client.query<OpRow>(
+    `select * from adex.capital_operations where company_id = $1 ${routeId ? 'and (route_id = $3 or to_route_id = $3)' : ''}
+      order by created_at desc, id limit $2`, routeId ? [ctx.companyId, limit, routeId] : [ctx.companyId, limit]);
+  return r.rows.map(opView);
+}
+
+export async function getOperation(client: pg.PoolClient, ctx: ActiveContext, id: string) {
+  pathId(id);
+  const r = await client.query<OpRow>('select * from adex.capital_operations where company_id = $1 and id = $2', [ctx.companyId, id]);
+  if (!r.rows[0]) throw new ApiError(404, 'NOT_FOUND');
+  return { operation: opView(r.rows[0]), entries: await visibleEntries(client, ctx, id) };
+}
+
+interface AdminPool {
+  adminId: string; name: string; status: string;
+  availableMinor: number; allocatedNetMinor: number; partnerContributionsMinor: number;
+  deliveredToWorkersMinor: number; returnedFromWorkersMinor: number; reassignedNetMinor: number;
+  /** Efectivo en custodia de trabajadores en las rutas que HOY controla. No es disponible. */
+  custodyUnderResponsibilityMinor: number;
+}
+
+/** Bolsas de Administradores (flujos por tipo) y posición de la empresa. */
+async function adminPools(client: pg.PoolClient, ctx: ActiveContext, onlyAdmin: string | null): Promise<AdminPool[]> {
+  const r = await client.query<{
+    membership_id: string; display_name: string; status: string; balance: string;
+    allocated: string; contributions: string; delivered: string; returned: string; reassigned: string; custody: string;
+  }>(
+    `select a.membership_id, m.display_name, m.status, a.balance_minor balance,
+            coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) in ('ADMIN_ALLOCATION', 'ADMIN_RETURN')), 0) allocated,
+            coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'PARTNER_CONTRIBUTION'), 0) contributions,
+            coalesce(-sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'WORKER_DELIVERY'), 0) delivered,
+            coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'WORKER_RETURN'), 0) returned,
+            coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'ROUTE_REASSIGNMENT'), 0) reassigned,
+            coalesce((select sum(c.balance_minor) from adex.capital_accounts c join adex.routes ro on ro.company_id = c.company_id and ro.id = c.route_id
+                       where c.company_id = a.company_id and c.kind = 'custody' and ro.capital_controller_membership_id = a.membership_id), 0) custody
+       from adex.capital_accounts a
+       join adex.memberships m on m.company_id = a.company_id and m.id = a.membership_id
+       left join adex.capital_entries e on e.company_id = a.company_id and e.account_id = a.id
+       left join adex.capital_operations o on o.company_id = e.company_id and o.id = e.operation_id
+      where a.company_id = $1 and a.kind = 'admin' ${onlyAdmin ? 'and a.membership_id = $2' : ''}
+      group by a.company_id, a.id, a.membership_id, m.display_name, m.status, a.balance_minor
+      order by m.display_name, a.membership_id`, onlyAdmin ? [ctx.companyId, onlyAdmin] : [ctx.companyId]);
+  return r.rows.map((x) => ({
+    adminId: x.membership_id, name: x.display_name, status: x.status, availableMinor: Number(x.balance),
+    allocatedNetMinor: Number(x.allocated), partnerContributionsMinor: Number(x.contributions),
+    deliveredToWorkersMinor: Number(x.delivered), returnedFromWorkersMinor: Number(x.returned), reassignedNetMinor: Number(x.reassigned),
+    custodyUnderResponsibilityMinor: Number(x.custody),
+  }));
+}
+
+/**
+ * Resumen de capital. SuperAdmin: empresa, todas las bolsas y la custodia. Un
+ * Administrador: SOLO su bolsa (nunca la de otro ni la de la empresa). El resto, 403.
+ */
+export async function capitalSummary(client: pg.PoolClient, ctx: ActiveContext) {
+  if (allowed(ctx, 'capital.allocateAdmins')) {
+    const t = (await client.query<{ kind: string; total: string }>(
+      `select kind, sum(balance_minor)::text total from adex.capital_accounts where company_id = $1 group by kind`, [ctx.companyId])).rows;
+    const total = (k: string) => Number(t.find((x) => x.kind === k)?.total ?? 0);
+    return {
+      currencyCode: ctx.company.currencyCode, minorUnits: ctx.company.minorUnits,
+      company: {
+        availableMinor: total('company'),
+        // Lo que entró a la cadena desde fuera (depósitos − retiros) y desde socios.
+        externalNetInMinor: -total('external'), partnerContributionsMinor: -total('partner'),
+        adminPoolsMinor: total('admin'), custodyMinor: total('custody'),
+      },
+      admins: await adminPools(client, ctx, null),
+    };
+  }
+  need(ctx, 'capital.manage');
+  return { currencyCode: ctx.company.currencyCode, minorUnits: ctx.company.minorUnits, admins: await adminPools(client, ctx, ctx.membershipId) };
+}
+
+/**
+ * Conciliación reproducible (SuperAdmin): saldos materializados = Σ patas; cada
+ * operación cuadra; sin sobregiros; y conservación:
+ *   −(externa + socios) = empresa + Σ bolsas + Σ custodias
+ * (lo que entró a la cadena está en alguna cuenta; ninguna operación lo crea ni lo destruye).
+ */
+export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveContext) {
+  need(ctx, 'capital.allocateAdmins');
+  const q = async (sql: string) => Number((await client.query<{ n: string }>(sql, [ctx.companyId])).rows[0]!.n);
+  const mismatched = await q(
+    `select count(*)::text n from adex.capital_accounts a
+      where a.company_id = $1 and a.balance_minor <> coalesce((select sum(e.amount_minor) from adex.capital_entries e
+                                                               where e.company_id = a.company_id and e.account_id = a.id), 0)`);
+  const unbalanced = await q(
+    `select count(*)::text n from adex.capital_operations o
+      where o.company_id = $1 and (select coalesce(sum(e.amount_minor), 0) <> 0 or count(*) < 2 from adex.capital_entries e
+                                    where e.company_id = o.company_id and e.operation_id = o.id)`);
+  const overdrawn = await q(`select count(*)::text n from adex.capital_accounts where company_id = $1 and kind not in ('external', 'partner') and balance_minor < 0`);
+  const foreignCurrency = await q(
+    `select count(*)::text n from adex.capital_operations o join adex.companies c on c.id = o.company_id
+      where o.company_id = $1 and o.currency_code <> c.currency_code`);
+  const conservation = await q(`select coalesce(sum(balance_minor), 0)::text n from adex.capital_accounts where company_id = $1`);
+  const checks = [
+    { name: 'positions-match-ledger', ok: mismatched === 0, detail: mismatched },
+    { name: 'operations-balanced', ok: unbalanced === 0, detail: unbalanced },
+    { name: 'no-overdraft', ok: overdrawn === 0, detail: overdrawn },
+    { name: 'single-currency', ok: foreignCurrency === 0, detail: foreignCurrency },
+    { name: 'capital-conserved', ok: conservation === 0, detail: conservation },
+  ];
+  return { ok: checks.every((c) => c.ok), checks };
+}

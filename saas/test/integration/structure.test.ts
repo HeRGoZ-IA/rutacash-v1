@@ -102,7 +102,7 @@ describe('Fase 2 · estructura de empresa, Oficinas, rutas y categorías', () =>
 
   test('STR-021 · alta de ruta: capital inicial, Oficina ajena, Cobrador inactivo, Administrador ajeno y roles sin permiso → rechazos', async () => {
     const base = { name: 'R', interestRate: 20, freeRate: false, maxLoanMinor: 1000 };
-    assert.equal((await bruno('POST', '/v1/routes', { ...base, initialCapitalMinor: 1000 })).body['error'], 'REQUIRES_PHASE_3_CAPITAL');
+    assert.equal((await bruno('POST', '/v1/routes', { ...base, initialCapitalMinor: 1000 })).body['error'], 'ROUTE_INITIAL_CAPITAL_NOT_ALLOWED');
     assert.equal((await bruno('POST', '/v1/routes', { ...base, officeId: uid('c2:office:1') })).body['error'], 'OFFICE_NOT_FOUND');
     assert.equal((await bruno('POST', '/v1/routes', { ...base, collectorId: M.ivanHist })).body['error'], 'INVALID_COLLECTOR');
     assert.equal((await bruno('POST', '/v1/routes', { ...base, collectorId: M.elisaCob })).body['error'], 'INVALID_COLLECTOR', 'Cobrador de otra empresa');

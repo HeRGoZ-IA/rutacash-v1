@@ -128,14 +128,16 @@ async function transition(client: pg.PoolClient, ctx: ActiveContext, route: { id
       [e.id, ctx.companyId, e.amount, e.from, e.to, route.id, eventId, e.description, entryDate, ctx.membershipId, ctx.role]);
   }
   const transferred = (fromAdminId ? carried : 0) + (toAdminId ? unattributed : 0);
-  // `base_at_change_minor` queda NULL: la Base de la ruta la calcula el servidor desde
-  // la Fase 3 (caja). Es un dato informativo; ningún saldo depende de él.
+  // `base_at_change_minor` (Fase 3): efectivo en custodia de los trabajadores de la ruta
+  // en el instante del cambio. Informativo: no se mueve dinero; desde ahora las
+  // devoluciones de esa custodia van a la bolsa del nuevo responsable.
   await client.query(
     `insert into adex.route_capital_controller_events (id, company_id, route_id, kind, from_admin_membership_id, to_admin_membership_id,
-                                                       capital_transferred_minor, ledger_entry_id, reason, created_at, actor_membership_id,
-                                                       actor_role, sync_status)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), $10, $11, 'synced')`,
-    [eventId, ctx.companyId, route.id, kind, fromAdminId, toAdminId, transferred, entries[0]?.id ?? null, reason, ctx.membershipId, ctx.role]);
+                                                       capital_transferred_minor, base_at_change_minor, ledger_entry_id, reason, created_at,
+                                                       actor_membership_id, actor_role, sync_status)
+     values ($1, $2, $3, $4, $5, $6, $7, adex.capital_route_custody_total($12::text, $13::text), $8, $9, now(), $10, $11, 'synced')`,
+    [eventId, ctx.companyId, route.id, kind, fromAdminId, toAdminId, transferred, entries[0]?.id ?? null, reason, ctx.membershipId, ctx.role,
+      ctx.companyId, route.id]);
   await client.query(
     `update adex.routes set capital_controller_membership_id = $3, capital_controller_since = case when $4 then now() end,
             updated_at = now() where company_id = $1 and id = $2`, [ctx.companyId, route.id, toAdminId, toAdminId !== null]);

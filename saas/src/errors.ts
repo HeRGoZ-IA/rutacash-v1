@@ -34,6 +34,20 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX202': return new ApiError(400, 'INVALID_DOCUMENT');
     case 'AX301': return new ApiError(409, 'ROUTE_NOT_OPERATIONAL');
     case 'AX302': return new ApiError(400, 'INVALID_COLLECTOR');
+    // Fase 3 · `adex.capital_post` (segunda barrera, bajo bloqueo). Sin cifras de saldos.
+    case 'AX401': return new ApiError(409, 'INSUFFICIENT_FUNDS');
+    case 'AX402': return new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED');
+    case 'AX403': return new ApiError(400, 'CUSTODIAN_INVALID');
+    case 'AX404': return new ApiError(409, 'REVERSAL_NOT_ALLOWED');
+    case 'AX405': return new ApiError(409, 'ALREADY_REVERSED');
+    case 'AX406': return new ApiError(409, 'DECISION_PENDING_D2');
+    case 'AX407': return new ApiError(409, 'PERIOD_CLOSED');
+    case 'AX408': return new ApiError(409, 'CAPITAL_CONTROLLER_MISSING');
+    case 'AX409': return new ApiError(409, 'OPERATION_ID_REUSED');
+    case 'AX410': return new ApiError(403, 'SELF_REDUCTION_FORBIDDEN');
+    case 'AX411': return new ApiError(400, 'INVALID_INPUT');
+    case 'AX412': return new ApiError(404, 'NOT_FOUND');
+    case 'AX413': return new ApiError(409, 'FUNDS_ALREADY_USED');
     default: return null;
   }
 }

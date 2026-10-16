@@ -82,7 +82,7 @@ describe('Fase 2 · responsable de capital (v16) como restricción transaccional
     assert.equal(await placement(db.admin, c1, r1, x), 480_000, 'la nueva sí, por el mismo importe');
     assert.equal(await controllerOf(r1), x);
     const e = await db.admin.query('select reason, capital_transferred_minor::int c, base_at_change_minor from adex.route_capital_controller_events where id = $1', [(r.body['event'] as { eventId: string }).eventId]);
-    assert.deepEqual(e.rows, [{ reason: 'Reorganización de cartera', c: 480_000, base_at_change_minor: null }]);
+    assert.deepEqual(e.rows, [{ reason: 'Reorganización de cartera', c: 480_000, base_at_change_minor: '0' }], 'Fase 3: custodia de la ruta al cambiar (sin entregas: 0)');
   });
 
   test('CAP-003 · desactivar al único Administrador libera la ruta (RELEASE); reactivarlo la recupera con el mismo capital', async () => {

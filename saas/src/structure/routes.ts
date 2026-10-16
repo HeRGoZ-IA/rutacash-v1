@@ -11,8 +11,8 @@
 //   · el Administrador no elimina rutas; solo el SuperAdmin y solo sin historia (DS-11).
 //
 // Diferencias propias del servidor (justificadas):
-//   · capital inicial > 0 se rechaza: colocar capital es un comando de la Fase 3
-//     (sale de la bolsa del responsable). La ruta nace con 0 y lo coloca el responsable;
+//   · capital inicial > 0 se rechaza: no hay caja de ruta (capital centralizado, Fase 3).
+//     La ruta nace con 0 y el responsable entrega capital a los trabajadores desde su bolsa;
 //   · la auditoría del ciclo de vida ESTRUCTURAL de la propia ruta (alta, datos,
 //     Oficina, estado) va sin `route_id` (la entidad está en `entity_id`): si llevara
 //     la FK, ninguna ruta podría borrarse jamás aunque no tenga ninguna historia.
@@ -126,7 +126,7 @@ export async function createRoute(client: pg.PoolClient, ctx: ActiveContext, bod
   const freeRate = bool(body, 'freeRate');
   const maxLoanMinor = minor(body, 'maxLoanMinor');
   if (has(body, 'initialCapitalMinor') && minor(body, 'initialCapitalMinor') > 0) {
-    throw new ApiError(409, 'REQUIRES_PHASE_3_CAPITAL', 'initial capital is placed by the route capital controller from its pool (Phase 3)');
+    throw new ApiError(409, 'ROUTE_INITIAL_CAPITAL_NOT_ALLOWED', 'there is no route cash box: the capital controller delivers capital to workers from its pool');
   }
   const officeId = optId(body, 'officeId');
   const collectorId = optId(body, 'collectorId');

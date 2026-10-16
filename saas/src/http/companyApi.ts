@@ -1,9 +1,9 @@
 // API de EMPRESA (Fase 1: identidad, contexto y membresías · Fase 2: estructura y
-// catálogo). Sin framework.
+// catálogo · Fase 3: capital centralizado y custodia). Sin framework.
 //
 //   Authorization: Bearer <token de acceso del proveedor de identidad>
 //   X-Adex-Membership: <membresía con la que se opera>   (contexto explícito, DS-05)
-//   X-Adex-Operation-Id: <uuid>   (opcional, comandos de alta: idempotencia P3)
+//   X-Adex-Operation-Id: <uuid>   (altas: opcional; comandos de dinero: OBLIGATORIO. Idempotencia P3)
 //
 // El cliente nunca envía empresa, rol ni rutas: se ignoran los encabezados ajenos y
 // se rechaza cualquier campo de cuerpo desconocido. Todo con `adex_api` (sin BYPASSRLS).
@@ -31,6 +31,10 @@ import { createCategory, deleteCategory, listCategories, updateCategory } from '
 import {
   CLIENT_FIELDS, createClient, deleteClient, documentTypes, getClient, listClients, setClientStatus, updateClient,
 } from '../structure/clients.ts';
+import {
+  allocateToAdmin, capitalReconciliation, capitalSummary, companyDeposit, companyWithdrawal, deliverToWorker, getOperation, listCustody,
+  listOperations, partnerContribution, reassignBetweenRoutes, returnFromAdmin, returnFromWorker, reverseOperation, transferBetweenWorkers,
+} from '../capital/service.ts';
 import { readJson, scopeOf, send } from './common.ts';
 
 export interface CompanyApiOptions {
@@ -40,19 +44,23 @@ export interface CompanyApiOptions {
   lockTimeoutMs?: number;
   /** Solo pruebas: se ejecuta con el contexto resuelto y los bloqueos tomados. */
   afterContext?: (ctx: ActiveContext, path: string) => Promise<void>;
+  /** Solo pruebas: tras el comando y antes del COMMIT (un fallo aquí revierte todo). */
+  beforeCommit?: (ctx: ActiveContext, path: string) => Promise<void>;
   onError?: (err: unknown) => void;
 }
 
 type Result = { status: number; body: unknown };
-type Handler = (client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, query: URLSearchParams) => Promise<Result>;
+type Handler = (client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, query: URLSearchParams, operationId: string | null) => Promise<Result>;
 
 interface Endpoint {
   method: string;
   pattern: RegExp;
   /** Campos de cuerpo admitidos; null = sin cuerpo. */
   fields: readonly string[] | null;
-  /** Clave estable del comando para la idempotencia (solo altas). */
+  /** Clave estable del comando para la idempotencia (altas y comandos de dinero). */
   idempotent?: string;
+  /** Comando de dinero: sin `X-Adex-Operation-Id` se rechaza (un reintento nunca duplica). */
+  requiresOperation?: boolean;
   handler: (params: string[], provider: IdentityProvider) => Handler;
 }
 
@@ -125,6 +133,32 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'PATCH', pattern: new RegExp(`^/v1/clients/${ID}$`), fields: CLIENT_FIELDS, handler: ([id]) => async (c, ctx, b) => ok(await updateClient(c, ctx, id!, b)) },
   { method: 'POST', pattern: new RegExp(`^/v1/clients/${ID}/status$`), fields: ['status'], handler: ([id]) => async (c, ctx, b) => ok(await setClientStatus(c, ctx, id!, b)) },
   { method: 'POST', pattern: new RegExp(`^/v1/clients/${ID}/delete$`), fields: [], handler: ([id]) => async (c, ctx) => ok(await deleteClient(c, ctx, id!)) },
+  // ---------- Capital centralizado y custodia (Fase 3) ----------
+  { method: 'GET', pattern: /^\/v1\/capital\/summary$/, fields: null, handler: () => async (c, ctx) => ok(await capitalSummary(c, ctx)) },
+  { method: 'GET', pattern: /^\/v1\/capital\/reconciliation$/, fields: null, handler: () => async (c, ctx) => ok(await capitalReconciliation(c, ctx)) },
+  { method: 'GET', pattern: /^\/v1\/capital\/custody$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ positions: await listCustody(c, ctx, q) }) },
+  { method: 'GET', pattern: /^\/v1\/capital\/operations$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ operations: await listOperations(c, ctx, q) }) },
+  { method: 'GET', pattern: new RegExp(`^/v1/capital/operations/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getOperation(c, ctx, id!)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/company\/deposits$/, fields: ['amountMinor', 'reason'], idempotent: 'capital.company_deposit', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await companyDeposit(c, ctx, b, op)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/company\/withdrawals$/, fields: ['amountMinor', 'reason'], idempotent: 'capital.company_withdrawal', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await companyWithdrawal(c, ctx, b, op)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/allocations$/, fields: ['adminId', 'amountMinor', 'reason'], idempotent: 'capital.admin_allocation', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await allocateToAdmin(c, ctx, b, op)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/admin-returns$/, fields: ['adminId', 'amountMinor', 'reason'], idempotent: 'capital.admin_return', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await returnFromAdmin(c, ctx, b, op)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/partner-contributions$/, fields: ['partnerId', 'routeId', 'amountMinor', 'reason'],
+    idempotent: 'capital.partner_contribution', requiresOperation: true, handler: () => async (c, ctx, b, _q, op) => created(await partnerContribution(c, ctx, b, op)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/deliveries$/, fields: ['routeId', 'workerId', 'amountMinor', 'reason', 'saleRequestId'],
+    idempotent: 'capital.worker_delivery', requiresOperation: true, handler: () => async (c, ctx, b, _q, op) => created(await deliverToWorker(c, ctx, b, op)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/returns$/, fields: ['routeId', 'workerId', 'amountMinor', 'reason'], idempotent: 'capital.worker_return', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await returnFromWorker(c, ctx, b, op)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/worker-transfers$/, fields: ['routeId', 'fromWorkerId', 'toWorkerId', 'amountMinor', 'reason'],
+    idempotent: 'capital.worker_transfer', requiresOperation: true, handler: () => async (c, ctx, b, _q, op) => created(await transferBetweenWorkers(c, ctx, b, op)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/route-reassignments$/, fields: ['fromRouteId', 'toRouteId', 'fromWorkerId', 'toWorkerId', 'amountMinor', 'reason'],
+    idempotent: 'capital.route_reassignment', requiresOperation: true, handler: () => async (c, ctx, b, _q, op) => created(await reassignBetweenRoutes(c, ctx, b, op)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/capital/operations/${ID}/reverse$`), fields: ['reason'], idempotent: 'capital.reversal', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => created(await reverseOperation(c, ctx, id!, b, op)) },
 ];
 
 function match(method: string, path: string): { e: Endpoint; params: string[] } | null {
@@ -199,13 +233,16 @@ export function createCompanyApi(opts: CompanyApiOptions): http.Server {
         const opHeader = req.headers['x-adex-operation-id'];
         const operationId = typeof opHeader === 'string' && opHeader.trim() ? opHeader.trim().toLowerCase() : null;
         if (operationId && (!UUID_RE.test(operationId) || !found.e.idempotent)) throw new ApiError(400, 'INVALID_OPERATION_ID');
+        if (found.e.requiresOperation && !operationId) throw new ApiError(400, 'OPERATION_ID_REQUIRED');
         const body = found.e.fields ? await readJson(req, found.e.fields) : {};
         const handler = found.e.handler(found.params, opts.provider);
         const result = await withTransaction(opts.pool, async (c) => {
           const ctx = await resolveContext(c, claims, membershipHeader.trim());
           await opts.afterContext?.(ctx, url.pathname);
-          const run = () => handler(c, ctx, body, url.searchParams);
-          return operationId ? withOperation(c, ctx, operationId, found.e.idempotent!, body, run) : run();
+          const run = () => handler(c, ctx, body, url.searchParams, operationId);
+          const out = operationId ? await withOperation(c, ctx, operationId, found.e.idempotent!, body, run) : await run();
+          await opts.beforeCommit?.(ctx, url.pathname);
+          return out;
         }, txOpts);
         send(res, result.status, result.body);
       } catch (err) {

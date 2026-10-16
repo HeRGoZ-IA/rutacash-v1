@@ -120,7 +120,7 @@ async function serve(server: http.Server, errors: unknown[]): Promise<TestServer
 }
 
 export async function startCompanyApi(db: TestDb, issuer: LocalIssuer, provider: IdentityProvider,
-  extra: Partial<Pick<CompanyApiOptions, 'afterContext' | 'lockTimeoutMs'>> = {}): Promise<TestServer> {
+  extra: Partial<Pick<CompanyApiOptions, 'afterContext' | 'beforeCommit' | 'lockTimeoutMs'>> = {}): Promise<TestServer> {
   const errors: unknown[] = [];
   return serve(createCompanyApi({ pool: db.api, verifyToken: issuer.verifier, provider, onError: (e) => errors.push(e), ...extra }), errors);
 }

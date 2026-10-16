@@ -1,8 +1,8 @@
-# ADEX SaaS · backend multiempresa (Fases 0, 1 y 2)
+# ADEX SaaS · backend multiempresa (Fases 0, 1, 2 y 3)
 
 Paquete independiente de CLEAN: tiene su propio `package.json`, no lo importa `src/`, no entra en el `tsconfig.json` raíz ni en el bundle de Vite. Solo **lee** reglas de CLEAN (`src/lib`, `src/models`) para reutilizarlas como contrato (DS-01).
 
-Resultados y decisiones: [`docs/SAAS_FASES_0_1_RESULTADOS.md`](../docs/SAAS_FASES_0_1_RESULTADOS.md) · [`docs/SAAS_FASE_2_RESULTADOS.md`](../docs/SAAS_FASE_2_RESULTADOS.md).
+Resultados y decisiones: [`docs/SAAS_FASES_0_1_RESULTADOS.md`](../docs/SAAS_FASES_0_1_RESULTADOS.md) · [`docs/SAAS_FASE_2_RESULTADOS.md`](../docs/SAAS_FASE_2_RESULTADOS.md) · [`docs/SAAS_FASE_3_RESULTADOS.md`](../docs/SAAS_FASE_3_RESULTADOS.md).
 
 ## Requisitos
 
@@ -39,6 +39,7 @@ El clúster local imita los roles de Supabase (`postgres` sin superusuario, con 
 | `src/client/` | Fase 1: cliente de modo servidor (solo tokens; IndexedDB `adex-server-mode`; selector) |
 | `src/structure/` | Fase 2: comandos de empresa, Oficinas, rutas, categorías, clientes (DS-10/DS-11) y responsable de capital (`capitalGuard.ts`) |
 | `test/integration/` | Fase 1: identidad, REVOKE-004, plano Owner, cliente sin contraseñas · Fase 2: estructura, clientes, DS-11, responsable de capital, matriz de permisos contra el servidor |
+| `src/capital/` | Fase 3: capital centralizado y custodia (Empresa → bolsa del Administrador → custodia del trabajador por ruta, sin caja de ruta). Escritura solo por `adex.capital_post` (0009) |
 | `test/auth-real/`, `scripts/staging.ts` | Supabase Auth real, RLS gestionada y Fase 2 en ADEX-Staging: 19/19 PASS en tres ejecuciones consecutivas (2026-10-14) |
 
 ## Roles de base de datos
