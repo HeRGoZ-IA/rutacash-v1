@@ -16,6 +16,14 @@ export async function withTransaction<T>(pool: pg.Pool, fn: (client: pg.PoolClie
   const maxAttempts = opts.maxAttempts ?? 3;
   for (let attempt = 1; ; attempt++) {
     const client = await pool.connect();
+    // Un cliente EN USO no tiene el oyente de errores del pool: si el pooler corta la
+    // conexión (reinicio, suspensión del alojamiento), un evento 'error' sin oyente
+    // tumbaría el proceso. La consulta en curso falla igualmente (la transacción no
+    // se confirma o queda incierta, y el cliente la consulta por id) y la conexión
+    // rota se descarta en vez de volver al pool.
+    let broken: Error | undefined;
+    const onError = (e: Error) => { broken = e; };
+    client.on('error', onError);
     try {
       // Un solo viaje (protocolo simple, sin parámetros): el valor es un entero propio.
       const lockMs = Math.max(1, Math.trunc(Number(opts.lockTimeoutMs ?? 5000)) || 5000);
@@ -24,7 +32,7 @@ export async function withTransaction<T>(pool: pg.Pool, fn: (client: pg.PoolClie
       await client.query('commit');
       return result;
     } catch (err) {
-      await client.query('rollback').catch(() => undefined);
+      await client.query('rollback').catch((e: Error) => { broken ??= e; });
       const code = (err as { code?: string }).code ?? '';
       if (RETRYABLE.has(code) && attempt < maxAttempts) {
         await new Promise((r) => setTimeout(r, 5 + Math.floor(Math.random() * 20 * attempt)));
@@ -32,7 +40,8 @@ export async function withTransaction<T>(pool: pg.Pool, fn: (client: pg.PoolClie
       }
       throw err;
     } finally {
-      client.release();
+      client.off('error', onError);
+      client.release(broken ?? false);
     }
   }
 }

@@ -50,6 +50,19 @@ export class UncertainOperation extends Error {
   }
 }
 
+/**
+ * ¿Pudo el servidor confirmar el comando sin que lo sepamos? Sin respuesta (red caída,
+ * servidor reiniciándose o despertando) o 5xx (p. ej. la conexión con PostgreSQL se
+ * cortó durante el COMMIT): el resultado es DESCONOCIDO y se consulta por id antes de
+ * repetir. Un 4xx es una respuesta definitiva (la transacción no se confirmó).
+ */
+export function isUnconfirmed(err: unknown): boolean {
+  return err instanceof NetworkFailure || (err instanceof ApiFailure && err.status >= 500);
+}
+
+/** Una petición que tarda más que esto suele ser el servidor despertando (Render Free). */
+const WAKING_AFTER_MS = 4_000;
+
 /** Errores que significan «el contexto elegido ya no vale»: volver al selector. */
 export const CONTEXT_LOST = new Set(['COMPANY_BLOCKED', 'MEMBERSHIP_INACTIVE', 'MEMBERSHIP_NOT_FOUND', 'CONTEXT_INVALID']);
 /** Errores que significan «la sesión terminó»: volver a iniciar sesión. */
@@ -64,7 +77,8 @@ export interface ActiveContextView {
   capabilities: string[];
 }
 
-type Listener = (event: 'session' | 'context' | 'network', detail?: unknown) => void;
+type ClientEvent = 'session' | 'context' | 'network' | 'waking';
+type Listener = (event: ClientEvent, detail?: unknown) => void;
 
 function store(): SessionStore {
   try {
@@ -90,7 +104,7 @@ export class OnlineClient {
     this.listeners.add(l);
     return () => this.listeners.delete(l);
   }
-  private emit(event: 'session' | 'context' | 'network', detail?: unknown) {
+  private emit(event: ClientEvent, detail?: unknown) {
     for (const l of this.listeners) l(event, detail);
   }
 
@@ -160,16 +174,18 @@ export class OnlineClient {
   }
 
   /**
-   * Comando idempotente (dinero, altas). Un id por intención. Si no llega respuesta:
+   * Comando idempotente (dinero, altas). Un id por intención. Si no llega respuesta o
+   * llega un 5xx (resultado desconocido, ver `isUnconfirmed`):
    *   1. se consulta `/v1/operations/:id`: si existe, ese ES el resultado (no se repite);
    *   2. si no existe (404), el comando no se confirmó y repetirlo con el MISMO id es seguro;
    *   3. si tampoco se puede consultar, `UncertainOperation`: la UI ofrece «Comprobar».
+   * Nunca se repite con un id nuevo: eso sí podría duplicar el movimiento.
    */
   async command<T = Record<string, unknown>>(method: string, path: string, body: unknown, operationId: string = crypto.randomUUID()): Promise<T> {
     try {
       return (await this.request(method, path, { body, operationId })) as T;
     } catch (err) {
-      if (!(err instanceof NetworkFailure)) throw err;
+      if (!isUnconfirmed(err)) throw err;
       return this.resolveUncertain<T>(new UncertainOperation(operationId, method, path, body));
     }
   }
@@ -187,9 +203,9 @@ export class OnlineClient {
           try {
             return (await this.request(u.method, u.path, { body: u.body, operationId: u.operationId })) as T;
           } catch (again) {
-            if (!(again instanceof NetworkFailure)) throw again;
+            if (!isUnconfirmed(again)) throw again;
           }
-        } else if (!(err instanceof NetworkFailure)) {
+        } else if (!isUnconfirmed(err)) {
           throw err;
         }
       }
@@ -231,11 +247,16 @@ export class OnlineClient {
     if (o.operationId) headers['x-adex-operation-id'] = o.operationId;
     if (o.body !== undefined) headers['content-type'] = 'application/json';
     let res: Response;
+    let waking = false;
+    const slow = setTimeout(() => { waking = true; this.emit('waking', true); }, WAKING_AFTER_MS);
     try {
       res = await fetch(`${this.cfg.apiBase}${path}`, { method, headers, body: o.body === undefined ? undefined : JSON.stringify(o.body), cache: 'no-store' });
     } catch {
       this.emit('network', false);
       throw new NetworkFailure('NETWORK');
+    } finally {
+      clearTimeout(slow);
+      if (waking) this.emit('waking', false);
     }
     this.emit('network', true);
     let body: Record<string, unknown> = {};

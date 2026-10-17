@@ -1,9 +1,14 @@
-# ADEX Online v1 · imagen del API (DigitalOcean App Platform u otro alojamiento de contenedores).
+# ADEX Online v1 · imagen del API (Render, DigitalOcean App Platform u otro alojamiento de contenedores).
 #
 # Contexto de construcción: la RAÍZ del repositorio (el API importa las reglas de CLEAN
 # de `src/lib`, `src/models` y `src/services/installmentEngine.ts` sin copiarlas, DS-01).
 # Node 24 ejecuta TypeScript sin compilar (eliminación de tipos); no hay paso de build.
-# Ningún secreto entra en la imagen: toda la configuración llega por variables de entorno.
+# Ningún secreto entra en la imagen: toda la configuración llega por variables de entorno
+# en ejecución. No se declara ningún ARG: Render convierte sus variables en argumentos de
+# construcción, pero esta imagen no los usa. Sus archivos secretos llegan a la raíz del
+# contexto y no se copian (solo se copian `src`, `saas/src` y dos scripts; además
+# .dockerignore excluye *.crt/*.pem/*.key). El puerto lo fija la plataforma con `PORT`
+# (Render: 10000); EXPOSE es solo informativo.
 
 FROM node:24.15.0-bookworm-slim
 ENV NODE_ENV=production

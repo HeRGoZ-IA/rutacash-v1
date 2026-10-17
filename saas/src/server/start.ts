@@ -1,22 +1,24 @@
-// Arranque de ADEX ONLINE v1 (contenedor de DigitalOcean App Platform o local).
+// Arranque de ADEX ONLINE v1 (contenedor de Render, DigitalOcean App Platform o local).
 //
 //   node --import ./scripts/register-alias.mjs src/server/main.ts
 //
 // Toda la configuración llega por variables de entorno (secretos del proveedor de
-// alojamiento; NUNCA en el repositorio). Ver deploy/README y saas/.env.online.example.
+// alojamiento; NUNCA en el repositorio). Ver docs/ADEX_ONLINE_RENDER.md.
 //
-//   PORT                       puerto HTTP (App Platform lo fija; por defecto 8080)
+//   PORT                       puerto HTTP (Render: 10000; App Platform lo fija; por defecto 8080)
 //   ADEX_API_DATABASE_URL      adex_api por el pooler de transacciones de Supabase (obligatorio)
 //   ADEX_DEMO_DATABASE_URL     adex_demo (opcional: sin ella, /demo/v1 no existe)
 //   SUPABASE_URL               https://<ref>.supabase.co (emisor de tokens y JWKS)
 //   SUPABASE_PUBLISHABLE_KEY   cierre de sesión en el proveedor
 //   SUPABASE_SECRET_KEY        SOLO invitaciones (alta sin contraseña); nunca llega al navegador ni a PostgreSQL
 //   ADEX_ALLOWED_ORIGINS       orígenes exactos del frontend, separados por comas
-//   ADEX_PG_SSL_CA_PEM         certificado raíz de Supabase (PEM). Obligatorio salvo ADEX_PG_SSL_INSECURE=1
+//   ADEX_PG_SSL_CA_FILE        ruta del certificado raíz de Supabase (Render: archivo secreto en /etc/secrets/…)
+//   ADEX_PG_SSL_CA_PEM         o el certificado en línea (PEM). Uno de los dos es obligatorio salvo ADEX_PG_SSL_INSECURE=1
 //   ADEX_TRUST_PROXY=1         IP del cliente desde X-Forwarded-For (detrás del balanceador)
 //   ADEX_API_POOL_MAX          conexiones a la base (por defecto 8)
 //   ADEX_RATE_PER_IP / ADEX_RATE_PER_TOKEN   peticiones por minuto (por defecto 300 / 240)
 
+import { readFileSync } from 'node:fs';
 import pg from '../db/pgTypes.ts';
 import { createTokenVerifier } from '../auth/jwt.ts';
 import { createSupabaseProvider } from '../auth/provider.ts';
@@ -32,8 +34,17 @@ export function readConfig(env: NodeJS.ProcessEnv) {
     return v;
   };
   const insecure = env['ADEX_PG_SSL_INSECURE'] === '1';
-  const ca = env['ADEX_PG_SSL_CA_PEM']?.replace(/\\n/g, '\n');
-  if (!ca && !insecure) throw new Error('ADEX_PG_SSL_CA_PEM is required (or ADEX_PG_SSL_INSECURE=1 for a non-production trial)');
+  const caFile = env['ADEX_PG_SSL_CA_FILE']?.trim();
+  let ca = env['ADEX_PG_SSL_CA_PEM']?.replace(/\\n/g, '\n');
+  if (caFile) {
+    try {
+      ca = readFileSync(caFile, 'utf8');
+    } catch {
+      throw new Error('ADEX_PG_SSL_CA_FILE cannot be read');
+    }
+    if (!ca.includes('-----BEGIN CERTIFICATE-----')) throw new Error('ADEX_PG_SSL_CA_FILE is not a PEM certificate');
+  }
+  if (!ca && !insecure) throw new Error('ADEX_PG_SSL_CA_FILE or ADEX_PG_SSL_CA_PEM is required (or ADEX_PG_SSL_INSECURE=1 for a non-production trial)');
   const origins = need('ADEX_ALLOWED_ORIGINS').split(',').map((o) => o.trim()).filter(Boolean);
   for (const o of origins) if (!/^https?:\/\/[^/\s*]+$/.test(o)) throw new Error(`invalid origin ${o}`);
   return {

@@ -1,0 +1,53 @@
+# ADEX Online v1 · especificación del API para Render (PREPARADA, NO APLICADA).
+#
+# Es la MISMA configuración que la guía manual (docs/ADEX_ONLINE_RENDER.md §5, «Deploy a
+# Web Service»), escrita como archivo para que sea reproducible y revisable. El camino
+# recomendado es el panel; este archivo sirve de referencia o para un Blueprint creado
+# A PROPÓSITO apuntando a esta ruta (Render solo busca `render.yaml` en la raíz, así que
+# aquí no se aplica solo).
+#
+#   · Un único servicio web: el API. NO define bases de datos (nada de Render Postgres ni
+#     Key Value): PostgreSQL y Auth son Supabase ADEX-Staging.
+#   · plan: free  → sin coste por instancia. Se suspende tras 15 min sin tráfico.
+#   · autoDeployTrigger: off → un push a `main` (que publica CLEAN en Vercel) NO despliega
+#     el API. Cada despliegue es manual («Manual Deploy» en el panel).
+#   · Ningún secreto: las variables `sync: false` se rellenan en el panel y quedan allí.
+services:
+  - type: web
+    name: adex-online-api
+    runtime: docker
+    plan: free
+    # Sin región en Sudamérica: Virginia (EE. UU. este) es la más cercana a São Paulo.
+    region: virginia
+    repo: https://github.com/HeRGoZ-IA/rutacash-v1
+    branch: main
+    # Contexto = raíz del repositorio: el API importa las reglas de CLEAN (`src/`) sin copiarlas.
+    dockerContext: .
+    dockerfilePath: ./deploy/adex-online-api/Dockerfile
+    numInstances: 1
+    healthCheckPath: /healthz
+    autoDeployTrigger: "off"
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: ADEX_TRUST_PROXY
+        value: "1"
+      - key: ADEX_API_POOL_MAX
+        value: "8"
+      # Archivo secreto subido en el panel (Environment → Secret Files) con este nombre.
+      - key: ADEX_PG_SSL_CA_FILE
+        value: /etc/secrets/supabase-ca.crt
+      # https://<dominio-del-frontend-adex-online> (sin barra final)
+      - key: ADEX_ALLOWED_ORIGINS
+        sync: false
+      # https://<ref>.supabase.co
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: ADEX_API_DATABASE_URL
+        sync: false
+      - key: ADEX_DEMO_DATABASE_URL
+        sync: false

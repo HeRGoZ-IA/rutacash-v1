@@ -116,6 +116,8 @@ Ninguno técnico. Pendiente de decisión del propietario: contratación del aloj
 
 ## 10. Pasos para publicar (cuando se autorice)
 
+> **Actualización:** el propietario eligió **Render Free** para el API en lugar de DigitalOcean. La configuración, las pruebas de suspensión y reinicio y la guía del panel están en [ADEX_ONLINE_RENDER.md](ADEX_ONLINE_RENDER.md); sustituyen al paso 2. Los demás pasos siguen vigentes.
+
 1. **ADEX-Staging**: credenciales estables ya generadas (`saas/.env.online`, local). Descargar el certificado raíz de Supabase (Database settings → SSL) para `ADEX_PG_SSL_CA_PEM`.
 2. **DigitalOcean** (con su cuenta y método de pago): crear la app desde `deploy/digitalocean/app.yaml` (repositorio `HeRGoZ-IA/rutacash-v1`, rama `main`, despliegue manual), elegir región (NYC o ATL), rellenar los secretos: `ADEX_API_DATABASE_URL`, `ADEX_DEMO_DATABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `ADEX_PG_SSL_CA_PEM`. Configurar alertas de gasto. Verificar `https://<app>/healthz` y `/readyz`.
 3. **Vercel**: proyecto nuevo con directorio raíz `online`, variables `VITE_ADEX_API_URL` (URL del paso 2), `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`. Poner su dominio en `ADEX_ALLOWED_ORIGINS` del API y en Supabase Auth → URL Configuration (Site URL / redirect) para el «primer acceso».

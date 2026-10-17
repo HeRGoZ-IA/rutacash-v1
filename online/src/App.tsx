@@ -74,8 +74,9 @@ function RequireContext() {
 }
 
 function ConnectionBanner() {
-  const { online } = useApp();
-  return online ? null : <div className="banner bad" role="alert">Conexión perdida con el servidor. Nada se guarda en este dispositivo: reintente cuando vuelva la conexión.</div>;
+  const { online, waking } = useApp();
+  if (!online) return <div className="banner bad" role="alert">Conexión perdida con el servidor. Nada se guarda en este dispositivo: reintente cuando vuelva la conexión.</div>;
+  return waking ? <div className="banner info" role="status">Activando el servidor: la primera conexión tras un rato sin uso puede tardar hasta un minuto. No repita la operación.</div> : null;
 }
 
 function Plain({ children }: { children: ReactNode }) {

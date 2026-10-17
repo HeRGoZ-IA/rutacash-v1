@@ -10,6 +10,8 @@ interface AppState {
   ctx: ActiveContextView | null;
   setCtx: (c: ActiveContextView | null) => void;
   online: boolean;
+  /** Alguna petición tarda: el servidor puede estar arrancando tras una suspensión. */
+  waking: boolean;
   notice: string | null;
   setNotice: (n: string | null) => void;
   can: (capability: string) => boolean;
@@ -20,9 +22,11 @@ const AppContext = createContext<AppState | null>(null);
 export function AppProvider({ client, children }: { client: OnlineClient; children: ReactNode }) {
   const [ctx, setCtx] = useState<ActiveContextView | null>(null);
   const [online, setOnline] = useState(true);
+  const [waking, setWaking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => client.on((event, detail) => {
     if (event === 'network') setOnline(detail === true);
+    if (event === 'waking') setWaking(detail === true);
     if (event === 'context') { setCtx(null); setNotice(errorText({ code: String(detail) })); }
     if (event === 'session') setCtx(null);
   }), [client]);
@@ -32,7 +36,7 @@ export function AppProvider({ client, children }: { client: OnlineClient; childr
     return () => window.removeEventListener('offline', off);
   }, []);
   const can = useCallback((c: string) => ctx?.capabilities.includes(c) ?? false, [ctx]);
-  return <AppContext.Provider value={{ client, ctx, setCtx, online, notice, setNotice, can }}>{children}</AppContext.Provider>;
+  return <AppContext.Provider value={{ client, ctx, setCtx, online, waking, notice, setNotice, can }}>{children}</AppContext.Provider>;
 }
 
 export function useApp(): AppState {
