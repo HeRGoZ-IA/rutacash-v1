@@ -20,7 +20,7 @@ try {
   await boot.end();
   const c = new pg.Client({ connectionString: cluster.adminUrl('adex_staging_local') });
   await c.connect();
-  const m = await migrate(c, { api: cluster.passwords.api, control: cluster.passwords.control });
+  const m = await migrate(c, { api: cluster.passwords.api, control: cluster.passwords.control, demo: cluster.passwords.demo });
   const { snapshot, options } = syntheticDataset();
   await importSnapshot(c, snapshot, options);
   console.log(`# ${cluster.version}`);

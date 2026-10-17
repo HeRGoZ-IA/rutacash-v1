@@ -1,8 +1,8 @@
-# ADEX SaaS · backend multiempresa (Fases 0 a 4)
+# ADEX SaaS · backend multiempresa (Fases 0 a 4 + ADEX Online v1)
 
 Paquete independiente de CLEAN: tiene su propio `package.json`, no lo importa `src/`, no entra en el `tsconfig.json` raíz ni en el bundle de Vite. Solo **lee** reglas de CLEAN (`src/lib`, `src/models`) para reutilizarlas como contrato (DS-01).
 
-Resultados y decisiones: [`docs/SAAS_FASES_0_1_RESULTADOS.md`](../docs/SAAS_FASES_0_1_RESULTADOS.md) · [`docs/SAAS_FASE_2_RESULTADOS.md`](../docs/SAAS_FASE_2_RESULTADOS.md) · [`docs/SAAS_FASE_3_RESULTADOS.md`](../docs/SAAS_FASE_3_RESULTADOS.md) · [`docs/SAAS_FASE_4_RESULTADOS.md`](../docs/SAAS_FASE_4_RESULTADOS.md).
+Resultados y decisiones: [`docs/SAAS_FASES_0_1_RESULTADOS.md`](../docs/SAAS_FASES_0_1_RESULTADOS.md) · [`docs/SAAS_FASE_2_RESULTADOS.md`](../docs/SAAS_FASE_2_RESULTADOS.md) · [`docs/SAAS_FASE_3_RESULTADOS.md`](../docs/SAAS_FASE_3_RESULTADOS.md) · [`docs/SAAS_FASE_4_RESULTADOS.md`](../docs/SAAS_FASE_4_RESULTADOS.md) · [`docs/ADEX_ONLINE_V1_RESULTADOS.md`](../docs/ADEX_ONLINE_V1_RESULTADOS.md).
 
 ## Requisitos
 
@@ -19,6 +19,9 @@ npm run test:db -- tenancy   # solo los archivos que empiezan por «tenancy»
 npm run db:rebuild       # base vacía → migraciones → semillas sintéticas → recuento y huella
 npm run bench            # las 26 suites de CLEAN contra el manifiesto del banco
 npm run staging:check    # ADEX-Staging: controles previos (BLOQUEADO sin saas/.env.staging)
+node --import ./scripts/register-alias.mjs scripts/staging.ts --online-credentials   # credenciales estables de ADEX Online → saas/.env.online
+node --import ./scripts/register-alias.mjs scripts/staging.ts --test online          # solo la batería de ADEX Online
+node --import ./scripts/register-alias.mjs src/server/main.ts                       # servidor ADEX Online (variables en src/server/start.ts)
 ```
 
 El clúster local imita los roles de Supabase (`postgres` sin superusuario, con BYPASSRLS; `anon`, `authenticated`, `service_role`, `authenticator`) y se borra al terminar. Datos y evidencia en `../tmp/saas-phase01/`.
@@ -41,6 +44,8 @@ El clúster local imita los roles de Supabase (`postgres` sin superusuario, con 
 | `test/integration/` | Fase 1: identidad, REVOKE-004, plano Owner, cliente sin contraseñas · Fase 2: estructura, clientes, DS-11, responsable de capital, matriz de permisos contra el servidor |
 | `src/credits/` | Fase 4: solicitudes, autorización y desembolso (solo en línea). Créditos solo por `adex.credit_disburse` (0010) |
 | `src/capital/` | Fase 3: capital centralizado y custodia (Empresa → bolsa del Administrador → custodia del trabajador por ruta, sin caja de ruta). Escritura solo por `adex.capital_post` (0009) |
+| `src/server/`, `src/http/demoApi.ts` | ADEX Online v1: servidor compuesto (API de empresa + administración Demo, CORS, límites, salud, registros sin datos). Imagen: `../deploy/adex-online-api/Dockerfile` |
+| `src/demo/` | ADEX Online v1: ciclo de vida de la Empresa Demo (0011) y escenario `demo-v1` ejecutado con la API normal por puestos sintéticos |
 | `test/auth-real/`, `scripts/staging.ts` | Supabase Auth real, RLS gestionada y Fase 2 en ADEX-Staging: 19/19 PASS en tres ejecuciones consecutivas (2026-10-14) |
 
 ## Roles de base de datos
@@ -50,5 +55,6 @@ El clúster local imita los roles de Supabase (`postgres` sin superusuario, con 
 | `adex_owner` | Dueño de los esquemas; sin login | Sin superusuario ni BYPASSRLS |
 | `adex_api` | API de empresa | Login, `NOINHERIT`, sin BYPASSRLS ni TRUNCATE; DELETE solo en asignaciones y catálogo sin historia (DS-11); escrituras según `src/db/privileges.ts` |
 | `adex_control` | API del plano Owner | Login, `NOINHERIT`, sin ningún privilegio de tabla sobre `adex` |
+| `adex_demo` | Administración de la Empresa Demo (0011) | Login, `NOINHERIT`, sin privilegios de tabla: solo ejecuta las funciones `adex_demo.*` |
 
-Las contraseñas de los roles se generan en cada ejecución y no se guardan.
+Las contraseñas de los roles se generan en cada ejecución y no se guardan, salvo las de ADEX-Staging para ADEX Online: `--online-credentials` las escribe solo en `saas/.env.online` (ignorado por Git) y, mientras exista, `--migrate` y `--test` las reutilizan en lugar de rotarlas.

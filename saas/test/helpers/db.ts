@@ -3,6 +3,7 @@
 //   admin   → `postgres` estilo Supabase (sin superusuario, BYPASSRLS): SOLO siembra y verifica.
 //   api     → `adex_api` (sujeto a RLS): el que usa la API de empresa.
 //   control → `adex_control`: el que usa la API del plano Owner.
+//   demo    → `adex_demo`: administración de la Empresa Demo (ADEX Online).
 
 import { randomBytes } from 'node:crypto';
 import pg from '../../src/db/pgTypes.ts';
@@ -14,7 +15,8 @@ export interface TestDb {
   admin: pg.Pool;
   api: pg.Pool;
   control: pg.Pool;
-  url(role: 'postgres' | 'adex_api' | 'adex_control'): string;
+  demo: pg.Pool;
+  url(role: 'postgres' | 'adex_api' | 'adex_control' | 'adex_demo'): string;
   close(): Promise<void>;
 }
 
@@ -30,7 +32,7 @@ export function pgAvailable(): boolean {
 
 export async function createTestDb(label: string, opts: { seed?: boolean } = {}): Promise<TestDb> {
   const port = required('ADEX_PG_PORT');
-  const pass = { postgres: required('ADEX_PG_ADMIN_PASS'), adex_api: required('ADEX_PG_API_PASS'), adex_control: required('ADEX_PG_CONTROL_PASS') };
+  const pass = { postgres: required('ADEX_PG_ADMIN_PASS'), adex_api: required('ADEX_PG_API_PASS'), adex_control: required('ADEX_PG_CONTROL_PASS'), adex_demo: required('ADEX_PG_DEMO_PASS') };
   const name = `t_${label}_${randomBytes(3).toString('hex')}`.toLowerCase();
   const url = (role: keyof typeof pass, db = name) => `postgres://${role}:${encodeURIComponent(pass[role])}@127.0.0.1:${port}/${db}`;
   const boot = new pg.Client({ connectionString: url('postgres', 'postgres') });
@@ -40,6 +42,7 @@ export async function createTestDb(label: string, opts: { seed?: boolean } = {})
   const admin = new pg.Pool({ connectionString: url('postgres'), max: 5, allowExitOnIdle: true });
   const api = new pg.Pool({ connectionString: url('adex_api'), max: 25, allowExitOnIdle: true });
   const control = new pg.Pool({ connectionString: url('adex_control'), max: 5, allowExitOnIdle: true });
+  const demo = new pg.Pool({ connectionString: url('adex_demo'), max: 4, allowExitOnIdle: true });
   if (opts.seed) {
     const c = await admin.connect();
     try {
@@ -50,10 +53,10 @@ export async function createTestDb(label: string, opts: { seed?: boolean } = {})
     }
   }
   return {
-    name, admin, api, control,
+    name, admin, api, control, demo,
     url: (role) => url(role),
     async close() {
-      await Promise.all([api.end(), control.end(), admin.end()]);
+      await Promise.all([api.end(), control.end(), demo.end(), admin.end()]);
     },
   };
 }

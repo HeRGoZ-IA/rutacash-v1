@@ -94,6 +94,8 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
     added: [
       { column: 'country_code', reason: 'P6: país ISO 3166-1. `Tenant.pais` es texto libre y se conserva en country_label; el código lo fija el alta o la importación' },
       { column: 'timezone', reason: 'P6/DS-04: zona IANA de la empresa, reloj de los periodos. No existe en Dexie (hoy manda el dispositivo)' },
+      { column: 'is_demo', reason: 'ADEX Online v1 (0011): Empresa Demo con datos ficticios, ciclo de vida en adex_demo. Inmutable; una importación de CLEAN siempre es false' },
+      { column: 'retired_at', reason: 'ADEX Online v1 (0011): retirada definitiva de una Empresa Demo (reinicio = recreación). Solo Demos; NULL en toda empresa importada' },
     ],
   },
   {

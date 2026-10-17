@@ -17,8 +17,9 @@ export async function withTransaction<T>(pool: pg.Pool, fn: (client: pg.PoolClie
   for (let attempt = 1; ; attempt++) {
     const client = await pool.connect();
     try {
-      await client.query('begin isolation level read committed');
-      await client.query(`select set_config('lock_timeout', $1, true)`, [`${opts.lockTimeoutMs ?? 5000}ms`]);
+      // Un solo viaje (protocolo simple, sin parámetros): el valor es un entero propio.
+      const lockMs = Math.max(1, Math.trunc(Number(opts.lockTimeoutMs ?? 5000)) || 5000);
+      await client.query(`begin isolation level read committed; set local lock_timeout = '${lockMs}ms'`);
       const result = await fn(client);
       await client.query('commit');
       return result;

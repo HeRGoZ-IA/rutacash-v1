@@ -1,5 +1,6 @@
 // API de EMPRESA (Fase 1: identidad, contexto y membresías · Fase 2: estructura y
-// catálogo · Fase 3: capital centralizado y custodia). Sin framework.
+// catálogo · Fase 3: capital centralizado y custodia · Fase 4: créditos · ADEX
+// Online v1: consulta de operaciones inciertas). Sin framework.
 //
 //   Authorization: Bearer <token de acceso del proveedor de identidad>
 //   X-Adex-Membership: <membresía con la que se opera>   (contexto explícito, DS-05)
@@ -14,6 +15,7 @@ import type pg from 'pg';
 import { ApiError, fromPgError } from '../errors.ts';
 import { withTransaction } from '../db/tx.ts';
 import { bearer, type TokenVerifier } from '../auth/jwt.ts';
+import type { SessionClaims } from '../db/tx.ts';
 import type { IdentityProvider } from '../auth/provider.ts';
 import { listOwnMemberships, resolveContext, resolveIdentity, type ActiveContext } from '../authz/context.ts';
 import { capabilitiesOf } from '../authz/cleanRules.ts';
@@ -39,7 +41,7 @@ import {
   APPROVE_FIELDS, CREATE_REQUEST_FIELDS, DIRECT_FIELDS, approveRequest, cancelRequest, createRequest, directSale, disburseRequest, getCredit,
   getRequest, listCredits, listRequests, rejectRequest,
 } from '../credits/service.ts';
-import { readJson, scopeOf, send } from './common.ts';
+import { checkFields, readJson, readJsonObject, scopeOf, send } from './common.ts';
 
 export interface CompanyApiOptions {
   pool: pg.Pool;
@@ -178,7 +180,24 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: () => async (c, ctx, b, _q, op) => created(await directSale(c, ctx, b, op)) },
   { method: 'GET', pattern: new RegExp(`^/v1/credits$`), fields: null, handler: () => async (c, ctx, _b, q) => ok({ credits: await listCredits(c, ctx, q) }) },
   { method: 'GET', pattern: new RegExp(`^/v1/credits/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getCredit(c, ctx, id!)) },
+  // ---------- Operaciones inciertas (ADEX Online v1) ----------
+  // Si la respuesta de un comando se pierde (red caída), el cliente consulta aquí su
+  // `X-Adex-Operation-Id` ANTES de repetirlo. 404 = el comando no llegó a confirmarse
+  // (su transacción se revirtió entera): repetirlo con el mismo id es seguro.
+  { method: 'GET', pattern: new RegExp(`^/v1/operations/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getOperationOutcome(c, ctx, id!)) },
 ];
+
+async function getOperationOutcome(c: pg.PoolClient, ctx: ActiveContext, operationId: string) {
+  if (!UUID_RE.test(operationId)) throw new ApiError(400, 'INVALID_OPERATION_ID');
+  // RLS (`operations_ctx`): solo las operaciones de ESTA membresía.
+  const r = await c.query<{ kind: string; outcome: string; http_status: number | null; result: unknown; created_at: Date }>(
+    'select kind, outcome, http_status, result, created_at from adex.operations where company_id = $1 and operation_id = $2 and membership_id = $3',
+    [ctx.companyId, operationId.toLowerCase(), ctx.membershipId]);
+  const row = r.rows[0];
+  if (!row) throw new ApiError(404, 'OPERATION_NOT_FOUND');
+  return { operationId: operationId.toLowerCase(), kind: row.kind, outcome: row.outcome, httpStatus: row.http_status, result: row.result,
+    createdAt: row.created_at.toISOString() };
+}
 
 function match(method: string, path: string): { e: Endpoint; params: string[] } | null {
   for (const e of ENDPOINTS) {
@@ -220,58 +239,109 @@ async function withOperation(c: pg.PoolClient, ctx: ActiveContext, operationId: 
   return result;
 }
 
-export function createCompanyApi(opts: CompanyApiOptions): http.Server {
+/** Petición ya autenticada (token verificado) y con el cuerpo ya leído. */
+export interface CompanyCall {
+  method: string;
+  path: string;
+  query?: URLSearchParams;
+  membershipId: string | undefined;
+  operationId?: string | null;
+  /** Cuerpo JSON (objeto) o `undefined` si no hay. */
+  body?: Record<string, unknown>;
+}
+
+export type CompanyExecutor = (claims: SessionClaims, call: CompanyCall) => Promise<Result>;
+
+/**
+ * Núcleo de la API de empresa: misma tabla de endpoints, mismas validaciones, misma
+ * transacción con contexto e idempotencia, con o sin HTTP. El servidor HTTP lo usa
+ * para cada petición; el aprovisionamiento de la Empresa Demo lo usa para ejecutar su
+ * escenario con el MISMO motor (nunca uno de simulación).
+ */
+export function createCompanyExecutor(opts: CompanyApiOptions): CompanyExecutor {
   const txOpts = { lockTimeoutMs: opts.lockTimeoutMs };
-  return http.createServer((req, res) => {
-    void (async () => {
-      try {
-        const url = new URL(req.url ?? '/', 'http://localhost');
-        const method = req.method ?? 'GET';
-        // Ruta conocida o no: sin token válido no se revela nada.
-        const token = bearer(req.headers['authorization']);
-        const claims = await opts.verifyToken(token);
+  return async function execute(claims, call) {
+    const found = match(call.method, call.path);
+    if (!found) throw new ApiError(404, 'NOT_FOUND');
+    const membershipId = call.membershipId?.trim();
+    if (!membershipId) throw new ApiError(400, 'MEMBERSHIP_REQUIRED');
+    const operationId = call.operationId?.trim() ? call.operationId.trim().toLowerCase() : null;
+    if (operationId && (!UUID_RE.test(operationId) || !found.e.idempotent)) throw new ApiError(400, 'INVALID_OPERATION_ID');
+    if (found.e.requiresOperation && !operationId) throw new ApiError(400, 'OPERATION_ID_REQUIRED');
+    let body: Record<string, unknown> = {};
+    if (found.e.fields) {
+      if (call.body === undefined) throw new ApiError(415, 'JSON_REQUIRED');
+      body = checkFields(call.body, found.e.fields);
+    }
+    const handler = found.e.handler(found.params, opts.provider);
+    const query = call.query ?? new URLSearchParams();
+    return withTransaction(opts.pool, async (c) => {
+      const ctx = await resolveContext(c, claims, membershipId);
+      await opts.afterContext?.(ctx, call.path);
+      const run = () => handler(c, ctx, body, query, operationId);
+      const out = operationId ? await withOperation(c, ctx, operationId, found.e.idempotent!, call.path, body, run) : await run();
+      await opts.beforeCommit?.(ctx, call.path);
+      return out;
+    }, txOpts);
+  };
+}
 
-        if (method === 'GET' && url.pathname === '/v1/me/memberships') {
-          const memberships = await withTransaction(opts.pool, (c) => listOwnMemberships(c, claims), txOpts);
-          return send(res, 200, { identityId: claims.identityId, memberships });
-        }
-        if (method === 'POST' && url.pathname === '/v1/session/logout') {
-          const scope = scopeOf(await readJson(req, ['scope']));
-          await withTransaction(opts.pool, async (c) => {
-            await resolveIdentity(c, claims);
-            await logout(c, claims, scope);
-          }, txOpts);
-          // ADEX ya cortó la sesión; el proveedor es segundo paso y no la «desrevoca» si falla.
-          let providerRevoked = true;
-          try { await opts.provider.signOut(token, scope); } catch (e) { providerRevoked = false; opts.onError?.(e); }
-          return send(res, 200, { revoked: true, scope, providerRevoked });
-        }
+/** Error de la API → respuesta (los errores de PostgreSQL conocidos se traducen; el resto es 500). */
+export function errorResponse(err: unknown, onError?: (err: unknown) => void): Result {
+  const e = err instanceof ApiError ? err : fromPgError(err);
+  if (e) return { status: e.status, body: e.details ? { error: e.code, details: e.details } : { error: e.code } };
+  onError?.(err);
+  return { status: 500, body: { error: 'INTERNAL' } };
+}
 
-        const found = match(method, url.pathname);
-        if (!found) throw new ApiError(404, 'NOT_FOUND');
-        const membershipHeader = req.headers['x-adex-membership'];
-        if (typeof membershipHeader !== 'string' || membershipHeader.trim() === '') throw new ApiError(400, 'MEMBERSHIP_REQUIRED');
-        const opHeader = req.headers['x-adex-operation-id'];
-        const operationId = typeof opHeader === 'string' && opHeader.trim() ? opHeader.trim().toLowerCase() : null;
-        if (operationId && (!UUID_RE.test(operationId) || !found.e.idempotent)) throw new ApiError(400, 'INVALID_OPERATION_ID');
-        if (found.e.requiresOperation && !operationId) throw new ApiError(400, 'OPERATION_ID_REQUIRED');
-        const body = found.e.fields ? await readJson(req, found.e.fields) : {};
-        const handler = found.e.handler(found.params, opts.provider);
-        const result = await withTransaction(opts.pool, async (c) => {
-          const ctx = await resolveContext(c, claims, membershipHeader.trim());
-          await opts.afterContext?.(ctx, url.pathname);
-          const run = () => handler(c, ctx, body, url.searchParams, operationId);
-          const out = operationId ? await withOperation(c, ctx, operationId, found.e.idempotent!, url.pathname, body, run) : await run();
-          await opts.beforeCommit?.(ctx, url.pathname);
-          return out;
-        }, txOpts);
-        send(res, result.status, result.body);
-      } catch (err) {
-        const e = err instanceof ApiError ? err : fromPgError(err);
-        if (e) return send(res, e.status, e.details ? { error: e.code, details: e.details } : { error: e.code });
-        opts.onError?.(err);
-        send(res, 500, { error: 'INTERNAL' });
+/** Manejador HTTP de la API de empresa (montable en el servidor compuesto de ADEX Online). */
+export function createCompanyHandler(opts: CompanyApiOptions): (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void> {
+  const txOpts = { lockTimeoutMs: opts.lockTimeoutMs };
+  const execute = createCompanyExecutor(opts);
+  return async (req, res) => {
+    try {
+      const url = new URL(req.url ?? '/', 'http://localhost');
+      const method = req.method ?? 'GET';
+      // Ruta conocida o no: sin token válido no se revela nada.
+      const token = bearer(req.headers['authorization']);
+      const claims = await opts.verifyToken(token);
+
+      if (method === 'GET' && url.pathname === '/v1/me/memberships') {
+        const memberships = await withTransaction(opts.pool, (c) => listOwnMemberships(c, claims), txOpts);
+        return send(res, 200, { identityId: claims.identityId, memberships });
       }
-    })();
-  });
+      if (method === 'POST' && url.pathname === '/v1/session/logout') {
+        const scope = scopeOf(await readJson(req, ['scope']));
+        await withTransaction(opts.pool, async (c) => {
+          await resolveIdentity(c, claims);
+          await logout(c, claims, scope);
+        }, txOpts);
+        // ADEX ya cortó la sesión; el proveedor es segundo paso y no la «desrevoca» si falla.
+        let providerRevoked = true;
+        try { await opts.provider.signOut(token, scope); } catch (e) { providerRevoked = false; opts.onError?.(e); }
+        return send(res, 200, { revoked: true, scope, providerRevoked });
+      }
+
+      const found = match(method, url.pathname);
+      if (!found) throw new ApiError(404, 'NOT_FOUND');
+      const membershipHeader = req.headers['x-adex-membership'];
+      if (typeof membershipHeader !== 'string' || membershipHeader.trim() === '') throw new ApiError(400, 'MEMBERSHIP_REQUIRED');
+      const opHeader = req.headers['x-adex-operation-id'];
+      const operationId = typeof opHeader === 'string' ? opHeader : null;
+      // Mismo orden de rechazos que antes del cuerpo: un id inválido no lee nada.
+      if (operationId?.trim() && (!UUID_RE.test(operationId.trim()) || !found.e.idempotent)) throw new ApiError(400, 'INVALID_OPERATION_ID');
+      if (found.e.requiresOperation && !operationId?.trim()) throw new ApiError(400, 'OPERATION_ID_REQUIRED');
+      const body = found.e.fields ? await readJsonObject(req) : undefined;
+      const result = await execute(claims, { method, path: url.pathname, query: url.searchParams, membershipId: membershipHeader, operationId, body });
+      send(res, result.status, result.body);
+    } catch (err) {
+      const r = errorResponse(err, opts.onError);
+      send(res, r.status, r.body);
+    }
+  };
+}
+
+export function createCompanyApi(opts: CompanyApiOptions): http.Server {
+  const handle = createCompanyHandler(opts);
+  return http.createServer((req, res) => { void handle(req, res); });
 }

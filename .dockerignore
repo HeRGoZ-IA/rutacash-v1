@@ -1,0 +1,16 @@
+# Contexto de la imagen de ADEX Online (deploy/adex-online-api/Dockerfile): solo código.
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.crt
+tmp
+tests
+experiments
+docs
+public
+online
+.impeccable
+.git

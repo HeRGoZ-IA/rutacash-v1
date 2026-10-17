@@ -1,0 +1,25 @@
+{
+  "name": "adex-online",
+  "private": true,
+  "version": "0.1.0",
+  "description": "ADEX Online v1: interfaz web solo en línea contra la API SaaS (PostgreSQL como autoridad financiera). Independiente de CLEAN.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router-dom": "6.30.4"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "typescript": "6.0.3",
+    "vite": "8.0.16"
+  }
+}

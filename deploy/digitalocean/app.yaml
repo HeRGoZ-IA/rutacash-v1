@@ -1,0 +1,61 @@
+# ADEX Online v1 · especificación de DigitalOcean App Platform (PREPARADA, NO APLICADA).
+#
+# No contiene secretos: las variables `type: SECRET` se rellenan en el panel de
+# DigitalOcean (o con `doctl apps create --spec` tras sustituir los marcadores) y
+# quedan cifradas allí. Crear la app GENERA COBRO: requiere la aprobación del propietario.
+#
+# Plan: apps-s-1vcpu-0.5gb (US$5/mes, 1 vCPU compartida, 512 MiB, 1 contenedor,
+# 50 GiB de salida incluidos). App Platform no tiene región en São Paulo: se elige una de
+# EE. UU. (ver docs/ADEX_ONLINE_V1_RESULTADOS.md §Alojamiento para la latencia medida).
+name: adex-online-api
+region: nyc
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+services:
+  - name: api
+    github:
+      repo: HeRGoZ-IA/rutacash-v1
+      branch: main
+      # Despliegue solo manual: un push a main (que publica CLEAN en Vercel) no publica el API.
+      deploy_on_push: false
+    source_dir: /
+    dockerfile_path: deploy/adex-online-api/Dockerfile
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    instance_count: 1
+    http_port: 8080
+    health_check:
+      http_path: /healthz
+      initial_delay_seconds: 10
+      period_seconds: 30
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: ADEX_ALLOWED_ORIGINS
+        scope: RUN_TIME
+        value: https://<dominio-del-frontend-adex-online>
+      - key: ADEX_TRUST_PROXY
+        scope: RUN_TIME
+        value: "1"
+      - key: ADEX_API_POOL_MAX
+        scope: RUN_TIME
+        value: "8"
+      - key: SUPABASE_URL
+        scope: RUN_TIME
+        value: https://<ref-de-supabase>.supabase.co
+      - key: SUPABASE_PUBLISHABLE_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: SUPABASE_SECRET_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: ADEX_API_DATABASE_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: ADEX_DEMO_DATABASE_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: ADEX_PG_SSL_CA_PEM
+        scope: RUN_TIME
+        type: SECRET

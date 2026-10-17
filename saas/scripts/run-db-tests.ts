@@ -30,7 +30,7 @@ try {
   await admin.end();
   const tpl = new pg.Client({ connectionString: cluster.adminUrl('adex_template') });
   await tpl.connect();
-  const result = await migrate(tpl, { api: cluster.passwords.api, control: cluster.passwords.control });
+  const result = await migrate(tpl, { api: cluster.passwords.api, control: cluster.passwords.control, demo: cluster.passwords.demo });
   await tpl.end();
 
   const env = {
@@ -39,6 +39,7 @@ try {
     ADEX_PG_ADMIN_PASS: cluster.passwords.admin,
     ADEX_PG_API_PASS: cluster.passwords.api,
     ADEX_PG_CONTROL_PASS: cluster.passwords.control,
+    ADEX_PG_DEMO_PASS: cluster.passwords.demo,
     ADEX_PG_VERSION: cluster.version,
   };
   const logPath = path.join(evidenceDir, `db-tests-${stamp}.log`);

@@ -4,12 +4,17 @@
 //   node scripts/staging.ts --check     → solo comprobaciones, sin escrituras
 //   node scripts/staging.ts --migrate   → migraciones + semillas sintéticas
 //   node scripts/staging.ts --test      → test/auth-real (Auth real + RLS gestionada)
+//   node scripts/staging.ts --online-credentials
+//        → ADEX Online v1: rota las contraseñas de adex_api, adex_control y adex_demo y
+//          las escribe SOLO en saas/.env.online (ignorado por Git) con las URL del pooler.
+//          Mientras ese archivo exista, --migrate y --test REUTILIZAN esas contraseñas
+//          (no las rotan): una API desplegada con ellas no se rompe por ejecutar pruebas.
 //
 // Variables en saas/.env.staging (ignorado por Git; ver .env.example). NUNCA se usa
 // el proyecto de la POC (ADEX-SaaS-POC-0A1) ni recursos de otros productos.
 
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from '../src/db/pgTypes.ts';
@@ -116,7 +121,35 @@ try {
   console.log(`OK: ${projectLine}, ${list.length} usuario(s) sintético(s), public vacío · ${dataApi}`);
   if (mode === '--check') process.exit(0);
 
-  const passwords = { api: randomSecret(), control: randomSecret() };
+  const onlineFile = path.join(root, '.env.online');
+  const online: Record<string, string> = {};
+  if (existsSync(onlineFile)) {
+    for (const line of readFileSync(onlineFile, 'utf8').split(/\r?\n/)) {
+      const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
+      if (m && m[2]) online[m[1]!] = m[2].trim();
+    }
+  }
+  const reuse = mode !== '--online-credentials' && online['ADEX_ONLINE_API_PASSWORD'] && online['ADEX_ONLINE_CONTROL_PASSWORD'] && online['ADEX_ONLINE_DEMO_PASSWORD'];
+  const passwords = reuse
+    ? { api: online['ADEX_ONLINE_API_PASSWORD']!, control: online['ADEX_ONLINE_CONTROL_PASSWORD']!, demo: online['ADEX_ONLINE_DEMO_PASSWORD']! }
+    : { api: randomSecret(), control: randomSecret(), demo: randomSecret() };
+  const roleUrl = (role: string, password: string) => `postgres://${role}.${ref}:${encodeURIComponent(password)}@${host}:6543/postgres`;
+  if (mode === '--online-credentials') {
+    const r = await migrate(admin, passwords);
+    writeFileSync(onlineFile, [
+      '# ADEX Online v1 · credenciales de ADEX-Staging (NO subir a Git; .env.* está ignorado).',
+      `# Generado ${new Date().toISOString()} por scripts/staging.ts --online-credentials.`,
+      `ADEX_ONLINE_API_PASSWORD=${passwords.api}`,
+      `ADEX_ONLINE_CONTROL_PASSWORD=${passwords.control}`,
+      `ADEX_ONLINE_DEMO_PASSWORD=${passwords.demo}`,
+      `ADEX_API_DATABASE_URL=${roleUrl('adex_api', passwords.api)}`,
+      `ADEX_DEMO_DATABASE_URL=${roleUrl('adex_demo', passwords.demo)}`,
+      '',
+    ].join('\n'), { mode: 0o600 });
+    console.log(`credenciales rotadas y guardadas en saas/.env.online · migraciones aplicadas: ${r.applied.join(', ') || 'ninguna'}`);
+    process.exit(0);
+  }
+  if (reuse) console.log('contraseñas de saas/.env.online reutilizadas (sin rotación)');
   if (mode === '--migrate') {
     const r = await migrate(admin, passwords);
     console.log(`migraciones aplicadas: ${r.applied.join(', ') || 'ninguna'} · omitidas: ${r.skipped.length}`);
@@ -132,24 +165,27 @@ try {
     await migrate(admin, passwords);
     // La contraseña de adex_api se rota en cada ejecución y Supavisor tarda unos segundos
     // en olvidar la anterior: se espera a tres conexiones seguidas aceptadas (máx. 120 s).
-    const apiUrl = `postgres://adex_api.${ref}:${encodeURIComponent(passwords.api)}@${host}:6543/postgres`;
-    let streak = 0;
-    for (const deadline = Date.now() + 120_000; streak < 3; ) {
-      const probe = new pg.Client({ connectionString: apiUrl, ssl });
-      try { await probe.connect(); await probe.query('select 1'); streak++; } catch { streak = 0; }
-      await probe.end().catch(() => undefined);
-      if (streak < 3) {
-        if (Date.now() > deadline) blocked('el pooler no acepta la credencial rotada de adex_api');
-        await new Promise((r) => setTimeout(r, 2000));
+    const apiUrl = roleUrl('adex_api', passwords.api);
+    // También `adex_demo` (ADEX Online): Supavisor puede tardar en aceptar una credencial nueva.
+    for (const [role, probeUrl] of [['adex_api', apiUrl], ['adex_demo', roleUrl('adex_demo', passwords.demo)]] as const) {
+      let streak = 0;
+      for (const deadline = Date.now() + 120_000; streak < 3; ) {
+        const probe = new pg.Client({ connectionString: probeUrl, ssl });
+        try { await probe.connect(); await probe.query('select 1'); streak++; } catch { streak = 0; }
+        await probe.end().catch(() => undefined);
+        if (streak < 3) {
+          if (Date.now() > deadline) blocked(`el pooler no acepta la credencial de ${role}`);
+          await new Promise((r) => setTimeout(r, 2000));
+        }
       }
     }
+    // `--test online` ejecuta solo los archivos cuyo nombre contiene «online» (repetición dirigida).
+    const files = ['staging-auth', 'staging-rls', 'staging-phase2', 'staging-phase3', 'staging-phase4', 'staging-online']
+      .filter((f) => !process.argv[3] || f.includes(process.argv[3])).map((f) => path.join('test', 'auth-real', `${f}.test.ts`));
     const code = await new Promise<number>((resolve) => {
-      const child = spawn(process.execPath, ['--import', './scripts/register-alias.mjs', '--test', '--test-reporter=spec', '--test-concurrency=1',
-        path.join('test', 'auth-real', 'staging-auth.test.ts'), path.join('test', 'auth-real', 'staging-rls.test.ts'),
-        path.join('test', 'auth-real', 'staging-phase2.test.ts'), path.join('test', 'auth-real', 'staging-phase3.test.ts'),
-        path.join('test', 'auth-real', 'staging-phase4.test.ts')], {
+      const child = spawn(process.execPath, ['--import', './scripts/register-alias.mjs', '--test', '--test-reporter=spec', '--test-concurrency=1', ...files], {
         cwd: root, stdio: 'inherit',
-        env: { ...process.env, ...env, ADEX_STAGING_API_URL: apiUrl,
+        env: { ...process.env, ...env, ADEX_STAGING_API_URL: apiUrl, ADEX_STAGING_DEMO_URL: roleUrl('adex_demo', passwords.demo),
           ADEX_STAGING_ADMIN_URL: adminUrl },
       });
       child.on('close', (c) => resolve(c ?? 1));

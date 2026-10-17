@@ -5,6 +5,19 @@ const MAX_BODY = 16 * 1024;
 
 /** JSON estricto: objeto, tamaño acotado y solo los campos permitidos. */
 export async function readJson(req: http.IncomingMessage, allowed: readonly string[]): Promise<Record<string, unknown>> {
+  return checkFields(await readJsonObject(req), allowed);
+}
+
+/** Solo los campos permitidos (también para cuerpos que no llegan por HTTP). */
+export function checkFields(body: Record<string, unknown>, allowed: readonly string[]): Record<string, unknown> {
+  for (const key of Object.keys(body)) {
+    if (!allowed.includes(key)) throw new ApiError(400, 'UNKNOWN_FIELD', `field "${key}" is not accepted`);
+  }
+  return body;
+}
+
+/** JSON estricto: objeto y tamaño acotado. */
+export async function readJsonObject(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   if (!(req.headers['content-type'] ?? '').startsWith('application/json')) throw new ApiError(415, 'JSON_REQUIRED');
   const chunks: Buffer[] = [];
   let size = 0;
@@ -20,9 +33,6 @@ export async function readJson(req: http.IncomingMessage, allowed: readonly stri
     throw new ApiError(400, 'INVALID_JSON');
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new ApiError(400, 'INVALID_JSON');
-  for (const key of Object.keys(parsed)) {
-    if (!allowed.includes(key)) throw new ApiError(400, 'UNKNOWN_FIELD', `field "${key}" is not accepted`);
-  }
   return parsed as Record<string, unknown>;
 }
 

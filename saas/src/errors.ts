@@ -57,6 +57,12 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX505': return new ApiError(403, 'SELF_APPROVAL_FORBIDDEN');
     case 'AX506': return new ApiError(409, 'REQUEST_NOT_DISBURSABLE');
     case 'AX507': return new ApiError(409, 'DIRECT_SALE_LIMIT');
+    // ADEX Online v1 · ciclo de vida de la Empresa Demo (0011).
+    case 'AX601': return new ApiError(409, 'DEMO_BUSY');
+    case 'AX603': return new ApiError(409, 'DEMO_TARGET_MISMATCH');
+    case 'AX604': return new ApiError(409, 'DEMO_NOT_LIVE');
+    case 'AX611': return new ApiError(400, 'INVALID_INPUT');
+    case 'AX612': return new ApiError(409, 'PARTICIPANT_NOT_USABLE');
     default: return null;
   }
 }

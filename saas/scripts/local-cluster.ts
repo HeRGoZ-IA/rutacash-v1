@@ -25,8 +25,8 @@ export interface LocalCluster {
   adminUrl(db?: string): string;
   /** Superusuario de arranque (solo para crear bases de prueba). */
   bootUrl(db?: string): string;
-  passwords: { admin: string; api: string; control: string };
-  roleUrl(role: 'adex_api' | 'adex_control', db?: string): string;
+  passwords: { admin: string; api: string; control: string; demo: string };
+  roleUrl(role: 'adex_api' | 'adex_control' | 'adex_demo', db?: string): string;
   stop(): Promise<void>;
 }
 
@@ -48,7 +48,7 @@ export async function startLocalCluster(label: string): Promise<LocalCluster> {
   const dataDir = path.join(tmpRoot, `pgdata-${label}-${Date.now()}`);
   const port = await freePort();
   const boot = randomSecret();
-  const passwords = { admin: randomSecret(), api: randomSecret(), control: randomSecret() };
+  const passwords = { admin: randomSecret(), api: randomSecret(), control: randomSecret(), demo: randomSecret() };
   const cluster = new EmbeddedPostgres({
     databaseDir: dataDir,
     user: 'supabase_admin',
@@ -84,7 +84,7 @@ export async function startLocalCluster(label: string): Promise<LocalCluster> {
       passwords,
       adminUrl: (db) => url('postgres', passwords.admin, db),
       bootUrl: (db) => url('supabase_admin', boot, db),
-      roleUrl: (role, db) => url(role, role === 'adex_api' ? passwords.api : passwords.control, db),
+      roleUrl: (role, db) => url(role, role === 'adex_api' ? passwords.api : role === 'adex_demo' ? passwords.demo : passwords.control, db),
       stop,
     };
   } catch (err) {

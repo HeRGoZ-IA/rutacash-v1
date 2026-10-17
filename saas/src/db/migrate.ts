@@ -3,10 +3,11 @@
 // Se ejecutan conectados como el ADMINISTRADOR del proyecto (en Supabase, `postgres`:
 // sin superusuario, con CREATEROLE y BYPASSRLS; en local, el mismo papel imitado).
 //   1. Roles: `adex_owner` (sin login, dueño de los esquemas), `adex_api` (API de
-//      empresa) y `adex_control` (API del plano Owner). Ninguno es superusuario ni
+//      empresa), `adex_control` (API del plano Owner) y `adex_demo` (administración
+//      de la Empresa Demo, ADEX Online). Ninguno es superusuario ni
 //      BYPASSRLS. Los atributos solo se fijan en CREATE ROLE: en PostgreSQL 16+ un
 //      administrador sin superusuario no puede ni mencionarlos en ALTER ROLE (0A.1).
-//   2. Esquemas `adex` y `adex_control` con `authorization adex_owner`.
+//   2. Esquemas `adex`, `adex_control` y `adex_demo` con `authorization adex_owner`.
 //   3. Cada archivo de `db/migrations` en SU transacción con `set local role
 //      adex_owner`, registrado en `adex_meta.schema_migrations` con su SHA-256. Un
 //      archivo ya aplicado cuyo contenido cambie detiene el proceso: el historial es
@@ -42,6 +43,8 @@ export interface RolePasswords {
   /** base64url (ALTER ROLE no admite parámetros). */
   api: string;
   control: string;
+  /** Opcional: sin ella, `adex_demo` existe pero su contraseña no se toca (ni se fija). */
+  demo?: string;
 }
 
 const PASSWORD_RE = /^[\w-]{24,}$/;
@@ -50,10 +53,11 @@ const ROLES = [
   { name: 'adex_owner', create: 'create role adex_owner nologin nosuperuser nobypassrls nocreatedb nocreaterole noinherit' },
   { name: 'adex_api', create: 'create role adex_api login nosuperuser nobypassrls nocreatedb nocreaterole noinherit' },
   { name: 'adex_control', create: 'create role adex_control login nosuperuser nobypassrls nocreatedb nocreaterole noinherit' },
+  { name: 'adex_demo', create: 'create role adex_demo login nosuperuser nobypassrls nocreatedb nocreaterole noinherit' },
 ] as const;
 
 export async function ensureRoles(admin: pg.Client, passwords: RolePasswords): Promise<void> {
-  for (const p of [passwords.api, passwords.control]) {
+  for (const p of [passwords.api, passwords.control, ...(passwords.demo === undefined ? [] : [passwords.demo])]) {
     if (!PASSWORD_RE.test(p)) throw new Error('role passwords must be base64url, ≥ 24 chars');
   }
   for (const r of ROLES) {
@@ -62,16 +66,18 @@ export async function ensureRoles(admin: pg.Client, passwords: RolePasswords): P
   }
   await admin.query(`alter role adex_api with login connection limit 40 password '${passwords.api}'`);
   await admin.query(`alter role adex_control with login connection limit 10 password '${passwords.control}'`);
+  await admin.query('alter role adex_demo with login connection limit 5');
+  if (passwords.demo !== undefined) await admin.query(`alter role adex_demo password '${passwords.demo}'`);
   const bad = await admin.query<{ rolname: string }>(
     `select rolname from pg_roles
-      where rolname in ('adex_owner', 'adex_api', 'adex_control')
+      where rolname in ('adex_owner', 'adex_api', 'adex_control', 'adex_demo')
         and (rolsuper or rolbypassrls or rolinherit or rolcreaterole or rolcreatedb)`,
   );
   if (bad.rowCount) throw new Error(`roles with privileged attributes: ${bad.rows.map((r) => r.rolname).join(', ')}`);
   // Ningún rol de aplicación pertenece a otro (sin herencia de privilegios).
   const memberOf = await admin.query(
     `select r.rolname from pg_auth_members am join pg_roles r on r.oid = am.member
-      where r.rolname in ('adex_api', 'adex_control')`,
+      where r.rolname in ('adex_api', 'adex_control', 'adex_demo')`,
   );
   if (memberOf.rowCount) throw new Error('application roles must not be members of other roles');
   await admin.query('grant adex_owner to current_user');
@@ -91,7 +97,7 @@ export async function migrate(admin: pg.Client, passwords: RolePasswords, files 
     name       text not null,
     checksum   char(64) not null,
     applied_at timestamptz not null default now())`);
-  for (const schema of ['adex', 'adex_control']) {
+  for (const schema of ['adex', 'adex_control', 'adex_demo']) {
     const exists = (await admin.query('select 1 from pg_namespace where nspname = $1', [schema])).rowCount;
     if (!exists) await admin.query(`create schema ${schema} authorization adex_owner`);
   }
