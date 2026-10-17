@@ -13,6 +13,8 @@ export function navFor(ctx: ActiveContextView): NavItem[] {
   if (can('sale.createRequest')) items.push({ to: '/app/solicitudes', label: 'Solicitudes', hint: 'Pedir un préstamo para un cliente' });
   if (can('authorization.approve')) items.push({ to: '/app/autorizaciones', label: 'Autorizaciones', hint: 'Aprobar o rechazar solicitudes' });
   if (can('sale.confirmDisbursement') || can('sale.viewActive')) items.push({ to: '/app/desembolsos', label: 'Desembolsos y créditos', hint: 'Confirmar entregas y consultar créditos' });
-  items.push({ to: '/app/proximamente', label: 'Próximamente', hint: 'Recaudos, gastos, cuadres, cierres, reportes' });
+  if (can('payment.register') || can('payment.viewHistory')) items.push({ to: '/app/recaudos', label: 'Recaudos', hint: 'Cobrar cuotas e historial de abonos' });
+  if (can('expense.register') || can('expense.correct')) items.push({ to: '/app/gastos', label: 'Gastos', hint: 'Registrar gastos e historial' });
+  items.push({ to: '/app/proximamente', label: 'Próximamente', hint: 'Cuadres, cierres, reportes' });
   return items;
 }

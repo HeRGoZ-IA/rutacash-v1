@@ -56,3 +56,12 @@
 Hasta esa aprobación no se escribe código de servidor ni se instala ninguna dependencia.
 
 > **Nota (2026-10-14).** Las Fases 0A y 0A.1 (`experiments/saas-phase0a/`) fueron autorizadas expresamente como **prueba de concepto sintética y descartable**. Validan el patrón transaccional, pero **no son el backend financiero multiusuario de ADEX, que todavía no existe**, ni inician la Fase 1.
+
+## 5. Decisiones de la Fase 5 aprobadas por el propietario (2026-10-17)
+
+Identificadores propios de la Fase 5 (no se usan en las series D1–D30 ni DS-01…DS-17). Detalle y pruebas en [SAAS_FASE_5_RESULTADOS.md](./SAAS_FASE_5_RESULTADOS.md).
+
+| ID | Decisión | Estado |
+|---|---|---|
+| **F5-D01** | Reparto de cada recaudo entre capital e interés: proporcional acumulado. Capital acumulado = redondeo determinista de pagado acumulado × capital / total pactado; interés = pagado − capital; cada pago imputa la diferencia de acumulados. Clasificación financiera interna del SaaS, no política fiscal o contable legal | **APROBADA** |
+| **F5-D02** | Anulación auditada de gastos de trabajador y de ruta por el Administrador responsable de capital de la ruta o el SuperAdmin, nunca por la persona que registró el gasto (comparación por identidad). Periodo cerrado (D7): ajuste nuevo en el periodo abierto con autoridad de ajustes, sin reabrir. El importe vuelve a la cuenta que pagó | **APROBADA** |

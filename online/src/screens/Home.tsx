@@ -29,8 +29,7 @@ export function Home() {
 }
 
 const UPCOMING = [
-  ['Recaudos', 'Cobro de cuotas y visitas sin pago'],
-  ['Gastos', 'Gastos de ruta y de trabajadores'],
+  ['Visitas sin pago', 'Registro de visitas y promesas de pago'],
   ['Cuadres', 'Cuadre diario de efectivo'],
   ['Cierres', 'Cierres semanales y periodos'],
   ['Reportes', 'Reportes completos de cartera y caja'],

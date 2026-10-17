@@ -38,7 +38,8 @@ export async function balance(q: pg.Pool, company: string, kind: string, members
 
 /**
  * Conciliación INDEPENDIENTE de la API (SQL propio): cada saldo = Σ patas, cada
- * operación cuadra con ≥ 2 patas, sin sobregiros y Σ saldos = 0 (conservación).
+ * operación cuadra con ≥ 2 patas, sin sobregiros (custodia negativa solo por gastos
+ * del trabajador) y Σ saldos = 0 (conservación).
  */
 export async function reconcile(q: pg.Pool, company: string): Promise<{ mismatched: number; unbalanced: number; overdrawn: number; total: number }> {
   const r = await q.query<{ mismatched: string; unbalanced: string; overdrawn: string; total: string }>(
@@ -46,7 +47,12 @@ export async function reconcile(q: pg.Pool, company: string): Promise<{ mismatch
                and a.balance_minor <> coalesce((select sum(e.amount_minor) from adex.capital_entries e where e.company_id = a.company_id and e.account_id = a.id), 0))::text mismatched,
             (select count(*) from adex.capital_operations o where o.company_id = $1
                and (select coalesce(sum(e.amount_minor), 0) <> 0 or count(*) < 2 from adex.capital_entries e where e.company_id = o.company_id and e.operation_id = o.id))::text unbalanced,
-            (select count(*) from adex.capital_accounts where company_id = $1 and kind not in ('external', 'partner') and balance_minor < 0)::text overdrawn,
+            -- Contrapartidas (externa, socios, interés) pueden ser negativas; la custodia, solo
+            -- por un gasto del trabajador (Fase 5, 73209ce), comprobado pata a pata.
+            ((select count(*) from adex.capital_accounts where company_id = $1 and kind not in ('external', 'partner', 'income', 'custody') and balance_minor < 0)
+             + (select count(*) from adex.capital_entries e join adex.capital_accounts a on a.company_id = e.company_id and a.id = e.account_id
+                  join adex.capital_operations o on o.company_id = e.company_id and o.id = e.operation_id
+                 where e.company_id = $1 and a.kind = 'custody' and e.amount_minor < 0 and e.balance_after_minor < 0 and o.kind <> 'WORKER_EXPENSE'))::text overdrawn,
             (select coalesce(sum(balance_minor), 0) from adex.capital_accounts where company_id = $1)::text total`, [company]);
   const x = r.rows[0]!;
   return { mismatched: Number(x.mismatched), unbalanced: Number(x.unbalanced), overdrawn: Number(x.overdrawn), total: Number(x.total) };

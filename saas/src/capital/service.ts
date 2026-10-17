@@ -31,7 +31,11 @@ import { optId, pathId, reqId, reqText } from '../structure/input.ts';
 
 export type CapitalKind =
   | 'COMPANY_DEPOSIT' | 'COMPANY_WITHDRAWAL' | 'ADMIN_ALLOCATION' | 'ADMIN_RETURN' | 'PARTNER_CONTRIBUTION'
-  | 'WORKER_DELIVERY' | 'WORKER_RETURN' | 'WORKER_TRANSFER' | 'ROUTE_REASSIGNMENT' | 'REVERSAL' | 'LOAN_DISBURSEMENT';
+  | 'WORKER_DELIVERY' | 'WORKER_RETURN' | 'WORKER_TRANSFER' | 'ROUTE_REASSIGNMENT' | 'REVERSAL' | 'LOAN_DISBURSEMENT'
+  | 'COLLECTION' | 'WORKER_EXPENSE' | 'ROUTE_EXPENSE' | 'COMPANY_EXPENSE' | 'EXPENSE_REFUND';
+
+/** Recaudos y gastos (Fase 5): se corrigen por su propio comando, nunca por la anulación genérica. */
+const OWN_CORRECTION_KINDS: readonly string[] = ['COLLECTION', 'WORKER_EXPENSE', 'ROUTE_EXPENSE', 'COMPANY_EXPENSE', 'EXPENSE_REFUND'];
 
 const COMPANY_KINDS: readonly string[] = ['COMPANY_DEPOSIT', 'COMPANY_WITHDRAWAL', 'ADMIN_ALLOCATION', 'ADMIN_RETURN'];
 
@@ -87,7 +91,7 @@ export async function routeOf(client: pg.PoolClient, ctx: ActiveContext, id: str
 }
 
 /** `routeCashAuthorityError` de CLEAN con el responsable y las asignaciones del servidor. */
-function requireAuthority(ctx: ActiveContext, route: RouteFacts, op: RouteCashOperation, members: Map<string, MembershipFacts>): void {
+export function requireAuthority(ctx: ActiveContext, route: RouteFacts, op: RouteCashOperation, members: Map<string, MembershipFacts>): void {
   const users = [...members.values()].map(toCleanUser);
   const controller = route.controller ? members.get(route.controller) : undefined;
   if (!controller || controller.role !== 'admin' || controller.status !== 'activo' || !controller.routeIds.includes(route.id)) {
@@ -98,7 +102,7 @@ function requireAuthority(ctx: ActiveContext, route: RouteFacts, op: RouteCashOp
 }
 
 /** `custodianBlockedReason` de CLEAN: activa, con caja personal y asignada a la ruta. */
-function requireCustodian(members: Map<string, MembershipFacts>, id: string, routeId: string): MembershipFacts {
+export function requireCustodian(members: Map<string, MembershipFacts>, id: string, routeId: string): MembershipFacts {
   const m = members.get(id);
   if (!m) throw new ApiError(404, 'NOT_FOUND');
   if (m.status !== 'activo' || !hasPersonalCashbox(m.role) || !m.routeIds.includes(routeId)) throw new ApiError(400, 'CUSTODIAN_INVALID');
@@ -155,6 +159,8 @@ const ACTIONS: Record<CapitalKind, string> = {
   PARTNER_CONTRIBUTION: 'PARTNER_CONTRIBUTION_REGISTERED', WORKER_DELIVERY: 'CENTRAL_CAPITAL_DELIVERED',
   WORKER_RETURN: 'CENTRAL_CAPITAL_RETURNED', WORKER_TRANSFER: 'CASH_CUSTODY_PERSON_TO_PERSON',
   ROUTE_REASSIGNMENT: 'CENTRAL_CAPITAL_REASSIGNED', REVERSAL: 'CAPITAL_OPERATION_REVERSED', LOAN_DISBURSEMENT: 'CONFIRM_DISBURSEMENT',
+  COLLECTION: 'REGISTER_PAYMENT', WORKER_EXPENSE: 'CREATE_EXPENSE', ROUTE_EXPENSE: 'CREATE_EXPENSE', COMPANY_EXPENSE: 'CREATE_EXPENSE',
+  EXPENSE_REFUND: 'EXPENSE_REFUNDED',
 };
 
 /** Escribe, audita (misma transacción) y responde con lo que el actor puede ver. */
@@ -338,6 +344,10 @@ export async function reverseOperation(client: pg.PoolClient, ctx: ActiveContext
   if (!orig) throw new ApiError(404, 'NOT_FOUND');
   // Un crédito desembolsado no se «anula»: el dinero está en manos del cliente (cobros y castigo, fases 4–5).
   if (orig.kind === 'LOAN_DISBURSEMENT') throw new ApiError(409, 'REVERSAL_NOT_ALLOWED');
+  // Un recaudo o un gasto se anula con su comando (recalcula el crédito o enlaza el gasto).
+  if (OWN_CORRECTION_KINDS.includes(orig.kind) || (orig.kind === 'REVERSAL' && OWN_CORRECTION_KINDS.includes(orig.reverses_kind ?? ''))) {
+    throw new ApiError(409, 'REVERSAL_NOT_ALLOWED', 'use the collection or expense correction command');
+  }
   if (COMPANY_KINDS.includes(orig.kind)) need(ctx, 'capital.allocateAdmins');
   else if (orig.kind === 'PARTNER_CONTRIBUTION') need(ctx, 'transfer.create');
   else need(ctx, 'capital.manage', { routeId: orig.route_id ?? undefined });
@@ -394,6 +404,10 @@ interface AdminPool {
   adminId: string; name: string; status: string;
   availableMinor: number; allocatedNetMinor: number; partnerContributionsMinor: number;
   deliveredToWorkersMinor: number; returnedFromWorkersMinor: number; reassignedNetMinor: number;
+  /** Gastos de ruta y administrativos pagados con la bolsa (neto de anulaciones y reintegros). */
+  expensesPaidMinor: number;
+  /** Cobros que no entraron a ninguna caja personal (C1) y desembolsos administrativos. */
+  collectionsReceivedMinor: number; disbursedFromPoolMinor: number;
   /** Efectivo en custodia de trabajadores en las rutas que HOY controla. No es disponible. */
   custodyUnderResponsibilityMinor: number;
 }
@@ -403,6 +417,7 @@ async function adminPools(client: pg.PoolClient, ctx: ActiveContext, onlyAdmin: 
   const r = await client.query<{
     membership_id: string; display_name: string; status: string; balance: string;
     allocated: string; contributions: string; delivered: string; returned: string; reassigned: string; custody: string;
+    expenses: string; collections: string; disbursed: string;
   }>(
     `select a.membership_id, m.display_name, m.status, a.balance_minor balance,
             coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) in ('ADMIN_ALLOCATION', 'ADMIN_RETURN')), 0) allocated,
@@ -410,6 +425,9 @@ async function adminPools(client: pg.PoolClient, ctx: ActiveContext, onlyAdmin: 
             coalesce(-sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'WORKER_DELIVERY'), 0) delivered,
             coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'WORKER_RETURN'), 0) returned,
             coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'ROUTE_REASSIGNMENT'), 0) reassigned,
+            coalesce(-sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) in ('ROUTE_EXPENSE', 'COMPANY_EXPENSE', 'EXPENSE_REFUND')), 0) expenses,
+            coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'COLLECTION'), 0) collections,
+            coalesce(-sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'LOAN_DISBURSEMENT'), 0) disbursed,
             coalesce((select sum(c.balance_minor) from adex.capital_accounts c join adex.routes ro on ro.company_id = c.company_id and ro.id = c.route_id
                        where c.company_id = a.company_id and c.kind = 'custody' and ro.capital_controller_membership_id = a.membership_id), 0) custody
        from adex.capital_accounts a
@@ -423,6 +441,7 @@ async function adminPools(client: pg.PoolClient, ctx: ActiveContext, onlyAdmin: 
     adminId: x.membership_id, name: x.display_name, status: x.status, availableMinor: Number(x.balance),
     allocatedNetMinor: Number(x.allocated), partnerContributionsMinor: Number(x.contributions),
     deliveredToWorkersMinor: Number(x.delivered), returnedFromWorkersMinor: Number(x.returned), reassignedNetMinor: Number(x.reassigned),
+    expensesPaidMinor: Number(x.expenses), collectionsReceivedMinor: Number(x.collections), disbursedFromPoolMinor: Number(x.disbursed),
     custodyUnderResponsibilityMinor: Number(x.custody),
   }));
 }
@@ -445,6 +464,8 @@ export async function capitalSummary(client: pg.PoolClient, ctx: ActiveContext) 
         adminPoolsMinor: total('admin'), custodyMinor: total('custody'),
         // Capital prestado pendiente de cobro (cartera de las rutas): deuda de clientes, no efectivo.
         portfolioMinor: total('portfolio'),
+        // Fase 5: interés efectivamente cobrado y gastos registrados (neto de correcciones).
+        interestCollectedMinor: -total('income'), expensesMinor: total('expense'),
       },
       admins: await adminPools(client, ctx, null),
     };
@@ -470,7 +491,14 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
     `select count(*)::text n from adex.capital_operations o
       where o.company_id = $1 and (select coalesce(sum(e.amount_minor), 0) <> 0 or count(*) < 2 from adex.capital_entries e
                                     where e.company_id = o.company_id and e.operation_id = o.id)`);
-  const overdrawn = await q(`select count(*)::text n from adex.capital_accounts where company_id = $1 and kind not in ('external', 'partner') and balance_minor < 0`);
+  // Contrapartidas (externa, socios, interés) miden lo que entró; la custodia solo puede
+  // quedar negativa por un gasto del trabajador (73209ce), comprobado pata a pata.
+  const overdrawn = await q(`select count(*)::text n from adex.capital_accounts where company_id = $1 and kind not in ('external', 'partner', 'income', 'custody') and balance_minor < 0`);
+  const negativeCustody = await q(
+    `select count(*)::text n from adex.capital_entries e
+       join adex.capital_accounts a on a.company_id = e.company_id and a.id = e.account_id
+       join adex.capital_operations o on o.company_id = e.company_id and o.id = e.operation_id
+      where e.company_id = $1 and a.kind = 'custody' and e.amount_minor < 0 and e.balance_after_minor < 0 and o.kind <> 'WORKER_EXPENSE'`);
   const foreignCurrency = await q(
     `select count(*)::text n from adex.capital_operations o join adex.companies c on c.id = o.company_id
       where o.company_id = $1 and o.currency_code <> c.currency_code`);
@@ -489,12 +517,43 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
   const duplicated = await q(
     `select count(*)::text n from (select sale_request_id from adex.sales where company_id = $1 and sale_request_id is not null
                                     group by sale_request_id having count(*) > 1) d`);
-  // Fase 4 (sin cobros todavía): la cartera de cada ruta = capital prestado de sus créditos con asiento.
+  // Cartera de cada ruta = capital prestado de sus créditos con asiento − capital ya cobrado.
   const portfolio = await q(
     `select count(*)::text n from adex.capital_accounts a
       where a.company_id = $1 and a.kind = 'portfolio'
         and a.balance_minor <> coalesce((select sum(s.sale_value_minor) from adex.sales s
-                                          where s.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null), 0)`);
+                                          where s.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null), 0)
+                             - coalesce((select sum(p.principal_minor) from adex.payments p join adex.sales s on s.company_id = p.company_id and s.id = p.sale_id
+                                          where p.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null), 0)`);
+  // Fase 5 · recaudos: cada crédito con asiento cumple, con sus pagos (originales y anulaciones),
+  //   saldo = Σ cuotas = total − Σ pagos; capital reconocido = round(pagado × capital / total);
+  //   y cada pago tiene su asiento COLLECTION (o su anulación) por el mismo importe y ruta.
+  const creditDrift = await q(
+    `select count(*)::text n from adex.sales s
+       left join lateral (select coalesce(sum(p.amount_minor), 0)::bigint paid, coalesce(sum(p.principal_minor), 0)::bigint principal
+                            from adex.payments p where p.company_id = s.company_id and p.sale_id = s.id) p on true
+       left join lateral (select coalesce(sum(i.balance_minor), 0) bal from adex.installments i where i.company_id = s.company_id and i.sale_id = s.id) i on true
+      where s.company_id = $1 and s.ledger_operation_id is not null
+        and (s.balance_minor <> i.bal or s.balance_minor <> s.total_value_minor - p.paid
+             or p.principal <> adex.credit_principal_of(p.paid, s.sale_value_minor, s.total_value_minor))`);
+  const unmatchedPayments = await q(
+    `select count(*)::text n from adex.payments p
+       join adex.sales s on s.company_id = p.company_id and s.id = p.sale_id
+      where p.company_id = $1 and s.ledger_operation_id is not null
+        and not exists (select 1 from adex.capital_operations o where o.company_id = p.company_id and o.id = p.ledger_operation_id and o.payment_id = p.id
+                          and o.amount_minor = abs(p.amount_minor) and o.route_id = p.route_id and coalesce(o.reverses_kind, o.kind) = 'COLLECTION')`);
+  // Fase 5 · gastos: cada gasto con asiento coincide con él, y la cuenta de gastos de
+  // cada ruta (o de empresa) es la suma de sus gastos netos.
+  const unmatchedExpenses = await q(
+    `select count(*)::text n from adex.expenses x
+      where x.company_id = $1 and x.ledger_operation_id is not null
+        and not exists (select 1 from adex.capital_operations o where o.company_id = x.company_id and o.id = x.ledger_operation_id and o.expense_id = x.id
+                          and o.amount_minor = abs(x.amount_minor) and o.route_id is not distinct from x.route_id)`);
+  const expenseAccounts = await q(
+    `select count(*)::text n from adex.capital_accounts a
+      where a.company_id = $1 and a.kind = 'expense'
+        and a.balance_minor <> coalesce((select sum(x.amount_minor) from adex.expenses x where x.company_id = a.company_id
+                                           and x.route_id is not distinct from a.route_id and x.ledger_operation_id is not null), 0)`);
   const checks = [
     { name: 'positions-match-ledger', ok: mismatched === 0, detail: mismatched },
     { name: 'operations-balanced', ok: unbalanced === 0, detail: unbalanced },
@@ -505,6 +564,11 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
     { name: 'credits-have-disbursement', ok: orphanCredits === 0, detail: orphanCredits },
     { name: 'one-credit-per-request', ok: duplicated === 0, detail: duplicated },
     { name: 'portfolio-matches-credits', ok: portfolio === 0, detail: portfolio },
+    { name: 'negative-custody-only-by-worker-expense', ok: negativeCustody === 0, detail: negativeCustody },
+    { name: 'credits-match-installments-and-payments', ok: creditDrift === 0, detail: creditDrift },
+    { name: 'payments-have-ledger-entry', ok: unmatchedPayments === 0, detail: unmatchedPayments },
+    { name: 'expenses-have-ledger-entry', ok: unmatchedExpenses === 0, detail: unmatchedExpenses },
+    { name: 'expense-accounts-match-expenses', ok: expenseAccounts === 0, detail: expenseAccounts },
   ];
   return { ok: checks.every((c) => c.ok), checks };
 }

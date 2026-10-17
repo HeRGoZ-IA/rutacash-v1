@@ -11,6 +11,8 @@ import { ContextSelector, Login } from './screens/Access.tsx';
 import { Clients } from './screens/Clients.tsx';
 import { Capital, MyCash } from './screens/Capital.tsx';
 import { Authorizations, Disbursements, Requests } from './screens/Credits.tsx';
+import { Collections } from './screens/Collections.tsx';
+import { Expenses } from './screens/Expenses.tsx';
 import { Home, Upcoming } from './screens/Home.tsx';
 import { DemoAdmin } from './screens/DemoAdmin.tsx';
 
@@ -32,6 +34,8 @@ export function App({ client }: { client: OnlineClient }) {
                 <Route path="solicitudes" element={<Requests />} />
                 <Route path="autorizaciones" element={<Authorizations />} />
                 <Route path="desembolsos" element={<Disbursements />} />
+                <Route path="recaudos" element={<Collections />} />
+                <Route path="gastos" element={<Expenses />} />
                 <Route path="proximamente" element={<Upcoming />} />
               </Route>
             </Route>

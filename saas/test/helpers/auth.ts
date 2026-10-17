@@ -95,6 +95,8 @@ export interface ApiResponse {
 }
 
 export interface TestServer {
+  /** URL base (`http://127.0.0.1:<puerto>`) para peticiones crudas. */
+  base: string;
   call(method: string, path: string, o?: { token?: string; membership?: string; body?: unknown; headers?: Record<string, string> }): Promise<ApiResponse>;
   errors: unknown[];
   close(): Promise<void>;
@@ -105,6 +107,7 @@ async function serve(server: http.Server, errors: unknown[]): Promise<TestServer
   server.unref();
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   return {
+    base,
     errors,
     async call(method, path, o = {}) {
       const headers: Record<string, string> = { connection: 'close', ...(o.headers ?? {}) };

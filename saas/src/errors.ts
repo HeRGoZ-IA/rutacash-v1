@@ -57,6 +57,21 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX505': return new ApiError(403, 'SELF_APPROVAL_FORBIDDEN');
     case 'AX506': return new ApiError(409, 'REQUEST_NOT_DISBURSABLE');
     case 'AX507': return new ApiError(409, 'DIRECT_SALE_LIMIT');
+    // Fase 5 · recaudos y gastos (0013). Sin cifras de saldos.
+    case 'AX701': return new ApiError(409, 'CREDIT_NOT_ACTIVE');
+    case 'AX702': return new ApiError(409, 'CREDIT_NOT_DISBURSED');
+    case 'AX703': return new ApiError(409, 'CREDIT_NOT_LEDGERED');
+    case 'AX704': return new ApiError(409, 'CREDIT_WITHOUT_INSTALLMENTS');
+    case 'AX705': return new ApiError(409, 'CREDIT_NO_BALANCE');
+    case 'AX706': return new ApiError(409, 'NOT_CORRECTABLE_HERE');
+    case 'AX707': return new ApiError(400, 'COLLECTOR_REQUIRED');
+    case 'AX708': return new ApiError(400, 'COLLECTOR_INVALID');
+    case 'AX711': return new ApiError(400, 'CATEGORY_INVALID');
+    case 'AX712': return new ApiError(403, 'POOL_NOT_ALLOWED');
+    case 'AX713': return new ApiError(409, 'REFUND_NOT_ALLOWED');
+    case 'AX714': return new ApiError(409, 'REFUND_EXCEEDS_EXPENSE');
+    case 'AX715': return new ApiError(409, 'EXPENSE_HAS_REFUNDS');
+    case 'AX717': return new ApiError(403, 'SELF_CORRECTION_FORBIDDEN');   // F5-D02: quien registró no anula
     // ADEX Online v1 · ciclo de vida de la Empresa Demo (0011).
     case 'AX601': return new ApiError(409, 'DEMO_BUSY');
     case 'AX603': return new ApiError(409, 'DEMO_TARGET_MISMATCH');

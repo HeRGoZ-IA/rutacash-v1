@@ -186,7 +186,11 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       id('correctionOfPaymentId', 'correction_of_payment_id'), f('correctionReason', 'correction_reason'),
       id('correctedBy', 'corrected_by_membership_id'), instant('correctedAt', 'corrected_at'),
     ],
-    omitted: [], added: [],
+    omitted: [], added: [
+      { column: 'ledger_operation_id', reason: 'Fase 5: asiento COLLECTION (o su anulación) del libro de capital del servidor; CLEAN no tiene libro de doble entrada' },
+      { column: 'principal_minor', reason: 'Fase 5: parte del abono que reduce la cartera (capital), en la proporción capital/total del crédito, acumulada' },
+      { column: 'interest_minor', reason: 'Fase 5: parte del abono que es interés cobrado (cuenta income de la ruta); el interés solo existe como dinero al cobrarse' },
+    ],
   },
   {
     dexieTable: 'noPaymentVisits', entity: 'NoPaymentVisit', source: 'models', sqlTable: 'adex.no_payment_visits',
@@ -211,7 +215,9 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       id('fundingAdminId', 'funding_admin_membership_id'), id('refundsExpenseId', 'refunds_expense_id'), f('referencia', 'reference'),
       f('syncStatus', 'sync_status'), created, ...REVERSAL,
     ],
-    omitted: [], added: [],
+    omitted: [], added: [
+      { column: 'ledger_operation_id', reason: 'Fase 5: asiento del gasto (custodia, bolsa o empresa → cuenta de gastos) en el libro de capital del servidor' },
+    ],
   },
   {
     dexieTable: 'capitalMovements', entity: 'CapitalMovement', source: 'models', sqlTable: 'adex.capital_movements',

@@ -1,6 +1,6 @@
 // API de EMPRESA (Fase 1: identidad, contexto y membresías · Fase 2: estructura y
 // catálogo · Fase 3: capital centralizado y custodia · Fase 4: créditos · ADEX
-// Online v1: consulta de operaciones inciertas). Sin framework.
+// Online v1: consulta de operaciones inciertas · Fase 5: recaudos y gastos). Sin framework.
 //
 //   Authorization: Bearer <token de acceso del proveedor de identidad>
 //   X-Adex-Membership: <membresía con la que se opera>   (contexto explícito, DS-05)
@@ -41,6 +41,8 @@ import {
   APPROVE_FIELDS, CREATE_REQUEST_FIELDS, DIRECT_FIELDS, approveRequest, cancelRequest, createRequest, directSale, disburseRequest, getCredit,
   getRequest, listCredits, listRequests, rejectRequest,
 } from '../credits/service.ts';
+import { COLLECTION_FIELDS, getCollection, listCollections, registerCollection, reverseCollection } from '../collections/service.ts';
+import { EXPENSE_FIELDS, createExpense, getExpense, listExpenses, refundExpense, reverseExpense } from '../expenses/service.ts';
 import { checkFields, readJson, readJsonObject, scopeOf, send } from './common.ts';
 
 export interface CompanyApiOptions {
@@ -180,6 +182,21 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: () => async (c, ctx, b, _q, op) => created(await directSale(c, ctx, b, op)) },
   { method: 'GET', pattern: new RegExp(`^/v1/credits$`), fields: null, handler: () => async (c, ctx, _b, q) => ok({ credits: await listCredits(c, ctx, q) }) },
   { method: 'GET', pattern: new RegExp(`^/v1/credits/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getCredit(c, ctx, id!)) },
+  // ---------- Recaudos y gastos (Fase 5, solo en línea) ----------
+  { method: 'GET', pattern: /^\/v1\/collections$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ collections: await listCollections(c, ctx, q) }) },
+  { method: 'POST', pattern: /^\/v1\/collections$/, fields: COLLECTION_FIELDS, idempotent: 'collections.register', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await registerCollection(c, ctx, b, op)) },
+  { method: 'GET', pattern: new RegExp(`^/v1/collections/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getCollection(c, ctx, id!)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/collections/${ID}/reverse$`), fields: ['reason'], idempotent: 'collections.reverse', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => created(await reverseCollection(c, ctx, id!, b, op)) },
+  { method: 'GET', pattern: /^\/v1\/expenses$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ expenses: await listExpenses(c, ctx, q) }) },
+  { method: 'POST', pattern: /^\/v1\/expenses$/, fields: EXPENSE_FIELDS, idempotent: 'expenses.create', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await createExpense(c, ctx, b, op)) },
+  { method: 'GET', pattern: new RegExp(`^/v1/expenses/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getExpense(c, ctx, id!)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/expenses/${ID}/reverse$`), fields: ['reason'], idempotent: 'expenses.reverse', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => created(await reverseExpense(c, ctx, id!, b, op)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/expenses/${ID}/refunds$`), fields: ['amountMinor', 'reason'], idempotent: 'expenses.refund', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => created(await refundExpense(c, ctx, id!, b, op)) },
   // ---------- Operaciones inciertas (ADEX Online v1) ----------
   // Si la respuesta de un comando se pierde (red caída), el cliente consulta aquí su
   // `X-Adex-Operation-Id` ANTES de repetirlo. 404 = el comando no llegó a confirmarse

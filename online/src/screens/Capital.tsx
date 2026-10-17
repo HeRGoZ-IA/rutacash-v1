@@ -183,6 +183,7 @@ export function MyCash() {
                   <span className="muted small">{nameOf(routes.data, p.routeId)} · {p.workerName}</span>
                   <strong><Money minor={p.balanceMinor} /></strong>
                   {p.carriedMinor ? <span className="muted small">Faltante arrastrado <Money minor={p.carriedMinor} /></span> : null}
+                  {p.balanceMinor < 0 ? <span className="muted small">Negativo por gastos pagados: no se entrega ni se presta; los próximos cobros lo compensan y el cuadre lo concilia.</span> : null}
                 </div>
               ))}
             </div>
