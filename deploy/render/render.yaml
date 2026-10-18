@@ -51,3 +51,41 @@ services:
         sync: false
       - key: ADEX_DEMO_DATABASE_URL
         sync: false
+
+  # ---------- Servicio OWNER (Ronda 20; PREPARADO, NO CREADO) ----------
+  # Panel Owner de ADEX Soluciones. MISMA imagen, OTRO proceso y OTRAS credenciales:
+  # solo `adex_control` (sin USAGE sobre el esquema de las empresas). El proceso se niega
+  # a arrancar si recibe ADEX_API_DATABASE_URL o ADEX_DEMO_DATABASE_URL, o si la base no
+  # confirma el rol adex_control. Ver docs/ADEX_OWNER_PANEL.md.
+  - type: web
+    name: adex-owner-api
+    runtime: docker
+    plan: free
+    region: virginia
+    repo: https://github.com/HeRGoZ-IA/rutacash-v1
+    branch: main
+    dockerContext: .
+    dockerfilePath: ./deploy/adex-online-api/Dockerfile
+    dockerCommand: node --import ./scripts/register-alias.mjs src/server/controlMain.ts
+    numInstances: 1
+    healthCheckPath: /healthz
+    autoDeployTrigger: "off"
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: ADEX_TRUST_PROXY
+        value: "1"
+      - key: ADEX_PG_SSL_CA_FILE
+        value: /etc/secrets/supabase-ca.crt
+      - key: ADEX_ALLOWED_ORIGINS
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      # Solo para invitar al primer SuperAdmin de una empresa (alta sin contraseña).
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      # postgres://adex_control.<ref>:<contraseña>@<pooler>:6543/postgres
+      - key: ADEX_CONTROL_DATABASE_URL
+        sync: false

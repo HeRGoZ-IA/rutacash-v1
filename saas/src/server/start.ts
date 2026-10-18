@@ -27,7 +27,8 @@ import { createDemoHandler } from '../http/demoApi.ts';
 import { createDemoService } from '../demo/service.ts';
 import { createOnlineServer } from './app.ts';
 
-export function readConfig(env: NodeJS.ProcessEnv) {
+/** Configuración común a los dos servicios (empresa y Owner): TLS, CORS, proveedor, límites. */
+export function readCommonConfig(env: NodeJS.ProcessEnv) {
   const need = (k: string) => {
     const v = env[k]?.trim();
     if (!v) throw new Error(`missing environment variable ${k}`);
@@ -49,8 +50,6 @@ export function readConfig(env: NodeJS.ProcessEnv) {
   for (const o of origins) if (!/^https?:\/\/[^/\s*]+$/.test(o)) throw new Error(`invalid origin ${o}`);
   return {
     port: Number(env['PORT'] ?? 8080),
-    apiUrl: need('ADEX_API_DATABASE_URL'),
-    demoUrl: env['ADEX_DEMO_DATABASE_URL']?.trim() || null,
     supabaseUrl: need('SUPABASE_URL').replace(/\/$/, ''),
     publishableKey: need('SUPABASE_PUBLISHABLE_KEY'),
     secretKey: need('SUPABASE_SECRET_KEY'),
@@ -62,8 +61,15 @@ export function readConfig(env: NodeJS.ProcessEnv) {
   };
 }
 
+export function readConfig(env: NodeJS.ProcessEnv) {
+  const apiUrl = env['ADEX_API_DATABASE_URL']?.trim();
+  if (!apiUrl) throw new Error('missing environment variable ADEX_API_DATABASE_URL');
+  if (env['ADEX_CONTROL_DATABASE_URL']?.trim()) throw new Error('ADEX_CONTROL_DATABASE_URL belongs to the Owner service, not to this one');
+  return { ...readCommonConfig(env), apiUrl, demoUrl: env['ADEX_DEMO_DATABASE_URL']?.trim() || null };
+}
+
 /** Error sin datos: código y tipo, nunca mensajes con valores ni tokens. */
-function logError(err: unknown) {
+export function logError(err: unknown) {
   const e = err as { code?: string; name?: string; constraint?: string };
   process.stderr.write(`${JSON.stringify({ level: 'error', t: new Date().toISOString(), name: e?.name ?? 'Error', code: e?.code ?? null, constraint: e?.constraint ?? null })}\n`);
 }

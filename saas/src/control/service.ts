@@ -94,3 +94,106 @@ export async function refreshRouteCounts(client: pg.PoolClient, companyId: strin
 export async function operatorLogout(client: pg.PoolClient, scope: 'local' | 'global') {
   await client.query('select adex_control.logout($1)', [scope === 'global']);
 }
+
+// ---------- Panel Owner SaaS (Ronda 20) ----------
+// Solo usa lo que `adex_control` ya tenía concedido en 0006: lectura de su propio
+// esquema, columnas de facturación de `company_control` y `saas_payments` (cobros de
+// ADEX a la empresa; NO es dinero de la empresa). Nada del esquema `adex`.
+
+/** Perfil del Owner de la sesión (nombre y fechas). La identidad viene del token verificado. */
+export async function operatorProfile(client: pg.PoolClient, claims: SessionClaims) {
+  const r = await client.query<{ display_name: string; role: string; created_at: Date }>(
+    'select display_name, role, created_at from adex_control.platform_operators where identity_id = $1', [claims.identityId]);
+  if (!r.rows[0]) throw new ApiError(403, 'OPERATOR_REQUIRED');
+  return { displayName: r.rows[0].display_name, role: r.rows[0].role, since: r.rows[0].created_at.toISOString() };
+}
+
+interface PaymentRow { id: string; period: string; amount: string; expected_date: string; paid_date: string | null; status: string; note: string | null; created_at: Date }
+const paymentView = (p: PaymentRow) => ({
+  id: p.id, period: p.period, amount: Number(p.amount), expectedDate: p.expected_date, paidDate: p.paid_date, status: p.status, note: p.note,
+  createdAt: p.created_at.toISOString(),
+});
+
+/** Ficha de una empresa: datos de control, historial estructural/comercial y cobros SaaS. */
+export async function companyDetail(client: pg.PoolClient, companyId: string) {
+  const company = await getCompany(client, companyId);
+  const events = await client.query<{ type: string; at: Date; detail: string | null }>(
+    'select type, at, detail from adex_control.control_events where company_id = $1 order by at desc limit 100', [companyId]);
+  const payments = await client.query<PaymentRow>(
+    `select id, period, amount, to_char(expected_date, 'YYYY-MM-DD') expected_date, to_char(paid_date, 'YYYY-MM-DD') paid_date, status, note, created_at
+       from adex_control.saas_payments where company_id = $1 order by period desc, created_at desc`, [companyId]);
+  return {
+    company,
+    events: events.rows.map((e) => ({ type: e.type, at: e.at.toISOString(), detail: e.detail })),
+    payments: payments.rows.map(paymentView),
+  };
+}
+
+/** Todos los cobros SaaS (vista de facturación). Solo hechos de ADEX con sus clientes. */
+export async function listPayments(client: pg.PoolClient) {
+  const r = await client.query<PaymentRow & { company_id: string; company_name: string }>(
+    `select p.id, p.company_id, c.name company_name, p.period, p.amount, to_char(p.expected_date, 'YYYY-MM-DD') expected_date,
+            to_char(p.paid_date, 'YYYY-MM-DD') paid_date, p.status, p.note, p.created_at
+       from adex_control.saas_payments p join adex_control.company_control c on c.company_id = p.company_id
+      order by p.expected_date desc, c.name`);
+  return r.rows.map((p) => ({ ...paymentView(p), companyId: p.company_id, companyName: p.company_name }));
+}
+
+const DATE_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+const amountOf = (v: unknown, field: string, min: number): number => {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() ? Number(v) : NaN;
+  if (!Number.isFinite(n) || n < min || n > 1e9 || Math.round(n * 100) !== n * 100) throw new ApiError(400, `INVALID_${field.toUpperCase()}`);
+  return n;
+};
+const optDate = (v: unknown, field: string): string | null => {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v !== 'string' || !DATE_RE.test(v)) throw new ApiError(400, `INVALID_${field.toUpperCase()}`);
+  return v;
+};
+
+/** Condiciones de facturación SaaS de la empresa (modo, tarifa, próximo cobro, estado de pago). */
+export async function updateBilling(client: pg.PoolClient, companyId: string, body: Record<string, unknown>) {
+  const mode = str(body['billingMode'], 'billingMode', /^(per_route|fixed)$/);
+  const rate = amountOf(body['billingRate'], 'billingRate', 0);
+  const next = optDate(body['nextBillingDate'], 'nextBillingDate');
+  const status = str(body['paymentStatus'], 'paymentStatus', /^(pending|paid|overdue)$/);
+  const r = await client.query(
+    `update adex_control.company_control set billing_mode = $2, billing_rate = $3, next_billing_date = $4, payment_status = $5, updated_at = now()
+      where company_id = $1`, [companyId, mode, rate, next, status]);
+  if (r.rowCount !== 1) throw new ApiError(404, 'NOT_FOUND');
+  return getCompany(client, companyId);
+}
+
+/** Registra un cobro de ADEX a la empresa (periodo AAAA-MM). */
+export async function registerPayment(client: pg.PoolClient, companyId: string, body: Record<string, unknown>) {
+  await getCompany(client, companyId);
+  const period = str(body['period'], 'period', /^\d{4}-(0[1-9]|1[0-2])$/);
+  const amount = amountOf(body['amount'], 'amount', 0.01);
+  const expected = optDate(body['expectedDate'], 'expectedDate') ?? fail('expectedDate');
+  const status = str(body['status'] ?? 'pending', 'status', /^(pending|paid|overdue)$/);
+  const paid = optDate(body['paidDate'], 'paidDate');
+  if ((status === 'paid') !== (paid !== null)) throw new ApiError(400, 'INVALID_PAIDDATE');
+  const note = typeof body['note'] === 'string' && body['note'].trim() ? body['note'].trim().slice(0, 200) : null;
+  const id = randomUUID();
+  await client.query(
+    `insert into adex_control.saas_payments (id, company_id, period, amount, expected_date, paid_date, status, note, created_at, updated_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())`, [id, companyId, period, amount, expected, paid, status, note]);
+  return (await companyDetail(client, companyId)).payments.find((p) => p.id === id)!;
+}
+
+/** Cambia el estado de un cobro SaaS (pendiente, pagado con fecha, vencido). */
+export async function setPaymentStatus(client: pg.PoolClient, paymentId: string, body: Record<string, unknown>) {
+  const status = str(body['status'], 'status', /^(pending|paid|overdue)$/);
+  const paid = optDate(body['paidDate'], 'paidDate');
+  if ((status === 'paid') !== (paid !== null)) throw new ApiError(400, 'INVALID_PAIDDATE');
+  const r = await client.query<PaymentRow>(
+    `update adex_control.saas_payments set status = $2, paid_date = $3, updated_at = now() where id = $1
+     returning id, period, amount, to_char(expected_date, 'YYYY-MM-DD') expected_date, to_char(paid_date, 'YYYY-MM-DD') paid_date, status, note, created_at`,
+    [paymentId, status, paid]);
+  if (!r.rows[0]) throw new ApiError(404, 'NOT_FOUND');
+  return paymentView(r.rows[0]);
+}
+
+function fail(field: string): never {
+  throw new ApiError(400, `INVALID_${field.toUpperCase()}`);
+}

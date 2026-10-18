@@ -3,7 +3,9 @@
 //   /demo/v1/*   administración de la Empresa Demo (pool `adex_demo`)
 //   /healthz     vida del proceso (sin base de datos)
 //   /readyz      la base responde (sin datos)
-// La API del plano Owner NO se publica en esta etapa.
+// La API del plano Owner (/control/v1/*) NO se monta aquí: vive en su PROPIO servicio
+// (server/controlStart.ts), con su propio proceso y SOLO credenciales `adex_control`;
+// ese servicio usa esta misma capa común con `company` y `demo` nulos.
 //
 // Capa común a todo: CORS SOLO para los orígenes configurados, cabeceras de seguridad
 // (HSTS lo pone el código: App Platform no lo añade), límite de peticiones por IP y por
@@ -23,9 +25,16 @@ type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => Promise<
  */
 export const API_FEATURES: readonly string[] = ['collections-v1', 'settlements-v1'];
 
+/** Módulos del servicio Owner (servicio aparte, ver controlStart.ts). */
+export const CONTROL_FEATURES: readonly string[] = ['owner-v1'];
+
 export interface OnlineServerOptions {
-  company: Handler;
+  company: Handler | null;
   demo: Handler | null;
+  /** Solo en el servicio Owner. Nunca junto a `company` o `demo`. */
+  control?: Handler | null;
+  /** Lo que declara /healthz (por defecto, los módulos de la API de empresa). */
+  features?: readonly string[];
   /** Pool para /readyz (`select 1`). */
   readinessPool: pg.Pool;
   /** Orígenes exactos admitidos (p. ej. https://adex-online.example). Nunca «*». */
@@ -65,6 +74,8 @@ export function createOnlineServer(opts: OnlineServerOptions): http.Server {
   const byToken = createRateLimiter(opts.rateLimit?.perTokenPerMinute ?? 240, now);
   const origins = new Set(opts.allowedOrigins.map((o) => o.replace(/\/$/, '')));
   if (origins.has('*')) throw new Error('CORS: wildcard origin is not allowed');
+  if (opts.control && (opts.company || opts.demo)) throw new Error('the Owner API must run in its own service');
+  const features = opts.features ?? API_FEATURES;
   const log = opts.log ?? ((l) => process.stdout.write(`${JSON.stringify(l)}\n`));
 
   return http.createServer((req, res) => {
@@ -101,7 +112,7 @@ export function createOnlineServer(opts: OnlineServerOptions): http.Server {
     // rechaza: nada se ejecuta en nombre de una página ajena.
     if (typeof origin === 'string' && !originOk) return reject(403, 'ORIGIN_NOT_ALLOWED');
 
-    if (path === '/healthz' && req.method === 'GET') return json(200, { status: 'ok', features: API_FEATURES });
+    if (path === '/healthz' && req.method === 'GET') return json(200, { status: 'ok', features });
     const forwarded = opts.trustProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0]!.trim() : '';
     const ip = forwarded || req.socket.remoteAddress || 'unknown';
     if (!byIp(ip)) return reject(429, 'RATE_LIMITED');
@@ -121,7 +132,14 @@ export function createOnlineServer(opts: OnlineServerOptions): http.Server {
           if (!opts.demo) return reject(404, 'NOT_FOUND');
           return await opts.demo(req, res);
         }
-        if (path.startsWith('/v1/')) return await opts.company(req, res);
+        if (path.startsWith('/control/v1/')) {
+          if (!opts.control) return reject(404, 'NOT_FOUND');
+          return await opts.control(req, res);
+        }
+        if (path.startsWith('/v1/')) {
+          if (!opts.company) return reject(404, 'NOT_FOUND');
+          return await opts.company(req, res);
+        }
         reject(404, 'NOT_FOUND');
       } catch {
         if (!res.headersSent) reject(503, 'UNAVAILABLE');

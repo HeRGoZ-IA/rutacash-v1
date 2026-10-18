@@ -95,8 +95,11 @@ const users = await fetch(`${need('SUPABASE_URL')}/auth/v1/admin/users?per_page=
   headers: { apikey: need('SUPABASE_SECRET_KEY'), authorization: `Bearer ${need('SUPABASE_SECRET_KEY')}` },
 });
 if (!users.ok) blocked(`Auth admin respondió ${users.status}`);
-const list = ((await users.json()) as { users?: { email?: string }[] }).users ?? [];
-const foreign = list.filter((u) => !(u.email ?? '').endsWith('@example.test'));
+const list = ((await users.json()) as { users?: { id?: string; email?: string }[] }).users ?? [];
+// Única excepción: la identidad REAL del Owner, admitida por id (no por correo) en el
+// .env.staging local; la añade scripts/owner-register.ts. Nunca usuarios de empresa reales.
+const realOwners = new Set((env['ADEX_STAGING_REAL_OWNER_IDS'] ?? '').split(',').map((x) => x.trim()).filter(Boolean));
+const foreign = list.filter((u) => !(u.email ?? '').endsWith('@example.test') && !realOwners.has(u.id ?? ''));
 if (foreign.length) blocked(`Auth tiene ${foreign.length} usuario(s) no sintético(s)`);
 
 const ssl = env['ADEX_PG_SSL_CA'] ? { ca: readFileSync(env['ADEX_PG_SSL_CA'], 'utf8'), rejectUnauthorized: true } : { rejectUnauthorized: false };

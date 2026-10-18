@@ -4,7 +4,11 @@
   "ignoreCommand": "node scripts/deploy-gate.mjs",
   "outputDirectory": "dist",
   "framework": "vite",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
+  "rewrites": [
+    { "source": "/owner", "destination": "/owner.html" },
+    { "source": "/owner/(.*)", "destination": "/owner.html" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
   "headers": [
     {
       "source": "/(.*)",
