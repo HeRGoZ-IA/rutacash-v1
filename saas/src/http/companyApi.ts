@@ -1,6 +1,7 @@
 // API de EMPRESA (Fase 1: identidad, contexto y membresías · Fase 2: estructura y
 // catálogo · Fase 3: capital centralizado y custodia · Fase 4: créditos · ADEX
-// Online v1: consulta de operaciones inciertas · Fase 5: recaudos y gastos). Sin framework.
+// Online v1: consulta de operaciones inciertas · Fase 5: recaudos y gastos · Fase 6:
+// cuadres y cierres). Sin framework.
 //
 //   Authorization: Bearer <token de acceso del proveedor de identidad>
 //   X-Adex-Membership: <membresía con la que se opera>   (contexto explícito, DS-05)
@@ -43,6 +44,10 @@ import {
 } from '../credits/service.ts';
 import { COLLECTION_FIELDS, getCollection, listCollections, registerCollection, reverseCollection } from '../collections/service.ts';
 import { EXPENSE_FIELDS, createExpense, getExpense, listExpenses, refundExpense, reverseExpense } from '../expenses/service.ts';
+import {
+  PERIOD_CLOSE_FIELDS, SETTLEMENT_FIELDS, closePeriod, closeSettlement, getClosure, getSettlement, liquidation, listClosures, listSettlements,
+  periodCalendar, previewSettlement, reopenSettlement, settleableWorkers,
+} from '../settlements/service.ts';
 import { checkFields, readJson, readJsonObject, scopeOf, send } from './common.ts';
 
 export interface CompanyApiOptions {
@@ -197,6 +202,21 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: ([id]) => async (c, ctx, b, _q, op) => created(await reverseExpense(c, ctx, id!, b, op)) },
   { method: 'POST', pattern: new RegExp(`^/v1/expenses/${ID}/refunds$`), fields: ['amountMinor', 'reason'], idempotent: 'expenses.refund', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => created(await refundExpense(c, ctx, id!, b, op)) },
+  // ---------- Cuadres y cierres (Fase 6, solo en línea) ----------
+  { method: 'GET', pattern: /^\/v1\/settlements\/workers$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await settleableWorkers(c, ctx, q)) },
+  { method: 'GET', pattern: /^\/v1\/settlements\/preview$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await previewSettlement(c, ctx, q)) },
+  { method: 'GET', pattern: /^\/v1\/settlements$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ settlements: await listSettlements(c, ctx, q) }) },
+  { method: 'POST', pattern: /^\/v1\/settlements$/, fields: SETTLEMENT_FIELDS, idempotent: 'settlements.close', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await closeSettlement(c, ctx, b, op)) },
+  { method: 'GET', pattern: new RegExp(`^/v1/settlements/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getSettlement(c, ctx, id!)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/settlements/${ID}/reopen$`), fields: ['reason'], idempotent: 'settlements.reopen', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => created(await reopenSettlement(c, ctx, id!, b, op)) },
+  { method: 'GET', pattern: /^\/v1\/periods\/calendar$/, fields: null, handler: () => async (c, ctx) => ok(await periodCalendar(c, ctx)) },
+  { method: 'GET', pattern: /^\/v1\/periods\/liquidation$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await liquidation(c, ctx, q)) },
+  { method: 'GET', pattern: /^\/v1\/periods$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ closures: await listClosures(c, ctx, q) }) },
+  { method: 'POST', pattern: /^\/v1\/periods\/close$/, fields: PERIOD_CLOSE_FIELDS, idempotent: 'periods.close', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await closePeriod(c, ctx, b, op)) },
+  { method: 'GET', pattern: new RegExp(`^/v1/periods/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getClosure(c, ctx, id!)) },
   // ---------- Operaciones inciertas (ADEX Online v1) ----------
   // Si la respuesta de un comando se pierde (red caída), el cliente consulta aquí su
   // `X-Adex-Operation-Id` ANTES de repetirlo. 404 = el comando no llegó a confirmarse

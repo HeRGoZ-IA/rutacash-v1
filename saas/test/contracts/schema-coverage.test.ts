@@ -122,7 +122,10 @@ describe('Fase 0 · esquema completo frente a Dexie v16', () => {
       // Fase 2: catálogo de tipos de documento por país (DS-10). Fase 3: libro de capital y
       // custodia de doble entrada (sin equivalente Dexie: CLEAN reparte el modelo C1 en
       // capitalMovements/withdrawals/cashCustodyMovements; el servidor no recrea esa caja de ruta).
-      assert.deepEqual(extra, ['adex.capital_accounts', 'adex.capital_entries', 'adex.capital_operations', 'adex.currencies', 'adex.document_types', 'adex.identities', 'adex.membership_routes', 'adex.operations', 'adex.revoked_sessions']);
+      // Fase 6: cuadres del servidor (tramo del libro y posición con signo; `cash_settlements`
+      // sigue siendo el histórico importado) y archivo de cifras de cada cierre de periodo.
+      assert.deepEqual(extra, ['adex.capital_accounts', 'adex.capital_entries', 'adex.capital_operations', 'adex.currencies', 'adex.custody_settlements',
+        'adex.document_types', 'adex.identities', 'adex.membership_routes', 'adex.operations', 'adex.period_closures', 'adex.revoked_sessions']);
     });
 
     test('SCHEMA-006 · toda tabla operativa lleva company_id NOT NULL y clave (company_id, id)', async () => {

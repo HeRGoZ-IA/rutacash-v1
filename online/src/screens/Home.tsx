@@ -30,8 +30,6 @@ export function Home() {
 
 const UPCOMING = [
   ['Visitas sin pago', 'Registro de visitas y promesas de pago'],
-  ['Cuadres', 'Cuadre diario de efectivo'],
-  ['Cierres', 'Cierres semanales y periodos'],
   ['Reportes', 'Reportes completos de cartera y caja'],
 ];
 

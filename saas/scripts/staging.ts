@@ -180,7 +180,7 @@ try {
       }
     }
     // `--test online` ejecuta solo los archivos cuyo nombre contiene «online» (repetición dirigida).
-    const files = ['staging-auth', 'staging-rls', 'staging-phase2', 'staging-phase3', 'staging-phase4', 'staging-phase5', 'staging-phase5-remote', 'staging-online']
+    const files = ['staging-auth', 'staging-rls', 'staging-phase2', 'staging-phase3', 'staging-phase4', 'staging-phase5', 'staging-phase5-remote', 'staging-phase6', 'staging-online']
       .filter((f) => !process.argv[3] || f.includes(process.argv[3])).map((f) => path.join('test', 'auth-real', `${f}.test.ts`));
     const code = await new Promise<number>((resolve) => {
       const child = spawn(process.execPath, ['--import', './scripts/register-alias.mjs', '--test', '--test-reporter=spec', '--test-concurrency=1', ...files], {

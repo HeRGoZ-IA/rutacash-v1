@@ -76,7 +76,7 @@ describe('Fase 3 · comandos de capital y custodia', () => {
     assert.equal(await balance(db.admin, c1, 'external', null), -2_000_000);
     const sa = (await bruno('GET', '/v1/capital/summary')).body;
     assert.deepEqual(sa['company'], { availableMinor: 800_000, externalNetInMinor: 2_000_000, partnerContributionsMinor: 0, adminPoolsMinor: 1_200_000, custodyMinor: 0, portfolioMinor: 0,
-      interestCollectedMinor: 0, expensesMinor: 0 });
+      interestCollectedMinor: 0, expensesMinor: 0, unidentifiedSurplusMinor: 0 });
     const own = (await ana('GET', '/v1/capital/summary')).body;
     assert.equal(own['company'], undefined, 'el Administrador no ve la empresa');
     assert.deepEqual((own['admins'] as Body[]).map((a) => [a['adminId'], a['availableMinor'], a['allocatedNetMinor']]), [[M.anaAdmin, 1_000_000, 1_000_000]]);

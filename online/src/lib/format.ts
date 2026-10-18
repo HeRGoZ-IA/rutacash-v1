@@ -54,6 +54,13 @@ const ERRORS: Record<string, string> = {
   SELF_CORRECTION_FORBIDDEN: 'Quien registró el gasto no puede anularlo (tampoco con otra membresía): debe hacerlo otra persona autorizada.',
   CAPITAL_CONTROLLER_MISSING: 'La ruta no tiene Administrador responsable de capital válido.',
   MEMBER_INACTIVE: 'Esa persona está inactiva.',
+  SELF_SETTLEMENT_FORBIDDEN: 'Nadie cuadra (ni reabre) su propio efectivo, tampoco con otra membresía: debe hacerlo otra persona autorizada.',
+  SETTLEMENT_STALE: 'Las cifras cambiaron desde la vista previa (hubo movimientos nuevos u otro cuadre). Revise el nuevo esperado antes de cerrar.',
+  REASON_REQUIRED: 'Explique el motivo (mínimo 10 caracteres).',
+  PERIOD_NOT_ENDED: 'Ese periodo todavía no ha terminado en la fecha de la empresa: aún no se puede cerrar.',
+  PERIOD_OVERLAP: 'Ese rango ya está cerrado o se solapa con un periodo cerrado.',
+  SETTLEMENT_NOT_REOPENABLE: 'Solo se puede reabrir el último cuadre vigente de esa persona.',
+  NOT_FOUND: 'No encontrado o fuera de su alcance.',
   NETWORK: 'Sin conexión con el servidor.',
   UNCERTAIN_OPERATION: 'No se pudo confirmar la operación. Compruebe antes de repetirla.',
 };
@@ -117,5 +124,5 @@ export const OPERATION_KIND: Record<string, string> = {
   WORKER_RETURN: 'Devolución del trabajador', WORKER_TRANSFER: 'Traspaso entre trabajadores', ROUTE_REASSIGNMENT: 'Reasignación entre rutas',
   REVERSAL: 'Anulación', LOAN_DISBURSEMENT: 'Desembolso de crédito',
   COLLECTION: 'Recaudo', WORKER_EXPENSE: 'Gasto de trabajador', ROUTE_EXPENSE: 'Gasto de la ruta', COMPANY_EXPENSE: 'Gasto administrativo',
-  EXPENSE_REFUND: 'Reintegro de gasto',
+  EXPENSE_REFUND: 'Reintegro de gasto', SETTLEMENT_RETURN: 'Efectivo entregado en cuadre', SETTLEMENT_SURPLUS: 'Sobrante de cuadre (en control)',
 };

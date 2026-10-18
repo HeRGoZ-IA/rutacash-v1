@@ -13,6 +13,7 @@ import { Capital, MyCash } from './screens/Capital.tsx';
 import { Authorizations, Disbursements, Requests } from './screens/Credits.tsx';
 import { Collections } from './screens/Collections.tsx';
 import { Expenses } from './screens/Expenses.tsx';
+import { Periods, Settlements } from './screens/Settlements.tsx';
 import { Home, Upcoming } from './screens/Home.tsx';
 import { DemoAdmin } from './screens/DemoAdmin.tsx';
 
@@ -36,6 +37,8 @@ export function App({ client }: { client: OnlineClient }) {
                 <Route path="desembolsos" element={<Disbursements />} />
                 <Route path="recaudos" element={<Collections />} />
                 <Route path="gastos" element={<Expenses />} />
+                <Route path="cuadres" element={<Settlements />} />
+                <Route path="cierres" element={<Periods />} />
                 <Route path="proximamente" element={<Upcoming />} />
               </Route>
             </Route>

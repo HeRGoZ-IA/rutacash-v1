@@ -72,6 +72,13 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX714': return new ApiError(409, 'REFUND_EXCEEDS_EXPENSE');
     case 'AX715': return new ApiError(409, 'EXPENSE_HAS_REFUNDS');
     case 'AX717': return new ApiError(403, 'SELF_CORRECTION_FORBIDDEN');   // F5-D02: quien registró no anula
+    // Fase 6 · cuadres y cierres (0014). Sin cifras de saldos.
+    case 'AX801': return new ApiError(403, 'SELF_SETTLEMENT_FORBIDDEN');   // nadie se cuadra (ni reabre) a sí mismo
+    case 'AX802': return new ApiError(409, 'SETTLEMENT_STALE');            // las cifras cambiaron desde la vista previa
+    case 'AX803': return new ApiError(400, 'REASON_REQUIRED');
+    case 'AX804': return new ApiError(409, 'PERIOD_NOT_ENDED');            // D29
+    case 'AX805': return new ApiError(409, 'PERIOD_OVERLAP');
+    case 'AX806': return new ApiError(409, 'SETTLEMENT_NOT_REOPENABLE');
     // ADEX Online v1 · ciclo de vida de la Empresa Demo (0011).
     case 'AX601': return new ApiError(409, 'DEMO_BUSY');
     case 'AX603': return new ApiError(409, 'DEMO_TARGET_MISMATCH');

@@ -15,6 +15,10 @@ export function navFor(ctx: ActiveContextView): NavItem[] {
   if (can('sale.confirmDisbursement') || can('sale.viewActive')) items.push({ to: '/app/desembolsos', label: 'Desembolsos y créditos', hint: 'Confirmar entregas y consultar créditos' });
   if (can('payment.register') || can('payment.viewHistory')) items.push({ to: '/app/recaudos', label: 'Recaudos', hint: 'Cobrar cuotas e historial de abonos' });
   if (can('expense.register') || can('expense.correct')) items.push({ to: '/app/gastos', label: 'Gastos', hint: 'Registrar gastos e historial' });
-  items.push({ to: '/app/proximamente', label: 'Próximamente', hint: 'Cuadres, cierres, reportes' });
+  if (can('cashSettlement.view') || can('cashSettlement.viewOwn')) {
+    items.push({ to: '/app/cuadres', label: can('cashSettlement.view') ? 'Cuadres' : 'Mi cuadre', hint: 'Esperado, entregas parciales, faltantes y sobrantes' });
+  }
+  if (can('cashbox.viewRoute')) items.push({ to: '/app/cierres', label: 'Cierres', hint: 'Liquidación por periodo y cierre semanal' });
+  items.push({ to: '/app/proximamente', label: 'Próximamente', hint: 'Visitas sin pago, reportes' });
   return items;
 }

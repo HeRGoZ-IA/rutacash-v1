@@ -32,10 +32,15 @@ import { optId, pathId, reqId, reqText } from '../structure/input.ts';
 export type CapitalKind =
   | 'COMPANY_DEPOSIT' | 'COMPANY_WITHDRAWAL' | 'ADMIN_ALLOCATION' | 'ADMIN_RETURN' | 'PARTNER_CONTRIBUTION'
   | 'WORKER_DELIVERY' | 'WORKER_RETURN' | 'WORKER_TRANSFER' | 'ROUTE_REASSIGNMENT' | 'REVERSAL' | 'LOAN_DISBURSEMENT'
-  | 'COLLECTION' | 'WORKER_EXPENSE' | 'ROUTE_EXPENSE' | 'COMPANY_EXPENSE' | 'EXPENSE_REFUND';
+  | 'COLLECTION' | 'WORKER_EXPENSE' | 'ROUTE_EXPENSE' | 'COMPANY_EXPENSE' | 'EXPENSE_REFUND'
+  | 'SETTLEMENT_RETURN' | 'SETTLEMENT_SURPLUS';
 
-/** Recaudos y gastos (Fase 5): se corrigen por su propio comando, nunca por la anulación genérica. */
-const OWN_CORRECTION_KINDS: readonly string[] = ['COLLECTION', 'WORKER_EXPENSE', 'ROUTE_EXPENSE', 'COMPANY_EXPENSE', 'EXPENSE_REFUND'];
+/**
+ * Recaudos y gastos (Fase 5) y asientos de un cuadre (Fase 6): se corrigen por su propio
+ * comando (el cuadre, solo reabriéndolo), nunca por la anulación genérica.
+ */
+const OWN_CORRECTION_KINDS: readonly string[] = ['COLLECTION', 'WORKER_EXPENSE', 'ROUTE_EXPENSE', 'COMPANY_EXPENSE', 'EXPENSE_REFUND',
+  'SETTLEMENT_RETURN', 'SETTLEMENT_SURPLUS'];
 
 const COMPANY_KINDS: readonly string[] = ['COMPANY_DEPOSIT', 'COMPANY_WITHDRAWAL', 'ADMIN_ALLOCATION', 'ADMIN_RETURN'];
 
@@ -160,7 +165,7 @@ const ACTIONS: Record<CapitalKind, string> = {
   WORKER_RETURN: 'CENTRAL_CAPITAL_RETURNED', WORKER_TRANSFER: 'CASH_CUSTODY_PERSON_TO_PERSON',
   ROUTE_REASSIGNMENT: 'CENTRAL_CAPITAL_REASSIGNED', REVERSAL: 'CAPITAL_OPERATION_REVERSED', LOAN_DISBURSEMENT: 'CONFIRM_DISBURSEMENT',
   COLLECTION: 'REGISTER_PAYMENT', WORKER_EXPENSE: 'CREATE_EXPENSE', ROUTE_EXPENSE: 'CREATE_EXPENSE', COMPANY_EXPENSE: 'CREATE_EXPENSE',
-  EXPENSE_REFUND: 'EXPENSE_REFUNDED',
+  EXPENSE_REFUND: 'EXPENSE_REFUNDED', SETTLEMENT_RETURN: 'CASH_SETTLEMENT_CLOSED', SETTLEMENT_SURPLUS: 'CASH_SETTLEMENT_CLOSED',
 };
 
 /** Escribe, audita (misma transacción) y responde con lo que el actor puede ver. */
@@ -466,6 +471,9 @@ export async function capitalSummary(client: pg.PoolClient, ctx: ActiveContext) 
         portfolioMinor: total('portfolio'),
         // Fase 5: interés efectivamente cobrado y gastos registrados (neto de correcciones).
         interestCollectedMinor: -total('income'), expensesMinor: total('expense'),
+        // Fase 6: sobrantes de cuadres en control (recibidos, sin identificar). NO es capital
+        // disponible ni se gasta; su destino es una decisión pendiente (F6-D02).
+        unidentifiedSurplusMinor: total('suspense'),
       },
       admins: await adminPools(client, ctx, null),
     };
@@ -493,7 +501,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
                                     where e.company_id = o.company_id and e.operation_id = o.id)`);
   // Contrapartidas (externa, socios, interés) miden lo que entró; la custodia solo puede
   // quedar negativa por un gasto del trabajador (73209ce), comprobado pata a pata.
-  const overdrawn = await q(`select count(*)::text n from adex.capital_accounts where company_id = $1 and kind not in ('external', 'partner', 'income', 'custody') and balance_minor < 0`);
+  const overdrawn = await q(`select count(*)::text n from adex.capital_accounts where company_id = $1 and kind not in ('external', 'partner', 'income', 'custody', 'unidentified') and balance_minor < 0`);
   const negativeCustody = await q(
     `select count(*)::text n from adex.capital_entries e
        join adex.capital_accounts a on a.company_id = e.company_id and a.id = e.account_id
@@ -554,6 +562,39 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
       where a.company_id = $1 and a.kind = 'expense'
         and a.balance_minor <> coalesce((select sum(x.amount_minor) from adex.expenses x where x.company_id = a.company_id
                                            and x.route_id is not distinct from a.route_id and x.ledger_operation_id is not null), 0)`);
+  // Fase 6 · cuadres: el arrastre de cada custodia es el faltante de su último cuadre
+  // vigente (0 sin cuadres); ninguna pata ajena al gasto del trabajador ni al retorno del
+  // cuadre la dejó por debajo de su arrastre; cada cuadre coincide con el libro (posición
+  // = Σ patas hasta su corte; retorno y sobrante = sus asientos, netos de su reapertura).
+  const carriedDrift = await q(
+    `select count(*)::text n from adex.capital_accounts a
+      where a.company_id = $1 and a.kind = 'custody'
+        and a.carried_minor <> coalesce((select s.carried_after_minor from adex.custody_settlements s where s.company_id = a.company_id
+                                          and s.custody_account_id = a.id and s.status = 'cerrada' order by s.cycle_no desc limit 1), 0)`);
+  const settlementDrift = await q(
+    `select count(*)::text n from adex.custody_settlements s
+      where s.company_id = $1
+        and (s.expected_position_minor <> coalesce((select sum(e.amount_minor) from adex.capital_entries e
+                                                     where e.company_id = s.company_id and e.account_id = s.custody_account_id and e.seq <= s.to_seq), 0)
+             or s.returned_to_pool_minor <> coalesce((select o.amount_minor from adex.capital_operations o where o.company_id = s.company_id
+                                                       and o.id = s.return_operation_id and o.kind = 'SETTLEMENT_RETURN' and o.settlement_id = s.id), 0)
+             or s.surplus_minor <> coalesce((select o.amount_minor from adex.capital_operations o where o.company_id = s.company_id
+                                              and o.id = s.surplus_operation_id and o.kind = 'SETTLEMENT_SURPLUS' and o.settlement_id = s.id), 0)
+             or (s.status = 'reabierta') <> exists (select 1 from adex.capital_operations o where o.company_id = s.company_id and o.settlement_id = s.id
+                                                     and o.kind = 'REVERSAL') and (s.return_operation_id is not null or s.surplus_operation_id is not null))`);
+  // Sobrantes en control = Σ sobrantes de cuadres vigentes, por ruta; su contrapartida, igual con signo contrario.
+  const surplusDrift = await q(
+    `select count(*)::text n from adex.capital_accounts a
+      where a.company_id = $1 and a.kind in ('suspense', 'unidentified')
+        and abs(a.balance_minor) <> coalesce((select sum(s.surplus_minor) from adex.custody_settlements s where s.company_id = a.company_id
+                                               and s.route_id = a.route_id and s.status = 'cerrada'
+                                               and (a.kind = 'unidentified' or s.receiver_admin_membership_id = a.membership_id)), 0)`);
+  // Cierres de periodo: lo archivado no cambia (nadie fecha asientos en un periodo cerrado).
+  const closedDrift = await q(
+    `select count(*)::text n from adex.period_closures p
+      where p.company_id = $1
+        and (p.figures -> 'custody' is distinct from adex.route_period_figures(p.company_id, p.route_id, p.week_start, p.week_end) -> 'custody'
+             or p.ledger_hash is distinct from adex.route_period_figures(p.company_id, p.route_id, p.week_start, p.week_end) #>> '{operations,hash}')`);
   const checks = [
     { name: 'positions-match-ledger', ok: mismatched === 0, detail: mismatched },
     { name: 'operations-balanced', ok: unbalanced === 0, detail: unbalanced },
@@ -569,6 +610,10 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
     { name: 'payments-have-ledger-entry', ok: unmatchedPayments === 0, detail: unmatchedPayments },
     { name: 'expenses-have-ledger-entry', ok: unmatchedExpenses === 0, detail: unmatchedExpenses },
     { name: 'expense-accounts-match-expenses', ok: expenseAccounts === 0, detail: expenseAccounts },
+    { name: 'carried-matches-last-settlement', ok: carriedDrift === 0, detail: carriedDrift },
+    { name: 'settlements-match-ledger', ok: settlementDrift === 0, detail: settlementDrift },
+    { name: 'surplus-control-matches-settlements', ok: surplusDrift === 0, detail: surplusDrift },
+    { name: 'closed-periods-unchanged', ok: closedDrift === 0, detail: closedDrift },
   ];
   return { ok: checks.every((c) => c.ok), checks };
 }

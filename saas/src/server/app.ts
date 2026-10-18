@@ -16,6 +16,13 @@ import type pg from 'pg';
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>;
 
+/**
+ * Módulos que ESTA versión de la API sirve, publicados en /healthz (sin datos ni secretos).
+ * El frontend solo se construye en Vercel cuando la API publicada declara lo que necesita
+ * (`online/scripts/deploy-gate.mjs`): así un push nunca adelanta el frontend a la API.
+ */
+export const API_FEATURES: readonly string[] = ['collections-v1', 'settlements-v1'];
+
 export interface OnlineServerOptions {
   company: Handler;
   demo: Handler | null;
@@ -94,7 +101,7 @@ export function createOnlineServer(opts: OnlineServerOptions): http.Server {
     // rechaza: nada se ejecuta en nombre de una página ajena.
     if (typeof origin === 'string' && !originOk) return reject(403, 'ORIGIN_NOT_ALLOWED');
 
-    if (path === '/healthz' && req.method === 'GET') return json(200, { status: 'ok' });
+    if (path === '/healthz' && req.method === 'GET') return json(200, { status: 'ok', features: API_FEATURES });
     const forwarded = opts.trustProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0]!.trim() : '';
     const ip = forwarded || req.socket.remoteAddress || 'unknown';
     if (!byIp(ip)) return reject(429, 'RATE_LIMITED');
