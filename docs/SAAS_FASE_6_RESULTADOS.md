@@ -86,4 +86,11 @@ Notación: *P* posición (saldo de la custodia), *E* = máx(*P*, 0) efectivo esp
 
 ## 7. Pruebas
 
-Ver la sección de resultados del informe de cierre de la fase (local, ADEX-Staging y publicación).
+| Batería | Resultado |
+|---|---|
+| SaaS local (`npm test`: typecheck + unitarias + PostgreSQL 17 real, 0001–0014) | **13/13 + 302 PASS · 0 FAIL · 1 SKIP** (RND-060, SIGTERM en Windows, preexistente). Base antes de la fase: 13 + 281 |
+| Nueva `settlements` (21) | F6-A…H (escenarios del encargo), SEC6-001…004 (autoridad, DS-05 por identidad, RLS, segunda barrera, Owner), REO-001/002 (reapertura y «dinero ya usado»), CC6-001…006 (cuadres simultáneos, mismo id simultáneo, caída antes del COMMIT, ráfaga mixta sin interbloqueos, revocación y cambio de responsable concurrentes, cierres simultáneos, desembolso simultáneo y arrastre), DS4-001 (zona horaria) |
+| Ajustadas | CAP3-001 (un campo nuevo en el resumen), SCHEMA-005 (dos tablas nuevas), RND-001 (`/healthz` declara sus módulos) |
+| ADEX-Staging (0014 aplicada 2026-10-18 00:3x UTC, checksum `11217e6c…daf7ef6`, credenciales persistidas sin rotación) | `staging-phase6` **6/6**; regresión `staging-phase5-remote` 19/19, `staging-phase5` 7/7, `staging-phase3` 8/8, `staging-rls` 7/7 (un `ENOTFOUND` de DNS local en el primer intento; repetido limpio). Las 70 empresas previas (15 Demo) sin ninguna fila nueva; Demo con la misma huella; libro global cuadrado; Auth sin usuarios al terminar |
+| CLEAN | **1.637 / 1.637** (banco de 27 suites); `src/` sin cambios; bundle `index-C1zR2rb4.js` idéntico |
+| ADEX Online | `tsc` + `vite build` sin errores; puerta de despliegue probada (API sin el módulo → omite; inalcanzable → omite; con el módulo → construye) y **verificada en Vercel**: el push de `03de95a` quedó `CANCELED` por el Ignored Build Step; producción siguió en `186f90d` |
