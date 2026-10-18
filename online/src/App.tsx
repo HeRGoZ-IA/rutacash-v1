@@ -16,6 +16,10 @@ import { Expenses } from './screens/Expenses.tsx';
 import { Periods, Settlements } from './screens/Settlements.tsx';
 import { Home, Upcoming } from './screens/Home.tsx';
 import { DemoAdmin } from './screens/DemoAdmin.tsx';
+import { People } from './screens/People.tsx';
+import { RoutesAdmin } from './screens/RoutesAdmin.tsx';
+import { Offices } from './screens/Offices.tsx';
+import { Settings } from './screens/Settings.tsx';
 
 export function App({ client }: { client: OnlineClient }) {
   return (
@@ -39,6 +43,10 @@ export function App({ client }: { client: OnlineClient }) {
                 <Route path="gastos" element={<Expenses />} />
                 <Route path="cuadres" element={<Settlements />} />
                 <Route path="cierres" element={<Periods />} />
+                <Route path="usuarios" element={<People />} />
+                <Route path="rutas" element={<RoutesAdmin />} />
+                <Route path="oficinas" element={<Offices />} />
+                <Route path="configuracion" element={<Settings />} />
                 <Route path="proximamente" element={<Upcoming />} />
               </Route>
             </Route>

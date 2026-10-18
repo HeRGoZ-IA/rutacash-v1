@@ -63,10 +63,46 @@ const ERRORS: Record<string, string> = {
   NOT_FOUND: 'No encontrado o fuera de su alcance.',
   NETWORK: 'Sin conexión con el servidor.',
   UNCERTAIN_OPERATION: 'No se pudo confirmar la operación. Compruebe antes de repetirla.',
+  // Administración de la empresa (usuarios, oficinas, rutas, categorías, datos).
+  INVALID_EMAIL: 'El correo no es válido.',
+  INVALID_ROLE: 'Seleccione un rol válido.',
+  INVALID_NAME: 'Indique el nombre de la persona.',
+  INVALID_ROUTES: 'La selección de rutas no es válida.',
+  CONFLICT: 'Ya existe un registro igual. Si es una persona: ya tiene una membresía con ese rol en esta empresa.',
+  IDENTITY_PROVIDER_ERROR: 'El servicio de identidad no respondió: la persona no se dio de alta. Inténtelo de nuevo.',
+  LAST_SUPERADMIN: 'La empresa no puede quedarse sin ningún Super Admin activo.',
+  CANNOT_DELETE_SELF: 'No puede eliminar su propia membresía.',
+  HAS_HISTORY: 'Tiene historia (movimientos, asignaciones o actos registrados): no se puede eliminar. Desactívelo en su lugar.',
+  SUPERADMIN_IS_UNRESTRICTED: 'El Super Admin accede a todas las rutas: no se le asignan rutas.',
+  OFFICE_NAME_DUPLICATE: 'Ya existe una oficina con ese nombre.',
+  OFFICE_CODE_DUPLICATE: 'Ya existe una oficina con ese código.',
+  OFFICE_HAS_ROUTES: 'La oficina tiene rutas: confirme que queden «Sin oficina» para poder eliminarla.',
+  OFFICE_NOT_FOUND: 'La oficina no existe o fue eliminada.',
+  ROUTE_NOT_FOUND: 'Alguna ruta no existe o fue eliminada.',
+  CATEGORY_NAME_DUPLICATE: 'Ya existe una categoría con ese nombre.',
+  INVALID_ADMIN: 'El Administrador elegido no es válido (debe estar activo y tener el rol Administrador).',
+  INVALID_COLLECTOR: 'El Cobrador responsable no es válido: debe estar activo, tener el rol Cobrador y quedar asignado a la ruta.',
+  ROUTE_INITIAL_CAPITAL_NOT_ALLOWED: 'La ruta no tiene caja propia: el capital se entrega a los trabajadores desde la bolsa del Administrador responsable.',
+  CAPITAL_CONTROLLER_REQUIRED: 'Esa persona es la responsable de capital de la ruta y quedan otros Administradores asignados: elija antes el nuevo responsable.',
+  CAPITAL_CONTROLLER_INVALID: 'El responsable de capital debe ser un Administrador activo asignado a la ruta.',
+  ALREADY_CONTROLLER: 'Esa persona ya es la responsable de capital de la ruta.',
+  UNKNOWN_FIELD: 'El servidor rechazó un dato no admitido.',
+};
+
+const FIELD: Record<string, string> = {
+  name: 'Nombre', code: 'Código', city: 'Ciudad', email: 'Correo', phone: 'Teléfono', interestRate: 'Tasa de interés', freeRate: 'Tasa libre',
+  maxLoanMinor: 'Préstamo máximo', officeId: 'Oficina', collectorId: 'Cobrador', memberIds: 'Personas asignadas', adminIds: 'Administradores',
+  capitalControllerId: 'Responsable de capital', membershipId: 'Responsable de capital', reason: 'Motivo', displayName: 'Nombre', icon: 'Icono',
+  legalName: 'Razón social', taxId: 'Identificación tributaria', address: 'Dirección', contactName: 'Persona de contacto', routeIds: 'Rutas',
+  selectedRouteIds: 'Rutas', status: 'Estado',
 };
 
 export function errorText(err: unknown): string {
   const code = (err as { code?: string })?.code ?? (err as Error)?.message ?? 'ERROR';
+  if (code === 'INVALID_INPUT') {
+    const field = (err as { details?: { field?: unknown } })?.details?.field;
+    return typeof field === 'string' ? `Revise el campo «${FIELD[field] ?? field}».` : 'Hay datos no válidos. Revise el formulario.';
+  }
   return ERRORS[code] ?? `No se pudo completar (${code}).`;
 }
 

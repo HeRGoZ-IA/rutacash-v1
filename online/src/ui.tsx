@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useApp, useAction, useCtx, type Resource } from './lib/app.tsx';
 import { errorText, money } from './lib/format.ts';
 
@@ -75,4 +75,44 @@ export function ActionMessage({ action, onResolved }: { action: ReturnType<typeo
 
 export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'ok' | 'warn' | 'bad' | 'info' }) {
   return <span className={`badge ${tone}`}>{children}</span>;
+}
+
+/**
+ * Operación delicada en dos pasos: el primer clic solo pregunta; nada se envía al
+ * servidor hasta «Confirmar». El resultado lo muestra el `ActionMessage` del llamador.
+ */
+export function Confirm({ label, question, confirmLabel = 'Confirmar', onConfirm, disabled, danger = true }: {
+  label: string; question: ReactNode; confirmLabel?: string; onConfirm: () => unknown; disabled?: boolean; danger?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!open) return <button type="button" disabled={disabled} onClick={() => setOpen(true)}>{label}</button>;
+  return (
+    <div className="confirm" role="alertdialog">
+      <p>{question}</p>
+      <div className="row">
+        <button type="button" className={danger ? 'danger' : 'primary'} disabled={disabled} onClick={() => { setOpen(false); void onConfirm(); }}>{confirmLabel}</button>
+        <button type="button" className="ghost" onClick={() => setOpen(false)}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+export interface CheckItem { id: string; label: string; hint?: string; disabled?: boolean }
+
+/** Selección múltiple (rutas, personas). */
+export function CheckList({ items, selected, onChange, empty = 'No hay opciones disponibles.' }: {
+  items: CheckItem[]; selected: readonly string[]; onChange: (next: string[]) => void; empty?: string;
+}) {
+  if (!items.length) return <p className="muted small">{empty}</p>;
+  const toggle = (id: string, on: boolean) => onChange(on ? [...new Set([...selected, id])] : selected.filter((x) => x !== id));
+  return (
+    <div className="checks">
+      {items.map((i) => (
+        <label key={i.id} className="check">
+          <input type="checkbox" checked={selected.includes(i.id)} disabled={i.disabled} onChange={(e) => toggle(i.id, e.target.checked)} />
+          <span>{i.label}{i.hint ? <span className="muted small"> · {i.hint}</span> : null}</span>
+        </label>
+      ))}
+    </div>
+  );
 }

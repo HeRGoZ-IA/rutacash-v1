@@ -129,3 +129,11 @@ a { color: var(--brand); }
 .table th, .table td { padding: .45rem .5rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .table th { color: var(--muted); font-weight: 600; font-size: .8rem; }
 .table.compact td, .table.compact th { padding: .3rem .45rem; }
+
+/* Administración de la empresa */
+.checks { border: 1px solid var(--line); border-radius: 8px; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .4rem .9rem; padding: .5rem .75rem; }
+.confirm { border: 1px solid var(--bad); border-radius: 8px; padding: .6rem .75rem; background: var(--bad-bg); }
+.confirm p { margin: 0 0 .5rem; }
+.admin-block { border-top: 1px solid var(--line); margin-top: .9rem; padding-top: .6rem; }
+.admin-block h3 { margin: 0 0 .4rem; font-size: 1rem; }
+.actions-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: flex-start; margin-top: .6rem; }

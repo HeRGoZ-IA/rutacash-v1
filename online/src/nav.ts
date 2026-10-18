@@ -19,6 +19,11 @@ export function navFor(ctx: ActiveContextView): NavItem[] {
     items.push({ to: '/app/cuadres', label: can('cashSettlement.view') ? 'Cuadres' : 'Mi cuadre', hint: 'Esperado, entregas parciales, faltantes y sobrantes' });
   }
   if (can('cashbox.viewRoute')) items.push({ to: '/app/cierres', label: 'Cierres', hint: 'Liquidación por periodo y cierre semanal' });
+  // Administración de la empresa (mismas capacidades que exige el servidor).
+  if (can('user.viewAll')) items.push({ to: '/app/usuarios', label: 'Usuarios', hint: 'Altas, estado, rutas autorizadas y membresías' });
+  if (can('route.create') || can('route.edit')) items.push({ to: '/app/rutas', label: 'Rutas', hint: 'Datos, asignaciones, Cobrador y responsable de capital' });
+  if (can('office.create') || can('office.edit')) items.push({ to: '/app/oficinas', label: 'Oficinas', hint: 'Organización de rutas por oficina' });
+  if (can('settings.access')) items.push({ to: '/app/configuracion', label: 'Configuración', hint: 'Datos de la empresa y categorías de gasto' });
   items.push({ to: '/app/proximamente', label: 'Próximamente', hint: 'Visitas sin pago, reportes' });
   return items;
 }
