@@ -491,22 +491,16 @@ export async function capitalSummary(client: pg.PoolClient, ctx: ActiveContext) 
 export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveContext) {
   need(ctx, 'capital.allocateAdmins');
   const q = async (sql: string) => Number((await client.query<{ n: string }>(sql, [ctx.companyId])).rows[0]!.n);
-  const mismatched = await q(
-    `select count(*)::text n from adex.capital_accounts a
-      where a.company_id = $1 and a.balance_minor <> coalesce((select sum(e.amount_minor) from adex.capital_entries e
-                                                               where e.company_id = a.company_id and e.account_id = a.id), 0)`);
-  const unbalanced = await q(
-    `select count(*)::text n from adex.capital_operations o
-      where o.company_id = $1 and (select coalesce(sum(e.amount_minor), 0) <> 0 or count(*) < 2 from adex.capital_entries e
-                                    where e.company_id = o.company_id and e.operation_id = o.id)`);
+  // Comprobaciones que recorren el libro: en una sola función (0019) que corre como el
+  // propietario del esquema, solo para el SuperAdmin del contexto. Mismas consultas.
+  const ledger = (await client.query<{ r: Record<string, string | number> }>('select adex.capital_ledger_checks() r')).rows[0]!.r;
+  const l = (k: string) => Number(ledger[k]);
+  const mismatched = l('mismatched');
+  const unbalanced = l('unbalanced');
   // Contrapartidas (externa, socios, interés) miden lo que entró; la custodia solo puede
   // quedar negativa por un gasto del trabajador (73209ce), comprobado pata a pata.
   const overdrawn = await q(`select count(*)::text n from adex.capital_accounts where company_id = $1 and kind not in ('external', 'partner', 'income', 'custody', 'unidentified') and balance_minor < 0`);
-  const negativeCustody = await q(
-    `select count(*)::text n from adex.capital_entries e
-       join adex.capital_accounts a on a.company_id = e.company_id and a.id = e.account_id
-       join adex.capital_operations o on o.company_id = e.company_id and o.id = e.operation_id
-      where e.company_id = $1 and a.kind = 'custody' and e.amount_minor < 0 and e.balance_after_minor < 0 and o.kind <> 'WORKER_EXPENSE'`);
+  const negativeCustody = l('negativeCustody');
   const foreignCurrency = await q(
     `select count(*)::text n from adex.capital_operations o join adex.companies c on c.id = o.company_id
       where o.company_id = $1 and o.currency_code <> c.currency_code`);
@@ -566,35 +560,12 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
   // vigente (0 sin cuadres); ninguna pata ajena al gasto del trabajador ni al retorno del
   // cuadre la dejó por debajo de su arrastre; cada cuadre coincide con el libro (posición
   // = Σ patas hasta su corte; retorno y sobrante = sus asientos, netos de su reapertura).
-  const carriedDrift = await q(
-    `select count(*)::text n from adex.capital_accounts a
-      where a.company_id = $1 and a.kind = 'custody'
-        and a.carried_minor <> coalesce((select s.carried_after_minor from adex.custody_settlements s where s.company_id = a.company_id
-                                          and s.custody_account_id = a.id and s.status = 'cerrada' order by s.cycle_no desc limit 1), 0)`);
-  const settlementDrift = await q(
-    `select count(*)::text n from adex.custody_settlements s
-      where s.company_id = $1
-        and (s.expected_position_minor <> coalesce((select sum(e.amount_minor) from adex.capital_entries e
-                                                     where e.company_id = s.company_id and e.account_id = s.custody_account_id and e.seq <= s.to_seq), 0)
-             or s.returned_to_pool_minor <> coalesce((select o.amount_minor from adex.capital_operations o where o.company_id = s.company_id
-                                                       and o.id = s.return_operation_id and o.kind = 'SETTLEMENT_RETURN' and o.settlement_id = s.id), 0)
-             or s.surplus_minor <> coalesce((select o.amount_minor from adex.capital_operations o where o.company_id = s.company_id
-                                              and o.id = s.surplus_operation_id and o.kind = 'SETTLEMENT_SURPLUS' and o.settlement_id = s.id), 0)
-             or (s.status = 'reabierta') <> exists (select 1 from adex.capital_operations o where o.company_id = s.company_id and o.settlement_id = s.id
-                                                     and o.kind = 'REVERSAL') and (s.return_operation_id is not null or s.surplus_operation_id is not null))`);
+  const carriedDrift = l('carriedDrift');
+  const settlementDrift = l('settlementDrift');
   // Sobrantes en control = Σ sobrantes de cuadres vigentes, por ruta; su contrapartida, igual con signo contrario.
-  const surplusDrift = await q(
-    `select count(*)::text n from adex.capital_accounts a
-      where a.company_id = $1 and a.kind in ('suspense', 'unidentified')
-        and abs(a.balance_minor) <> coalesce((select sum(s.surplus_minor) from adex.custody_settlements s where s.company_id = a.company_id
-                                               and s.route_id = a.route_id and s.status = 'cerrada'
-                                               and (a.kind = 'unidentified' or s.receiver_admin_membership_id = a.membership_id)), 0)`);
+  const surplusDrift = l('surplusDrift');
   // Cierres de periodo: lo archivado no cambia (nadie fecha asientos en un periodo cerrado).
-  const closedDrift = await q(
-    `select count(*)::text n from adex.period_closures p
-      where p.company_id = $1
-        and (p.figures -> 'custody' is distinct from adex.route_period_figures(p.company_id, p.route_id, p.week_start, p.week_end) -> 'custody'
-             or p.ledger_hash is distinct from adex.route_period_figures(p.company_id, p.route_id, p.week_start, p.week_end) #>> '{operations,hash}')`);
+  const closedDrift = l('closedDrift');
   const checks = [
     { name: 'positions-match-ledger', ok: mismatched === 0, detail: mismatched },
     { name: 'operations-balanced', ok: unbalanced === 0, detail: unbalanced },

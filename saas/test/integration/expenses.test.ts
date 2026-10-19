@@ -350,6 +350,21 @@ describe('Fase 5 · gastos', () => {
     }
   });
 
+  test('CAN-SQL-002 · las comprobaciones del libro (0019, propietario) solo responden al SuperAdmin del contexto', async () => {
+    const byRole: Record<string, { identityId: string; membershipId: string }> = {
+      superadmin: { identityId: identityOf('bruno'), membershipId: M.brunoSa }, admin: { identityId: identityOf('ana'), membershipId: M.anaAdmin },
+      socio: { identityId: identityOf('fabio'), membershipId: M.fabioSocio }, secretario: { identityId: identityOf('gabi'), membershipId: M.gabiSec },
+      supervisor: { identityId: dora.identityId, membershipId: dora.membershipId }, cobrador: { identityId: carlos.identityId, membershipId: carlos.membershipId },
+    };
+    for (const role of USER_ROLES) {
+      const run = asApi(db.api, { ...byRole[role]!, companyId: c1 }, async (q) => (await q.query('select adex.capital_ledger_checks() r')).rows[0].r);
+      if (role !== 'superadmin') { await assert.rejects(run, (e: { code?: string }) => e.code === '42501', role); continue; }
+      const r = await run as Record<string, number>;
+      assert.deepEqual(Object.keys(r).sort(), ['carriedDrift', 'closedDrift', 'mismatched', 'negativeCustody', 'settlementDrift', 'surplusDrift', 'unbalanced']);
+      for (const [k, v] of Object.entries(r)) assert.equal(v, 0, k);
+    }
+  });
+
   test('SEC5-003 · ADEX Online no escribe dinero en el dispositivo: sin almacenamiento local financiero, solo comandos del servidor', () => {
     const dir = path.join(repo, 'online', 'src');
     const files = readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter((f) => /\.(ts|tsx)$/.test(f));
