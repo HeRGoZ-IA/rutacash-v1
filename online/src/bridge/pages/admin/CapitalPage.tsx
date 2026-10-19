@@ -713,7 +713,7 @@ export default function CapitalPage() {
               </p>
             </div>
           ))}
-          {/* ADEX Online: el servidor aún no expone este historial (sí lo audita). */}
+          {/* ADEX Online: eventos del servidor (GET /v1/capital/controller-events). */}
           {events.filter(e => e.routeId === historyRouteId).length === 0 && <p className="py-4 text-sm text-gray-400">Sin cambios registrados.</p>}
         </div>
       </Modal>

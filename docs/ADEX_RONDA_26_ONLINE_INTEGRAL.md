@@ -41,13 +41,18 @@ Lecturas nuevas: cuotas en bloque por ruta (`GET /v1/installments`), páginas co
 
 ## 4. Pruebas
 
+Regresión final sobre el código que se publica (2026-10-19, después de 0019, del resumen de bolsas por cuenta y de los hitos de la Demo):
+
 | Prueba | Resultado |
 |---|---|
-| SaaS `npm run test:db` (PostgreSQL real, migraciones 0001–0019) | 322/323 · 0 fallos · 1 omitida (`tmp/saas-phase01/evidence/db-tests-2026-10-19T07-04-53-481Z.log`) |
+| SaaS: typecheck · unitarias · PostgreSQL real (migraciones 0001–0019) | OK · 13/13 · 323/324, 0 fallos, 1 omitida (`tmp/saas-phase01/evidence/db-tests-2026-10-19T13-14-06-567Z.log`) |
+| ADEX Online: typecheck | OK |
+| 0019 · aislamiento por empresa, sin suplantación, privilegios (`CAN-SQL-002`, `CAN-SQL-003`) | OK |
+| Ensayo local de la Demo completa (182 días, `ADEX_DEMO_FULL=1`) | 3/3 |
 | E2E Cobrador · Supervisor · Caja · Liquidación (`tmp/r26/e2e-campo.mjs`, Chrome real, staging) | 37/37 |
 | E2E Secretario · Socio · Ajustes · Caja socios · Reportes · Dashboard (`tmp/r26/e2e-oficina.mjs`) | 26/26 |
-| Regresión Ronda 24 (`tmp/r24/e2e.mjs`) | 61/62 → caso UI-35 actualizado (la Caja ya no es pendiente) |
-| Regresión Ronda 25 (`tmp/r25/e2e-capital.mjs`) | 50/50 |
+| Regresión Ronda 25 · Capital y Transferencias (`tmp/r25/e2e-capital.mjs`) | 50/50 (SA-14 actualizado: el historial de responsables ya viene del servidor) |
+| Regresión Ronda 24 · escritura (`tmp/r24/e2e.mjs`) | 62/62 (UI-29 y UI-35 actualizados: «Rutas con mora» y la Caja ya no son pendientes) |
 
 Garantías comprobadas en cada E2E: un triple toque no cobra ni desembolsa dos veces; en el navegador solo hay la sesión (y la ruta activa elegida); sin errores de JavaScript; conciliación del servidor OK; Empresa Demo y demás empresas intactas por huella; usuarios de prueba eliminados de Auth.
 
@@ -109,11 +114,12 @@ Lo que no se registra: los **ingresos y salidas manuales** de Caja socios. Decid
 |---|---|
 | Base de datos (ADEX-Staging) | Migraciones 0001–0019 aplicadas y verificadas por huella. Son aditivas: el API publicado actual sigue funcionando. |
 | Empresa DEMO de seis meses | **Activa** en staging (§5). |
-| Código | 11 commits locales sobre `origin/main` (095ab5b), del `3c7f9fe` a este documento. **Sin push**: el envío a GitHub quedó bloqueado en esta sesión y requiere la autorización o la acción del propietario. |
+| Código | 13 commits sobre 095ab5b, del `3c7f9fe` hasta este documento (los 11 revisados por el propietario, la prueba de aislamiento de 0019 y estos resultados). Push autorizado por el propietario el 2026-10-19. |
 | API (Render, `adex-online-api`) | **Pendiente**: tras el push, el propietario ejecuta un *Manual Deploy*. Debe anunciar `clean-online-v1` en `/healthz`. |
 | Frontend (Vercel, `adex-online`) | Se publica solo cuando el API anuncia `clean-online-v1`; la compuerta `online/scripts/deploy-gate.mjs` impide publicarlo antes. |
 | CLEAN y DEMO de CLEAN | Sin cambios en esta ronda: siguen sirviendo `index-C1zR2rb4.js`. |
-| Respaldo | Bundle de las Rondas 24–25 en `ADEX_PRIVADOespaldos`. El stash de la Ronda 23 sigue intacto. |
+| Respaldo | Bundle de las Rondas 24–25 en `ADEX_PRIVADO
+espaldos`. El stash de la Ronda 23 sigue intacto. |
 
 Después del despliegue hay que comprobar, en este orden:
 1. `/healthz` anuncia `clean-online-v1`.
