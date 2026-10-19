@@ -22,6 +22,9 @@ import { HISTORY_COMPANY, HISTORY_SEATS, HISTORY_VERSION, runHistoryScenario } f
 
 export const SLOT_RE = /^[a-z][a-z0-9-]{1,30}$/;
 
+/** Errores de conexión o autenticación transitorios del pooler (se reintentan en el escenario histórico). */
+const TRANSIENT = new Set(['28P01', '08000', '08003', '08006', '57P01', '57P03', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN']);
+
 export interface DemoServiceOptions {
   /** Pool conectado como `adex_demo`. */
   pool: pg.Pool;
@@ -105,8 +108,15 @@ export function createDemoService(opts: DemoServiceOptions) {
     const actor = async (seat: string) => {
       const hit = actors.get(seat);
       if (hit) return hit;
-      const r = await inDemo(opts.pool, claims, (c) => c.query<{ identity_id: string; membership_id: string }>(
+      const lookup = () => inDemo(opts.pool, claims, (c) => c.query<{ identity_id: string; membership_id: string }>(
         'select identity_id, membership_id from adex_demo.synthetic_actor($1, $2)', [companyId, seat]));
+      let r: Awaited<ReturnType<typeof lookup>>;
+      for (let attempt = 0; ; attempt++) {
+        try { r = await lookup(); break; } catch (err) {
+          if (!history || attempt >= 8 || !TRANSIENT.has((err as { code?: string }).code ?? '')) throw err;
+          await new Promise((ok) => setTimeout(ok, 2000 * (attempt + 1)));
+        }
+      }
       const row = r.rows[0];
       // Nunca se actúa con un puesto ocupado por una persona.
       if (!row) throw new ApiError(409, 'DEMO_SEAT_NOT_SYNTHETIC');
@@ -132,6 +142,13 @@ export function createDemoService(opts: DemoServiceOptions) {
           const code = (err as { code?: string }).code;
           // Interbloqueo o fallo de serialización: la transacción se revirtió entera; se repite igual.
           if ((code === '40P01' || code === '40001') && attempt < 6) { await new Promise((r) => setTimeout(r, 100 * (attempt + 1))); continue; }
+          // Escenario histórico: conexión caída o rechazo transitorio del pooler. Se repite con el
+          // MISMO id de operación: si el comando llegó a confirmarse, el servidor devuelve ese
+          // resultado guardado y nunca lo duplica.
+          if (history && attempt < 8 && (TRANSIENT.has(code ?? '') || /Connection terminated|ECONNRESET|ETIMEDOUT|ENOTFOUND|timeout exceeded/i.test(String((err as Error).message)))) {
+            await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+            continue;
+          }
           if (history) {
             const e = err as Error & { code?: string; details?: unknown };
             throw new ApiError(500, 'DEMO_SCENARIO_STEP_FAILED',
