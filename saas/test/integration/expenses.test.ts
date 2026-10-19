@@ -365,6 +365,40 @@ describe('Fase 5 · gastos', () => {
     }
   });
 
+  test('CAN-SQL-003 · 0019: aislamiento por empresa, sin suplantación y sin privilegios de más', async () => {
+    const c2 = companyId('c2');
+    const bruno = { identityId: identityOf('bruno'), membershipId: M.brunoSa };
+    const call = (ctx: { identityId: string; membershipId: string; companyId: string }) =>
+      asApi(db.api, ctx, async (q) => (await q.query('select adex.capital_ledger_checks() r')).rows[0].r as Record<string, number>);
+    const denied = (e: { code?: string }) => e.code === '42501';
+    // Un SuperAdmin no puede pedir la conciliación de OTRA empresa ni usar la membresía de otra persona.
+    await assert.rejects(call({ ...bruno, companyId: c2 }), denied, 'SuperAdmin de c1 contra c2');
+    await assert.rejects(call({ identityId: identityOf('bruno'), membershipId: M.carlaSa, companyId: c2 }), denied, 'membresía ajena');
+    await assert.rejects(call({ identityId: identityOf('carla'), membershipId: M.brunoSa, companyId: c1 }), denied, 'identidad ajena');
+    await assert.rejects(call({ identityId: '', membershipId: '', companyId: c1 }), denied, 'sin contexto');
+    // Solo cuenta lo de SU empresa: un descuadre en c1 lo ve el SuperAdmin de c1, nunca el de c2.
+    const tamper = (delta: number, id?: string) => db.admin.query(
+      `update adex.capital_accounts set balance_minor = balance_minor + $2, version = version + 1
+        where id = coalesce($3, (select id from adex.capital_accounts where company_id = $1 order by id limit 1)) returning id`, [c1, delta, id ?? null]);
+    const acc = (await tamper(1)).rows[0]?.id as string | undefined;
+    assert.ok(acc, 'c1 tiene cuentas de capital');
+    try {
+      assert.equal((await call({ identityId: identityOf('carla'), membershipId: M.carlaSa, companyId: c2 })).mismatched, 0, 'c2 no ve el descuadre de c1');
+      assert.ok((await call({ ...bruno, companyId: c1 })).mismatched >= 1, 'c1 sí lo ve');
+    } finally {
+      await tamper(-1, acc);
+    }
+    assert.equal((await call({ ...bruno, companyId: c1 })).mismatched, 0, 'restaurado');
+    // Catálogo: definer con search_path fijo, de solo lectura (STABLE) y ejecutable solo por adex_api (y su dueño).
+    const f = (await db.admin.query(`select p.prosecdef, p.provolatile, p.proconfig, pg_get_userbyid(p.proowner) owner,
+             array(select coalesce(nullif(pg_get_userbyid(a.grantee), ''), 'PUBLIC') from aclexplode(p.proacl) a where a.privilege_type = 'EXECUTE' order by 1)::text[] exec
+        from pg_proc p where p.oid = 'adex.capital_ledger_checks()'::regprocedure`)).rows[0];
+    assert.equal(f.prosecdef, true);
+    assert.equal(f.provolatile, 's');
+    assert.deepEqual(f.proconfig, ['search_path=pg_catalog, adex']);
+    assert.deepEqual([...f.exec].filter((g: string) => g !== f.owner), ['adex_api']);
+  });
+
   test('SEC5-003 · ADEX Online no escribe dinero en el dispositivo: sin almacenamiento local financiero, solo comandos del servidor', () => {
     const dir = path.join(repo, 'online', 'src');
     const files = readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter((f) => /\.(ts|tsx)$/.test(f));
