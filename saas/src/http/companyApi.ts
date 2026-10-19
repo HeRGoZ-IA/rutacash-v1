@@ -98,6 +98,10 @@ const ENDPOINTS: readonly Endpoint[] = [
     await c.query('select adex_control.record_company_login()');
     return ok(contextView(ctx));
   } },
+  // Huella de actividad de la empresa del contexto (0020): cambia cuando algo se registra.
+  // Solo dice «hubo cambios»; los datos se siguen leyendo con su propia autorización.
+  { method: 'GET', pattern: /^\/v1\/changes$/, fields: null, handler: () => async (c) =>
+    ok({ marker: (await c.query<{ m: string | null }>('select adex.ctx_change_marker() m')).rows[0]!.m }) },
   // ---------- Empresa ----------
   { method: 'GET', pattern: /^\/v1\/company$/, fields: null, handler: () => async (c, ctx) => ok(await getCompany(c, ctx)) },
   { method: 'PATCH', pattern: /^\/v1\/company$/, fields: COMPANY_FIELDS, handler: () => async (c, ctx, b) => ok(await updateCompany(c, ctx, b)) },

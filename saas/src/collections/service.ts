@@ -36,6 +36,11 @@ const ymd = (d: string | Date) => (typeof d === 'string' ? d.slice(0, 10)
 const num = (v: string | null) => (v === null ? null : Number(v));
 
 const PERIOD_CLOSED = 'coalesce(adex.payment_in_closed_period(id), false) period_closed';
+// En listados, la MISMA regla una vez por consulta: semanas cerradas de las rutas del alcance
+// (`ctx_closed_weeks`, 0020) en vez de una llamada a la función por cobro.
+const CLOSED_WEEKS = 'with closed as materialized (select * from adex.ctx_closed_weeks())';
+const PERIOD_CLOSED_LIST = `exists (select 1 from closed w where w.route_id = p.route_id::text
+  and p.payment_date between w.week_start and w.week_end) period_closed`;
 
 function paymentView(p: PaymentRow) {
   return {
@@ -180,7 +185,8 @@ export async function listCollections(client: pg.PoolClient, ctx: ActiveContext,
   where += pageFilters(q, 'payment_date', params);
   const limit = Math.min(Math.max(Number(q.get('limit') ?? 200) || 200, 1), 1000);
   params.push(limit);
-  const r = await client.query<PaymentRow>(`select *, ${PERIOD_CLOSED} from adex.payments where ${where} order by ${PAGE_ORDER} limit $${params.length}`, params);
+  const r = await client.query<PaymentRow>(`${CLOSED_WEEKS} select p.*, ${PERIOD_CLOSED_LIST} from adex.payments p
+    where ${where} order by ${PAGE_ORDER} limit $${params.length}`, params);
   return r.rows.map(paymentView);
 }
 
