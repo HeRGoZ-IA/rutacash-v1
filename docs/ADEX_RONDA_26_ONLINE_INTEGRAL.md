@@ -53,7 +53,33 @@ Garantías comprobadas en cada E2E: un triple toque no cobra ni desembolsa dos v
 
 ## 5. Empresa DEMO de seis meses
 
-(Se completa al terminar la inicialización.)
+Inicializada en ADEX-Staging el 2026-10-19: empresa `fdc9e597-813d-4e39-b082-298a50eae8a5`, escenario `demo-v2-6m`, 96 min, 6.184 comandos.
+- **Todo por la API normal de empresa**: el mismo motor, las mismas reglas y la misma seguridad que cualquier empresa. No hubo escrituras directas en la base.
+- **Conciliación de capital OK** antes de activarla. La Demo anterior se retiró solo después de que esta terminara bien.
+
+| Dato | Valor |
+|---|---|
+| País · moneda · zona | Colombia · COP · America/Bogota |
+| Periodo con operación | 2026-04-20 → 2026-10-19 (cobros desde el 2026-04-21) |
+| Oficinas · rutas | 2 · 4 (Centro, Norte, Sur y Expansión, abierta en el último tramo sin Oficina ni Cobrador) |
+| Personas | 13 puestos (6 asignados a las cuentas `demo.*`) |
+| Clientes | 66 (puntuales, irregulares y morosos; diarios y semanales) |
+| Solicitudes | 215: 204 desembolsadas, 8 rechazadas, 2 pendientes, 1 aprobada sin desembolsar |
+| Créditos | 262: 210 terminados (renovaciones), 52 vivos, 17 con cuotas vencidas |
+| Cobros · visitas sin pago · gastos | 4.138 · 475 · 181 |
+| Cuadres · cierres semanales | 78 · 84 |
+| Operaciones de capital | 4.770 |
+| Ajustes de pagos de semanas cerradas | 3: uno aprobado, uno rechazado, uno pendiente |
+
+**Excepciones reales incluidas:**
+- Movimientos de capital: depósito, aporte de socio, aporte duplicado anulado, retiro de la empresa, devolución de bolsa.
+- Cambio de responsable de la Ruta Norte; la Administradora anterior queda desactivada.
+- Anulaciones: de una entrega y de un cobro.
+- Correcciones y movimientos de caja: corrección de un cobro por la Secretaria, traspasos entre trabajadores, reasignación entre rutas, cuadres con faltante y con sobrante.
+
+**Cuentas:** las 6 cuentas `demo.<rol>@example.test` y el operador Demo están verificadas con `scripts/demo-accounts.ts --verify`, 7/7 OK. Las contraseñas solo están en la bóveda privada cifrada del propietario (DPAPI); no se imprimen ni están en Git.
+
+**Cómo se reinicia:** desde este equipo, con `scripts/demo-provision.ts --reset` (unos 90 min). El servidor gratuito de Render se suspende sin tráfico y no sirve para una inicialización tan larga. El servicio publicado conserva el escenario corto `demo-v1` salvo que se configure `ADEX_DEMO_SCENARIO=demo-v2-6m`.
 
 ## 6. Decisión de negocio pendiente: D1 (Caja socios)
 
@@ -79,4 +105,18 @@ Lo que no se registra: los **ingresos y salidas manuales** de Caja socios. Decid
 
 ## 8. Estado de publicación
 
-(Se completa al final.)
+| Pieza | Estado |
+|---|---|
+| Base de datos (ADEX-Staging) | Migraciones 0001–0019 aplicadas y verificadas por huella. Son aditivas: el API publicado actual sigue funcionando. |
+| Empresa DEMO de seis meses | **Activa** en staging (§5). |
+| Código | 11 commits locales sobre `origin/main` (095ab5b), del `3c7f9fe` a este documento. **Sin push**: el envío a GitHub quedó bloqueado en esta sesión y requiere la autorización o la acción del propietario. |
+| API (Render, `adex-online-api`) | **Pendiente**: tras el push, el propietario ejecuta un *Manual Deploy*. Debe anunciar `clean-online-v1` en `/healthz`. |
+| Frontend (Vercel, `adex-online`) | Se publica solo cuando el API anuncia `clean-online-v1`; la compuerta `online/scripts/deploy-gate.mjs` impide publicarlo antes. |
+| CLEAN y DEMO de CLEAN | Sin cambios en esta ronda: siguen sirviendo `index-C1zR2rb4.js`. |
+| Respaldo | Bundle de las Rondas 24–25 en `ADEX_PRIVADOespaldos`. El stash de la Ronda 23 sigue intacto. |
+
+Después del despliegue hay que comprobar, en este orden:
+1. `/healthz` anuncia `clean-online-v1`.
+2. Se ha publicado el frontend nuevo.
+3. Las seis cuentas `demo.*` entran a su panel con la historia.
+4. CLEAN y DEMO siguen intactos.
