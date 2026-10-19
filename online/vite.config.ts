@@ -18,9 +18,9 @@ import tailwindConfig from './tailwind.config.js';
 //     calcula sobre una base local (DS-07). El único almacenamiento local es la sesión
 //     (tokens y membresía elegida) del cliente de modo servidor.
 //
-// Tres páginas y tres bundles: empresas (index.html, CLEAN conectado), operaciones de
-// transición (operaciones.html, pantallas Online anteriores) y Owner (owner.html,
-// intacto). Ninguna importa a otra; comparten solo la sesión de empresa.
+// Dos páginas y dos bundles: empresas (index.html, CLEAN conectado) y Owner (owner.html,
+// plano separado). Ninguna importa a la otra. La interfaz Online de transición
+// (operaciones.html) se retiró en la Ronda 26: todas las pantallas son las de CLEAN.
 const CLEAN_SRC = path.resolve(__dirname, '../src');
 const BRIDGE = path.resolve(__dirname, 'src/bridge');
 const EXT = ['.ts', '.tsx', '.js', '.jsx'];
@@ -59,22 +59,9 @@ function cleanBridge(): Plugin {
   };
 }
 
-/** En desarrollo y vista previa, `/operaciones/*` sirve su propia página (en Vercel: vercel.json). */
-function transitionPage(): Plugin {
-  const rewrite = (req: { url?: string }, _res: unknown, next: () => void) => {
-    if (req.url && /^\/operaciones(\/|$|\?)/.test(req.url) && !req.url.startsWith('/operaciones.html')) req.url = '/operaciones.html';
-    next();
-  };
-  return {
-    name: 'adex-transition-page',
-    configureServer(server) { server.middlewares.use(rewrite); },
-    configurePreviewServer(server) { server.middlewares.use(rewrite); },
-  };
-}
-
 export default defineConfig({
   root: __dirname,
-  plugins: [cleanBridge(), transitionPage(), react()],
+  plugins: [cleanBridge(), react()],
   // Los iconos y favicons son los de CLEAN.
   publicDir: path.resolve(__dirname, '../public'),
   // Las dependencias se resuelven SIEMPRE desde online/ (en Vercel solo se instala
@@ -89,7 +76,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: path.resolve(__dirname, 'index.html'),
-        operaciones: path.resolve(__dirname, 'operaciones.html'),
         owner: path.resolve(__dirname, 'owner.html'),
       },
       output: { chunkFileNames: 'assets/shared-[hash].js' } } },

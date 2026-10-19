@@ -83,6 +83,14 @@ describe('Fase 2 · responsable de capital (v16) como restricción transaccional
     assert.equal(await controllerOf(r1), x);
     const e = await db.admin.query('select reason, capital_transferred_minor::int c, base_at_change_minor from adex.route_capital_controller_events where id = $1', [(r.body['event'] as { eventId: string }).eventId]);
     assert.deepEqual(e.rows, [{ reason: 'Reorganización de cartera', c: 480_000, base_at_change_minor: '0' }], 'Fase 3: custodia de la ruta al cambiar (sin entregas: 0)');
+    // ADEX Online: historial consultable (SuperAdmin: todo; Administrador: los suyos; Cobrador: nada).
+    const hist = (await bruno('GET', `/v1/capital/controller-events?routeId=${r1}`)).body['events'] as Record<string, unknown>[];
+    assert.deepEqual(hist.filter((h) => h['reason'] === 'Reorganización de cartera').map((h) => [h['kind'], h['fromAdminId'], h['toAdminId'], h['capitalTransferredMinor']]),
+      [['CHANGE', M.anaAdmin, x, 480_000]]);
+    const anaHist = (await ana('GET', `/v1/capital/controller-events?routeId=${r1}`)).body['events'] as Record<string, unknown>[];
+    assert.ok(anaHist.every((h) => h['fromAdminId'] === M.anaAdmin || h['toAdminId'] === M.anaAdmin) && anaHist.some((h) => h['kind'] === 'CHANGE'));
+    const cob = caller(api, issuer, 'ana', M.anaCob);
+    assert.equal((await cob('GET', '/v1/capital/controller-events')).status, 403);
   });
 
   test('CAP-003 · desactivar al único Administrador libera la ruta (RELEASE); reactivarlo la recupera con el mismo capital', async () => {

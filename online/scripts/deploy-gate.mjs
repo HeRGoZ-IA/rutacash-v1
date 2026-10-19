@@ -12,7 +12,7 @@
 // temporizador pendiente abortó Node en Windows, y un código anómalo significaría «construir»).
 
 const API = process.env.ADEX_DEPLOY_GATE_API ?? 'https://adex-online-api.onrender.com';
-const REQUIRED = ['settlements-v1'];
+const REQUIRED = ['settlements-v1', 'clean-online-v1'];
 
 async function decide() {
   const ctl = new AbortController();

@@ -4,11 +4,13 @@
   "ignoreCommand": "node scripts/deploy-gate.mjs",
   "outputDirectory": "dist",
   "framework": "vite",
+  "redirects": [
+    { "source": "/operaciones", "destination": "/", "permanent": false },
+    { "source": "/operaciones/(.*)", "destination": "/", "permanent": false }
+  ],
   "rewrites": [
     { "source": "/owner", "destination": "/owner.html" },
     { "source": "/owner/(.*)", "destination": "/owner.html" },
-    { "source": "/operaciones", "destination": "/operaciones.html" },
-    { "source": "/operaciones/(.*)", "destination": "/operaciones.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [

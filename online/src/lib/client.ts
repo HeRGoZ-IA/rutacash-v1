@@ -72,6 +72,8 @@ export interface ActiveContextView {
   identityId: string;
   membershipId: string;
   role: string;
+  /** Nombre de la persona en ESTA membresía (servidor). */
+  displayName?: string;
   routeIds: string[];
   company: { id: string; name: string; countryCode: string; currencyCode: string; minorUnits: number; timezone: string; isDemo: boolean };
   capabilities: string[];

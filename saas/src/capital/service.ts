@@ -617,3 +617,30 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
   ];
   return { ok: checks.every((c) => c.ok), checks };
 }
+
+
+/**
+ * Historial de responsables de capital (`listRouteControllerHistory` de CLEAN): los eventos
+ * que el servidor registra al asignar o cambiar el responsable de una ruta. SuperAdmin:
+ * todos los de sus rutas; Administrador: los suyos (como origen o destino). Solo lectura.
+ */
+export async function listControllerEvents(client: pg.PoolClient, ctx: ActiveContext, q: URLSearchParams) {
+  const sa = allowed(ctx, 'capital.assignController');
+  if (!sa) need(ctx, 'capital.manage');
+  const routeId = q.get('routeId');
+  if (routeId !== null) pathId(routeId);
+  const params: unknown[] = [ctx.companyId];
+  let where = 'company_id = $1';
+  if (routeId) { params.push(routeId); where += ` and route_id = $${params.length}`; }
+  if (!sa) { params.push(ctx.membershipId); where += ` and (from_admin_membership_id = $${params.length} or to_admin_membership_id = $${params.length})`; }
+  const r = await client.query<{ id: string; route_id: string; kind: string; from_admin_membership_id: string | null; to_admin_membership_id: string | null;
+    capital_transferred_minor: string; base_at_change_minor: string | null; ledger_entry_id: string | null; reason: string | null; created_at: Date;
+    actor_membership_id: string | null; actor_system: string | null; actor_role: string | null }>(
+    `select * from adex.route_capital_controller_events where ${where} order by created_at desc, id limit 500`, params);
+  return r.rows.map((e) => ({
+    id: e.id, routeId: e.route_id, kind: e.kind, fromAdminId: e.from_admin_membership_id, toAdminId: e.to_admin_membership_id,
+    capitalTransferredMinor: Number(e.capital_transferred_minor), baseAtChangeMinor: e.base_at_change_minor === null ? null : Number(e.base_at_change_minor),
+    ledgerEntryId: e.ledger_entry_id, reason: e.reason, createdAt: e.created_at.toISOString(), actorId: e.actor_membership_id,
+    actorSystem: e.actor_system, actorRole: e.actor_role,
+  }));
+}

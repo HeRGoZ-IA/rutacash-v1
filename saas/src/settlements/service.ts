@@ -143,8 +143,13 @@ export async function settleableWorkers(client: pg.PoolClient, ctx: ActiveContex
   }
   out.sort((a, b) => a.name.localeCompare(b.name) || a.workerId.localeCompare(b.workerId));
   // Consolidado de la ruta: SOLO agrega, no concentra dinero (la ruta no es una caja).
+  // Responsable de capital (ADEX Online): la pantalla original decide con él quién cuadra
+  // (`canOperateRouteCash`); se da solo su nombre y si HOY es válido (mismo criterio que
+  // `requireAuthority`), a quien ya puede ver los cuadres de la ruta.
+  const ctrl = route.controller ? members.get(route.controller) : undefined;
+  const controllerValid = !!ctrl && ctrl.role === 'admin' && ctrl.status === 'activo' && ctrl.routeIds.includes(route.id);
   return {
-    routeId: route.id, routeName: route.name, controllerId: route.controller, workers: out,
+    routeId: route.id, routeName: route.name, controllerId: route.controller, controllerName: ctrl?.displayName ?? null, controllerValid, workers: out,
     routeTotalPositionMinor: out.reduce((s, w) => s + w.positionMinor, 0),
     routeTotalAvailableMinor: out.reduce((s, w) => s + w.availableMinor, 0),
   };
@@ -308,6 +313,7 @@ interface ClosureRow {
   closed_at: Date | null; closed_by_membership_id: string | null; superseded_by: string | null; opening_balance_minor: string;
   closing_balance_minor: string; figures: Json | null; business_date: string | Date | null; timezone: string | null; note: string | null;
   ledger_operations: number | null; ledger_hash: string | null;
+  reopened_at: Date | null; reopened_by_membership_id: string | null; reopen_reason: string | null;
 }
 
 function closureView(c: ClosureRow) {
@@ -318,11 +324,13 @@ function closureView(c: ClosureRow) {
     // Cierre del servidor (Fase 6): archivo con las cifras del libro. Legado importado: sin archivo.
     archived: c.figures !== null, businessDate: c.business_date ? ymd(c.business_date) : null, timezone: c.timezone, note: c.note,
     ledgerOperations: c.ledger_operations, ledgerHash: c.ledger_hash, figures: c.figures,
+    reopenedAt: c.reopened_at?.toISOString() ?? null, reopenedBy: c.reopened_by_membership_id, reopenReason: c.reopen_reason,
   };
 }
 
 const CLOSURE_SQL = `select w.id, w.route_id, w.week_start, w.week_end, w.status, w.version, w.closed_at, w.closed_by_membership_id, w.superseded_by,
-                            w.opening_balance_minor, w.closing_balance_minor, p.figures, p.business_date, p.timezone, p.note, p.ledger_operations, p.ledger_hash
+                            w.opening_balance_minor, w.closing_balance_minor, p.figures, p.business_date, p.timezone, p.note, p.ledger_operations, p.ledger_hash,
+                            w.reopened_at, w.reopened_by_membership_id, w.reopen_reason
                        from adex.weekly_settlements w left join adex.period_closures p on p.company_id = w.company_id and p.id = w.id`;
 
 /** Cierres visibles (RLS de `weekly_settlements`: `cashbox.viewRoute` sobre la ruta). */
@@ -342,4 +350,24 @@ export async function getClosure(client: pg.PoolClient, ctx: ActiveContext, id: 
   const r = await client.query<ClosureRow>(`${CLOSURE_SQL} where w.company_id = $1 and w.id = $2`, [ctx.companyId, id]);
   if (!r.rows[0]) throw new ApiError(404, 'NOT_FOUND');
   return closureView(r.rows[0]);
+}
+
+/**
+ * REAPERTURA de un periodo cerrado (`reopenSettlement` de CLEAN, 0016): `settlement.reopen`
+ * + autoridad `correct` (responsable de capital o SuperAdmin), motivo ≥ 10. No borra ni
+ * recalcula: el documento queda 'reabierta' y sus fechas vuelven a ser corregibles hasta el
+ * siguiente cierre, que crea una versión nueva. El archivo de cifras no cambia.
+ */
+export async function reopenPeriod(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Json, operationId: string | null) {
+  const opId = requireOperationId(operationId);
+  pathId(id);
+  const reason = reqText(body, 'reason', 300);
+  const r = (await client.query<{ r: Json }>('select adex.period_reopen($1, $2, $3) r', [opId, id, reason])).rows[0]!.r;
+  await audit(client, ctx, {
+    action: 'SETTLEMENT_REOPENED', entityType: 'weeklySettlement', entityId: id, routeId: r['routeId'] as string, reason,
+    description: `Semana ${r['weekStart']} a ${r['weekEnd']} REABIERTA (versión ${r['version']}). Los pagos de esas fechas vuelven a ser corregibles.`,
+    before: { status: 'cerrada' }, after: { status: 'reabierta' }, metadata: { operationId: opId },
+  });
+  const row = (await client.query<ClosureRow>(`${CLOSURE_SQL} where w.company_id = $1 and w.id = $2`, [ctx.companyId, id])).rows[0]!;
+  return { closure: closureView(row) };
 }

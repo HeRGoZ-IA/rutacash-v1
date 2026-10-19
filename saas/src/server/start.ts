@@ -8,6 +8,7 @@
 //   PORT                       puerto HTTP (Render: 10000; App Platform lo fija; por defecto 8080)
 //   ADEX_API_DATABASE_URL      adex_api por el pooler de transacciones de Supabase (obligatorio)
 //   ADEX_DEMO_DATABASE_URL     adex_demo (opcional: sin ella, /demo/v1 no existe)
+//   ADEX_DEMO_SCENARIO         demo-v1 (por defecto) | demo-v2-6m (seis meses de historia)
 //   SUPABASE_URL               https://<ref>.supabase.co (emisor de tokens y JWKS)
 //   SUPABASE_PUBLISHABLE_KEY   cierre de sesión en el proveedor
 //   SUPABASE_SECRET_KEY        SOLO invitaciones (alta sin contraseña); nunca llega al navegador ni a PostgreSQL
@@ -84,7 +85,9 @@ export async function start(env: NodeJS.ProcessEnv = process.env) {
   const companyOpts = { pool: apiPool, verifyToken, provider, onError: logError };
   const demo = demoPool
     ? createDemoHandler({ verifyToken, onError: logError,
-      service: createDemoService({ pool: demoPool, execute: createCompanyExecutor(companyOpts), provider, onError: logError }) })
+      service: createDemoService({ pool: demoPool, execute: createCompanyExecutor(companyOpts), provider, onError: logError,
+        // Escenario de las Demos que cree o reinicie ESTE servicio (por defecto demo-v1).
+        scenario: env['ADEX_DEMO_SCENARIO'] === 'demo-v2-6m' ? 'demo-v2-6m' : 'demo-v1' }) })
     : null;
   const server = createOnlineServer({
     company: createCompanyHandler(companyOpts), demo, readinessPool: apiPool, allowedOrigins: cfg.origins, trustProxy: cfg.trustProxy, rateLimit: cfg.rateLimit,

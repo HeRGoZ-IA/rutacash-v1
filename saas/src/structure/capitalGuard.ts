@@ -118,7 +118,7 @@ async function transition(client: pg.PoolClient, ctx: ActiveContext, route: { id
   }
   // Fecha contable en la zona horaria de la EMPRESA, no la del servidor.
   const entryDate = entries.length
-    ? (await client.query<{ d: string }>('select (now() at time zone timezone)::date d from adex.companies where id = $1', [ctx.companyId])).rows[0]!.d
+    ? (await client.query<{ d: string }>('select adex.business_today($1) d', [ctx.companyId])).rows[0]!.d
     : null;
   for (const e of entries) {
     await client.query(

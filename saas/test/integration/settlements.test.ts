@@ -405,6 +405,26 @@ describe('Fase 6 · cuadres y cierres', () => {
     assert.equal((await w.call('GET', `/v1/periods?routeId=${r}`)).status, 403);
     assert.equal((await ana('GET', `/v1/periods?routeId=${r}`)).body['closures'] instanceof Array, true);
     await reconciliation();
+    // ADEX Online (0016): REABRIR la semana (CLEAN `reopenSettlement`). Motivo ≥ 10; responsable
+    // o SuperAdmin; no borra ni recalcula; volver a cerrar crea la versión 2 que la sustituye.
+    const reopen = (m: Money, reason: string, id = res.body['closureId'] as string) => m(`/v1/periods/${id}/reopen`, { reason });
+    assert.deepEqual([(await reopen($ana, 'corto')).status, (await reopen($ana, 'corto')).body['error']], [400, 'REASON_REQUIRED']);
+    assert.equal((await reopen(w.money, 'Corrección de un abono del día 8')).status, 403, 'Cobrador');
+    assert.ok([403, 404].includes((await reopen(xavier.money, 'Corrección de un abono del día 8')).status), 'Administrador sin la ruta');
+    const ro = await reopen($ana, 'Corrección de un abono del día 8');
+    assert.equal(ro.status, 200, JSON.stringify(ro.body));
+    assert.equal((ro.body['closure'] as Body)['status'], 'reabierta');
+    assert.deepEqual((await reopen($ana, 'Corrección de un abono del día 8')).body['error'], 'SETTLEMENT_NOT_REOPENABLE');
+    const audRo = (await db.admin.query(`select reason from adex.audit_log where action = 'SETTLEMENT_REOPENED' and entity_id = $1`, [res.body['closureId']])).rows;
+    assert.deepEqual(audRo, [{ reason: 'Corrección de un abono del día 8' }]);
+    assert.deepEqual(((await ana('GET', `/v1/periods/${res.body['closureId']}`)).body['figures'] as Body)['custody'], cust, 'el archivo no cambia');
+    const v2 = await close($ana, '2026-10-05', '2026-10-11');
+    assert.equal(v2.status, 201, JSON.stringify(v2.body));
+    assert.equal(v2.body['version'], 2);
+    const v1 = (await db.admin.query('select status, superseded_by from adex.weekly_settlements where id = $1', [res.body['closureId']])).rows[0];
+    assert.deepEqual(v1, { status: 'reabierta', superseded_by: v2.body['closureId'] });
+    assert.deepEqual((await reopen($ana, 'Intento sobre una versión sustituida')).body['error'], 'SETTLEMENT_NOT_REOPENABLE');
+    await reconciliation();
   });
 
   // ==========================================================

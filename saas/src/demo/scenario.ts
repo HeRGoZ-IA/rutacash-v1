@@ -19,7 +19,7 @@ export const SCENARIO_VERSION = 'demo-v1';
 
 export interface SeatSpec {
   seat: string;
-  role: 'superadmin' | 'admin' | 'supervisor' | 'cobrador';
+  role: 'superadmin' | 'admin' | 'supervisor' | 'cobrador' | 'socio' | 'secretario';
   displayName: string;
   assignable: boolean;
 }
@@ -57,6 +57,8 @@ export interface ScenarioCall {
   body?: Record<string, unknown>;
   /** Comando de dinero o alta: se envía con un `X-Adex-Operation-Id` nuevo. */
   operation?: boolean;
+  /** Escenario histórico (demo-v2-6m): día contable simulado de la llamada (0018). */
+  day?: string;
 }
 
 export type CallRunner = (call: ScenarioCall) => Promise<Record<string, unknown>>;

@@ -375,9 +375,11 @@ describe('Fase 5 · gastos', () => {
     for (const op of ['put', 'bulkAdd', 'bulkPut', 'bulkDelete', 'clear']) {
       assert.match(bridgeDb, new RegExp(`async ${op}\\([^)]*\\): Promise<never> \\{ throw new OnlineWriteBlocked`), `db.${op} del puente bloqueado`);
     }
-    const screens = files.filter((f) => /screens/.test(f)).map((f) => readFileSync(path.join(dir, f), 'utf8')).join('\n');
-    for (const endpoint of ["'/v1/collections'", "'/v1/expenses'", '/reverse`', '/refunds`']) assert.ok(screens.includes(endpoint), `la interfaz usa ${endpoint}`);
-    assert.doesNotMatch(screens, /client\.send<[^>]*>\('POST', '\/v1\/(collections|expenses)/, 'los comandos de dinero van con operationId (client.command)');
+    // Ronda 26: las pantallas son las de CLEAN; sus comandos de dinero los emiten los puentes
+    // (`bridge/services`) con `money()` (id de operación), nunca con `plain()`.
+    const bridges = files.filter((f) => /^(bridge|runtime)[\\/]/.test(f)).map((f) => readFileSync(path.join(dir, f), 'utf8')).join('\n');
+    for (const endpoint of ["'/v1/collections'", "'/v1/expenses'", '/reverse`', '/refunds`']) assert.ok(bridges.includes(endpoint), `la interfaz usa ${endpoint}`);
+    assert.doesNotMatch(bridges, /plain(<[^>]*>)?\('POST', [`']\/v1\/(collections|expenses|capital|credits)/, 'los comandos de dinero van con operationId (money)');
   });
 
   test('EXP-099 · conciliación y sin errores inesperados', async () => {

@@ -17,6 +17,10 @@
 //   guardia de transiciones). Créditos y cuotas: SOLO `adex.credit_disburse`.
 //   Fase 6 (0014): NINGÚN privilegio de escritura nuevo. Cuadres y cierres solo con
 //   `adex.custody_settle`, `custody_settlement_reopen` y `period_close`.
+//   ADEX Online (0015): alta de visitas sin pago (INSERT, columnas concretas; no mueven
+//   dinero). Sin UPDATE ni DELETE: es historia.
+//   ADEX Online (0017): solicitudes de ajuste de pago (INSERT; UPDATE solo de su estado
+//   de revisión para el rechazo). La corrección del pago solo con `adex.collection_correct`.
 // Nunca TRUNCATE. Nunca DELETE ni UPDATE sobre datos financieros.
 export const EXPECTED_API_WRITES: Record<string, string[]> = {
   'adex.audit_log': ['INSERT'],
@@ -27,7 +31,9 @@ export const EXPECTED_API_WRITES: Record<string, string[]> = {
   'adex.identities': ['INSERT', 'UPDATE'],
   'adex.membership_routes': ['DELETE', 'INSERT'],
   'adex.memberships': ['DELETE', 'INSERT', 'UPDATE'],
+  'adex.no_payment_visits': ['INSERT'],
   'adex.offices': ['DELETE', 'INSERT', 'UPDATE'],
+  'adex.payment_adjustment_requests': ['INSERT', 'UPDATE'],
   'adex.operations': ['INSERT', 'UPDATE'],
   'adex.revoked_sessions': ['INSERT'],
   'adex.route_capital_controller_events': ['INSERT'],

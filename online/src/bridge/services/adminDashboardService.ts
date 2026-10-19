@@ -13,9 +13,10 @@
 //     listados llegaron a su tope y no cubren el periodo, se usa el agregado del libro del
 //     servidor por ruta y rango (GET /v1/periods/liquidation), que da la misma cifra.
 //   · Pendiente de sincronizar: 0 por construcción (ADEX Online no tiene cola local).
-//   · Rutas con mora: el servidor solo recalcula el vencimiento de cuotas al registrar un
-//     pago, así que no hay un dato fiable de mora todavía. Se devuelve -1 («sin dato») y
-//     la pantalla lo muestra como pendiente; nunca se calcula en el navegador.
+//   · Rutas con mora: la MISMA regla de CLEAN (rutas con alguna cuota «vencida» y días de
+//     mora) sobre las cuotas del servidor. El estado y los días de mora de cada cuota los
+//     deriva la regla original `updateInstallmentStatuses` con la fecha de hoy al leerlas
+//     (projection.ts): el servidor guarda importes, pagado y saldo; no se inventa nada.
 
 import { format, parseISO, subDays } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -26,6 +27,19 @@ import { carteraEnCalleOf } from '@clean/services/cashboxEngine';
 import type { User } from '@clean/models/types';
 import { calendar, custodyPositions, liquidation, mapLimit, table, truncated, type Liquidation } from '../../runtime/projection.ts';
 import { toMajor } from '../../runtime/mappers.ts';
+
+/** Rutas visibles con alguna cuota vencida (regla original de CLEAN, `getAdminDashboardData`). */
+async function rutasConMora(scope: Set<string>): Promise<number> {
+  const sales = new Map((await db.sales.toArray()).map((s) => [s.id, s]));
+  const set = new Set<string>();
+  for (const inst of await db.installments.toArray()) {
+    if (inst.status === 'vencida' && inst.diasMora > 0) {
+      const sale = sales.get(inst.saleId);
+      if (sale && scope.has(sale.routeId)) set.add(sale.routeId);
+    }
+  }
+  return set.size;
+}
 import { useRuntime } from '../../runtime/session.ts';
 
 export interface DashboardData {
@@ -44,8 +58,7 @@ export interface DashboardData {
   alertas: { tipo: string; mensaje: string; severity: 'warning' | 'error' | 'info' }[]
 }
 
-/** Valor de `rutasConMora` cuando el servidor no ofrece el dato. */
-export const MORA_SIN_DATO = -1;
+
 
 const recaudo = (l: Liquidation) => l.credit.principalCollectedMinor + l.credit.interestCollectedMinor;
 
@@ -136,7 +149,7 @@ export async function getAdminDashboardData(params: { user: User | null | undefi
     clientesActivos,
     gastosSemana,
     pagosPendientesSync: 0,
-    rutasConMora: MORA_SIN_DATO,
+    rutasConMora: await rutasConMora(scope),
     topRoutes,
     recaudoDiario,
     alertas,

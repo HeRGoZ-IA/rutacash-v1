@@ -65,10 +65,34 @@ const CLIENT_MAP: Record<string, string> = {
   nombre: 'name', documento: 'document', telefonoPrincipal: 'phonePrimary', telefonoSecundario: 'phoneSecondary',
   direccionPrincipal: 'addressPrimary', direccionSecundaria: 'addressSecondary', negocio: 'business', notas: 'notes', routeId: 'routeId',
 };
+/**
+ * Alta de un cliente de CLEAN en el servidor. El id que generó la pantalla es el id de la
+ * operación (un reintento devuelve el mismo cliente) y se recuerda su alias: la venta o la
+ * solicitud que la pantalla crea a continuación con ese id usa el del servidor.
+ * El TIPO de documento lo aporta el formulario (`documentType`, DS-10).
+ */
+const clientAliases = new Map<string, string>();
+export const clientId = (id: string) => clientAliases.get(id) ?? id;
+
+export async function createClientOnline(row: Changes): Promise<string> {
+  const documentType = row['documentType'];
+  if (!documentType) reject('Indique el tipo de documento del cliente.');
+  if ((row['fotoDocumentoUrl'] && !/^https:\/\//.test(row['fotoDocumentoUrl'])) || (row['fotoNegocioUrl'] && !/^https:\/\//.test(row['fotoNegocioUrl']))) {
+    reject('Las fotos todavía no se pueden subir en ADEX Online (falta el almacenamiento de archivos en el servidor). Guarde el cliente sin fotos.');
+  }
+  const body: Changes = { routeId: row['routeId'], documentType, document: row['documento'] };
+  for (const [k, f] of Object.entries(CLIENT_MAP)) {
+    if (k === 'routeId' || k === 'documento') continue;
+    const v = row[k];
+    if (typeof v === 'string' && v.trim() !== '') body[f] = v.trim();
+  }
+  const created = await money<{ id: string }>('POST', '/v1/clients', body, row['id']);
+  if (row['id']) clientAliases.set(String(row['id']), created.id);
+  return created.id;
+}
+
 registerWrites('clients', {
-  // El alta en el servidor exige el TIPO de documento (catálogo del país). El formulario
-  // original de CLEAN no lo tiene: no se elige uno por el usuario.
-  add: async () => reject('Para dar de alta clientes en ADEX Online hace falta el tipo de documento, que este formulario aún no pide. Use Clientes en Operaciones (transición).'),
+  add: (row) => createClientOnline(row),
   update: async (id, changes) => {
     const c = await current('clients', id);
     const body: Changes = {};
@@ -139,4 +163,16 @@ registerWrites('users', {
     return null;
   },
   delete: (id) => plain('POST', `/v1/members/${memberId(id)}/delete`, {}),
+});
+
+// ---------- Visitas sin pago (NoPaymentPage) ----------
+// Mismo registro que CLEAN; la fecha y quien visita los pone el servidor (0015). El id que
+// genera la pantalla es el id de la operación: un doble toque no registra dos visitas.
+registerWrites('noPaymentVisits', {
+  add: (row) => {
+    const body: Changes = { saleId: row['saleId'], reason: row['motivo'] };
+    if (row['fechaPromesaPago']) body['promisedPaymentDate'] = row['fechaPromesaPago'];
+    if (typeof row['observacion'] === 'string' && row['observacion'].trim()) body['note'] = row['observacion'].trim();
+    return money('POST', '/v1/no-payment-visits', body, row['id']);
+  },
 });

@@ -20,7 +20,7 @@ import type { ActiveContext } from '../authz/context.ts';
 import { toCleanUser } from '../authz/cleanRules.ts';
 import { audit } from '../db/audit.ts';
 import { loadMembers, need } from '../structure/common.ts';
-import { optId, optText, pathId, reqId, reqText } from '../structure/input.ts';
+import { optId, optText, PAGE_ORDER, pageFilters, pathId, reqId, reqText } from '../structure/input.ts';
 import { requireOperationId, routeOf } from '../capital/service.ts';
 
 interface PaymentRow {
@@ -28,11 +28,14 @@ interface PaymentRow {
   amount_minor: string; payment_date: string | Date; payment_type: string; note: string | null; created_at: Date; state: string | null;
   reverses_payment_id: string | null; reversal_payment_id: string | null; correction_reason: string | null; corrected_by_membership_id: string | null;
   corrected_at: Date | null; ledger_operation_id: string | null; principal_minor: string | null; interest_minor: string | null;
+  corrected_by_payment_id?: string | null; correction_of_payment_id?: string | null; period_closed?: boolean;
 }
 
 const ymd = (d: string | Date) => (typeof d === 'string' ? d.slice(0, 10)
   : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
 const num = (v: string | null) => (v === null ? null : Number(v));
+
+const PERIOD_CLOSED = 'coalesce(adex.payment_in_closed_period(id), false) period_closed';
 
 function paymentView(p: PaymentRow) {
   return {
@@ -42,6 +45,9 @@ function paymentView(p: PaymentRow) {
     reversesPaymentId: p.reverses_payment_id, reversalPaymentId: p.reversal_payment_id, correctionReason: p.correction_reason,
     correctedBy: p.corrected_by_membership_id, correctedAt: p.corrected_at?.toISOString() ?? null, ledgerOperationId: p.ledger_operation_id,
     principalMinor: num(p.principal_minor), interestMinor: num(p.interest_minor),
+    correctedByPaymentId: p.corrected_by_payment_id ?? null, correctionOfPaymentId: p.correction_of_payment_id ?? null,
+    // ¿Su fecha cae en una semana CERRADA de la ruta? (decide corrección directa o solicitud de ajuste, D7).
+    periodClosed: p.period_closed === true,
   };
 }
 
@@ -79,7 +85,7 @@ async function visibleEntries(client: pg.PoolClient, ctx: ActiveContext, opId: s
 
 async function loadPayment(client: pg.PoolClient, ctx: ActiveContext, id: string): Promise<PaymentRow> {
   pathId(id);
-  const r = await client.query<PaymentRow>('select * from adex.payments where company_id = $1 and id = $2', [ctx.companyId, id]);
+  const r = await client.query<PaymentRow>(`select *, ${PERIOD_CLOSED} from adex.payments where company_id = $1 and id = $2`, [ctx.companyId, id]);
   if (!r.rows[0]) throw new ApiError(404, 'NOT_FOUND');
   return r.rows[0];
 }
@@ -171,9 +177,10 @@ export async function listCollections(client: pg.PoolClient, ctx: ActiveContext,
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ApiError(400, 'INVALID_INPUT', 'date is invalid');
     params.push(date); where += ` and payment_date = $${params.length}`;
   }
-  const limit = Math.min(Math.max(Number(q.get('limit') ?? 200) || 200, 1), 500);
+  where += pageFilters(q, 'payment_date', params);
+  const limit = Math.min(Math.max(Number(q.get('limit') ?? 200) || 200, 1), 1000);
   params.push(limit);
-  const r = await client.query<PaymentRow>(`select * from adex.payments where ${where} order by created_at desc, id limit $${params.length}`, params);
+  const r = await client.query<PaymentRow>(`select *, ${PERIOD_CLOSED} from adex.payments where ${where} order by ${PAGE_ORDER} limit $${params.length}`, params);
   return r.rows.map(paymentView);
 }
 

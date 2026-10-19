@@ -34,8 +34,26 @@ function translate(e: unknown): Error {
   return e instanceof Error ? e : new Error(String(e));
 }
 
+/**
+ * Comandos IDÉNTICOS en curso (mismo método, ruta y cuerpo). Algunas pantallas originales
+ * generan el id de operación en cada pulsación (abono, visita, venta directa): un doble
+ * toque simultáneo enviaría dos operaciones distintas. Mientras la primera no termina, la
+ * segunda recibe su mismo resultado: nunca se cobra, desembolsa ni registra dos veces por
+ * un toque repetido. Dos operaciones iguales legítimas se hacen una después de otra.
+ */
+const inFlight = new Map<string, Promise<unknown>>();
+
 /** Comando de dinero o alta idempotente (un id por intención; reintento seguro con el mismo id). */
-export async function money<T = Record<string, unknown>>(method: string, path: string, body: unknown, operationId?: string): Promise<T> {
+export function money<T = Record<string, unknown>>(method: string, path: string, body: unknown, operationId?: string): Promise<T> {
+  const key = `${method} ${path} ${JSON.stringify(body)}`;
+  const running = inFlight.get(key);
+  if (running) return running as Promise<T>;
+  const p = send<T>(method, path, body, operationId).finally(() => inFlight.delete(key));
+  inFlight.set(key, p);
+  return p;
+}
+
+async function send<T>(method: string, path: string, body: unknown, operationId?: string): Promise<T> {
   try {
     const r = await api().command<T>(method, path, body, operationId && isUuid(operationId) ? operationId : undefined);
     invalidate();

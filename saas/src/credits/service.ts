@@ -27,7 +27,7 @@ import type { ActiveContext } from '../authz/context.ts';
 import { allowed } from '../authz/cleanRules.ts';
 import { audit } from '../db/audit.ts';
 import { need } from '../structure/common.ts';
-import { has, optText, pathId, reqId, reqText } from '../structure/input.ts';
+import { has, optText, PAGE_ORDER, pageFilters, pathId, reqId, reqText } from '../structure/input.ts';
 import { requireOperationId, routeOf } from '../capital/service.ts';
 
 const FREQUENCIES: readonly PaymentFrequency[] = ['diaria', 'semanal', 'quincenal', 'mensual', 'personalizada'];
@@ -115,7 +115,8 @@ function financials(c: Conditions) {
 }
 
 async function companyToday(client: pg.PoolClient, ctx: ActiveContext): Promise<string> {
-  return (await client.query<{ d: string }>(`select (now() at time zone $1)::date::text d`, [ctx.company.timezone])).rows[0]!.d;
+  // Fecha contable de la empresa (0018: una sola fuente para todo el servidor).
+  return (await client.query<{ d: string }>('select adex.business_today($1)::text d', [ctx.companyId])).rows[0]!.d;
 }
 
 /** Cliente ACTIVO de esa ruta, visible para el actor. */
@@ -398,8 +399,39 @@ export async function listCredits(client: pg.PoolClient, ctx: ActiveContext, q: 
     const v = q.get(key);
     if (v !== null) { pathId(v); params.push(v); where += ` and ${col} = $${params.length}`; }
   }
-  const r = await client.query<SaleRow>(`select * from adex.sales where ${where} order by created_at desc, id limit 500`, params);
+  where += pageFilters(q, 'start_date', params);
+  const limit = Math.min(Math.max(Number(q.get('limit') ?? 500) || 500, 1), 1000);
+  params.push(limit);
+  const r = await client.query<SaleRow>(`select * from adex.sales where ${where} order by ${PAGE_ORDER} limit $${params.length}`, params);
   return r.rows.map(creditView);
+}
+
+/**
+ * Cuotas en bloque de los créditos visibles (ADEX Online: la proyección de lectura las
+ * pide por ruta en una sola consulta, no una por crédito). Exige `routeId` o `saleId`.
+ */
+export async function listInstallments(client: pg.PoolClient, ctx: ActiveContext, q: URLSearchParams) {
+  need(ctx, 'sale.viewActive');
+  const params: unknown[] = [ctx.companyId];
+  let where = 's.company_id = $1';
+  let scoped = false;
+  for (const [key, col] of [['routeId', 's.route_id'], ['saleId', 's.id']] as const) {
+    const v = q.get(key);
+    if (v !== null) { pathId(v); params.push(v); where += ` and ${col} = $${params.length}`; scoped = true; }
+  }
+  if (!scoped) throw new ApiError(400, 'INVALID_INPUT', 'routeId or saleId is required');
+  const status = q.get('creditStatus');
+  if (status !== null) {
+    if (!['activa', 'finalizada', 'perdida', 'refinanciada'].includes(status)) throw new ApiError(400, 'INVALID_INPUT', 'creditStatus is invalid');
+    params.push(status); where += ` and s.status = $${params.length}`;
+  }
+  const r = await client.query<{ sale_id: string; number: number; due_date: string | Date; amount_minor: string; paid_minor: string; balance_minor: string; status: string; days_overdue: number }>(
+    `select i.sale_id, i.number, i.due_date, i.amount_minor, i.paid_minor, i.balance_minor, i.status, i.days_overdue
+       from adex.installments i join adex.sales s on s.company_id = i.company_id and s.id = i.sale_id
+      where ${where} order by i.sale_id, i.number limit 50001`, params);
+  if (r.rows.length > 50000) throw new ApiError(400, 'INVALID_INPUT', 'too many installments: filter by saleId');
+  return r.rows.map((i) => ({ saleId: i.sale_id, number: i.number, dueDate: ymd(i.due_date), amountMinor: Number(i.amount_minor),
+    paidMinor: Number(i.paid_minor), balanceMinor: Number(i.balance_minor), status: i.status, daysOverdue: i.days_overdue }));
 }
 
 /** Crédito, cuotas, solicitud, asiento (solo las patas visibles) y eventos de auditoría visibles. */

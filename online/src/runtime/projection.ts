@@ -21,9 +21,12 @@ import { ApiFailure } from '../lib/client.ts';
 import { buildCapitalRecords, fetchOperations, type CapitalRecords } from './capitalRecords.ts';
 import { api, useRuntime } from './session.ts';
 import {
-  cashSettlementFrom, categoryFrom, clientFrom, expenseFrom, weeklySettlementFrom, installmentFrom, officeFrom, paymentFrom, routeFrom, saleFrom, saleRequestFrom, tenantFrom, userFrom,
+  adjustmentFrom, cashSettlementFrom, controllerEventFrom, categoryFrom, clientFrom, companyFromContext, expenseFrom, weeklySettlementFrom, installmentFrom, noPaymentVisitFrom, officeFrom, paymentFrom, pendingSaleFrom,
+  routeFrom, saleFrom, saleRequestFrom, tenantFrom, userFrom,
   type CompanyView,
 } from './mappers.ts';
+import type { Installment, SaleRequest } from '@clean/models/types';
+import { updateInstallmentStatuses } from '@clean/services/installmentEngine';
 
 /** Una escritura local que CLEAN haría sobre IndexedDB y que ADEX Online no permite. */
 export class OnlineWriteBlocked extends Error {
@@ -62,8 +65,37 @@ async function list(path: string, key: string): Promise<Row[]> {
   }
 }
 
+/**
+ * Listado PAGINADO del servidor (cursor `before` = «createdAt|id», orden más reciente
+ * primero): se piden páginas hasta agotar la lista o llegar a `maxRows`. Si se llega al
+ * tope, la tabla queda marcada como incompleta (`truncated`) en vez de fingir que está entera.
+ */
+async function paged(path: string, key: string, maxRows: number): Promise<Row[]> {
+  const out: Row[] = [];
+  let before: string | null = null;
+  for (;;) {
+    const sep = path.includes('?') ? '&' : '?';
+    const q = `${path}${sep}limit=1000${before ? `&before=${encodeURIComponent(before)}` : ''}`;
+    let page: Row[];
+    try {
+      page = ((await api().get<Record<string, unknown>>(q))[key] ?? []) as Row[];
+    } catch (e) {
+      if (e instanceof ApiFailure && e.status === 403) return out;
+      throw e;
+    }
+    out.push(...page);
+    if (page.length < 1000) return out;
+    if (out.length >= maxRows) { truncated.add(path); return out; }
+    const last = page[page.length - 1]!;
+    before = `${last['createdAt']}|${last['id']}`;
+  }
+}
+
 /** Topes de los listados del servidor: si se alcanzan, la tabla puede estar incompleta. */
-const LIST_CAPS: Record<string, number> = { '/v1/clients?limit=1000': 1000, '/v1/credits': 500, '/v1/credit-requests': 500, '/v1/collections?limit=500': 500, '/v1/expenses?limit=500': 500, '/v1/settlements?limit=500': 500 };
+const LIST_CAPS: Record<string, number> = { '/v1/credit-requests': 500, '/v1/settlements?limit=500': 500,
+  '/v1/no-payment-visits?limit=1000': 1000 };
+/** Filas máximas que se traen de un listado paginado por revisión (recaudos, gastos). */
+const MAX_ROWS = 20_000;
 export const truncated = new Set<string>();
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<R[]> {
@@ -76,26 +108,90 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R
 }
 
 const LOADERS: Record<string, Loader> = {
-  tenants: async () => [tenantFrom(await api().get<CompanyView>('/v1/company'))],
+  tenants: async () => {
+    if (!can('settings.access')) return [tenantFrom(companyFromContext())];
+    try {
+      return [tenantFrom(await api().get<CompanyView>('/v1/company'))];
+    } catch (e) {
+      if (e instanceof ApiFailure && e.status === 403) return [tenantFrom(companyFromContext())];
+      throw e;
+    }
+  },
   users: async () => {
     if (can('user.viewAll')) return (await list('/v1/members', 'members')).map(userFrom);
+    // Roles de campo (Supervisor, Cobrador, Socio, Secretario): la propia membresía y,
+    // si cuadra a otros, los trabajadores de sus rutas con su nombre real (mismo listado
+    // que usa el cuadre: `GET /v1/settlements/workers`). Nunca se amplía el alcance.
     const ctx = useRuntime.getState().ctx!;
-    return [userFrom({ membershipId: ctx.membershipId, role: ctx.role, status: 'activo', displayName: '', routeIds: ctx.routeIds })];
+    const self = userFrom({ membershipId: ctx.membershipId, role: ctx.role, status: 'activo', displayName: ctx.displayName ?? '', routeIds: ctx.routeIds });
+    if (!can('cashSettlement.view')) return [self];
+    const byId = new Map<string, Row>([[self.id, self as unknown as Row]]);
+    const lists = await mapLimit([...ctx.routeIds], 4, (routeId) => settleableWorkers(routeId).catch(() => null));
+    lists.forEach((l, i) => {
+      // Responsable de capital válido de la ruta (lo necesita la regla original de quién cuadra).
+      if (l?.controllerId && l.controllerValid && l.controllerId !== self.id) {
+        const prev = byId.get(l.controllerId);
+        const routeIds = new Set<string>(prev ? (prev['authorizedRouteIds'] as string[]) : []);
+        routeIds.add(ctx.routeIds[i]!);
+        byId.set(l.controllerId, userFrom({ membershipId: l.controllerId, role: 'admin', status: 'activo', displayName: l.controllerName ?? '', routeIds: [...routeIds] }) as unknown as Row);
+      }
+      for (const w of l?.workers ?? []) {
+        if (w.workerId === self.id) continue;
+        const prev = byId.get(w.workerId);
+        const routeIds = new Set<string>(prev ? (prev['authorizedRouteIds'] as string[]) : []);
+        if (w.assigned) routeIds.add(ctx.routeIds[i]!);
+        byId.set(w.workerId, userFrom({ membershipId: w.workerId, role: w.role, status: w.status, displayName: w.name, routeIds: [...routeIds] }) as unknown as Row);
+      }
+    });
+    return [...byId.values()];
   },
   routes: async () => (await list('/v1/routes', 'routes')).map(routeFrom),
   offices: async () => (await list('/v1/offices', 'offices')).map(officeFrom),
-  clients: async () => (can('client.view') ? (await list('/v1/clients?limit=1000', 'clients')).map(clientFrom) : []),
-  sales: async () => (can('sale.viewActive') || can('sale.viewHistory') ? (await list('/v1/credits', 'credits')).map(saleFrom) : []),
-  installments: async () => {
-    const sales = await table('sales');
-    const parts = await mapLimit(sales, 4, async (s) => {
-      const body = await api().get<{ installments: Row[] }>(`/v1/credits/${s['id']}`);
-      return (body.installments ?? []).map((i) => installmentFrom(String(s['id']), i));
-    });
-    return parts.flat();
+  // Clientes por páginas de 1000 (orden por nombre del servidor, desplazamiento).
+  clients: async () => {
+    if (!can('client.view')) return [];
+    const out: Row[] = [];
+    for (let offset = 0; offset < MAX_ROWS; offset += 1000) {
+      const page = await list(`/v1/clients?limit=1000&offset=${offset}`, 'clients');
+      out.push(...page);
+      if (page.length < 1000) break;
+    }
+    return out.map(clientFrom);
   },
-  payments: async () => (can('payment.viewHistory') ? (await list('/v1/collections?limit=500', 'collections')).map(paymentFrom) : []),
-  expenses: async () => (can('expense.register') || can('expense.correct') ? (await list('/v1/expenses?limit=500', 'expenses')).map(expenseFrom) : []),
+  sales: async () => {
+    if (!can('sale.viewActive') && !can('sale.viewHistory')) return [];
+    const credits = (await paged('/v1/credits', 'credits', MAX_ROWS)).map(saleFrom);
+    // Aprobadas sin desembolsar = ventas «pendientes de desembolso» de CLEAN (ver pendingSaleFrom).
+    const requests = (await table('saleRequests')) as SaleRequest[];
+    const pending = requests.filter((r) => r.status === 'approved' && !r.saleId).map(pendingSaleFrom);
+    return [...credits, ...pending];
+  },
+  // Cuotas en UNA consulta por ruta (`GET /v1/installments`), no una por crédito.
+  installments: async () => {
+    if (!can('sale.viewActive')) return [];
+    const routes = (await table('routes')).map((r) => String(r['id']));
+    const parts = await mapLimit(routes, 4, async (routeId) => {
+      const body = await api().get<{ installments: Row[] }>(`/v1/installments?routeId=${encodeURIComponent(routeId)}`);
+      return (body.installments ?? []).map((i) => installmentFrom(String(i['saleId']), i));
+    });
+    // Estado y días de mora con la regla ORIGINAL de CLEAN a la fecha de hoy (el servidor
+    // solo los recalcula al cobrar): mismos importes, mismo resultado que CLEAN.
+    const bySale = new Map<string, Installment[]>();
+    for (const i of parts.flat()) {
+      const l = bySale.get(i.saleId) ?? [];
+      l.push(i);
+      bySale.set(i.saleId, l);
+    }
+    return [...bySale.values()].flatMap((l) => updateInstallmentStatuses(l)) as unknown as Row[];
+  },
+  payments: async () => (can('payment.viewHistory') ? (await paged('/v1/collections', 'collections', MAX_ROWS)).map(paymentFrom) : []),
+  expenses: async () => (can('expense.register') || can('expense.correct') ? (await paged('/v1/expenses', 'expenses', MAX_ROWS)).map(expenseFrom) : []),
+  // Historial de responsables de capital de cada ruta (eventos que el servidor registra al cambiarlo).
+  routeCapitalControllerEvents: async () => (can('capital.manage') || can('capital.assignController')
+    ? (await list('/v1/capital/controller-events', 'events')).map(controllerEventFrom) : []),
+  paymentAdjustmentRequests: async () => (can('payment.correct') || can('payment.approveAdjustment')
+    ? (await list('/v1/payment-adjustments', 'adjustments')).map(adjustmentFrom) : []),
+  noPaymentVisits: async () => (can('payment.viewHistory') ? (await list('/v1/no-payment-visits?limit=1000', 'visits')).map(noPaymentVisitFrom) : []),
   expenseCategories: async () => (await list('/v1/expense-categories', 'categories')).map(categoryFrom),
   saleRequests: async () => (can('authorization.access') || can('sale.createRequest') ? (await list('/v1/credit-requests', 'requests')).map(saleRequestFrom) : []),
   // Cierres de periodo del servidor (misma entidad que `weeklySettlements` de CLEAN). Solo
@@ -107,6 +203,8 @@ const LOADERS: Record<string, Loader> = {
   withdrawals: async () => (await capitalRecords()).withdrawals,
   transfers: async () => (await capitalRecords()).transfers,
   cashCustodyMovements: async () => (await capitalRecords()).cashCustodyMovements,
+  // Caja socios: SOLO la pata de los aportes del libro central (ver capitalRecords.ts, D1).
+  partnerCashMovements: async () => (await capitalRecords()).partnerCashMovements,
   // Cuadres por trabajador del servidor (misma entidad que `cashSettlements` de CLEAN).
   cashSettlements: async () => (can('cashSettlement.view') || can('cashSettlement.viewOwn')
     ? (await list('/v1/settlements?limit=500', 'settlements')).map(cashSettlementFrom) : []),
@@ -130,8 +228,7 @@ export function capitalRecords(): Promise<CapitalRecords> {
 
 /** Tablas del libro local de CLEAN SIN equivalente directo (ver cabecera). */
 export const GAP_TABLES = [
-  'cashboxMovements', 'auditLogs', 'partnerCashMovements',
-  'paymentAdjustmentRequests', 'routeCapitalControllerEvents', 'noPaymentVisits',
+  'cashboxMovements', 'auditLogs',
   'platformUsers', 'companyControl', 'saasPayments', 'controlEvents',
 ] as const;
 
@@ -172,6 +269,14 @@ export async function custodyPositions(): Promise<CustodyPosition[]> {
     if (e instanceof ApiFailure && e.status === 403) return [];
     throw e;
   }
+}
+
+export interface SettleableWorker { workerId: string; name: string; role: string; status: string; assigned: boolean; own: boolean; positionMinor: number; carriedMinor: number; availableMinor: number }
+export interface SettleableWorkers { routeId: string; routeName: string; controllerId: string | null; controllerName: string | null; controllerValid: boolean; workers: SettleableWorker[]; routeTotalPositionMinor: number; routeTotalAvailableMinor: number }
+
+/** Trabajadores cuadrables de una ruta con su posición de custodia (`cashSettlement.view`). */
+export function settleableWorkers(routeId: string): Promise<SettleableWorkers> {
+  return serverView<SettleableWorkers>(`/v1/settlements/workers?routeId=${encodeURIComponent(routeId)}`);
 }
 
 export function calendar(): Promise<Calendar> {

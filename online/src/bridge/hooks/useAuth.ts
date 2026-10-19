@@ -14,10 +14,10 @@
 import { create } from 'zustand';
 import type { Route, Tenant, User } from '@clean/models/types';
 import { errorText } from '../../lib/format.ts';
-import type { ActiveContextView } from '../../lib/client.ts';
+import { ApiFailure, type ActiveContextView } from '../../lib/client.ts';
 import { api, onContextChange, sessionEmail, signIn, signOut, useRuntime } from '../../runtime/session.ts';
 import { prefetch, reset } from '../../runtime/projection.ts';
-import { tenantFrom, userFrom, type CompanyView } from '../../runtime/mappers.ts';
+import { companyFromContext, tenantFrom, userFrom, type CompanyView } from '../../runtime/mappers.ts';
 
 interface AuthState {
   user: User | null
@@ -39,7 +39,10 @@ interface AuthState {
 async function identityOf(ctx: ActiveContextView): Promise<{ user: User; tenant: Tenant }> {
   const c = api();
   const [company, members] = await Promise.all([
-    c.get<CompanyView>('/v1/company'),
+    // Sin `settings.access` (roles de campo) el servidor no da los datos de contacto: la empresa del contexto.
+    ctx.capabilities.includes('settings.access')
+      ? c.get<CompanyView>('/v1/company').catch((e) => { if (e instanceof ApiFailure && e.status === 403) return companyFromContext(); throw e; })
+      : Promise.resolve(companyFromContext()),
     ctx.capabilities.includes('user.viewAll')
       ? c.get<{ members: Record<string, unknown>[] }>('/v1/members').then((b) => b.members).catch(() => [])
       : Promise.resolve([] as Record<string, unknown>[]),
@@ -48,7 +51,7 @@ async function identityOf(ctx: ActiveContextView): Promise<{ user: User; tenant:
   const email = sessionEmail();
   const user = userFrom({
     membershipId: ctx.membershipId, role: ctx.role, status: 'activo', routeIds: ctx.routeIds,
-    displayName: (self?.['displayName'] as string | undefined) ?? email, email: (self?.['email'] as string | undefined) ?? email,
+    displayName: (self?.['displayName'] as string | undefined) ?? ctx.displayName ?? email, email: (self?.['email'] as string | undefined) ?? email,
     phone: self?.['phone'] ?? null,
   });
   return { user, tenant: tenantFrom(company) };

@@ -124,7 +124,8 @@ describe('Fase 0 · esquema completo frente a Dexie v16', () => {
       // capitalMovements/withdrawals/cashCustodyMovements; el servidor no recrea esa caja de ruta).
       // Fase 6: cuadres del servidor (tramo del libro y posición con signo; `cash_settlements`
       // sigue siendo el histórico importado) y archivo de cifras de cada cierre de periodo.
-      assert.deepEqual(extra, ['adex.capital_accounts', 'adex.capital_entries', 'adex.capital_operations', 'adex.currencies', 'adex.custody_settlements',
+      // ADEX Online (0017): permiso de UN SOLO USO de cada paso de una corrección de pago.
+      assert.deepEqual(extra, ['adex.capital_accounts', 'adex.capital_entries', 'adex.capital_operations', 'adex.correction_steps', 'adex.currencies', 'adex.custody_settlements',
         'adex.document_types', 'adex.identities', 'adex.membership_routes', 'adex.operations', 'adex.period_closures', 'adex.revoked_sessions']);
     });
 

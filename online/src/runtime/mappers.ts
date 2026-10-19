@@ -6,9 +6,10 @@
 // tienen equivalente en el servidor quedan vacíos (nunca se inventan).
 
 import type {
-  CashSettlement, Client, Expense, ExpenseCategory, WeeklySettlement, Installment, Office, Payment, Route, Sale, SaleRequest, Tenant, User, UserRole,
+  CashSettlement, Client, Expense, ExpenseCategory, WeeklySettlement, Installment, NoPaymentVisit, Office, Payment, PaymentAdjustmentRequest, Route, RouteCapitalControllerEvent, Sale, SaleRequest, Tenant, User, UserRole,
 } from '@clean/models/types';
 import { useRuntime } from './session.ts';
+import { cashboxFromFigures } from './cashboxFigures.ts';
 
 export function minorUnits(): number {
   return useRuntime.getState().ctx?.company.minorUnits ?? 0;
@@ -31,6 +32,17 @@ type V = Record<string, any>;
 
 export interface CompanyView { id: string; name: string; legalName: string | null; taxId: string | null; email: string | null; phone: string | null; city: string | null;
   address: string | null; contactName: string | null; countryCode: string; countryLabel?: string; currencyCode: string; timezone: string; plan: string; status: string }
+
+/**
+ * La empresa vista por un rol SIN acceso a sus datos de contacto (Configuración, p. ej.
+ * Cobrador o Supervisor): solo lo que el servidor ya le da en su contexto validado
+ * (nombre, país, moneda, zona). Nunca se pide ni se inventa lo demás.
+ */
+export function companyFromContext(): CompanyView {
+  const c = useRuntime.getState().ctx!.company;
+  return { id: c.id, name: c.name, legalName: null, taxId: null, email: null, phone: null, city: null, address: null, contactName: null,
+    countryCode: c.countryCode, currencyCode: c.currencyCode, timezone: c.timezone, plan: 'operativo', status: 'activa' };
+}
 
 export function tenantFrom(c: CompanyView): Tenant {
   return {
@@ -93,6 +105,35 @@ export function saleFrom(c: V): Sale {
   };
 }
 
+/**
+ * Solicitud APROBADA y aún sin desembolsar → la venta «pendiente de desembolso» de CLEAN.
+ *
+ * En CLEAN aprobar crea la venta con `disbursementStatus: 'pendiente'`; en el servidor
+ * (Fase 4) el crédito nace al DESEMBOLSAR y hasta entonces solo existe la solicitud
+ * aprobada con sus condiciones. Para el negocio es el mismo estado, así que las
+ * pantallas originales la ven igual: misma lista de desembolsos, mismo contador.
+ * El id es el de la SOLICITUD (`saleRequestId` también): confirmar el desembolso es
+ * `POST /v1/credit-requests/:id/disburse`. No tiene cuotas ni saldo en el libro todavía.
+ */
+export function pendingSaleFrom(r: SaleRequest): Sale {
+  return {
+    id: r.id, tenantId: r.tenantId, routeId: r.routeId, clientId: r.clientId, createdByUserId: r.requestedBy ?? r.collectorId,
+    valorVenta: r.amount, tasaInteres: r.approvedInterestRate ?? r.interestRate, valorInteres: r.totalAmount - r.amount,
+    valorTotal: r.totalAmount, saldo: r.totalAmount, numeroCuotas: r.installmentsCount, valorCuota: r.installmentValue,
+    frecuenciaPago: (r.approvedFrequency ?? r.frequency) as Sale['frecuenciaPago'], paymentDays: r.approvedPaymentDays ?? r.paymentDays,
+    fechaInicio: r.startDate, fechaFinalEstimada: '', status: 'activa', disbursementStatus: 'pendiente', saleRequestId: r.id,
+    createdAt: r.reviewedAt ?? r.requestedAt, updatedAt: r.reviewedAt ?? r.requestedAt,
+  };
+}
+
+export function noPaymentVisitFrom(v: V): NoPaymentVisit {
+  return {
+    id: v.id, tenantId: tenantId(), saleId: v.saleId, clientId: v.clientId, routeId: v.routeId, collectorId: v.collectorId,
+    motivo: v.reason, fechaPromesaPago: s(v.promisedPaymentDate), observacion: s(v.note), fecha: v.visitDate,
+    syncStatus: 'synced', createdAt: v.createdAt,
+  };
+}
+
 export function installmentFrom(saleId: string, i: V): Installment {
   return {
     id: `${saleId}:${i.number}`, saleId, numero: i.number, fechaVencimiento: i.dueDate, valor: toMajor(i.amountMinor),
@@ -100,8 +141,16 @@ export function installmentFrom(saleId: string, i: V): Installment {
   };
 }
 
+/**
+ * ¿La fecha del pago cae en una semana CERRADA de su ruta? Lo dice el servidor en cada pago
+ * (`periodClosed`): un rol sin acceso a los cierres (Secretario) decide igual que CLEAN si
+ * corrige directamente o pide un ajuste.
+ */
+export const paymentPeriodClosed = new Map<string, boolean>();
+
 export function paymentFrom(p: V): Payment {
   const state = p.state as Payment['state'];
+  if (typeof p.periodClosed === 'boolean') paymentPeriodClosed.set(p.id, p.periodClosed);
   return {
     id: p.id, tenantId: tenantId(), saleId: p.saleId, clientId: p.clientId, routeId: p.routeId, collectorId: p.collectorId,
     createdByUserId: p.createdBy ?? undefined,
@@ -112,6 +161,27 @@ export function paymentFrom(p: V): Payment {
     syncStatus: 'synced', createdAt: p.createdAt, state,
     reversesPaymentId: p.reversesPaymentId ?? undefined, reversalPaymentId: p.reversalPaymentId ?? undefined,
     correctionReason: s(p.correctionReason), correctedBy: p.correctedBy ?? undefined, correctedAt: p.correctedAt ?? undefined,
+    correctedByPaymentId: p.correctedByPaymentId ?? undefined, correctionOfPaymentId: p.correctionOfPaymentId ?? undefined,
+  };
+}
+
+export function controllerEventFrom(e: V): RouteCapitalControllerEvent {
+  return {
+    id: e.id, tenantId: tenantId(), routeId: e.routeId, kind: e.kind, fromAdminId: e.fromAdminId ?? undefined, toAdminId: e.toAdminId ?? undefined,
+    capitalTransferido: toMajor(e.capitalTransferredMinor), baseAlCambio: e.baseAtChangeMinor === null || e.baseAtChangeMinor === undefined ? undefined : toMajor(e.baseAtChangeMinor),
+    ledgerEntryId: e.ledgerEntryId ?? undefined, motivo: s(e.reason), createdAt: e.createdAt, actorUserId: e.actorId ?? e.actorSystem ?? '',
+    actorRole: e.actorRole ?? undefined, syncStatus: 'synced',
+  };
+}
+
+export function adjustmentFrom(a: V): PaymentAdjustmentRequest {
+  return {
+    id: a.id, tenantId: tenantId(), routeId: a.routeId, paymentId: a.paymentId, clientId: a.clientId, saleId: a.saleId,
+    requestedBy: a.requestedBy, requestedByRole: a.requestedByRole, requestedAt: a.requestedAt,
+    originalValor: toMajor(a.originalAmountMinor), originalFecha: a.originalDate, reason: a.reason, newValor: toMajor(a.newAmountMinor),
+    newFecha: a.newDate ?? undefined, observacion: s(a.note), status: a.status, reviewedBy: a.reviewedBy ?? undefined,
+    reviewedAt: a.reviewedAt ?? undefined, rejectionReason: s(a.rejectionReason), resultingReversalId: a.resultingReversalId ?? undefined,
+    resultingPaymentId: a.resultingPaymentId ?? undefined,
   };
 }
 
@@ -148,23 +218,23 @@ export function saleRequestFrom(r: V): SaleRequest {
 }
 
 /**
- * Cierre de periodo del servidor → `WeeklySettlement`. Saldo de apertura y de cierre son
- * los archivados por el servidor; el desglose de CLEAN (capital, transferencias, retiros…)
- * no tiene equivalente uno a uno en el libro central y NO se rellena (queda NaN: una
- * pantalla que lo mostrara fallaría a la vista en vez de enseñar un cero falso).
+ * Cierre de periodo del servidor → `WeeklySettlement`. Cierres del servidor (Fase 6): las
+ * cifras salen del ARCHIVO del cierre (el libro tal como quedó), con el mismo desglose que
+ * la Caja (`cashboxFromFigures`). Cierres importados sin archivo: solo los saldos de
+ * apertura y cierre que guardó CLEAN; el resto queda NaN (una pantalla que lo mostrara
+ * fallaría a la vista en vez de enseñar un cero falso).
  */
 export function weeklySettlementFrom(c: V): WeeklySettlement {
-  const f = (c.figures ?? {}) as V;
-  const credit = (f.credit ?? {}) as V;
-  const has = (k: string) => typeof credit[k] === 'number';
+  const f = c.figures as V | null;
+  const caja = f && f.custody ? cashboxFromFigures(c.routeId, f) : null;
   return {
     id: c.id, tenantId: tenantId(), routeId: c.routeId, semanaInicio: c.weekStart, semanaFin: c.weekEnd,
     saldoAnterior: toMajor(c.openingMinor), saldoFinal: toMajor(c.closingMinor),
-    cobros: has('principalCollectedMinor') ? toMajor(credit.principalCollectedMinor + (credit.interestCollectedMinor ?? 0)) : NaN,
-    prestamosEntregados: has('principalDisbursedMinor') ? toMajor(credit.principalDisbursedMinor) : NaN,
-    gastos: has('expensesMinor') ? toMajor(credit.expensesMinor) : NaN,
-    ingresoCapital: NaN, transferenciasEntradas: NaN, transferenciasSalidas: NaN, retiros: NaN,
+    cobros: caja ? caja.cobros : NaN, prestamosEntregados: caja ? caja.prestamosEntregados : NaN, gastos: caja ? caja.gastos : NaN,
+    ingresoCapital: caja ? caja.ingresoCapital : NaN, transferenciasEntradas: caja ? caja.transferenciasEntradas : NaN,
+    transferenciasSalidas: caja ? caja.transferenciasSalidas : NaN, retiros: caja ? caja.retiros : NaN,
     createdAt: c.closedAt ?? '', status: c.status, closedAt: c.closedAt ?? undefined, closedByUserId: c.closedBy ?? undefined,
+    reopenedAt: c.reopenedAt ?? undefined, reopenedByUserId: c.reopenedBy ?? undefined, reopenReason: c.reopenReason ?? undefined,
     version: c.version, supersededBy: c.supersededBy ?? undefined,
   };
 }

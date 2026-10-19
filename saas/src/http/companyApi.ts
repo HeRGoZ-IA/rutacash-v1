@@ -35,17 +35,19 @@ import {
   CLIENT_FIELDS, createClient, deleteClient, documentTypes, getClient, listClients, setClientStatus, updateClient,
 } from '../structure/clients.ts';
 import {
-  allocateToAdmin, capitalReconciliation, capitalSummary, companyDeposit, companyWithdrawal, deliverToWorker, getOperation, listCustody,
+  allocateToAdmin, capitalReconciliation, capitalSummary, companyDeposit, companyWithdrawal, deliverToWorker, getOperation, listControllerEvents, listCustody,
   listOperations, partnerContribution, reassignBetweenRoutes, returnFromAdmin, returnFromWorker, reverseOperation, transferBetweenWorkers,
 } from '../capital/service.ts';
 import {
   APPROVE_FIELDS, CREATE_REQUEST_FIELDS, DIRECT_FIELDS, approveRequest, cancelRequest, createRequest, directSale, disburseRequest, getCredit,
-  getRequest, listCredits, listRequests, rejectRequest,
+  getRequest, listCredits, listInstallments, listRequests, rejectRequest,
 } from '../credits/service.ts';
 import { COLLECTION_FIELDS, getCollection, listCollections, registerCollection, reverseCollection } from '../collections/service.ts';
+import { VISIT_FIELDS, listVisits, registerVisit } from '../collections/visits.ts';
+import { ADJUSTMENT_FIELDS, CORRECTION_FIELDS, approveAdjustment, correctCollection, createAdjustment, listAdjustments, rejectAdjustment } from '../collections/adjustments.ts';
 import { EXPENSE_FIELDS, createExpense, getExpense, listExpenses, refundExpense, reverseExpense } from '../expenses/service.ts';
 import {
-  PERIOD_CLOSE_FIELDS, SETTLEMENT_FIELDS, closePeriod, closeSettlement, getClosure, getSettlement, liquidation, listClosures, listSettlements,
+  PERIOD_CLOSE_FIELDS, SETTLEMENT_FIELDS, closePeriod, closeSettlement, getClosure, getSettlement, liquidation, listClosures, listSettlements, reopenPeriod,
   periodCalendar, previewSettlement, reopenSettlement, settleableWorkers,
 } from '../settlements/service.ts';
 import { checkFields, readJson, readJsonObject, scopeOf, send } from './common.ts';
@@ -83,7 +85,7 @@ const ID = '([^/]+)';
 
 function contextView(ctx: ActiveContext) {
   return {
-    identityId: ctx.claims.identityId, membershipId: ctx.membershipId, role: ctx.role, routeIds: ctx.routeIds,
+    identityId: ctx.claims.identityId, membershipId: ctx.membershipId, role: ctx.role, displayName: ctx.displayName, routeIds: ctx.routeIds,
     company: ctx.company, capabilities: capabilitiesOf(ctx.role),
   };
 }
@@ -149,6 +151,7 @@ const ENDPOINTS: readonly Endpoint[] = [
   // ---------- Capital centralizado y custodia (Fase 3) ----------
   { method: 'GET', pattern: /^\/v1\/capital\/summary$/, fields: null, handler: () => async (c, ctx) => ok(await capitalSummary(c, ctx)) },
   { method: 'GET', pattern: /^\/v1\/capital\/reconciliation$/, fields: null, handler: () => async (c, ctx) => ok(await capitalReconciliation(c, ctx)) },
+  { method: 'GET', pattern: /^\/v1\/capital\/controller-events$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ events: await listControllerEvents(c, ctx, q) }) },
   { method: 'GET', pattern: /^\/v1\/capital\/custody$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ positions: await listCustody(c, ctx, q) }) },
   { method: 'GET', pattern: /^\/v1\/capital\/operations$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ operations: await listOperations(c, ctx, q) }) },
   { method: 'GET', pattern: new RegExp(`^/v1/capital/operations/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getOperation(c, ctx, id!)) },
@@ -187,6 +190,7 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: () => async (c, ctx, b, _q, op) => created(await directSale(c, ctx, b, op)) },
   { method: 'GET', pattern: new RegExp(`^/v1/credits$`), fields: null, handler: () => async (c, ctx, _b, q) => ok({ credits: await listCredits(c, ctx, q) }) },
   { method: 'GET', pattern: new RegExp(`^/v1/credits/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getCredit(c, ctx, id!)) },
+  { method: 'GET', pattern: /^\/v1\/installments$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ installments: await listInstallments(c, ctx, q) }) },
   // ---------- Recaudos y gastos (Fase 5, solo en línea) ----------
   { method: 'GET', pattern: /^\/v1\/collections$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ collections: await listCollections(c, ctx, q) }) },
   { method: 'POST', pattern: /^\/v1\/collections$/, fields: COLLECTION_FIELDS, idempotent: 'collections.register', requiresOperation: true,
@@ -194,6 +198,19 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'GET', pattern: new RegExp(`^/v1/collections/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getCollection(c, ctx, id!)) },
   { method: 'POST', pattern: new RegExp(`^/v1/collections/${ID}/reverse$`), fields: ['reason'], idempotent: 'collections.reverse', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => created(await reverseCollection(c, ctx, id!, b, op)) },
+  // Corrección de pagos y solicitudes de ajuste (ADEX Online, 0017).
+  { method: 'POST', pattern: new RegExp(`^/v1/collections/${ID}/correct$`), fields: CORRECTION_FIELDS, idempotent: 'collections.correct', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => created(await correctCollection(c, ctx, id!, b, op)) },
+  { method: 'GET', pattern: /^\/v1\/payment-adjustments$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ adjustments: await listAdjustments(c, ctx, q) }) },
+  { method: 'POST', pattern: /^\/v1\/payment-adjustments$/, fields: ADJUSTMENT_FIELDS, idempotent: 'payment_adjustments.create', requiresOperation: true,
+    handler: () => async (c, ctx, b) => created(await createAdjustment(c, ctx, b)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/payment-adjustments/${ID}/approve$`), fields: [], idempotent: 'payment_adjustments.approve', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, _b, _q, op) => ok(await approveAdjustment(c, ctx, id!, op)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/payment-adjustments/${ID}/reject$`), fields: ['reason'], handler: ([id]) => async (c, ctx, b) => ok(await rejectAdjustment(c, ctx, id!, b)) },
+  // Visitas sin pago (ADEX Online, 0015): no mueven dinero; idempotentes como cualquier alta.
+  { method: 'GET', pattern: /^\/v1\/no-payment-visits$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ visits: await listVisits(c, ctx, q) }) },
+  { method: 'POST', pattern: /^\/v1\/no-payment-visits$/, fields: VISIT_FIELDS, idempotent: 'no_payment_visits.register', requiresOperation: true,
+    handler: () => async (c, ctx, b) => created(await registerVisit(c, ctx, b)) },
   { method: 'GET', pattern: /^\/v1\/expenses$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ expenses: await listExpenses(c, ctx, q) }) },
   { method: 'POST', pattern: /^\/v1\/expenses$/, fields: EXPENSE_FIELDS, idempotent: 'expenses.create', requiresOperation: true,
     handler: () => async (c, ctx, b, _q, op) => created(await createExpense(c, ctx, b, op)) },
@@ -217,6 +234,8 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'POST', pattern: /^\/v1\/periods\/close$/, fields: PERIOD_CLOSE_FIELDS, idempotent: 'periods.close', requiresOperation: true,
     handler: () => async (c, ctx, b, _q, op) => created(await closePeriod(c, ctx, b, op)) },
   { method: 'GET', pattern: new RegExp(`^/v1/periods/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getClosure(c, ctx, id!)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/periods/${ID}/reopen$`), fields: ['reason'], idempotent: 'periods.reopen', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => ok(await reopenPeriod(c, ctx, id!, b, op)) },
   // ---------- Operaciones inciertas (ADEX Online v1) ----------
   // Si la respuesta de un comando se pierde (red caída), el cliente consulta aquí su
   // `X-Adex-Operation-Id` ANTES de repetirlo. 404 = el comando no llegó a confirmarse
@@ -285,6 +304,12 @@ export interface CompanyCall {
   operationId?: string | null;
   /** Cuerpo JSON (objeto) o `undefined` si no hay. */
   body?: Record<string, unknown>;
+  /**
+   * SOLO la inicialización de la Empresa Demo (en proceso, nunca desde HTTP): día contable
+   * simulado de esta llamada. PostgreSQL lo acepta únicamente para una Demo en
+   * aprovisionamiento (`adex.business_today`, 0018); cualquier otra empresa lo ignora.
+   */
+  seedDay?: string;
 }
 
 export type CompanyExecutor = (claims: SessionClaims, call: CompanyCall) => Promise<Result>;
@@ -314,6 +339,10 @@ export function createCompanyExecutor(opts: CompanyApiOptions): CompanyExecutor 
     const query = call.query ?? new URLSearchParams();
     return withTransaction(opts.pool, async (c) => {
       const ctx = await resolveContext(c, claims, membershipId);
+      if (call.seedDay) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(call.seedDay)) throw new ApiError(400, 'INVALID_INPUT', 'seedDay is invalid');
+        await c.query(`select set_config('adex.seed_today', $1, true)`, [call.seedDay]);
+      }
       await opts.afterContext?.(ctx, call.path);
       const run = () => handler(c, ctx, body, query, operationId);
       const out = operationId ? await withOperation(c, ctx, operationId, found.e.idempotent!, call.path, body, run) : await run();

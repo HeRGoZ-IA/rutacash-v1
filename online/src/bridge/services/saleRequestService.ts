@@ -5,13 +5,17 @@
 //     desembolsar (comando de dinero del Cobrador o del responsable). Para el negocio es
 //     el mismo estado que en CLEAN: «pendiente de desembolso por el cobrador».
 //   · Castigar (marcar perdido) un crédito desembolsado no existe todavía en el servidor.
+//   · Alta de cliente + venta/solicitud en el mismo formulario: el servidor da de alta el
+//     cliente (comando idempotente) y DESPUÉS registra la venta o la solicitud. Son dos
+//     transacciones: si la segunda falla, el cliente queda registrado y se dice así.
 // Los errores se lanzan como `SaleRuleError` para que las pantallas originales muestren
 // el motivo exacto (solo muestran el texto de ese tipo de error).
 
-import type { Sale, SaleRequest, User } from '@clean/models/types';
-import { SaleRuleError } from '@clean/services/saleRequestService';
+import type { Client, Sale, SaleRequest, User } from '@clean/models/types';
+import { SaleRuleError, type SaleInputs } from '@clean/services/saleRequestService';
 import { money, plain } from '../../runtime/commands.ts';
-import { saleFrom, toMinor } from '../../runtime/mappers.ts';
+import { saleFrom, saleRequestFrom, toMinor } from '../../runtime/mappers.ts';
+import { clientId, createClientOnline } from '../../runtime/writeAdapters.ts';
 import { generateId } from '@/lib/utils';
 
 export * from '@clean/services/saleRequestService';
@@ -41,19 +45,57 @@ async function rejectSaleRequestOnline(requestOrId: SaleRequest | string, _actor
   await asSaleError(() => plain('POST', `/v1/credit-requests/${idOf(requestOrId)}/reject`, { reason }));
 }
 
-async function createDirectSaleOnline(
-  input: { routeId: string; clientId: string; valorVenta: number; tasaInteres: number; numeroCuotas: number; frecuenciaPago: string; fechaInicio: string; paymentDays?: number[] },
-  _actor: User,
-  opts: { newClient?: unknown } = {},
-): Promise<Sale> {
+type Conditions = Pick<SaleInputs, 'routeId' | 'clientId' | 'valorVenta' | 'tasaInteres' | 'numeroCuotas' | 'frecuenciaPago' | 'fechaInicio'> & { paymentDays?: number[] };
+
+const conditions = (input: Conditions, client: string) => ({
+  routeId: input.routeId, clientId: client, amountMinor: toMinor(input.valorVenta), interestRate: input.tasaInteres,
+  installmentsCount: input.numeroCuotas, frequency: input.frecuenciaPago, startDate: input.fechaInicio, paymentDays: input.paymentDays ?? [],
+});
+
+/** Cliente nuevo del mismo formulario: se da de alta primero y se devuelve su id del servidor. */
+async function clientFor(input: Conditions, newClient?: Client): Promise<string> {
+  if (!newClient) return clientId(input.clientId);
+  return createClientOnline(newClient as unknown as Record<string, unknown>);
+}
+
+/** El segundo paso falló con el cliente ya creado: se dice exactamente qué quedó guardado. */
+function afterClient(e: unknown, created: boolean, what: string): never {
+  const msg = e instanceof Error ? e.message : String(e);
+  throw new Error(created ? `El cliente quedó registrado, pero ${what} no: ${msg} Puede intentarlo de nuevo desde Nueva venta.` : msg);
+}
+
+async function createDirectSaleOnline(input: Conditions, _actor: User, opts: { newClient?: Client } = {}): Promise<Sale> {
   return asSaleError(async () => {
-    if (opts.newClient) throw new Error('En ADEX Online el cliente se da de alta antes de la venta.');
-    const r = await money<Record<string, unknown>>('POST', '/v1/credits/direct', {
-      routeId: input.routeId, clientId: input.clientId, amountMinor: toMinor(input.valorVenta), interestRate: input.tasaInteres,
-      installmentsCount: input.numeroCuotas, frequency: input.frecuenciaPago, startDate: input.fechaInicio, paymentDays: input.paymentDays ?? [],
-    }, generateId());
-    return saleFrom((r['credit'] as Record<string, unknown>) ?? r);
+    const client = await clientFor(input, opts.newClient);
+    try {
+      const r = await money<Record<string, unknown>>('POST', '/v1/credits/direct', conditions(input, client), generateId());
+      return saleFrom((r['credit'] as Record<string, unknown>) ?? r);
+    } catch (e) {
+      return afterClient(e, Boolean(opts.newClient), 'la venta');
+    }
   });
+}
+
+async function createSaleRequestOnline(input: Conditions, _actor: User, opts: { newClient?: Client } = {}): Promise<SaleRequest> {
+  return asSaleError(async () => {
+    const client = await clientFor(input, opts.newClient);
+    try {
+      const r = await money<Record<string, unknown>>('POST', '/v1/credit-requests', conditions(input, client), generateId());
+      return saleRequestFrom((r['request'] as Record<string, unknown>) ?? r);
+    } catch (e) {
+      return afterClient(e, Boolean(opts.newClient), 'la solicitud');
+    }
+  });
+}
+
+/**
+ * Confirmar el desembolso de una venta «pendiente de desembolso». En el servidor es la
+ * solicitud aprobada (`pendingSaleFrom`: el id de la venta pendiente ES el de la
+ * solicitud): el crédito nace aquí, sale de la custodia de quien entrega o de la bolsa
+ * del responsable, con id de operación (un doble toque no desembolsa dos veces).
+ */
+async function confirmDisbursementOnline(saleId: string, _actor: User): Promise<void> {
+  await asSaleError(() => money('POST', `/v1/credit-requests/${saleId}/disburse`, {}, generateId()));
 }
 
 async function markSaleLostOnline(): Promise<void> {
@@ -65,3 +107,5 @@ export const approveSaleRequest = approveSaleRequestOnline as unknown as typeof 
 export const rejectSaleRequest = rejectSaleRequestOnline as unknown as typeof Clean.rejectSaleRequest;
 export const createDirectSale = createDirectSaleOnline as unknown as typeof Clean.createDirectSale;
 export const markSaleLost = markSaleLostOnline as unknown as typeof Clean.markSaleLost;
+export const createSaleRequest = createSaleRequestOnline as unknown as typeof Clean.createSaleRequest;
+export const confirmDisbursement = confirmDisbursementOnline as unknown as typeof Clean.confirmDisbursement;

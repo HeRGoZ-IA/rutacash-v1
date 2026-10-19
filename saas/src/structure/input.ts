@@ -80,3 +80,27 @@ export function pathId(id: string): string {
   if (!ID_RE.test(id)) throw new ApiError(404, 'NOT_FOUND');
   return id;
 }
+
+/**
+ * Página por fecha contable y cursor (ADEX Online): `from`/`to` (yyyy-MM-dd, inclusive) sobre
+ * `dateCol` y `before` = «createdAt|id» de la última fila recibida. El orden es `PAGE_ORDER`:
+ * milisegundos (la precisión del JSON) y después id, para que el cursor no salte filas.
+ */
+export const PAGE_ORDER = `date_trunc('milliseconds', created_at) desc, id desc`;
+
+export function pageFilters(q: URLSearchParams, dateCol: string, params: unknown[]): string {
+  let where = '';
+  for (const [key, op] of [['from', '>='], ['to', '<=']] as const) {
+    const v = q.get(key);
+    if (v === null) continue;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new ApiError(400, 'INVALID_INPUT', `${key} is invalid`);
+    params.push(v); where += ` and ${dateCol} ${op} $${params.length}`;
+  }
+  const before = q.get('before');
+  if (before !== null) {
+    const m = /^(\d{4}-\d{2}-\d{2}T[0-9:.]+Z)\|([A-Za-z0-9_-]{1,64})$/.exec(before);
+    if (!m || Number.isNaN(Date.parse(m[1]!))) throw new ApiError(400, 'INVALID_INPUT', 'before is invalid');
+    params.push(m[1], m[2]); where += ` and (date_trunc('milliseconds', created_at), id) < ($${params.length - 1}::timestamptz, $${params.length})`;
+  }
+  return where;
+}

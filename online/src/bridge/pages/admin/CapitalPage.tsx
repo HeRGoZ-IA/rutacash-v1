@@ -5,8 +5,6 @@
 //   1. Sin el acceso «Capital centralizado» (transición de CLEAN): en el SaaS el capital
 //      centralizado rige desde la creación de la empresa; no hay nada que activar.
 //   2. Aviso de las cifras que el servidor aún no ofrece con el significado de CLEAN (se ven «—»).
-//   3. Historial de responsables: el servidor lo audita pero aún no lo expone; se dice así
-//      en vez de «Sin cambios registrados».
 import { useState, useEffect } from 'react'
 import {
   Plus, DollarSign, ChevronRight, MapPin, UserCog, History, ArrowDownLeft, ArrowUpRight, ShieldAlert, Repeat, Wallet,
@@ -47,9 +45,8 @@ import type { TransferMode, TransferOperationKind } from '@/lib/transferOperatio
 import { reverseCapitalDelivery } from '@/services/centralCapitalService'
 import { getRouteCashReconciliation } from '@/services/routeCashReconciliation'
 import { Link } from 'react-router-dom'
-// ADEX Online: aviso del historial de responsables sin consulta en el servidor.
+// ADEX Online: aviso de cifras sin equivalente en el servidor.
 import { Info } from 'lucide-react'
-import { CONTROLLER_HISTORY_UNAVAILABLE } from '../../services/capitalControlService.ts'
 
 // ============================================================
 // CAPITAL (v16) — SuperAdmin → Administrador → Ruta
@@ -717,7 +714,7 @@ export default function CapitalPage() {
             </div>
           ))}
           {/* ADEX Online: el servidor aún no expone este historial (sí lo audita). */}
-          {events.filter(e => e.routeId === historyRouteId).length === 0 && <p className="py-4 text-sm text-gray-400">{CONTROLLER_HISTORY_UNAVAILABLE}</p>}
+          {events.filter(e => e.routeId === historyRouteId).length === 0 && <p className="py-4 text-sm text-gray-400">Sin cambios registrados.</p>}
         </div>
       </Modal>
 

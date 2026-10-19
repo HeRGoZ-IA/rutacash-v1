@@ -28,7 +28,7 @@ export interface Online {
 
 export async function startOnline(db: TestDb, extra: {
   company?: Partial<Pick<CompanyApiOptions, 'afterContext' | 'beforeCommit' | 'lockTimeoutMs'>>;
-  demo?: Partial<Pick<DemoServiceOptions, 'onScenarioStep'>>;
+  demo?: Partial<Pick<DemoServiceOptions, 'onScenarioStep' | 'scenario' | 'historyDays' | 'historyScale'>>;
   rateLimit?: { perIpPerMinute?: number; perTokenPerMinute?: number };
 } = {}): Promise<Online> {
   const issuer = await createLocalIssuer();

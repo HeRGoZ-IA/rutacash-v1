@@ -17,7 +17,8 @@ import { ApiError } from '../errors.ts';
 import { setDbContext, withTransaction, type SessionClaims } from '../db/tx.ts';
 import type { IdentityProvider } from '../auth/provider.ts';
 import type { CompanyExecutor } from '../http/companyApi.ts';
-import { ASSIGNABLE_SEATS, DEFAULT_COMPANY, SCENARIO_VERSION, SEATS, runScenario, type DemoCompanySpec, type ScenarioCall } from './scenario.ts';
+import { DEFAULT_COMPANY, SCENARIO_VERSION, SEATS, runScenario, type DemoCompanySpec, type ScenarioCall, type SeatSpec } from './scenario.ts';
+import { HISTORY_COMPANY, HISTORY_SEATS, HISTORY_VERSION, runHistoryScenario } from './history.ts';
 
 export const SLOT_RE = /^[a-z][a-z0-9-]{1,30}$/;
 
@@ -30,6 +31,15 @@ export interface DemoServiceOptions {
   onError?: (err: unknown) => void;
   /** Solo pruebas: se llama entre pasos del escenario. */
   onScenarioStep?: (call: ScenarioCall) => Promise<void>;
+  /**
+   * Escenario de las Demos que se creen o reinicien. `demo-v1` (por defecto): estructura
+   * mínima del día. `demo-v2-6m`: seis meses de operación registrada día a día (history.ts).
+   */
+  scenario?: 'demo-v1' | 'demo-v2-6m';
+  /** demo-v2-6m: días de historia y escala de clientes (las pruebas usan valores pequeños). */
+  historyDays?: number;
+  historyScale?: number;
+  onHistoryProgress?: (info: { day: string; index: number; total: number; calls: number }) => void;
 }
 
 type Seats = { seat: string; role: string; membershipId: string }[];
@@ -58,20 +68,25 @@ function targetOf(body: Record<string, unknown>): string {
   return id;
 }
 
-function specOf(body: Record<string, unknown>): DemoCompanySpec {
-  const name = body['name'];
-  if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.length > 80)) throw new ApiError(400, 'INVALID_NAME');
-  return { ...DEFAULT_COMPANY, name: typeof name === 'string' ? name.trim() : DEFAULT_COMPANY.name };
-}
-
 export function createDemoService(opts: DemoServiceOptions) {
+  const history = opts.scenario === 'demo-v2-6m';
+  const SEATS_IN_USE: readonly SeatSpec[] = history ? HISTORY_SEATS : SEATS;
+  const ASSIGNABLE_SEATS = SEATS_IN_USE.filter((s) => s.assignable).map((s) => s.seat);
+  const VERSION = history ? HISTORY_VERSION : SCENARIO_VERSION;
+  const COMPANY = history ? HISTORY_COMPANY : DEFAULT_COMPANY;
+  function specOf(body: Record<string, unknown>): DemoCompanySpec {
+    const name = body['name'];
+    if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.length > 80)) throw new ApiError(400, 'INVALID_NAME');
+    return { ...COMPANY, name: typeof name === 'string' ? name.trim() : COMPANY.name };
+  }
   const running = new Set<string>();
 
   async function status(claims: SessionClaims, slot: string) {
     return inDemo(opts.pool, claims, async (c) => ({
       ...(await c.query<{ s: Record<string, unknown> }>('select adex_demo.status($1) s', [slotOf(slot)])).rows[0]!.s,
       jobRunning: running.has(slot),
-      assignableSeats: SEATS.filter((s) => s.assignable).map((s) => ({ seat: s.seat, role: s.role })),
+      assignableSeats: SEATS_IN_USE.filter((s) => s.assignable).map((s) => ({ seat: s.seat, role: s.role })),
+      scenario: VERSION,
     }));
   }
 
@@ -104,8 +119,15 @@ export function createDemoService(opts: DemoServiceOptions) {
       const a = await actor(call.seat);
       // Sesión propia del actor sintético (no tiene cuenta de acceso; nadie más la usa).
       const actorClaims: SessionClaims = { identityId: a.identityId, sessionId: randomUUID(), iat: Math.floor(Date.now() / 1000) };
-      const res = await opts.execute(actorClaims, { method: call.method, path: call.path, membershipId: a.membershipId,
-        operationId: call.operation ? randomUUID() : null, body: call.body });
+      // Igual que el servidor HTTP: la ruta sin la consulta, y la consulta aparte.
+      const url = new URL(call.path, 'http://demo.local');
+      const res = await opts.execute(actorClaims, { method: call.method, path: url.pathname, query: url.searchParams, membershipId: a.membershipId,
+        operationId: call.operation ? randomUUID() : null, body: call.body, ...(call.day ? { seedDay: call.day } : {}) });
+      // Escenario histórico: cualquier rechazo detiene la inicialización (la Demo nueva se
+      // retira y la anterior sigue intacta). Nunca se sigue con una historia a medias.
+      if (history && res.status >= 400) {
+        throw new ApiError(500, 'DEMO_SCENARIO_STEP_FAILED', `${call.method} ${call.path.split('?')[0]} (${call.day ?? ''}) → ${res.status} ${JSON.stringify(res.body)}`);
+      }
       return res.body as Record<string, unknown>;
     };
     const membership = (seat: string) => {
@@ -114,7 +136,9 @@ export function createDemoService(opts: DemoServiceOptions) {
       return s.membershipId;
     };
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-    const summary = await runScenario(run, membership, today);
+    const summary = history
+      ? await runHistoryScenario(run, membership, { today, days: opts.historyDays ?? 182, scale: opts.historyScale, onProgress: opts.onHistoryProgress })
+      : await runScenario(run, membership, today);
     const rec = await run({ seat: 'direccion', method: 'GET', path: '/v1/capital/reconciliation' }) as { ok?: boolean; checks?: { name: string; ok: boolean }[] };
     if (rec.ok !== true) throw new ApiError(500, 'DEMO_RECONCILIATION_FAILED');
     return { summary, reconciliation: { ok: true, checks: (rec.checks ?? []).map((c) => ({ name: c.name, ok: c.ok })) } };
@@ -134,7 +158,7 @@ export function createDemoService(opts: DemoServiceOptions) {
   }
 
   function seatsJson() {
-    return JSON.stringify(SEATS.map((s) => ({ seat: s.seat, role: s.role, displayName: s.displayName, assignable: s.assignable })));
+    return JSON.stringify(SEATS_IN_USE.map((s) => ({ seat: s.seat, role: s.role, displayName: s.displayName, assignable: s.assignable })));
   }
 
   /**
@@ -147,7 +171,7 @@ export function createDemoService(opts: DemoServiceOptions) {
     let seats: Seats;
     try {
       seats = await inDemo(opts.pool, claims, async (c) => {
-        const args = [companyId, spec.name, spec.countryCode, spec.countryLabel, spec.currencyCode, spec.timezone, SCENARIO_VERSION, seatsJson()];
+        const args = [companyId, spec.name, spec.countryCode, spec.countryLabel, spec.currencyCode, spec.timezone, VERSION, seatsJson()];
         const r = action === 'CREATE'
           ? await c.query<{ s: Seats }>('select adex_demo.begin_create($1, $2, $3, $4, $5, $6, $7, $8, $9) s', [slot, ...args])
           : await c.query<{ s: Seats }>('select adex_demo.begin_reset($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) s', [slot, target, ...args]);
@@ -195,13 +219,13 @@ export function createDemoService(opts: DemoServiceOptions) {
       if (!displayName || displayName.length > 80) throw new ApiError(400, 'INVALID_NAME');
       // Antes de invitar: solo un operador válido puede provocar una alta en el proveedor.
       await inDemo(opts.pool, claims, async () => undefined);
-      const role = SEATS.find((s) => s.seat === seat)!.role;
+      const role = SEATS_IN_USE.find((s) => s.seat === seat)!.role;
       const { identityId } = await opts.provider.ensureIdentity(email);
       await inDemo(opts.pool, claims, async (c) => {
         // Una persona no ocupa dos puestos del mismo rol (una membresía por empresa y rol, DS-05).
         const clash = await c.query<{ s: Record<string, unknown> }>('select adex_demo.status($1) s', [slot]);
         const participants = (clash.rows[0]!.s['participants'] as { seat: string; email: string }[]) ?? [];
-        const sameRole = participants.find((p) => p.email === email && p.seat !== seat && SEATS.find((s) => s.seat === p.seat)?.role === role);
+        const sameRole = participants.find((p) => p.email === email && p.seat !== seat && SEATS_IN_USE.find((s) => s.seat === p.seat)?.role === role);
         if (sameRole) throw new ApiError(409, 'PARTICIPANT_ROLE_DUPLICATE');
         await c.query('select adex_demo.set_participant($1, $2, $3, $4, $5)', [slot, seat, identityId, email, displayName]);
       });

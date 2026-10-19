@@ -79,6 +79,8 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX804': return new ApiError(409, 'PERIOD_NOT_ENDED');            // D29
     case 'AX805': return new ApiError(409, 'PERIOD_OVERLAP');
     case 'AX806': return new ApiError(409, 'SETTLEMENT_NOT_REOPENABLE');
+    // ADEX Online · corrección de pagos (0017).
+    case 'AX807': return new ApiError(409, 'ADJUSTMENT_REQUIRED');         // periodo cerrado: solicitud de ajuste
     // ADEX Online v1 · ciclo de vida de la Empresa Demo (0011).
     case 'AX601': return new ApiError(409, 'DEMO_BUSY');
     case 'AX603': return new ApiError(409, 'DEMO_TARGET_MISMATCH');

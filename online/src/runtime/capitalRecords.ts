@@ -25,7 +25,7 @@
 // servidor (así una anulación desde la pantalla anula esa operación exacta).
 
 import type {
-  CapitalLedgerEntry, CapitalMovement, CashCustodyMovement, CentralCapitalKind, Transfer, Withdrawal,
+  CapitalLedgerEntry, CapitalMovement, CashCustodyMovement, CentralCapitalKind, PartnerCashMovement, Transfer, Withdrawal,
 } from '@clean/models/types';
 import { ApiFailure } from '../lib/client.ts';
 import { toMajor } from './mappers.ts';
@@ -47,6 +47,12 @@ export interface CapitalRecords {
   withdrawals: Withdrawal[];
   transfers: Transfer[];
   cashCustodyMovements: CashCustodyMovement[];
+  /**
+   * Pata de Caja socios de cada APORTE de socio (CLEAN C1: `registerPartnerContribution`
+   * crea una «salida» del socio, categoría transferencia; su anulación, el espejo negativo).
+   * Los ingresos y salidas MANUALES de Caja socios no existen en el servidor (decisión D1).
+   */
+  partnerCashMovements: PartnerCashMovement[];
 }
 
 const LIMIT = 500;
@@ -71,7 +77,7 @@ const LEDGER_KINDS = ['COMPANY_DEPOSIT', 'COMPANY_WITHDRAWAL', 'ADMIN_ALLOCATION
 
 export function buildCapitalRecords(operations: ServerOperation[], truncated: boolean): CapitalRecords {
   const tenantId = useRuntime.getState().ctx?.company.id ?? '';
-  const out: CapitalRecords = { operations, truncated, capitalLedger: [], capitalMovements: [], withdrawals: [], transfers: [], cashCustodyMovements: [] };
+  const out: CapitalRecords = { operations, truncated, capitalLedger: [], capitalMovements: [], withdrawals: [], transfers: [], cashCustodyMovements: [], partnerCashMovements: [] };
   const sorted = [...operations].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   for (const o of sorted) {
     const rev = o.kind === 'REVERSAL';
@@ -91,6 +97,13 @@ export function buildCapitalRecords(operations: ServerOperation[], truncated: bo
         descripcion: o.reason, ...common, actorUserId: o.actorId, actorRole: o.actorRole as CapitalLedgerEntry['actorRole'],
         status: 'aplicado', syncStatus: 'synced', ...reversal,
       });
+      if (k === 'PARTNER_CONTRIBUTION' && o.counterpartId) {
+        out.partnerCashMovements.push({
+          id: `pc:${o.id}`, tenantId, partnerId: o.counterpartId, type: 'salida', category: 'transferencia', amount: rev ? -a : a,
+          description: rev ? `Anulación de aporte: ${o.reason}` : o.reason, relatedLedgerEntryId: o.id, ...common, createdBy: o.actorId,
+          ...(rev ? { reversesId: `pc:${orig}`, reversalReason: o.reason } : {}),
+        });
+      }
     } else if (k === 'WORKER_DELIVERY' && o.routeId) {
       const l = link(rev ? 'ANULACION_ENTREGA' : 'ENTREGA_TRABAJADOR');
       out.capitalMovements.push({
@@ -160,5 +173,6 @@ export function buildCapitalRecords(operations: ServerOperation[], truncated: bo
   mark(out.withdrawals, (r) => r.userId);
   mark(out.transfers, (r) => r.userId);
   mark(out.cashCustodyMovements, (r) => r.createdByUserId);
+  mark(out.partnerCashMovements, (r) => r.createdBy ?? '');
   return out;
 }

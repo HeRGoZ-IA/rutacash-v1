@@ -17,7 +17,7 @@ import { ApiError } from '../errors.ts';
 import type { ActiveContext } from '../authz/context.ts';
 import { audit } from '../db/audit.ts';
 import { loadMembers, need } from '../structure/common.ts';
-import { oneOf, optId, optText, pathId, reqId, reqText } from '../structure/input.ts';
+import { oneOf, optId, optText, PAGE_ORDER, pageFilters, pathId, reqId, reqText } from '../structure/input.ts';
 import { requireAuthority, requireCustodian, requireOperationId, routeOf } from '../capital/service.ts';
 
 interface ExpenseRow {
@@ -214,9 +214,10 @@ export async function listExpenses(client: pg.PoolClient, ctx: ActiveContext, q:
     if (!['empresa', 'ruta', 'trabajador'].includes(scope)) throw new ApiError(400, 'INVALID_INPUT');
     params.push(scope); where += ` and scope = $${params.length}`;
   }
-  const limit = Math.min(Math.max(Number(q.get('limit') ?? 200) || 200, 1), 500);
+  where += pageFilters(q, 'expense_date', params);
+  const limit = Math.min(Math.max(Number(q.get('limit') ?? 200) || 200, 1), 1000);
   params.push(limit);
-  const r = await client.query<ExpenseRow>(`select * from adex.expenses where ${where} order by created_at desc, id limit $${params.length}`, params);
+  const r = await client.query<ExpenseRow>(`select * from adex.expenses where ${where} order by ${PAGE_ORDER} limit $${params.length}`, params);
   return r.rows.map(expenseView);
 }
 

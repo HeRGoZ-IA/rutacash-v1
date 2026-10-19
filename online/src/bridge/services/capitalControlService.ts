@@ -16,7 +16,7 @@
 // (POST /v1/capital/...) con id de operación; cambio de responsable de capital de una ruta
 // (PUT /v1/routes/:id/capital-controller). El servidor valida autoridad, fondos y concurrencia.
 
-import type { CapitalLedgerEntry, Expense, RouteCapitalControllerEvent, User } from '@clean/models/types';
+import type { CapitalLedgerEntry, Expense, User } from '@clean/models/types';
 import type { PoolMovement, PoolMovementKind, PoolStatement } from '@clean/lib/adminPoolStatement';
 import { centralPoolKind } from '@clean/lib/adminPoolStatement';
 import { expenseFundingOf, poolExpenseStateOf } from '@clean/lib/expenseFunding';
@@ -54,7 +54,7 @@ async function poolExpenses(adminId: string): Promise<{ total: number; list: Exp
     const f = expenseFundingOf(x);
     return f.kind === 'admin' && f.adminId === adminId;
   });
-  const complete = !truncated.has('/v1/expenses?limit=500');
+  const complete = !truncated.has('/v1/expenses');
   return { total: complete ? list.reduce((s, x) => s + x.valor, 0) : SIN_DATO, list };
 }
 
@@ -168,11 +168,6 @@ async function getAdminPoolStatementOnline(params: { actor: User | null | undefi
   };
 }
 
-/** Historial de responsables: el servidor lo audita pero aún no lo expone (no hay consulta). */
-export const CONTROLLER_HISTORY_UNAVAILABLE = 'El servidor registra cada cambio de responsable en su auditoría, pero aún no ofrece una consulta para mostrarlos aquí.';
-async function listRouteControllerHistoryOnline(): Promise<RouteCapitalControllerEvent[]> {
-  return [];
-}
 
 // ---------- Comandos ----------
 type LedgerOp = { actor: User | null | undefined; tenantId: string; amount: number; descripcion?: string; fecha?: string; operationId?: string };
@@ -230,7 +225,6 @@ async function withCapitalControllerGuardOnline<T>(_params: unknown, cambio: () 
 // Firmas ORIGINALES de CLEAN (las pantallas y servicios originales las llaman así).
 export const getCapitalOverview = getCapitalOverviewOnline as unknown as typeof Clean.getCapitalOverview;
 export const getAdminPoolStatement = getAdminPoolStatementOnline as unknown as typeof Clean.getAdminPoolStatement;
-export const listRouteControllerHistory = listRouteControllerHistoryOnline as unknown as typeof Clean.listRouteControllerHistory;
 export const registerCompanyCapital = registerCompanyCapitalOnline as unknown as typeof Clean.registerCompanyCapital;
 export const withdrawCompanyCapital = withdrawCompanyCapitalOnline as unknown as typeof Clean.withdrawCompanyCapital;
 export const allocateCapitalToAdmin = allocateCapitalToAdminOnline as unknown as typeof Clean.allocateCapitalToAdmin;

@@ -37,7 +37,17 @@ export async function createTestDb(label: string, opts: { seed?: boolean } = {})
   const url = (role: keyof typeof pass, db = name) => `postgres://${role}:${encodeURIComponent(pass[role])}@127.0.0.1:${port}/${db}`;
   const boot = new pg.Client({ connectionString: url('postgres', 'postgres') });
   await boot.connect();
-  await boot.query(`create database ${name} template adex_template`);
+  // PostgreSQL no copia la plantilla mientras otra copia simultánea la usa («being accessed
+  // by other users»): con muchos archivos en paralelo se reintenta un momento después.
+  for (let i = 0; ; i++) {
+    try {
+      await boot.query(`create database ${name} template adex_template`);
+      break;
+    } catch (e) {
+      if (i >= 20 || !/being accessed by other users/.test(String((e as Error).message))) throw e;
+      await new Promise((r) => setTimeout(r, 250 + i * 100));
+    }
+  }
   await boot.end();
   const admin = new pg.Pool({ connectionString: url('postgres'), max: 5, allowExitOnIdle: true });
   const api = new pg.Pool({ connectionString: url('adex_api'), max: 25, allowExitOnIdle: true });

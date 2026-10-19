@@ -12,13 +12,18 @@
 //     MISMA fórmula de CLEAN (`carteraEnCalleOf`, original) sobre los saldos de cada
 //     crédito que devuelve el servidor. No es `portfolioMinor` del resumen de capital, que
 //     solo cuenta capital pendiente.
-//   · Los resúmenes de caja por rango (`getCashboxSummary`, caja del cobrador) dependen del
-//     libro local y quedan sin conectar: lanzan `ServerGap`.
+//   · «Mi recaudo hoy» del Cobrador (`getCollectorDailyCashSummary`) es el ORIGINAL: suma
+//     sus abonos, desembolsos y gastos del día, que la proyección trae del servidor.
+//   · El ciclo personal por rango (`getCollectorCashSummary`) es el del servidor (vista
+//     previa del cuadre, `cashSettlementService`).
+//   · CAJA de la ruta por rango (`getCashboxSummary`) y su desglose de capital: cifras de
+//     la liquidación del servidor, línea a línea (`runtime/cashboxFigures.ts`).
 
 import type { RouteFinancialSummary } from '@clean/models/types';
 import { carteraEnCalleOf } from '@clean/services/cashboxEngine';
 import { db } from '@/lib/db';
-import { custodyPositions, ServerGap } from '../../runtime/projection.ts';
+import { calendar, custodyPositions, serverView, ServerGap } from '../../runtime/projection.ts';
+import { cashboxFromFigures, flowFromFigures } from '../../runtime/cashboxFigures.ts';
 import { toMajor } from '../../runtime/mappers.ts';
 
 export * from '@clean/services/cashboxEngine';
@@ -66,11 +71,62 @@ async function getRoutesFinancialSummaryOnline(routeIds: string[]): Promise<Reco
   return result;
 }
 
-// Resúmenes del libro local por rango: sin conectar (ver cabecera).
-async function getCashboxSummaryOnline(): Promise<never> { throw new ServerGap('cashboxSummary'); }
-function getRouteLedgerOnline(): Promise<never> { return Promise.reject(new ServerGap('cashboxSummary')); }
-async function getCapitalFlowBreakdownOnline(): Promise<never> { throw new ServerGap('capitalFlowBreakdown'); }
-async function getCollectorDailyCashSummaryOnline(): Promise<never> { throw new ServerGap('collectorCash'); }
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type Figures = Record<string, any>;
+const FLOW_KEYS = ['deliveriesMinor', 'transfersInMinor', 'transfersOutMinor', 'partialReturnsMinor', 'settlementReturnsMinor', 'collectionsMinor',
+  'disbursementsMinor', 'workerExpensesMinor', 'otherMinor'];
+const POOL_KEYS = ['collectionsReceivedMinor', 'deliveredToWorkersMinor', 'returnsReceivedMinor', 'routeExpensesMinor', 'disbursedFromPoolMinor',
+  'partnerContributionsMinor', 'surplusHeldMinor'];
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
+const addDays = (s: string, n: number) => { const d = new Date(`${s}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return ymd(d); };
+
+function liquidationOf(routeId: string, from: string, to: string): Promise<Figures> {
+  return serverView<Figures>(`/v1/periods/liquidation?routeId=${encodeURIComponent(routeId)}&from=${from}&to=${to}`);
+}
+
+/**
+ * Liquidación del servidor de una ruta y un rango (`GET /v1/periods/liquidation`,
+ * `cashbox.viewRoute`). Como en CLEAN, un rango vacío (fin antes del inicio) no tiene
+ * movimientos: apertura = cierre = saldo al inicio. El servidor admite hasta 366 días por
+ * consulta: un rango mayor se pide por tramos y se suman sus flujos (apertura del primero,
+ * cierre del último).
+ */
+async function figures(routeId: string, desde: string, hasta: string): Promise<Figures> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(desde) || !/^\d{4}-\d{2}-\d{2}$/.test(hasta) || hasta < desde) {
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(desde) ? desde : ymd(new Date());
+    const f = await liquidationOf(routeId, d, d);
+    const c = f['custody'] ?? {};
+    return { custody: { openingMinor: c.openingMinor ?? 0, closingMinor: c.openingMinor ?? 0 }, pool: {} };
+  }
+  const parts: Figures[] = [];
+  for (let from = desde; from <= hasta; from = addDays(from, 366)) {
+    const to = addDays(from, 365) < hasta ? addDays(from, 365) : hasta;
+    parts.push(await liquidationOf(routeId, from, to));
+  }
+  if (parts.length === 1) return parts[0]!;
+  const custody: Record<string, number> = { openingMinor: parts[0]!['custody']?.openingMinor ?? 0, closingMinor: parts[parts.length - 1]!['custody']?.closingMinor ?? 0 };
+  const pool: Record<string, number> = {};
+  for (const p of parts) {
+    for (const k of FLOW_KEYS) custody[k] = (custody[k] ?? 0) + Number(p['custody']?.[k] ?? 0);
+    for (const k of POOL_KEYS) pool[k] = (pool[k] ?? 0) + Number(p['pool']?.[k] ?? 0);
+  }
+  return { custody, pool };
+}
+
+/** Caja de la ruta en el rango: cifras del libro del servidor (`runtime/cashboxFigures.ts`). */
+async function getCashboxSummaryOnline(routeId: string, desde: string, hasta: string) {
+  return cashboxFromFigures(routeId, await figures(routeId, desde, hasta));
+}
+async function getCapitalFlowBreakdownOnline(routeId: string, desde: string, hasta: string) {
+  return flowFromFigures(await figures(routeId, desde, hasta));
+}
+/** Caja ACUMULADA de la ruta (CLEAN `getRouteLedger`: desde su alta hasta hoy). */
+async function getRouteLedgerOnline(routeId: string) {
+  const route = await db.routes.get(routeId);
+  const hoy = (await calendar()).businessDate;
+  const desde = route?.createdAt ? route.createdAt.slice(0, 10) : hoy;
+  return cashboxFromFigures(routeId, await figures(routeId, desde < hoy ? desde : hoy, hoy));
+}
 async function getCollectorCashSummaryOnline(): Promise<never> { throw new ServerGap('collectorCash'); }
 /** La API valida los fondos al desembolsar (INSUFFICIENT_FUNDS): aquí no se decide. */
 async function hasCapitalForSaleOnline(): Promise<boolean> { return true; }
@@ -84,6 +140,5 @@ export const getRoutesFinancialSummary = getRoutesFinancialSummaryOnline as unkn
 export const getCashboxSummary = getCashboxSummaryOnline as unknown as typeof Clean.getCashboxSummary;
 export const getRouteLedger = getRouteLedgerOnline as unknown as typeof Clean.getRouteLedger;
 export const getCapitalFlowBreakdown = getCapitalFlowBreakdownOnline as unknown as typeof Clean.getCapitalFlowBreakdown;
-export const getCollectorDailyCashSummary = getCollectorDailyCashSummaryOnline as unknown as typeof Clean.getCollectorDailyCashSummary;
 export const getCollectorCashSummary = getCollectorCashSummaryOnline as unknown as typeof Clean.getCollectorCashSummary;
 export const hasCapitalForSale = hasCapitalForSaleOnline as unknown as typeof Clean.hasCapitalForSale;
