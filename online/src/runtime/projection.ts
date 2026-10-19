@@ -15,7 +15,8 @@
 //   · ALCANCE DEL SERVIDOR. Cada listado llega ya recortado por empresa y rutas del
 //     contexto activo (RLS + autorización): aquí no se amplía nada.
 //   · Refresco: cada tabla se carga una vez por revisión; la revisión sube tras cada
-//     comando confirmado y cada 20 s con la pestaña visible (sin WebSockets).
+//     comando confirmado y cuando la huella de actividad del servidor cambia (sondeo de
+//     20 s, ver «POLÍTICA DE ACTUALIZACIÓN» al final; sin WebSockets).
 
 import { ApiFailure } from '../lib/client.ts';
 import { buildCapitalRecords, fetchOperations, type CapitalRecords } from './capitalRecords.ts';
@@ -73,7 +74,10 @@ async function list(path: string, key: string): Promise<Row[]> {
 async function paged(path: string, key: string, maxRows: number): Promise<Row[]> {
   const out: Row[] = [];
   let before: string | null = null;
+  const gen = generation;
   for (;;) {
+    // Cambio de contexto a mitad del listado: no se piden más páginas con la sesión nueva.
+    if (gen !== generation) throw new StaleContext();
     const sep = path.includes('?') ? '&' : '?';
     const q = `${path}${sep}limit=1000${before ? `&before=${encodeURIComponent(before)}` : ''}`;
     let page: Row[];
@@ -211,7 +215,6 @@ const LOADERS: Record<string, Loader> = {
 };
 
 /** Registros de capital del libro central, una sola lectura por revisión para las cinco tablas. */
-let capitalCache: { rev: number; promise: Promise<CapitalRecords> } | null = null;
 async function loadCapital(): Promise<CapitalRecords> {
   const routes = (await table('routes')).map((r) => String(r['id']));
   const { operations, truncated: cut } = await fetchOperations(routes);
@@ -219,11 +222,22 @@ async function loadCapital(): Promise<CapitalRecords> {
   return buildCapitalRecords(operations, cut);
 }
 export function capitalRecords(): Promise<CapitalRecords> {
-  if (capitalCache && capitalCache.rev === revision) return capitalCache.promise;
-  const promise = loadCapital();
-  capitalCache = { rev: revision, promise };
-  promise.catch(() => { if (capitalCache?.promise === promise) capitalCache = null; });
-  return promise;
+  return cached('capital', loadCapital);
+}
+
+/**
+ * Cobros o gastos con fecha DESDE `from` (filtro de fecha del servidor, mismo alcance y mismos
+ * registros que la tabla completa). Para las cifras de un periodo reciente (Dashboard: hoy,
+ * semana, 7 días) sin descargar todo el historial.
+ */
+const SINCE = {
+  payments: { path: '/v1/collections', key: 'collections', map: paymentFrom, can: () => can('payment.viewHistory') },
+  expenses: { path: '/v1/expenses', key: 'expenses', map: expenseFrom, can: () => can('expense.register') || can('expense.correct') },
+} as const;
+export function since(kind: keyof typeof SINCE, from: string): Promise<Row[]> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return Promise.reject(new Error(`fecha inválida: ${from}`));
+  const s = SINCE[kind];
+  return cached(`since:${kind}:${from}`, async () => (s.can() ? (await paged(`${s.path}?from=${from}`, s.key, MAX_ROWS)).map((r) => s.map(r) as unknown as Row) : []));
 }
 
 /** Tablas del libro local de CLEAN SIN equivalente directo (ver cabecera). */
@@ -240,15 +254,8 @@ export const ALL_TABLES = [...Object.keys(LOADERS), ...GAP_TABLES];
 // calcula sobre su libro (custodia, liquidación, resumen de capital). Mismo ciclo de
 // caché que las tablas: una lectura por revisión.
 // ---------------------------------------------------------------------------
-const views = new Map<string, { rev: number; promise: Promise<unknown> }>();
-
 export function serverView<T>(path: string): Promise<T> {
-  const hit = views.get(path);
-  if (hit && hit.rev === revision) return hit.promise as Promise<T>;
-  const promise = api().get<T>(path);
-  views.set(path, { rev: revision, promise });
-  promise.catch(() => { if (views.get(path)?.promise === promise) views.delete(path); });
-  return promise;
+  return cached(`view:${path}`, () => api().get<T>(path));
 }
 
 export interface CustodyPosition { routeId: string; workerId: string; workerName: string; role: string; balanceMinor: number; carriedMinor: number; transferableMinor: number }
@@ -290,7 +297,32 @@ export function liquidation(routeId: string, from: string, to: string): Promise<
 export { mapLimit };
 
 let revision = 0;
-const cache = new Map<string, { rev: number; promise: Promise<Row[]> }>();
+/** Sube en cada `reset()` (cambio de contexto o cierre de sesión). */
+let generation = 0;
+
+/** Una lectura empezada con otro contexto (empresa o rol): su resultado se descarta. */
+export class StaleContext extends Error {
+  constructor() { super('Lectura de un contexto anterior: descartada.'); this.name = 'StaleContext'; }
+}
+
+interface Entry { rev: number; promise: Promise<unknown>; load: () => Promise<unknown>; used: number }
+/** Caché de la proyección por revisión: tablas (`table:`), vistas (`view:`), capital y rangos (`since:`). */
+const cache = new Map<string, Entry>();
+/** Momento del último cambio de pantalla (ver `refreshIfChanged`). */
+let navigatedAt = 0;
+
+function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const hit = cache.get(key);
+  if (hit && hit.rev === revision) { hit.used = now; return hit.promise as Promise<T>; }
+  const gen = generation;
+  const promise = load().then((v) => { if (gen !== generation) throw new StaleContext(); return v; });
+  const entry: Entry = { rev: revision, promise, load, used: now };
+  cache.set(key, entry);
+  promise.catch(() => { if (cache.get(key) === entry) cache.delete(key); });
+  return promise;
+}
+
 type Listener = (tables: Set<string>) => void;
 const listeners = new Set<Listener>();
 
@@ -300,12 +332,7 @@ export function currentRevision(): number { return revision; }
 export function table(name: string): Promise<Row[]> {
   const loader = LOADERS[name];
   if (!loader) return Promise.reject(new ServerGap(name));
-  const hit = cache.get(name);
-  if (hit && hit.rev === revision) return hit.promise;
-  const promise = loader();
-  cache.set(name, { rev: revision, promise });
-  promise.catch(() => { if (cache.get(name)?.promise === promise) cache.delete(name); });
-  return promise;
+  return cached(`table:${name}`, loader);
 }
 
 export function subscribe(fn: Listener): () => void {
@@ -317,17 +344,21 @@ export function subscribe(fn: Listener): () => void {
 export function invalidate(tables: readonly string[] = ALL_TABLES): void {
   revision++;
   cache.clear();
-  views.clear();
+  primeMarker();
   const set = new Set(tables);
   for (const l of listeners) l(set);
 }
 
 /** Vacía la proyección (cambio de contexto o cierre de sesión): nada de otra empresa queda en memoria. */
 export function reset(): void {
+  generation++;
   cache.clear();
   truncated.clear();
   invalidate();
 }
+
+/** La pantalla cambió: lo que la pantalla anterior leyó ya no se refresca (se relee al pedirlo). */
+export function markNavigation(): void { navigatedAt = Date.now(); }
 
 /** Precarga en paralelo de las tablas que casi todas las pantallas leen (latencia del servidor). */
 export function prefetch(): void {
@@ -335,46 +366,88 @@ export function prefetch(): void {
 }
 
 /**
- * Refresco periódico SIN parpadeo: vuelve a leer del servidor lo que las pantallas tienen
- * cargado y SOLO si algo cambió publica una revisión nueva (con los datos ya leídos). Si
- * nada cambió no se avisa a nadie: ninguna pantalla vuelve a cargar ni muestra su
- * indicador de carga (en CLEAN las pantallas solo se refrescaban cuando había cambios).
+ * Refresco SIN parpadeo de lo que la PANTALLA ACTUAL usa: vuelve a leer del servidor las
+ * entradas leídas desde el último cambio de pantalla y SOLO si algo cambió publica una
+ * revisión nueva (con los datos ya leídos). Lo que leyeron pantallas anteriores se descarta:
+ * se volverá a leer, ya actualizado, cuando una pantalla lo pida. Con `somethingChanged`
+ * (la huella del servidor cambió) se publica la revisión aunque lo releído sea igual, para que
+ * los componentes que usan datos descartados los relean.
  */
+export async function refreshIfChanged(somethingChanged = false): Promise<void> {
+  const rev0 = revision;
+  const gen0 = generation;
+  const current = [...cache.entries()].filter(([, e]) => e.rev === rev0);
+  const live = current.filter(([, e]) => e.used >= navigatedAt);
+  const dropped = current.length - live.length;
+  const before = await Promise.all(live.map(([, e]) => e.promise.catch(() => null)));
+  const after = await mapLimit(live, 4, ([, e]) => e.load().catch(() => null));
+  if (revision !== rev0 || generation !== gen0) return; // un comando o un cambio de contexto ya publicó otra revisión
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const changed = live.filter(([, e], i) => after[i] !== null && !same(before[i], after[i])).map(([k]) => k);
+  if (changed.length === 0 && !(somethingChanged && dropped > 0)) return;
+  revision++;
+  cache.clear();
+  live.forEach(([k, e], i) => { if (after[i] !== null) cache.set(k, { rev: revision, promise: Promise.resolve(after[i]), load: e.load, used: e.used }); });
+  // Vistas agregadas, capital y rangos alimentan cifras de cualquier pantalla.
+  const onlyTables = changed.length > 0 && dropped === 0 && changed.every((k) => k.startsWith('table:'));
+  const touched = onlyTables ? new Set(changed.map((k) => k.slice('table:'.length))) : new Set<string>(ALL_TABLES);
+  for (const l of listeners) l(touched);
+}
+
+/**
+ * POLÍTICA DE ACTUALIZACIÓN (Ronda 33):
+ *   · Cada 20 s con la pestaña visible, y al volver a ella: se pide la huella de actividad de
+ *     la empresa (`GET /v1/changes`, unos bytes). Si no cambió, no se descarga nada más.
+ *   · Si cambió (o han pasado 5 min, red de seguridad), se relee lo de la pantalla actual.
+ *   · Nunca dos refrescos a la vez; un refresco empezado con otro contexto no se aplica.
+ *   · Tras cada comando propio se invalida todo (`invalidate`), como antes.
+ * Una API sin `/v1/changes` (anterior a la Ronda 33) se trata como «cambió»: el refresco
+ * se comporta como antes, limitado a la pantalla actual.
+ */
+const FULL_EVERY_MS = 5 * 60_000;
+let lastMarker: string | null | undefined;
+let lastFullAt = 0;
+let markerSupported = true;
 let refreshing = false;
-export async function refreshIfChanged(): Promise<void> {
+
+async function changeMarker(): Promise<string | null | undefined> {
+  if (!markerSupported) return undefined;
+  try {
+    return (await api().get<{ marker: string | null }>('/v1/changes')).marker;
+  } catch (e) {
+    if (e instanceof ApiFailure && e.status === 404) markerSupported = false;
+    return undefined;
+  }
+}
+
+/**
+ * Huella de referencia al empezar a leer (contexto nuevo o tras un comando): lo que cambie
+ * después se detecta en el siguiente sondeo. Si no llega, el siguiente sondeo relee.
+ */
+function primeMarker(): void {
+  lastMarker = undefined;
+  lastFullAt = Date.now();
+  if (!useRuntime.getState().ctx) return;
+  const gen = generation;
+  const rev = revision;
+  void changeMarker().then((m) => { if (gen === generation && rev === revision && lastMarker === undefined) lastMarker = m; });
+}
+
+export async function pollOnce(): Promise<void> {
   if (refreshing) return;
   refreshing = true;
   try {
-    const rev0 = revision;
-    const tableNames = [...cache.keys()].filter((n) => cache.get(n)!.rev === rev0);
-    const viewPaths = [...views.keys()].filter((p) => views.get(p)!.rev === rev0);
-    const withCapital = capitalCache?.rev === rev0;
-    const before = {
-      tables: await Promise.all(tableNames.map((n) => cache.get(n)!.promise.catch(() => null))),
-      views: await Promise.all(viewPaths.map((p) => views.get(p)!.promise.catch(() => null))),
-      capital: withCapital ? await capitalCache!.promise.then((c) => c.operations).catch(() => null) : null,
-    };
-    const after = {
-      tables: await Promise.all(tableNames.map((n) => LOADERS[n]!().catch(() => null))),
-      views: await Promise.all(viewPaths.map((p) => api().get(p).catch(() => null))),
-      capital: withCapital ? await loadCapital().catch(() => null) : null,
-    };
-    if (revision !== rev0) return; // un comando ya publicó una revisión nueva
-    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-    const changed = new Set(tableNames.filter((_, i) => after.tables[i] !== null && !same(before.tables[i], after.tables[i])));
-    const viewsChanged = viewPaths.some((_, i) => after.views[i] !== null && !same(before.views[i], after.views[i]));
-    const capitalChanged = withCapital && after.capital !== null && !same(before.capital, after.capital.operations);
-    if (changed.size === 0 && !viewsChanged && !capitalChanged) return;
-    revision++;
-    cache.clear();
-    views.clear();
-    capitalCache = null;
-    tableNames.forEach((n, i) => { if (after.tables[i]) cache.set(n, { rev: revision, promise: Promise.resolve(after.tables[i]!) }); });
-    viewPaths.forEach((p, i) => { if (after.views[i]) views.set(p, { rev: revision, promise: Promise.resolve(after.views[i]) }); });
-    if (after.capital) capitalCache = { rev: revision, promise: Promise.resolve(after.capital) };
-    // Las vistas agregadas (custodia, liquidación, resumen) alimentan cifras de cualquier pantalla.
-    const touched = viewsChanged || capitalChanged ? new Set<string>(ALL_TABLES) : changed;
-    for (const l of listeners) l(touched);
+    const gen = generation;
+    const marker = await changeMarker();
+    if (gen !== generation) return;
+    const due = Date.now() - lastFullAt >= FULL_EVERY_MS;
+    const known = marker !== undefined && lastMarker !== undefined;
+    if (known && marker === lastMarker && !due) return;
+    const changedMarker = !known || marker !== lastMarker;
+    await refreshIfChanged(changedMarker);
+    if (gen !== generation) return;
+    if (marker !== undefined) lastMarker = marker;
+    lastFullAt = Date.now();
   } finally {
     refreshing = false;
   }
@@ -384,7 +457,7 @@ let poller = 0;
 export function startPolling(ms = 20_000): void {
   window.clearInterval(poller);
   const tick = () => {
-    if (document.visibilityState === 'visible' && useRuntime.getState().ctx) void refreshIfChanged();
+    if (document.visibilityState === 'visible' && useRuntime.getState().ctx) void pollOnce();
   };
   poller = window.setInterval(tick, ms);
   document.addEventListener('visibilitychange', tick);

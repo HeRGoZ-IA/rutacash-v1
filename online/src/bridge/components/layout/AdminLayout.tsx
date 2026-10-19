@@ -245,11 +245,13 @@ export function AdminLayout() {
             Sin conexión con el servidor — nada se guarda en este dispositivo; reintente al volver la conexión
           </div>
         )}
-        {/* ADEX Online: el servidor puede tardar en responder tras un rato sin uso. */}
+        {/* ADEX Online: «activando» solo si el servicio no responde ni a /healthz; si responde, la consulta tarda. */}
         {isOnline && waking && (
           <div className="bg-primary-600 text-white text-xs text-center py-1.5 font-medium flex items-center justify-center gap-2">
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            Activando el servidor: la primera conexión puede tardar hasta un minuto. No repita la operación.
+            {waking === 'starting'
+              ? 'Activando el servidor: la primera conexión puede tardar hasta un minuto. No repita la operación.'
+              : 'Consultando el servidor: la respuesta está tardando más de lo normal. No repita la operación.'}
           </div>
         )}
 

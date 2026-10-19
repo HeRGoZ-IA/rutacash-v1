@@ -24,8 +24,8 @@ import { db } from '@/lib/db';
 import { filterAccessibleRoutes } from '@/lib/permissions';
 import { getWeekEnd, getWeekStart } from '@/lib/formatters';
 import { carteraEnCalleOf } from '@clean/services/cashboxEngine';
-import type { User } from '@clean/models/types';
-import { calendar, custodyPositions, liquidation, mapLimit, table, truncated, type Liquidation } from '../../runtime/projection.ts';
+import type { Expense, Payment, User } from '@clean/models/types';
+import { calendar, custodyPositions, liquidation, mapLimit, since, table, truncated, type Liquidation } from '../../runtime/projection.ts';
 import { toMajor } from '../../runtime/mappers.ts';
 
 /** Rutas visibles con alguna cuota vencida (regla original de CLEAN, `getAdminDashboardData`). */
@@ -65,7 +65,7 @@ const recaudo = (l: Liquidation) => l.credit.principalCollectedMinor + l.credit.
 export async function getAdminDashboardData(params: { user: User | null | undefined; tenantId: string; now?: Date }): Promise<DashboardData> {
   const { user, tenantId } = params;
   // Todas las lecturas en paralelo (después se leen de la caché de la misma revisión).
-  const [cal] = await Promise.all([calendar(), table('routes'), table('sales'), custodyPositions(), table('payments'), table('expenses'), table('clients')]);
+  const [cal] = await Promise.all([calendar(), table('routes'), table('sales'), custodyPositions(), table('clients')]);
   const todayStr = cal.businessDate;
   const now = parseISO(`${todayStr}T12:00:00`);
   const weekStart = getWeekStart(now);
@@ -85,15 +85,17 @@ export async function getAdminDashboardData(params: { user: User | null | undefi
   const days = Array.from({ length: 7 }, (_, i) => format(subDays(now, 6 - i), 'yyyy-MM-dd'));
   const desde = days[0]! < weekStart ? days[0]! : weekStart;
 
-  // Registros del servidor (proyección). ¿Cubren todo el periodo? Si el listado llegó a su
-  // tope, solo cubre desde su registro más antiguo.
-  const allPayments = (await db.payments.where('tenantId').equals(tenantId).toArray()).filter((p) => scope.has(p.routeId));
-  const allExpenses = (await db.expenses.where('tenantId').equals(tenantId).toArray()).filter((e) => !!e.routeId && scope.has(e.routeId));
+  // Registros del servidor con fecha DESDE `desde` (todas las cifras de abajo son de ese rango:
+  // el servidor filtra por fecha, mismo alcance; no se descarga el historial). ¿Cubren todo el
+  // periodo? Si el listado llegó a su tope, solo cubre desde su registro más antiguo.
+  const [recentPayments, recentExpenses] = (await Promise.all([since('payments', desde), since('expenses', desde)])) as unknown as [Payment[], Expense[]];
+  const allPayments = recentPayments.filter((p) => p.tenantId === tenantId && scope.has(p.routeId));
+  const allExpenses = recentExpenses.filter((e) => e.tenantId === tenantId && !!e.routeId && scope.has(e.routeId));
   const covers = (key: string, dates: string[]) => !truncated.has(key) || dates.reduce((m, d) => (d < m ? d : m), '9999-12-31') < desde;
   // Sin permiso para leer abonos o gastos, los listados llegan vacíos: se usa el agregado.
   const caps = useRuntime.getState().ctx?.capabilities ?? [];
   const legibles = caps.includes('payment.viewHistory') && (caps.includes('expense.register') || caps.includes('expense.correct'));
-  const fromRecords = legibles && covers('/v1/collections?limit=500', allPayments.map((p) => p.fecha)) && covers('/v1/expenses?limit=500', allExpenses.map((e) => e.fecha));
+  const fromRecords = legibles && covers(`/v1/collections?from=${desde}`, allPayments.map((p) => p.fecha)) && covers(`/v1/expenses?from=${desde}`, allExpenses.map((e) => e.fecha));
 
   let recaudoHoy: number; let recaudoSemana: number; let gastosSemana: number;
   let porRuta: Record<string, number> = {};

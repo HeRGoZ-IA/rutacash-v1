@@ -10,7 +10,7 @@
 //   · Socio y Secretario: sus layouts y pantallas originales, con las mismas rutas.
 
 import { useEffect, type ReactNode } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Toaster } from '@/components/ui/Toast';
 import { AdminLayout } from '@/components/layout/AdminLayout';
 import { CollectorLayout } from '@/components/layout/CollectorLayout';
@@ -69,6 +69,7 @@ import SaleAuthorizationsPage from '@/pages/admin/SaleAuthorizationsPage';
 import UsersPage from '@/pages/admin/UsersPage';
 import SettingsPage from '@/pages/admin/SettingsPage';
 import { boot, useRuntime } from './session.ts';
+import { markNavigation } from './projection.ts';
 import { ContextSelectPage } from './ContextSelectPage.tsx';
 
 function Boot({ children }: { children: ReactNode }) {
@@ -123,9 +124,17 @@ function operationalRoutes() {
   );
 }
 
+/** Marca el cambio de pantalla: el refresco periódico relee solo lo que la pantalla actual usa. */
+function NavigationMark() {
+  const { pathname } = useLocation();
+  useEffect(() => { markNavigation(); }, [pathname]);
+  return null;
+}
+
 export function CleanOnlineApp() {
   return (
     <BrowserRouter>
+      <NavigationMark />
       <Boot>
         <Routes>
           <Route path="/login" element={<LoginGate />} />

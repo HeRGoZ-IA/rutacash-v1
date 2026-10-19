@@ -27,8 +27,11 @@ export interface RuntimeState {
   booted: boolean;
   /** Última respuesta del servidor: true = hubo respuesta. */
   online: boolean;
-  /** Una petición tarda: el servidor puede estar despertando (Render Free). */
-  waking: boolean;
+  /**
+   * Una petición tarda más de lo normal: 'starting' = el servicio no responde ni a /healthz
+   * (está arrancando); 'slow' = el servidor está activo y la respuesta tarda; false = nada.
+   */
+  waking: 'starting' | 'slow' | false;
   /** Aviso pendiente para el selector (p. ej. la membresía dejó de valer). */
   notice: string | null;
   /** Membresías activas de la persona (para ofrecer «Cambiar empresa o rol» solo si hay más de una). */
@@ -60,7 +63,7 @@ export function wireClient(c: OnlineClient): void {
   setClient(c);
   c.on((event, detail) => {
     if (event === 'network') useRuntime.setState({ online: detail === true });
-    if (event === 'waking') useRuntime.setState({ waking: detail === true });
+    if (event === 'waking') useRuntime.setState({ waking: detail === 'starting' || detail === 'slow' ? detail : false });
     if (event === 'context') { useRuntime.setState({ notice: errorText({ code: String(detail) }) }); publish(null); }
     if (event === 'session') publish(null);
   });

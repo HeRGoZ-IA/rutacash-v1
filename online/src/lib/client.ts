@@ -62,6 +62,8 @@ export function isUnconfirmed(err: unknown): boolean {
 
 /** Una petición que tarda más que esto suele ser el servidor despertando (Render Free). */
 const WAKING_AFTER_MS = 4_000;
+/** Espera máxima de la sonda `/healthz` para decidir si el servicio está arrancando. */
+const HEALTH_PROBE_MS = 4_000;
 
 /** Errores que significan «el contexto elegido ya no vale»: volver al selector. */
 export const CONTEXT_LOST = new Set(['COMPANY_BLOCKED', 'MEMBERSHIP_INACTIVE', 'MEMBERSHIP_NOT_FOUND', 'CONTEXT_INVALID']);
@@ -216,6 +218,27 @@ export class OnlineClient {
     throw u;
   }
 
+  /**
+   * Peticiones que tardan más de lo normal. Solo se afirma «el servidor se está activando»
+   * con EVIDENCIA: si `/healthz` (sin base de datos) tampoco responde en unos segundos, el
+   * servicio está arrancando (Render Free tras un rato sin uso). Si responde, el servidor está
+   * activo y lo que tarda es la consulta. Nada se reintenta por esto.
+   */
+  private slowCount = 0;
+  private slowStarted(): void {
+    if (this.slowCount++ > 0) return;
+    this.emit('waking', 'slow');
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), HEALTH_PROBE_MS);
+    fetch(`${this.cfg.apiBase}/healthz`, { cache: 'no-store', signal: ctl.signal })
+      .then((r) => r.ok, () => false)
+      .then((up) => { if (this.slowCount > 0) this.emit('waking', up ? 'slow' : 'starting'); })
+      .finally(() => clearTimeout(timer));
+  }
+  private slowEnded(): void {
+    if (--this.slowCount === 0) this.emit('waking', false);
+  }
+
   private require(): StoredSession {
     if (!this.session) throw new ApiFailure(401, 'NOT_SIGNED_IN');
     return this.session;
@@ -249,8 +272,8 @@ export class OnlineClient {
     if (o.operationId) headers['x-adex-operation-id'] = o.operationId;
     if (o.body !== undefined) headers['content-type'] = 'application/json';
     let res: Response;
-    let waking = false;
-    const slow = setTimeout(() => { waking = true; this.emit('waking', true); }, WAKING_AFTER_MS);
+    let slowNow = false;
+    const slow = setTimeout(() => { slowNow = true; this.slowStarted(); }, WAKING_AFTER_MS);
     try {
       res = await fetch(`${this.cfg.apiBase}${path}`, { method, headers, body: o.body === undefined ? undefined : JSON.stringify(o.body), cache: 'no-store' });
     } catch {
@@ -258,7 +281,7 @@ export class OnlineClient {
       throw new NetworkFailure('NETWORK');
     } finally {
       clearTimeout(slow);
-      if (waking) this.emit('waking', false);
+      if (slowNow) this.slowEnded();
     }
     this.emit('network', true);
     let body: Record<string, unknown> = {};
