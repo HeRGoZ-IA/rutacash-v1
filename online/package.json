@@ -2,7 +2,7 @@
   "name": "adex-online",
   "private": true,
   "version": "0.1.0",
-  "description": "ADEX Online v1: interfaz web solo en línea contra la API SaaS (PostgreSQL como autoridad financiera). Independiente de CLEAN.",
+  "description": "ADEX Online: el frontend de CLEAN (../src) conectado a la API SaaS (PostgreSQL como autoridad financiera). CLEAN no se modifica.",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,14 +11,24 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "clsx": "2.1.1",
+    "date-fns": "3.6.0",
+    "lucide-react": "0.414.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "react-router-dom": "6.30.4"
+    "react-router-dom": "6.30.4",
+    "recharts": "2.15.4",
+    "uuid": "10.0.0",
+    "zod": "3.25.76",
+    "zustand": "4.5.7"
   },
   "devDependencies": {
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
+    "autoprefixer": "10.5.0",
+    "postcss": "8.5.15",
+    "tailwindcss": "3.4.19",
     "typescript": "6.0.3",
     "vite": "8.0.16"
   }

@@ -21,10 +21,10 @@ import { RoutesAdmin } from './screens/RoutesAdmin.tsx';
 import { Offices } from './screens/Offices.tsx';
 import { Settings } from './screens/Settings.tsx';
 
-export function App({ client }: { client: OnlineClient }) {
+export function App({ client, basename }: { client: OnlineClient; basename?: string }) {
   return (
     <AppProvider client={client}>
-      <BrowserRouter>
+      <BrowserRouter basename={basename}>
         <Boot>
           <Routes>
             <Route path="/login" element={<Login />} />

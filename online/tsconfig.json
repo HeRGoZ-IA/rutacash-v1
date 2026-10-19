@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
@@ -11,7 +15,27 @@
     "isolatedModules": true,
     "allowImportingTsExtensions": true,
     "noFallthroughCasesInSwitch": true,
-    "types": ["vite/client"]
+    "types": [
+      "vite/client"
+    ],
+    "paths": {
+      "@/*": [
+        "./src/bridge/*",
+        "../src/*"
+      ],
+      "@clean/*": [
+        "../src/*"
+      ],
+      "dexie-react-hooks": [
+        "./src/bridge/vendor/dexie-react-hooks.ts"
+      ],
+      "dexie": [
+        "./src/bridge/vendor/dexie.ts"
+      ]
+    }
   },
-  "include": ["src", "../saas/src/client"]
+  "include": [
+    "src",
+    "../saas/src/client"
+  ]
 }

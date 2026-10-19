@@ -358,10 +358,23 @@ describe('Fase 5 · gastos', () => {
     for (const f of files) {
       // Solo código: los comentarios pueden nombrar lo que está prohibido.
       const text = readFileSync(path.join(dir, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
-      if (/localStorage|sessionStorage|Dexie|RutaCashDB|openDatabase/.test(text)) hits.push(f);
-      if (/indexedDB/.test(text) && f.replace(/\\/g, '/') !== 'lib/client.ts') hits.push(`${f} (indexedDB)`);
+      const rel = f.replace(/\\/g, '/');
+      if (/localStorage|sessionStorage|openDatabase/.test(text)) hits.push(f);
+      // Ronda 24/25: el puente (`bridge/`) SUSTITUYE la base local de CLEAN y por eso lleva sus
+      // nombres (`RutaCashDB`, el sustituto bloqueante de `dexie`); fuera del puente siguen prohibidos.
+      if (/Dexie|RutaCashDB/.test(text) && !rel.startsWith('bridge/')) hits.push(f);
+      if (/indexedDB/.test(text) && rel !== 'lib/client.ts') hits.push(`${f} (indexedDB)`);
     }
     assert.deepEqual(hits, [], 'el único IndexedDB es la sesión (adex-server-mode)');
+    // El paquete `dexie` está prohibido en el bundle: se resuelve a un sustituto que falla al abrir
+    // una base, y el `db` del puente rechaza toda escritura que no sea un comando de la API.
+    const vite = readFileSync(path.join(repo, 'online', 'vite.config.ts'), 'utf8');
+    assert.match(vite, /id === 'dexie'[^\n]*BRIDGE, 'vendor', 'dexie\.ts'/, 'dexie se resuelve al sustituto bloqueante');
+    assert.match(readFileSync(path.join(dir, 'bridge', 'vendor', 'dexie.ts'), 'utf8'), /constructor\(\) \{\s*throw new Error/, 'el sustituto de dexie falla al abrir una base');
+    const bridgeDb = readFileSync(path.join(dir, 'bridge', 'lib', 'db.ts'), 'utf8');
+    for (const op of ['put', 'bulkAdd', 'bulkPut', 'bulkDelete', 'clear']) {
+      assert.match(bridgeDb, new RegExp(`async ${op}\\([^)]*\\): Promise<never> \\{ throw new OnlineWriteBlocked`), `db.${op} del puente bloqueado`);
+    }
     const screens = files.filter((f) => /screens/.test(f)).map((f) => readFileSync(path.join(dir, f), 'utf8')).join('\n');
     for (const endpoint of ["'/v1/collections'", "'/v1/expenses'", '/reverse`', '/refunds`']) assert.ok(screens.includes(endpoint), `la interfaz usa ${endpoint}`);
     assert.doesNotMatch(screens, /client\.send<[^>]*>\('POST', '\/v1\/(collections|expenses)/, 'los comandos de dinero van con operationId (client.command)');
