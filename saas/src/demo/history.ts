@@ -358,6 +358,15 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
   const at60 = Math.floor(total * 0.6);
   const at75 = Math.floor(total * 0.75);
   const at90 = Math.floor(total * 0.9);
+  // Los hitos caen SIEMPRE en un día que se trabaja: el bucle salta los domingos y un hito en
+  // domingo no ocurriría nunca. `midweek` = martes a viernes (lunes hay cierres; sábado, cuadres).
+  const onWorkday = (k: number, midweek = false, dir = 1) => {
+    while (k > 0 && k < total - 1 && (midweek ? [0, 1, 6] : [0]).includes(weekday(at(k)))) k += dir;
+    return k;
+  };
+  const m01 = onWorkday(at01 + 2), m30 = onWorkday(at30), m30b = onWorkday(at30 + 1, true), m45 = onWorkday(at45), m45b = onWorkday(at45 + 1, true);
+  const m50 = onWorkday(at50, true), m60 = onWorkday(at60), m60b = onWorkday(at60 + 1), m75 = onWorkday(at75), m90 = onWorkday(at90, true);
+  const mLast = onWorkday(total - 2, false, -1), mLate = onWorkday(lateStart);
   let norteChange = Math.floor(total * 0.5);
   while (weekday(at(norteChange)) !== 2) norteChange++; // un martes, con la semana anterior ya cerrada
   const firstMonday = (i: number) => weekday(at(i)) === 1 && Number(at(i).slice(8, 10)) <= 7;
@@ -373,18 +382,18 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
         scope: 'empresa', categoryId: cat('Otros'), amountMinor: COP(900_000), description: 'Arriendo de la oficina', fundingSource: 'empresa' } });
       summary.expenses++;
     }
-    if (i === at01 + 2) await alloc('admin-centro', 4_000_000, day, 'Refuerzo de capital Ruta Centro');
-    if (i === at30) {
+    if (i === m01) await alloc('admin-centro', 4_000_000, day, 'Refuerzo de capital Ruta Centro');
+    if (i === m30) {
       await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/company/deposits', operation: true, day, body: { amountMinor: COP(10_000_000 * Math.max(scale, 0.3)), reason: 'Nuevo aporte de capital de los socios' } });
       await c({ seat: 'admin-centro', method: 'POST', path: '/v1/capital/partner-contributions', operation: true, day, body: {
         partnerId: m('socio-invitado'), routeId: routes.centro, amountMinor: COP(3_000_000 * Math.max(scale, 0.3)), reason: 'Aporte del socio para Ruta Centro' } });
     }
-    if (i === at45) {
+    if (i === m45) {
       const dup = await c({ seat: 'admin-centro', method: 'POST', path: '/v1/capital/partner-contributions', operation: true, day, body: {
         partnerId: m('socio-fundador'), routeId: routes.centro, amountMinor: COP(1_500_000), reason: 'Aporte registrado dos veces' } });
       await c({ seat: 'admin-centro', method: 'POST', path: `/v1/capital/operations/${str((dup['operation'] as Record<string, unknown>)?.['id'], 'op')}/reverse`, operation: true, day, body: { reason: 'Registro duplicado del aporte' } });
     }
-    if (i === at60) await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/company/withdrawals', operation: true, day, body: { amountMinor: COP(2_000_000), reason: 'Distribución parcial de utilidades' } });
+    if (i === m60) await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/company/withdrawals', operation: true, day, body: { amountMinor: COP(2_000_000), reason: 'Distribución parcial de utilidades' } });
     // ---- Cambio de responsable de Ruta Norte (Jorge → Marta) y baja de Jorge.
     if (i === norteChange) {
       await c({ seat: 'direccion', method: 'PUT', path: `/v1/routes/${routes.norte}/capital-controller`, day, body: { membershipId: m('admin-norte'), reason: 'Jorge deja la empresa; Marta asume Ruta Norte' } });
@@ -398,7 +407,7 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
       await c({ seat: 'direccion', method: 'POST', path: `/v1/members/${m('admin-anterior')}/deactivate`, day, body: {} });
     }
     // ---- Ruta Expansión (último tramo, sin Oficina ni Cobrador).
-    if (i === lateStart && !routes.expansion) {
+    if (i === mLate && !routes.expansion) {
       routes.expansion = await mkRouteOn('Ruta Expansión', 'RE', day);
       for (let k = 0; k < Math.max(2, Math.round(4 * scale)); k++) {
         const cl = await addClient('expansion', day);
@@ -411,40 +420,40 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
     await Promise.all((Object.keys(routes) as RouteKey[]).filter((r) => routes[r]).map((r) => routeDay(r, day, i)));
 
     // ---- Excepciones por ruta (después de la operación del día).
-    if (i === at30 + 1 && wd !== 6) {
+    if (i === m30b && wd !== 6) {
       // Entrega duplicada anulada el mismo día.
       await ensurePool('admin-centro', COP(200_000), day);
       const del = await c({ seat: 'admin-centro', method: 'POST', path: '/v1/capital/deliveries', operation: true, day, body: { routeId: routes.centro, workerId: m('cobrador-centro'), amountMinor: COP(200_000), reason: 'Capital adicional' } });
       await c({ seat: 'admin-centro', method: 'POST', path: `/v1/capital/operations/${str((del['operation'] as Record<string, unknown>)?.['id'], 'op')}/reverse`, operation: true, day, body: { reason: 'Entrega registrada por error' } });
     }
-    if (i === at45 + 1 && wd !== 6) {
+    if (i === m45b && wd !== 6) {
       // Abono a cliente equivocado: lo anula el Administrador mientras el Cobrador aún tiene el dinero.
       const p = lastPayment.centro.filter((x) => x.day === day).pop();
       if (p) await c({ seat: 'admin-centro', method: 'POST', path: `/v1/collections/${p.id}/reverse`, operation: true, day, body: { reason: 'Abono registrado a otro cliente' } });
     }
-    if (i === at50 && wd !== 6) {
+    if (i === m50 && wd !== 6) {
       // Corrección de un abono por la Secretaria (semana abierta): valor mal digitado.
       const p = lastPayment.norte.filter((x) => x.day === day).pop();
       if (p) await c({ seat: 'secretario-invitado', method: 'POST', path: `/v1/collections/${p.id}/correct`, operation: true, day, body: { newAmountMinor: 0 + (await paymentAmount(p.id)) - COP(1_000), reason: 'Valor mal digitado por el cobrador' } });
     }
-    if (i === at60 + 1 || i === at75 || i === total - 2) {
+    if (i === m60b || i === m75 || i === mLast) {
       // Solicitudes de ajuste de pagos de semanas CERRADAS: una aprobada, una rechazada, una pendiente.
-      const route: RouteKey = i === at75 ? 'norte' : 'centro';
+      const route: RouteKey = i === m75 ? 'norte' : 'centro';
       const old = lastPayment[route].find((x) => x.day <= addDays(day, -14));
       if (old) {
         const a = await c({ seat: 'secretario-invitado', method: 'POST', path: '/v1/payment-adjustments', operation: true, day, body: {
           paymentId: old.id, newAmountMinor: Math.max(100, (await paymentAmount(old.id)) - COP(2_000)), reason: 'El cliente presentó el recibo con otro valor' } });
         lastPayment[route] = lastPayment[route].filter((x) => x.id !== old.id);
-        if (i === at60 + 1) {
+        if (i === m60b) {
           await ensurePool('admin-centro', await paymentAmount(old.id), day);
           await c({ seat: 'admin-centro', method: 'POST', path: '/v1/capital/deliveries', operation: true, day, body: {
             routeId: routes.centro, workerId: m('cobrador-centro'), amountMinor: await paymentAmount(old.id), reason: 'Base para cubrir la corrección aprobada' } });
           await c({ seat: 'admin-centro', method: 'POST', path: `/v1/payment-adjustments/${str(a['id'], 'adj')}/approve`, operation: true, day, body: {} });
         }
-        if (i === at75) await c({ seat: 'admin-norte', method: 'POST', path: `/v1/payment-adjustments/${str(a['id'], 'adj')}/reject`, day, body: { reason: 'El recibo no corresponde a este cliente' } });
+        if (i === m75) await c({ seat: 'admin-norte', method: 'POST', path: `/v1/payment-adjustments/${str(a['id'], 'adj')}/reject`, day, body: { reason: 'El recibo no corresponde a este cliente' } });
       }
     }
-    if (i === at90 && wd !== 6 && wd !== 1 && (await available('norte', 'cobrador-norte')) >= COP(50_000)) {
+    if (i === m90 && wd !== 6 && wd !== 1 && (await available('norte', 'cobrador-norte')) >= COP(50_000)) {
       // Traspasos: del Cobrador Norte al Supervisor (efectivo para un desembolso en campo) y
       // reasignación entre rutas de la misma responsable (Norte → Sur), una de ellas anulada.
       await c({ seat: 'admin-norte', method: 'POST', path: '/v1/capital/worker-transfers', operation: true, day, body: {

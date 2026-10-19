@@ -83,6 +83,10 @@ describe('ADEX Online · Empresa Demo histórica (demo-v2-6m, escala real)', { s
     assert.ok(await n(`select count(*) n from adex.sale_requests where company_id = $1 and status = 'disbursed'`) >= 60, 'renovaciones por solicitud');
     assert.ok(await n(`select count(*) n from adex.payments where company_id = $1`) >= 4000, 'volumen de cobros');
     assert.ok(await n(`select count(*) n from adex.sales where company_id = $1 and status = 'activa'`) >= 40, 'cartera viva al final');
+    // Los hitos ocurren aunque su día caiga en domingo (se mueven a un día laborable).
+    assert.equal(await n(`select count(*) n from adex.routes where company_id = $1 and name = 'Ruta Expansión'`), 1, 'ruta abierta en el último tramo');
+    const adj = (await db.admin.query(`select status, count(*)::int n from adex.payment_adjustment_requests where company_id = $1 group by status`, [demoId])).rows;
+    assert.deepEqual(Object.fromEntries(adj.map((r: { status: string; n: number }) => [r.status, r.n])), { approved: 1, pending: 1, rejected: 1 });
     assert.ok(await n(`select count(distinct s.id) n from adex.sales s join adex.installments i on i.company_id = s.company_id and i.sale_id = s.id
                        where s.company_id = $1 and s.status = 'activa' and i.balance_minor > 0 and i.due_date < now()::date - 7`) >= 3, 'créditos en mora');
     // Los clientes son ficticios (cédulas 99…).
