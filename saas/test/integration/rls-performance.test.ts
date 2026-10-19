@@ -22,7 +22,8 @@ const dbDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '
 const MIGRATION = readFileSync(path.join(dbDir, 'migrations', '0020_rls_context_once.sql'), 'utf8');
 const ROLLBACK = readFileSync(path.join(dbDir, 'rollback', '0020_rls_context_once.down.sql'), 'utf8');
 
-interface Ctx { identityId: string; membershipId: string; companyId: string }
+interface Ctx { identityId: string; membershipId: string; companyId: string; sessionId?: string }
+const REVOKED = '33333333-3333-4333-8333-333333333333';
 
 describe('Ronda 33 · RLS con contexto evaluado una vez (0020)', () => {
   let db: TestDb;
@@ -80,7 +81,13 @@ describe('Ronda 33 · RLS con contexto evaluado una vez (0020)', () => {
       { label: 'sa-c1-en-c2', ctx: { identityId: identityOf('bruno'), membershipId: M.brunoSa, companyId: c2 } },
       { label: 'membresía-ajena', ctx: { identityId: identityOf('bruno'), membershipId: M.carlaSa, companyId: c2 } },
       { label: 'sin-contexto', ctx: { identityId: '', membershipId: '', companyId: c1 } },
+      { label: 'identidad-ajena-misma-empresa', ctx: { identityId: identityOf('carla'), membershipId: M.brunoSa, companyId: c1 } },
+      { label: 'cobrador-desactivado', ctx: { identityId: identityOf('ana'), membershipId: M.anaCob, companyId: c1 } },
+      { label: 'sesion-revocada', ctx: { identityId: identityOf('fabio'), membershipId: M.fabioSocio, companyId: c1, sessionId: REVOKED } },
     );
+    // Membresía con identidad desactivada y sesión revocada (deben ver lo mismo: nada).
+    await db.admin.query(`update adex.memberships set status = 'inactivo' where id = $1`, [M.anaCob]);
+    await db.admin.query(`insert into adex.revoked_sessions (session_id, identity_id, revoked_at, reason) values ($1, $2, now(), 'security')`, [REVOKED, identityOf('fabio')]);
   });
   after(async () => { await api.close(); await db.close(); });
 
@@ -94,6 +101,11 @@ describe('Ronda 33 · RLS con contexto evaluado una vez (0020)', () => {
     for (const t of ['payments', 'sales', 'clients', 'capital_operations', 'audit_log']) {
       const visible = Object.entries(withMigration).filter(([k, v]) => k.endsWith(`:${t}`) && !v.startsWith('0:')).length;
       assert.ok(visible > 0, `${t}: algún contexto ve filas`);
+    }
+    // Contextos ilegítimos: ninguna fila financiera ni operativa (con 0020).
+    const illegit = ['sa-c1-en-c2', 'membresía-ajena', 'sin-contexto', 'identidad-ajena-misma-empresa', 'cobrador-desactivado', 'sesion-revocada'];
+    for (const l of illegit) for (const t of ['payments', 'sales', 'installments', 'clients', 'expenses', 'capital_operations', 'capital_accounts', 'routes', 'audit_log']) {
+      assert.ok(withMigration[`${l}:${t}`]?.startsWith('0:'), `${l} no ve ${t}`);
     }
     await asOwner(ROLLBACK.replace(/^(begin|commit|set local role adex_owner);$/gm, ''));
     const previous = await visibility();
