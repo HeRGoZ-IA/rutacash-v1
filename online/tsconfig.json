@@ -31,6 +31,10 @@
       ],
       "dexie": [
         "./src/bridge/vendor/dexie.ts"
+      ],
+      "*": [
+        "./node_modules/@types/*",
+        "./node_modules/*"
       ]
     }
   },
