@@ -47,7 +47,7 @@ const OPERATOR = 'demo.operador@example.test';
 const args = process.argv.slice(2);
 const mode = args[0];
 const days = Number(args[args.indexOf('--days') + 1] ?? 182) || 182;
-if (!['--status', '--reset'].includes(mode ?? '')) fail('uso: --status | --reset [--days N]');
+if (!['--status', '--reset', '--abort'].includes(mode ?? '')) fail('uso: --status | --reset [--days N] | --abort');
 
 // TLS estricto si el certificado del proyecto está disponible; si no, el modo de prueba de staging.
 const caFile = [env['ADEX_PG_SSL_CA_FILE'], path.join(os.homedir(), 'Downloads', 'prod-ca-2021.crt')].find((f) => f && existsSync(f));
@@ -80,6 +80,13 @@ try {
   const status = await service.status(claims, SLOT) as Record<string, unknown>;
   const company = status['company'] as { id: string; name: string; scenario: string } | null;
   say(`# Demo · ${new Date().toISOString()} · hueco ${SLOT}: ${status['state']} · empresa ${company?.id ?? '—'} (${company?.scenario ?? '—'}) · TLS ${caFile ? 'estricto' : 'modo de prueba'}`);
+  if (mode === '--abort') {
+    // Recuperación de una inicialización interrumpida: retira la Demo a medias y reactiva la anterior.
+    const pending = status['pendingCompanyId'] as string | null;
+    if (!pending) fail('no hay inicialización pendiente');
+    const r = await service.abort(claims, SLOT, { companyId: pending, confirm: pending });
+    say(`abortada ${pending}: ${r.status} ${JSON.stringify(r.body)}`);
+  }
   if (mode === '--reset') {
     if (!company) fail('no hay Demo activa que reiniciar');
     for (const p of PARTICIPANTS) {

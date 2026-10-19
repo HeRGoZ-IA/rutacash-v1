@@ -287,7 +287,11 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
       const dueTodayN = cr.due.filter((d) => d === day).length;
       const expected = cr.due.filter((d) => d <= day).length * cr.installmentMinor;
       const overdue = Math.max(0, expected - cr.paidMinor);
-      if (dueTodayN === 0 && !(cl.profile === 'irregular' && overdue > cr.installmentMinor && rand() < 0.15)) continue;
+      // Sin cuota hoy, solo se cobra si hay atraso: el cliente que falló un día se pone al día
+      // (el puntual casi siempre; el irregular a veces). Sin esto, un crédito vencido después de su
+      // última fecha nunca terminaría ni se renovaría.
+      const lastDue = cr.due[cr.due.length - 1] ?? day;
+      if (dueTodayN === 0 && !(overdue > 0 && (day > lastDue || (cl.profile === 'puntual' ? rand() < 0.8 : cl.profile === 'irregular' && rand() < 0.25)))) continue;
       const stops = cl.profile === 'moroso' && index > total - 40;
       const p = cl.profile === 'puntual' ? 0.95 : cl.profile === 'irregular' ? 0.72 : 0.6;
       if (stops || rand() > p) {
@@ -301,7 +305,9 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
       }
       let k = 1;
       if (cl.profile === 'irregular') k = rand() < 0.25 ? 0.5 : overdue >= 2 * cr.installmentMinor && rand() < 0.4 ? 2 : 1;
-      const amount = Math.min(cr.balanceMinor, Math.max(100, Math.round((cr.installmentMinor * k) / 100) * 100));
+      // El puntual paga lo vencido completo (cuota de hoy incluida); el resto, su patrón.
+      const owed = cl.profile === 'puntual' ? Math.max(overdue, cr.installmentMinor * dueTodayN) : cr.installmentMinor * k;
+      const amount = Math.min(cr.balanceMinor, Math.max(100, Math.round(owed / 100) * 100));
       const r = await c({ seat: payer, method: 'POST', path: '/v1/collections', operation: true, day, body: { saleId: cr.id, amountMinor: amount } });
       summary.collections++;
       cr.paidMinor += Number(r['appliedMinor'] ?? amount);

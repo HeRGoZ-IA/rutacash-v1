@@ -42,8 +42,15 @@ describe('ADEX Online · Empresa Demo histórica (demo-v2-6m, escala real)', { s
   after(async () => { await online?.close(); await db?.close(); });
 
   test('HIST-FULL-001 · crear: semanas de operación con fechas contables pasadas, mismo motor y conciliación OK', { timeout: 3_600_000 }, async () => {
-    const r = await online.call('POST', `/demo/v1/slots/${slot}/create`, { token: operator.token, body: {} });
-    assert.equal(r.status, 200, `${JSON.stringify(r.body)} · ${online.errors.map((e) => (e instanceof Error ? `${e.message} ${(e as { details?: unknown }).details ?? ''}` : String(e))).join(' | ')}`);
+    // A escala real tarda minutos: se lanza en segundo plano (202) y se consulta el estado.
+    const r = await online.call('POST', `/demo/v1/slots/${slot}/create`, { token: operator.token, body: { wait: false } });
+    assert.equal(r.status, 202, JSON.stringify(r.body));
+    for (;;) {
+      await new Promise((ok) => setTimeout(ok, 3000));
+      const st = (await online.call('GET', `/demo/v1/slots/${slot}`, { token: operator.token })).body;
+      if (st['state'] === 'active' && !st['jobRunning']) break;
+      assert.ok(st['state'] !== 'empty', `${JSON.stringify(st).slice(0, 300)} · ${online.errors.map((e) => (e instanceof Error ? e.message : String(e))).join(' | ')}`);
+    }
     demoId = r.body['companyId'] as string;
     const s = (await online.call('GET', `/demo/v1/slots/${slot}`, { token: operator.token })).body;
     assert.deepEqual([s['state'], s['scenario']], ['active', 'demo-v2-6m']);
@@ -70,6 +77,14 @@ describe('ADEX Online · Empresa Demo histórica (demo-v2-6m, escala real)', { s
     assert.ok(await n(`select count(*) n from adex.sales where company_id = $1 and disbursement_status = 'desembolsado'`) >= 8);
     // Ningún cierre se hizo antes de que terminara su semana (D29 con el reloj simulado).
     assert.equal(await n(`select count(*) n from adex.period_closures where company_id = $1 and business_date <= week_end`), 0);
+    // Realismo a escala: cartera que se renueva (créditos terminados y renovados por solicitud),
+    // cobros de todos los días hábiles y algo de mora al final.
+    assert.ok(await n(`select count(*) n from adex.sales where company_id = $1 and status = 'finalizada'`) >= 80, 'créditos terminados');
+    assert.ok(await n(`select count(*) n from adex.sale_requests where company_id = $1 and status = 'disbursed'`) >= 60, 'renovaciones por solicitud');
+    assert.ok(await n(`select count(*) n from adex.payments where company_id = $1`) >= 4000, 'volumen de cobros');
+    assert.ok(await n(`select count(*) n from adex.sales where company_id = $1 and status = 'activa'`) >= 40, 'cartera viva al final');
+    assert.ok(await n(`select count(distinct s.id) n from adex.sales s join adex.installments i on i.company_id = s.company_id and i.sale_id = s.id
+                       where s.company_id = $1 and s.status = 'activa' and i.balance_minor > 0 and i.due_date < now()::date - 7`) >= 3, 'créditos en mora');
     // Los clientes son ficticios (cédulas 99…).
     assert.equal(await n(`select count(*) n from adex.clients where company_id = $1 and document not like '99%'`), 0);
   });
