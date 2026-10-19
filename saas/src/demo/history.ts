@@ -105,7 +105,18 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
   const rand = rng(20261018);
   const pick = <T>(xs: readonly T[]) => xs[Math.floor(rand() * xs.length)]!;
   let calls = 0;
-  const c = (x: ScenarioCall) => { calls++; return call(x); };
+  // Si una ruta falla, las demás se detienen en su siguiente paso (la inicialización se aborta entera).
+  let failed: unknown = null;
+  const c = async (x: ScenarioCall) => {
+    if (failed) throw failed;
+    calls++;
+    try {
+      return await call(x);
+    } catch (e) {
+      failed = failed ?? e;
+      throw e;
+    }
+  };
 
   // Primer lunes de la historia; el último día es HOY.
   let day0 = addDays(opts.today, -opts.days);
@@ -234,7 +245,12 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
     const directNeed = plans.filter((p) => p.direct).reduce((s, p) => s + COP(p.amount), 0);
     if (need + directNeed > 0) await ensurePool(ctl, need + directNeed, day);
     if (col && need > 0) {
-      await c({ seat: ctl, method: 'POST', path: '/v1/capital/deliveries', operation: true, day, body: { routeId: routes[route], workerId: m(col), amountMinor: need, reason: 'Capital para desembolsos del día' } });
+      // Lo que el trabajador ya tiene disponible (sin el faltante arrastrado, que no financia
+      // desembolsos) se usa primero; el responsable entrega solo lo que falta.
+      const missing = need - (await available(route, col));
+      if (missing > 0) {
+        await c({ seat: ctl, method: 'POST', path: '/v1/capital/deliveries', operation: true, day, body: { routeId: routes[route], workerId: m(col), amountMinor: missing, reason: 'Capital para desembolsos del día' } });
+      }
     }
     for (const p of plans) {
       const cl = p.cl;
@@ -258,7 +274,8 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
       const tenPercent = cl.profile === 'puntual' && cl.credits >= 2 && rand() < 0.3;
       await c({ seat: approver[route], method: 'POST', path: `/v1/credit-requests/${reqId}/approve`, day, body: {
         notes: tenPercent ? 'Cliente puntual: tasa preferencial' : 'Aprobada tras verificar referencias', ...(tenPercent ? { interestRate: 10 } : {}),
-        phoneConfirmed: true, phoneConfirmationNote: 'Confirmado por teléfono' } });
+        // La confirmación telefónica es del Supervisor o del Secretario (`authorization.phoneConfirm`).
+        ...(approver[route].startsWith('supervisor') ? { phoneConfirmed: true, phoneConfirmationNote: 'Confirmado por teléfono' } : {}) } });
       track(cl, await c({ seat: col!, method: 'POST', path: `/v1/credit-requests/${reqId}/disburse`, operation: true, day, body: {} }));
       cl.renewOn = null;
     }

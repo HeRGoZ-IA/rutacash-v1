@@ -121,8 +121,25 @@ export function createDemoService(opts: DemoServiceOptions) {
       const actorClaims: SessionClaims = { identityId: a.identityId, sessionId: randomUUID(), iat: Math.floor(Date.now() / 1000) };
       // Igual que el servidor HTTP: la ruta sin la consulta, y la consulta aparte.
       const url = new URL(call.path, 'http://demo.local');
-      const res = await opts.execute(actorClaims, { method: call.method, path: url.pathname, query: url.searchParams, membershipId: a.membershipId,
-        operationId: call.operation ? randomUUID() : null, body: call.body, ...(call.day ? { seedDay: call.day } : {}) });
+      const operationId = call.operation ? randomUUID() : null;
+      let res;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          res = await opts.execute(actorClaims, { method: call.method, path: url.pathname, query: url.searchParams, membershipId: a.membershipId,
+            operationId, body: call.body, ...(call.day ? { seedDay: call.day } : {}) });
+          break;
+        } catch (err) {
+          const code = (err as { code?: string }).code;
+          // Interbloqueo o fallo de serialización: la transacción se revirtió entera; se repite igual.
+          if ((code === '40P01' || code === '40001') && attempt < 6) { await new Promise((r) => setTimeout(r, 100 * (attempt + 1))); continue; }
+          if (history) {
+            const e = err as Error & { code?: string; details?: unknown };
+            throw new ApiError(500, 'DEMO_SCENARIO_STEP_FAILED',
+              `${call.seat} ${call.method} ${url.pathname} (${call.day ?? ''}) → ${e.code ?? ''} ${e.message} ${JSON.stringify(e.details ?? '')} ${JSON.stringify(call.body ?? {}).slice(0, 300)}`);
+          }
+          throw err;
+        }
+      }
       // Escenario histórico: cualquier rechazo detiene la inicialización (la Demo nueva se
       // retira y la anterior sigue intacta). Nunca se sigue con una historia a medias.
       if (history && res.status >= 400) {
