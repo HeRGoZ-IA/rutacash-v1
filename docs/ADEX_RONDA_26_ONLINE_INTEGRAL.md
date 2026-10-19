@@ -27,7 +27,7 @@ En negrita, lo nuevo de esta ronda. CLEAN no cambió (`git status src/` vacío).
 
 Se **retiró** la copia del Dashboard: «Rutas con mora» ya se calcula (regla original de CLEAN sobre las cuotas del servidor), así que vuelve a usarse la pantalla original sin cambios.
 
-## 3. Servidor (migraciones 0015–0018, aditivas)
+## 3. Servidor (migraciones 0015–0019, aditivas)
 
 | Migración | Qué añade |
 |---|---|
@@ -35,6 +35,7 @@ Se **retiró** la copia del Dashboard: «Rutas con mora» ya se calcula (regla o
 | 0016 | **Reapertura de una semana cerrada** (`POST /v1/periods/:id/reopen`): responsable o SuperAdmin, motivo ≥ 10, el archivo del cierre no cambia; volver a cerrar crea la versión 2. |
 | 0017 | **Corrección de pagos** en una transacción (`POST /v1/collections/:id/correct`) y **solicitudes de ajuste** (`/v1/payment-adjustments`: crear, aprobar = corregir, rechazar). Reutiliza los motores de 0013 sin copiarlos. `payment.correct` en la segunda barrera SQL. |
 | 0018 | Una sola fuente de la **fecha contable** (`adex.business_today`) y el **reloj de inicialización de la Empresa Demo** (§5). Para cualquier otra empresa la fecha es la real, como antes. |
+| 0019 | **Conciliación de capital a escala**: las comprobaciones que recorren el libro (posiciones, operaciones, custodias, cuadres, sobrantes, periodos cerrados) se ejecutan en una sola función del propietario, reservada al SuperAdmin del contexto. Las consultas son las mismas, con el mismo resultado. Antes, la evaluación fila a fila de la seguridad por filas superaba el tope de 2 min con seis meses de datos. |
 
 Lecturas nuevas: cuotas en bloque por ruta (`GET /v1/installments`), páginas con cursor y filtro por fecha en recaudos, gastos y créditos, `periodClosed` en cada pago, historial de responsables de capital (`GET /v1/capital/controller-events`), nombre del responsable en el listado de trabajadores cuadrables y nombre de la persona en el contexto.
 
@@ -42,9 +43,9 @@ Lecturas nuevas: cuotas en bloque por ruta (`GET /v1/installments`), páginas co
 
 | Prueba | Resultado |
 |---|---|
-| SaaS `npm test` (typecheck, unitarias, PostgreSQL real) | ver §8 |
+| SaaS `npm run test:db` (PostgreSQL real, migraciones 0001–0019) | 322/323 · 0 fallos · 1 omitida (`tmp/saas-phase01/evidence/db-tests-2026-10-19T07-04-53-481Z.log`) |
 | E2E Cobrador · Supervisor · Caja · Liquidación (`tmp/r26/e2e-campo.mjs`, Chrome real, staging) | 37/37 |
-| E2E Secretario · Socio · Ajustes · Caja socios · Reportes · Dashboard (`tmp/r26/e2e-oficina.mjs`) | ver §8 |
+| E2E Secretario · Socio · Ajustes · Caja socios · Reportes · Dashboard (`tmp/r26/e2e-oficina.mjs`) | 26/26 |
 | Regresión Ronda 24 (`tmp/r24/e2e.mjs`) | 61/62 → caso UI-35 actualizado (la Caja ya no es pendiente) |
 | Regresión Ronda 25 (`tmp/r25/e2e-capital.mjs`) | 50/50 |
 
@@ -68,7 +69,13 @@ Lo que no se registra: los **ingresos y salidas manuales** de Caja socios. Decid
 
 ## 7. Pendientes reales
 
-(Se completa al final.)
+| # | Pendiente | Tipo | Qué hace falta |
+|---|---|---|---|
+| P1 | **D1 · Caja socios**: ingresos y salidas manuales (§6) | Decisión de negocio | Elegir A, B o C. Hasta entonces la pantalla original muestra los aportes y rechaza los movimientos manuales con un mensaje claro. |
+| P2 | **Indicadores de Capital «Asignado / En rutas / Colocado»** | Definición pendiente | En CLEAN salen de la colocación heredada por ruta, que en una empresa nativa del servidor vale 0. No se inventa una fórmula: las cifras reales del libro (bolsas, custodia, cartera, interés, gastos) sí se muestran. Hay que decidir qué cuenta del libro corresponde a cada indicador. |
+| P3 | **Sobrante de cuadre sin identificar** (F6-D02) | Decisión de negocio heredada | Queda en control, sin gastarse, como hasta ahora. |
+| P4 | **Despliegue del API en Render** | Acción del propietario | El servidor publicado aún no tiene las migraciones del API nuevo (0015–0018 ya están en staging). La publicación del frontend está bloqueada por la compuerta hasta que /healthz anuncie `clean-online-v1`. |
+| P5 | **Proyecto gratuito de Supabase** | Riesgo operativo | La inicialización larga de la Demo mostró bloqueos de hasta 2 min en el proyecto gratuito. Para el uso real conviene un plan con recursos garantizados. |
 
 ## 8. Estado de publicación
 

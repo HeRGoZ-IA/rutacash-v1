@@ -52,8 +52,8 @@ if (!['--status', '--reset', '--abort'].includes(mode ?? '')) fail('uso: --statu
 // TLS estricto si el certificado del proyecto está disponible; si no, el modo de prueba de staging.
 const caFile = [env['ADEX_PG_SSL_CA_FILE'], path.join(os.homedir(), 'Downloads', 'prod-ca-2021.crt')].find((f) => f && existsSync(f));
 const ssl = caFile ? { ca: readFileSync(caFile, 'utf8'), rejectUnauthorized: true } : { rejectUnauthorized: false };
-// Tope de 30 s por sentencia: si el proyecto gratuito se atasca, falla rápido y el escenario
-// reintenta el mismo comando (en vez de esperar los 2 min por defecto del rol).
+// Tope de 30 s por sentencia pedido al conectar. El pooler de Supabase no lo aplica (rige el
+// tope del rol, 2 min); se deja por si se conecta directo. Los 57014 se reintentan igual.
 const apiPool = new pg.Pool({ connectionString: env['ADEX_API_DATABASE_URL'], ssl, max: 8, statement_timeout: 30_000, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 20_000 });
 const demoPool = new pg.Pool({ connectionString: env['ADEX_DEMO_DATABASE_URL'], ssl, max: 2, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 20_000 });
 const provider = createSupabaseProvider({ url: env['SUPABASE_URL']!, publishableKey: env['SUPABASE_PUBLISHABLE_KEY']!, secretKey: env['SUPABASE_SECRET_KEY']! });
