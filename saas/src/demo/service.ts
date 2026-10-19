@@ -22,8 +22,12 @@ import { HISTORY_COMPANY, HISTORY_SEATS, HISTORY_VERSION, runHistoryScenario } f
 
 export const SLOT_RE = /^[a-z][a-z0-9-]{1,30}$/;
 
-/** Errores de conexión o autenticación transitorios del pooler (se reintentan en el escenario histórico). */
-const TRANSIENT = new Set(['28P01', '08000', '08003', '08006', '57P01', '57P03', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN']);
+/**
+ * Errores transitorios del pooler (se reintentan en el escenario histórico): conexión o
+ * autenticación caída, y sentencia cancelada por tiempo o espera de bloqueo (57014/55P03:
+ * la transacción se revierte entera, así que repetir con el mismo id es seguro).
+ */
+const TRANSIENT = new Set(['57014', '55P03', '28P01', '08000', '08003', '08006', '57P01', '57P03', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN']);
 
 export interface DemoServiceOptions {
   /** Pool conectado como `adex_demo`. */
