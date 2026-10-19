@@ -424,23 +424,28 @@ async function adminPools(client: pg.PoolClient, ctx: ActiveContext, onlyAdmin: 
     allocated: string; contributions: string; delivered: string; returned: string; reassigned: string; custody: string;
     expenses: string; collections: string; disbursed: string;
   }>(
+    // Las patas se agregan POR CUENTA (lateral sobre el índice company_id + account_id): con un
+    // join y group by, el planificador podía recorrer el libro de todas las empresas evaluando
+    // la RLS fila a fila (minutos en staging). Mismas sumas, mismos filtros.
     `select a.membership_id, m.display_name, m.status, a.balance_minor balance,
-            coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) in ('ADMIN_ALLOCATION', 'ADMIN_RETURN')), 0) allocated,
-            coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'PARTNER_CONTRIBUTION'), 0) contributions,
-            coalesce(-sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'WORKER_DELIVERY'), 0) delivered,
-            coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'WORKER_RETURN'), 0) returned,
-            coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'ROUTE_REASSIGNMENT'), 0) reassigned,
-            coalesce(-sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) in ('ROUTE_EXPENSE', 'COMPANY_EXPENSE', 'EXPENSE_REFUND')), 0) expenses,
-            coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'COLLECTION'), 0) collections,
-            coalesce(-sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'LOAN_DISBURSEMENT'), 0) disbursed,
+            f.allocated, f.contributions, f.delivered, f.returned, f.reassigned, f.expenses, f.collections, f.disbursed,
             coalesce((select sum(c.balance_minor) from adex.capital_accounts c join adex.routes ro on ro.company_id = c.company_id and ro.id = c.route_id
                        where c.company_id = a.company_id and c.kind = 'custody' and ro.capital_controller_membership_id = a.membership_id), 0) custody
        from adex.capital_accounts a
        join adex.memberships m on m.company_id = a.company_id and m.id = a.membership_id
-       left join adex.capital_entries e on e.company_id = a.company_id and e.account_id = a.id
-       left join adex.capital_operations o on o.company_id = e.company_id and o.id = e.operation_id
+       cross join lateral (
+         select coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) in ('ADMIN_ALLOCATION', 'ADMIN_RETURN')), 0) allocated,
+                coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'PARTNER_CONTRIBUTION'), 0) contributions,
+                coalesce(-sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'WORKER_DELIVERY'), 0) delivered,
+                coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'WORKER_RETURN'), 0) returned,
+                coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'ROUTE_REASSIGNMENT'), 0) reassigned,
+                coalesce(-sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) in ('ROUTE_EXPENSE', 'COMPANY_EXPENSE', 'EXPENSE_REFUND')), 0) expenses,
+                coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'COLLECTION'), 0) collections,
+                coalesce(-sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'LOAN_DISBURSEMENT'), 0) disbursed
+           from adex.capital_entries e
+           join adex.capital_operations o on o.company_id = e.company_id and o.id = e.operation_id
+          where e.company_id = a.company_id and e.account_id = a.id) f
       where a.company_id = $1 and a.kind = 'admin' ${onlyAdmin ? 'and a.membership_id = $2' : ''}
-      group by a.company_id, a.id, a.membership_id, m.display_name, m.status, a.balance_minor
       order by m.display_name, a.membership_id`, onlyAdmin ? [ctx.companyId, onlyAdmin] : [ctx.companyId]);
   return r.rows.map((x) => ({
     adminId: x.membership_id, name: x.display_name, status: x.status, availableMinor: Number(x.balance),
