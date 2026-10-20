@@ -48,9 +48,8 @@ export interface CapitalRecords {
   transfers: Transfer[];
   cashCustodyMovements: CashCustodyMovement[];
   /**
-   * Pata de Caja socios de cada APORTE de socio (CLEAN C1: `registerPartnerContribution`
-   * crea una «salida» del socio, categoría transferencia; su anulación, el espejo negativo).
-   * Los ingresos y salidas MANUALES de Caja socios no existen en el servidor (decisión D1).
+   * Caja socios: SIEMPRE vacía (Ronda 53: el rol Socio y su caja no existen en ADEX Online; los
+   * aportes históricos de socio quedan solo en el libro como entrada externa a la bolsa).
    */
   partnerCashMovements: PartnerCashMovement[];
 }
@@ -93,17 +92,10 @@ export function buildCapitalRecords(operations: ServerOperation[], truncated: bo
         id: o.id, tenantId, tipo: k as CapitalLedgerEntry['tipo'], amount: rev ? -a : a,
         fromAdminId: k === 'ADMIN_RETURN' ? o.adminId ?? undefined : undefined,
         toAdminId: k === 'ADMIN_ALLOCATION' || k === 'PARTNER_CONTRIBUTION' ? o.adminId ?? undefined : undefined,
-        routeId: o.routeId ?? undefined, partnerId: k === 'PARTNER_CONTRIBUTION' ? o.counterpartId ?? undefined : undefined,
+        routeId: o.routeId ?? undefined,
         descripcion: o.reason, ...common, actorUserId: o.actorId, actorRole: o.actorRole as CapitalLedgerEntry['actorRole'],
         status: 'aplicado', syncStatus: 'synced', ...reversal,
       });
-      if (k === 'PARTNER_CONTRIBUTION' && o.counterpartId) {
-        out.partnerCashMovements.push({
-          id: `pc:${o.id}`, tenantId, partnerId: o.counterpartId, type: 'salida', category: 'transferencia', amount: rev ? -a : a,
-          description: rev ? `Anulación de aporte: ${o.reason}` : o.reason, relatedLedgerEntryId: o.id, ...common, createdBy: o.actorId,
-          ...(rev ? { reversesId: `pc:${orig}`, reversalReason: o.reason } : {}),
-        });
-      }
     } else if (k === 'WORKER_DELIVERY' && o.routeId) {
       const l = link(rev ? 'ANULACION_ENTREGA' : 'ENTREGA_TRABAJADOR');
       out.capitalMovements.push({

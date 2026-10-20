@@ -22,7 +22,7 @@ const FILTROS: { value: string; label: string; kinds: PoolMovementKind[] }[] = [
   { value: 'cuadres', label: 'Efectivo recibido en cuadres', kinds: ['retornoCuadre'] },
   { value: 'cobros', label: 'Cobros no en efectivo', kinds: ['cobroNoPersonal'] },
   { value: 'operacion', label: 'Préstamos y gastos de ruta con la bolsa', kinds: ['desembolsoAdmin', 'gastoRuta'] },
-  { value: 'socios', label: 'Aportes de socios', kinds: ['aporteSocio'] },
+  { value: 'socios', label: 'Aportes externos (históricos)', kinds: ['aporteSocio'] },
 ]
 
 /** Entradas a la bolsa que vienen de las rutas (v16: retiros; centralizado: su operación real). */
@@ -135,7 +135,10 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
         <div className="divide-y divide-gray-50 text-sm">
           <Linea label="Asignado por el SuperAdmin" value={money(p.asignaciones)} />
           {p.devolucionesSA !== 0 && <Linea label="(−) Devuelto al SuperAdmin" value={money(p.devolucionesSA)} />}
-          {p.aportesSocios !== 0 && <Linea label="(+) Aportes de socios" value={money(p.aportesSocios)} />}
+          {p.aportesSocios !== 0 && <Linea label="(+) Aportes externos (históricos)" value={money(p.aportesSocios)} />}
+          {/* ADEX Online · Ronda 53 */}
+          {(p as { traspasos?: number }).traspasos ? <Linea label="(±) Transferencias entre Administradores" value={money((p as { traspasos?: number }).traspasos ?? 0)} /> : null}
+          {(p as { comprometido?: number }).comprometido ? <Linea label="(−) Comprometido en transferencias pendientes" value={money(-((p as { comprometido?: number }).comprometido ?? 0))} /> : null}
           {p.rutasRecibidas !== 0 && <Linea label="(+) Capital recibido con rutas (cambio de responsable)" value={money(p.rutasRecibidas)} />}
           {p.rutasEntregadas !== 0 && <Linea label="(−) Capital entregado con rutas (cambio de responsable)" value={money(p.rutasEntregadas)} />}
           <Linea label="= Capital a explicar" value={money(k.entradas)} strong />
@@ -147,7 +150,7 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
         {/* ADEX Online */}
         {Number.isNaN(k.diferencia) && (
           <p className="px-4 pt-2 text-[11px] text-gray-500">
-            El disponible, el capital recibido y los aportes son los del servidor. El capital en rutas de la bolsa (y por tanto la conciliación y el capital bajo tu responsabilidad) aún no tiene una cifra en el servidor con el significado de CLEAN: se muestra «—».
+            El capital en rutas aún no tiene cifra en el servidor: se muestra «—».
           </p>
         )}
         <p className="px-4 py-2 text-[11px] text-gray-500">
@@ -163,7 +166,7 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
           <Cifra label={gDesde || gHasta ? 'Gasto neto del período' : 'Gasto neto (todo el historial)'} value={money(periodo.neto)} tone="text-red-700" bg="bg-red-50" testId="pool-period-total" />
           <Cifra label="Gastos registrados" value={String(periodo.registros)} />
         </div>
-        <p className="text-[11px] text-gray-500">Resumen por fecha contable (incluye anulaciones y reintegros del período). La conciliación usa siempre el acumulado.</p>
+        <p className="text-[11px] text-gray-500">Por fecha contable, con anulaciones y reintegros.</p>
       </section>
 
       {/* DEVOLUCIONES DESDE RUTAS */}
@@ -227,7 +230,7 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
             ))}
           </div>
         )}
-        <p className="text-[11px] text-gray-500">Registros reales de la bolsa (sin saldo acumulado por fila). Los traslados entre tus rutas no cambian la bolsa y no aparecen aquí.</p>
+        <p className="text-[11px] text-gray-500">Los traslados entre tus rutas no cambian la bolsa.</p>
       </section>
     </div>
   )

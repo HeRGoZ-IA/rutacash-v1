@@ -83,7 +83,7 @@ const LEDGER_LABEL: Record<CapitalLedgerEntry['tipo'], string> = {
   ADMIN_ALLOCATION: 'Asignación a Administrador',
   ADMIN_RETURN: 'Devolución de Administrador',
   ROUTE_CONTROL_TRANSFER: 'Traspaso de responsabilidad de ruta',
-  PARTNER_CONTRIBUTION: 'Aporte de socio',
+  PARTNER_CONTRIBUTION: 'Aporte externo (histórico)',
 }
 
 const EVENT_LABEL: Record<RouteCapitalControllerEvent['kind'], string> = {
@@ -313,13 +313,12 @@ export default function CapitalPage() {
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h1 className="text-xl font-bold text-gray-900">{titularId ? 'Caja principal' : 'Capital'}</h1>
-        {central.activo && <p className="text-xs font-medium text-primary-700" data-testid="central-active">Capital centralizado activo{central.desde ? ` desde ${formatDateTime(central.desde)}` : ''}</p>}
         <p className="text-sm text-gray-500 mt-0.5">
           {verAdminId
             ? <>Consulta de la bolsa de <b>{nombre(verAdminId)}</b> (SuperAdmin). <button type="button" className="text-primary-700 hover:underline" onClick={() => setSearchParams({}, { replace: true })}>Volver a Capital</button></>
             : esSuperAdmin
-              ? 'SuperAdmin → Administradores → Rutas. Asignas capital a cada Administrador; él lo distribuye en sus rutas.'
-              : 'Mi capital: lo que recibí del SuperAdmin, lo que distribuí en mis rutas y mis gastos administrativos. Una sola bolsa.'}
+              ? 'Capital de la empresa y bolsas de los Administradores.'
+              : 'Tu bolsa: capital recibido, entregado y gastos.'}
         </p>
       </div>
       {esSuperAdmin && !verAdminId && (
@@ -354,13 +353,7 @@ export default function CapitalPage() {
         </div>
       )}
 
-      {/* ADEX Online: cifras sin equivalente en el servidor. */}
-      {esSuperAdmin && !verAdminId && (
-        <p className="flex items-start gap-2 text-sm text-gray-600 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2" data-testid="capital-server-figures">
-          <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-400" />
-          Los disponibles de la empresa y de cada bolsa son los del servidor central. Las cifras con «—» (capital total controlado, asignado, en rutas, capital colocado por ruta y en rutas sin responsable) se calculaban con el libro local de CLEAN; el servidor todavía no tiene cifras con ese mismo significado.
-        </p>
-      )}
+      {/* ADEX Online (Ronda 53): sin la nota técnica sobre las cifras «—» (sin dato en el servidor). */}
 
       {/* Oficina → Ruta solo filtra LISTAS de rutas. En la Caja principal va junto a
           las rutas: el disponible es lo primero que se ve. */}

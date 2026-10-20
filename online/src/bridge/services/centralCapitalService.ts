@@ -4,8 +4,7 @@
 //   deliverCapitalToWorker      → POST /v1/capital/deliveries          (WORKER_DELIVERY)
 //   returnCapitalFromWorker     → POST /v1/capital/returns             (WORKER_RETURN)
 //   reverseCapitalDelivery      → POST /v1/capital/operations/:id/reverse
-//   registerPartnerContribution → POST /v1/capital/partner-contributions
-//   reversePartnerContribution  → POST /v1/capital/operations/:id/reverse
+//   registerPartnerContribution / reversePartnerContribution → no existen (Ronda 53: sin Socio)
 //
 // Cada comando lleva el id de operación que CLEAN ya genera al abrir el formulario: un
 // doble clic o un reintento tras una respuesta perdida devuelven la MISMA operación. El
@@ -67,20 +66,8 @@ async function reverseDeliveryOnline(p: { actor: User | null | undefined; tenant
   };
 }
 
-async function partnerContributionOnline(p: { actor: User | null | undefined; tenantId: string; partnerId: string; routeId: string; amount: number; descripcion?: string; fecha?: string; operationId?: string }) {
-  const hoy = (await calendar()).businessDate;
-  if (p.fecha && p.fecha !== hoy) throw new CentralCapitalError(`La fecha la fija el servidor: hoy en la empresa (${hoy}).`);
-  const id = await command('/v1/capital/partner-contributions',
-    { partnerId: p.partnerId, routeId: p.routeId, amountMinor: toMinor(p.amount), reason: motivoValido(p.descripcion, 'la descripción del aporte') }, p.operationId);
-  const entry = (await capitalRecords()).capitalLedger.find((e) => e.id === id) ?? ({ id } as CapitalLedgerEntry);
-  // Caja socios no existe en el servidor (decisión D1 abierta): no hay pata de socio.
-  return { entry, partnerMovement: undefined as never };
-}
-
-async function reversePartnerContributionOnline(p: { actor: User | null | undefined; tenantId: string; entryId: string; reason: string }) {
-  const id = await command(`/v1/capital/operations/${p.entryId}/reverse`, { reason: motivoValido(p.reason, 'el motivo de la anulación') });
-  return { reversal: (await capitalRecords()).capitalLedger.find((e) => e.id === id) ?? ({ id } as CapitalLedgerEntry) };
-}
+// Ronda 53: el rol Socio y sus aportes no existen en ADEX Online (el servidor no tiene el comando).
+const sinSocio = async (): Promise<never> => { throw new CentralCapitalError('ADEX Online no tiene el rol Socio ni aportes de socio.'); };
 
 const sinTransicion = async (): Promise<never> => {
   throw new CentralCapitalError('En ADEX Online el capital centralizado está activo desde la creación de la empresa: no hay transición que activar ni diagnosticar.');
@@ -90,8 +77,8 @@ const sinTransicion = async (): Promise<never> => {
 export const deliverCapitalToWorker = deliverOnline as unknown as typeof Clean.deliverCapitalToWorker;
 export const returnCapitalFromWorker = returnOnline as unknown as typeof Clean.returnCapitalFromWorker;
 export const reverseCapitalDelivery = reverseDeliveryOnline as unknown as typeof Clean.reverseCapitalDelivery;
-export const registerPartnerContribution = partnerContributionOnline as unknown as typeof Clean.registerPartnerContribution;
-export const reversePartnerContribution = reversePartnerContributionOnline as unknown as typeof Clean.reversePartnerContribution;
+export const registerPartnerContribution = sinSocio as unknown as typeof Clean.registerPartnerContribution;
+export const reversePartnerContribution = sinSocio as unknown as typeof Clean.reversePartnerContribution;
 export const activateCentralCapitalModel = sinTransicion as unknown as typeof Clean.activateCentralCapitalModel;
 export const getActivationReadiness = sinTransicion as unknown as typeof Clean.getActivationReadiness;
 export const releaseCentralCapitalRoute = sinTransicion as unknown as typeof Clean.releaseCentralCapitalRoute;

@@ -1,509 +1,200 @@
-// ADEX Online: COPIA de la TransfersPage original de CLEAN (src/pages/admin/TransfersPage.tsx).
-// Misma pantalla; entregas, devoluciones, aportes de socio, historial y anulaciones van al
-// libro central del servidor por los servicios del puente. Único cambio, marcado: la
-// «Operación con socio» (Caja socios, decisión D1) no existe en el servidor y se muestra
-// deshabilitada con el motivo, nunca como disponible.
-import { useState, useEffect } from 'react'
+// ADEX Online: pantalla de TRANSFERENCIAS (Ronda 53). Parte de la TransfersPage de CLEAN
+// (src/pages/admin/TransfersPage.tsx) con la misma identidad visual, reorganizada:
+//
+//   · Arriba, lo que decide una operación: capital disponible, capital en manos de
+//     trabajadores y transferencias pendientes.
+//   · UN punto de entrada, «Nueva operación», con SOLO las operaciones que el rol activo
+//     puede ejecutar (mismas reglas que cada servicio: `availableOperations`). Las de
+//     trabajadores abren el asistente de CLEAN (`OperationWizard`, sus servicios de
+//     siempre); el traspaso entre Administradores, su formulario (servidor, 0023).
+//   · Rutas solo de consulta (responsable y efectivo en manos), sin botones repetidos.
+//   · «Ver movimientos» abre una ventana con filtros; nada de historial permanente.
+//
+// Sin Socio ni Caja socios (retirados de ADEX Online en la Ronda 53).
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, ArrowLeftRight, ChevronRight, MapPin, Users, Search, Wallet, Info, AlertTriangle, History } from 'lucide-react'
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, ChevronDown, History, MapPin, Plus, Search, Users } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
-import { Input, Select, Textarea } from '@/components/ui/Input'
-import { MoneyInput } from '@/components/ui/MoneyInput'
+import { Input, Select } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
-import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { DateRangeFilter } from '@/components/ui/DateRangeFilter'
-import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { useDataRevision } from '@/hooks/useDataRevision'
-import { registerTransfer } from '@/services/routeFundsService'
-import { canReverseTransfer, reverseTransfer } from '@/services/movementReversalService'
 import { getRouteCashReconciliation } from '@/services/routeCashReconciliation'
-import { getAdminAvailableCapital } from '@/services/capitalControlService'
 import { listCustodyMovements } from '@/services/cashCustodyService'
-import { pairReversals, reversalStateOf } from '@/lib/movementReversal'
-import { transferTotalsFor } from '@/lib/transferTotals'
-import { availableOperations, operationButtonLabel, operationsOfMode, routesForOperation, transferCategories, type TransferMode, type TransferOperationKind } from '@/lib/transferOperations'
-import { useCentralCapital } from '@/hooks/useCentralCapital'
-import { registerPartnerContribution } from '@/services/centralCapitalService'
-import { AnnulledBadge, ReversalDetail, ReverseButton, ReverseMovementModal, signedMoney } from '@/components/ui/MovementReversal'
+import { availableOperations, operationDef, type TransferMode, type TransferOperationKind } from '@/lib/transferOperations'
 import { OperationWizard } from '@/components/transfers/OperationWizard'
-import { generateId } from '@/lib/utils'
-import { formatCurrency, formatDate, formatDateTime, today } from '@/lib/formatters'
-import { can, canOperateRouteCash, filterAccessibleRoutes, authorizedRouteIdsOf, isPartnerInScope, isTransferInScope } from '@/lib/permissions'
+import { formatCurrency, formatDateTime } from '@/lib/formatters'
+import { filterAccessibleRoutes } from '@/lib/permissions'
 import { CapitalControllerBadge } from '@/components/ui/CapitalControllerBadge'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
-import type { CashCustodyMovement, Transfer, Route, User, TransferEntityType } from '@/models/types'
+import { useCentralCapital } from '@/hooks/useCentralCapital'
+import type { CashCustodyMovement, Route, User } from '@/models/types'
+import { serverView } from '../../../runtime/projection.ts'
+import { toMajor } from '../../../runtime/mappers.ts'
+import { listAdminTransfers, STATE_LABEL, type AdminTransfer } from '../../../runtime/adminTransfers.ts'
+import { TransferCard, TransferDecisionModal, TransferRegisterModal } from '../../../runtime/AdminTransferUI.tsx'
 
-// Entidad participante (ruta o socio) para el historial agrupado.
-interface EntityGroup {
-  key: string          // `${type}:${id}`
-  type: TransferEntityType
-  id: string
-  nombre: string
-  entrante: number
-  saliente: number
-  neto: number
-  cantidad: number
-  ultimoMovimiento?: string
-  transfers: Transfer[]
-}
+interface PoolSummary { admins: { adminId: string; availableMinor: number; pendingTransfersOutMinor?: number }[]; company?: { availableMinor: number; inTransitMinor?: number } }
 
-/** Saldos de la caja de una ruta (conciliación con permiso). `null` = no disponibles. */
-interface RouteSummary { disponible: number; sinAsignar: number; enTrabajadores: number }
+/** Operaciones del menú «Nueva operación»: las del asistente de CLEAN y el traspaso entre Administradores. */
+type NewOp = { kind: TransferOperationKind } | { kind: 'admin-transfer' }
 
-function encodeEndpoint(type: TransferEntityType, id: string) { return `${type}:${id}` }
-function decodeEndpoint(v: string): { type: TransferEntityType; id: string } | null {
-  const [type, id] = v.split(':')
-  if ((type === 'route' || type === 'partner') && id) return { type, id }
-  return null
-}
-
-/**
- * TRANSFERENCIAS — MÓDULO UNIFICADO (Ronda 4/6).
- *
- * Una sola pantalla para las operaciones de caja EXISTENTES, cada una con su
- * servicio (ver `OperationWizard` y `lib/transferOperations`): entregar y recibir
- * Base, transferir entre rutas del mismo responsable, distribuir y retirar
- * capital. No hay libro paralelo: el historial muestra los registros reales.
- *
- * Fuera del flujo nuevo, a propósito:
- *  · Traspaso de efectivo ENTRE TRABAJADORES: sigue en Liquidación → Cuadre por
- *    trabajador (`transferBaseBetweenWorkers`); el botón que solo navegaba se retiró
- *    (2026-10-07) y no vuelve.
- *  · Operaciones con SOCIOS: se conservan como estaban (sección propia), sin nuevos
- *    accesos, por los riesgos R1/R2 de la auditoría (decisión D1 pendiente).
- *  · Entre bolsas de Administradores distintos: no existe (D2 pendiente).
- *
- * CAPITAL CENTRALIZADO (C2): con el modelo activo la caja de la ruta no es una
- * bolsa. Se ofrecen entregar y recibir capital (bolsa ⇄ trabajador) y, solo donde
- * queda, vaciar el saldo heredado. No aparecen Ruta → Ruta, colocar en la caja ni
- * Socio → Ruta: el aporte de un socio entra a la bolsa del responsable.
- */
 export default function TransfersPage() {
   const { tenantId, currency } = useTenant()
   const officeFilter = useOfficeRouteFilter()
   const { user } = useAuth()
   const money = (n: number) => formatCurrency(n, currency)
-  const [transfers, setTransfers] = useState<Transfer[]>([])
-  const [routes, setRoutes] = useState<Route[]>([])
-  const [partners, setPartners] = useState<User[]>([])
-  const [users, setUsers] = useState<User[]>([])
-  const [loading, setLoading] = useState(true)
-  /** Saldos por ruta: MISMA fuente que Caja y Liquidación (`getRouteCashReconciliation`). */
-  const [resumen, setResumen] = useState<Record<string, RouteSummary | null>>({})
-  const [bolsa, setBolsa] = useState<number | null>(null)
-  const [custodia, setCustodia] = useState<CashCustodyMovement[]>([])
-  const [saldosAt, setSaldosAt] = useState('')
-  const [wizard, setWizard] = useState<{ kind?: TransferOperationKind; routeId?: string } | null>(null)
-  const [detailKey, setDetailKey] = useState<string | null>(null)
-  const [reversing, setReversing] = useState<Transfer | null>(null)
-  // Historial: filtros
-  const [desde, setDesde] = useState('')
-  const [hasta, setHasta] = useState('')
-  const [tipoFiltro, setTipoFiltro] = useState<'all' | 'route' | 'partner'>('all')
-  const [search, setSearch] = useState('')
-  // Operación con socio (formulario existente, sin cambios de reglas).
-  const [socioOpen, setSocioOpen] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ origen: '', destino: '', valor: 0, descripcion: '', fecha: today() })
-  const [socioOpId, setSocioOpId] = useState('')
-  // Capital centralizado: aporte de socio a la bolsa del responsable de una ruta.
   const central = useCentralCapital(tenantId)
-  const [aporteOpen, setAporteOpen] = useState(false)
-  const [aporte, setAporte] = useState({ partnerId: '', routeId: '', valor: 0, descripcion: '', fecha: today() })
-  const [aporteOpId, setAporteOpId] = useState('')
+  const [routes, setRoutes] = useState<Route[]>([])
+  const [users, setUsers] = useState<User[]>([])
+  const [enManos, setEnManos] = useState<Record<string, number | null>>({})
+  const [heredado, setHeredado] = useState<Record<string, number>>({})
+  const [pool, setPool] = useState<{ available: number; pendingOut: number } | null>(null)
+  const [companyAvailable, setCompanyAvailable] = useState<number | null>(null)
+  const [transfers, setTransfers] = useState<AdminTransfer[]>([])
+  const [loading, setLoading] = useState(true)
+  const [chooser, setChooser] = useState(false)
+  const [wizard, setWizard] = useState<{ kind?: TransferOperationKind } | null>(null)
+  const [adminForm, setAdminForm] = useState(false)
+  const [decision, setDecision] = useState<{ t: AdminTransfer; what: 'confirm' | 'reject' | 'cancel' } | null>(null)
+  const [movements, setMovements] = useState(false)
 
-  // Reactiva: otra pestaña del mismo navegador registra y esta vista se entera sin F5.
   const revision = useDataRevision()
-  useEffect(() => { load() }, [tenantId, user, revision])  // eslint-disable-line react-hooks/exhaustive-deps
-
-  const partnerRouteIds = (socioId: string) => authorizedRouteIdsOf(users.find(u => u.id === socioId))
+  useEffect(() => { void load() }, [tenantId, user, revision])  // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
     setLoading(true)
-    const [ts, rts, us] = await Promise.all([
-      db.transfers.where('tenantId').equals(tenantId).toArray(),
+    const [rts, us] = await Promise.all([
       db.routes.where('tenantId').equals(tenantId).toArray(),
       db.users.where('tenantId').equals(tenantId).toArray(),
     ])
-    // RESTRICCIÓN POR RUTAS: rutas autorizadas, socios vinculados y transferencias
-    // cuyas DOS entidades están en alcance.
-    const socioRoute = (id: string) => authorizedRouteIdsOf(us.find(u => u.id === id))
-    const scopedRoutes = filterAccessibleRoutes(user, rts)
-    setTransfers(ts.filter(t => isTransferInScope(user, t, socioRoute)).sort((a, b) => b.fecha.localeCompare(a.fecha)))
-    setRoutes(scopedRoutes)
+    const scoped = filterAccessibleRoutes(user, rts)
+    setRoutes(scoped)
     setUsers(us)
-    setPartners(us.filter(u => u.rol === 'socio' && isPartnerInScope(user, authorizedRouteIdsOf(u))))
-    // Saldos SOLO de rutas en alcance (nunca rutas ajenas), con el permiso del servicio.
-    const saldos = await Promise.all(scopedRoutes.map(async r => {
+    // Efectivo en manos de trabajadores y saldo heredado: MISMA fuente que Caja y Liquidación.
+    const saldos = await Promise.all(scoped.map(async r => {
       try {
         const c = await getRouteCashReconciliation({ actor: user, tenantId, routeId: r.id })
-        return [r.id, { disponible: c.disponible, sinAsignar: c.noAsignado, enTrabajadores: c.enPersonas }] as const
-      } catch { return [r.id, null] as const }
+        return [r.id, c.enPersonas, Math.max(0, c.noAsignado)] as const
+      } catch { return [r.id, null, 0] as const }
     }))
-    setResumen(Object.fromEntries(saldos))
-    // Bolsa del Administrador (Caja principal): solo la propia; el SuperAdmin no tiene caja personal.
-    setBolsa(user?.rol === 'admin' ? await getAdminAvailableCapital(tenantId, user.id).catch(() => null) : null)
-    const movs = (await Promise.all(scopedRoutes.map(r => listCustodyMovements(r.id)))).flat()
-      .filter(m => m.tenantId === tenantId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    setCustodia(movs.slice(0, 15))
-    setSaldosAt(new Date().toISOString())
+    setEnManos(Object.fromEntries(saldos.map(([id, p]) => [id, p])))
+    setHeredado(Object.fromEntries(saldos.map(([id, , h]) => [id, h])))
+    const summary = await serverView<PoolSummary>('/v1/capital/summary').catch(() => null)
+    const own = summary?.admins.find(a => a.adminId === user?.id)
+    setPool(user?.rol === 'admin' && own ? { available: toMajor(own.availableMinor), pendingOut: toMajor(own.pendingTransfersOutMinor ?? 0) } : null)
+    setCompanyAvailable(user?.rol === 'superadmin' && summary?.company ? toMajor(summary.company.availableMinor) : null)
+    setTransfers(await listAdminTransfers().catch(() => []))
     setLoading(false)
   }
 
-  const routeNombre = (id: string) => routes.find(r => r.id === id)?.nombre ?? id
-  const partnerName = (id?: string) => id ? (users.find(u => u.id === id)?.nombre ?? id) : undefined
-  const userName = (id?: string) => id ? (users.find(u => u.id === id)?.nombre ?? '') : ''
+  const modo: TransferMode | undefined = central.activo ? { central: true, heredado } : undefined
+  const workerOps = central.listo ? availableOperations(user, routes, users, tenantId, modo) : []
+  const otherAdmins = users.filter(u => u.rol === 'admin' && u.status === 'activo' && u.id !== user?.id)
+  const canAdminTransfer = user?.rol === 'admin' && otherAdmins.length > 0
+  const ops: NewOp[] = [...workerOps.map(kind => ({ kind })), ...(canAdminTransfer ? [{ kind: 'admin-transfer' as const }] : [])]
 
-  function originLabel(t: Transfer): string {
-    if (t.socioOrigenId) return `Socio: ${partnerName(t.socioOrigenId)}`
-    if (t.routeOrigenId) return `Ruta: ${officeFilter.labelFor(t.routeOrigenId)}`
-    return 'Externo'
-  }
-  function destinoLabel(t: Transfer): string {
-    if (t.socioDestinoId) return `Socio: ${partnerName(t.socioDestinoId)}`
-    if (t.routeDestinoId) return `Ruta: ${officeFilter.labelFor(t.routeDestinoId)}`
-    return 'Externo/Socio'
-  }
-
-  // Operaciones que el actor puede iniciar (mismas reglas que cada servicio). Hasta
-  // saber qué modelo rige la empresa no se ofrece ninguna (nunca el circuito equivocado).
-  const modo: TransferMode | undefined = central.activo
-    ? { central: true, heredado: Object.fromEntries(routes.map(r => [r.id, Math.max(0, resumen[r.id]?.sinAsignar ?? 0)])) }
-    : undefined
-  const operaciones = central.listo ? availableOperations(user, routes, users, tenantId, modo) : []
-  const opsDeRuta = (r: Route) => operationsOfMode(modo)
-    .filter(k => operaciones.includes(k) && routesForOperation(k, user, [r], users, tenantId, modo).length > 0)
-
-  // ---------- Operación con socio (sin cambios de reglas; sin nuevos accesos) ----------
-  const rutasControladas = routes.filter(r => canOperateRouteCash(user, r, 'structural', users))
-  const puedeSocios = can(user, 'transfer.create', { tenantId }) && partners.length > 0
-  const endpointOptions = [
-    ...partners.map(p => ({ value: encodeEndpoint('partner', p.id), label: `Socio ${p.nombre} · Caja socios` })),
-    ...rutasControladas.map(r => ({ value: encodeEndpoint('route', r.id), label: `Ruta ${r.nombre} · caja sin asignar` })),
-  ]
-  // Origen y destino se excluyen entre sí, y al menos un extremo es un socio
-  // (Ruta → Ruta va por el asistente, con su vista previa).
-  const origenOptions = endpointOptions.filter(o => o.value !== form.destino)
-  // Capital centralizado: ninguna ruta como destino (Socio → Ruta no existe; el aporte va a la bolsa).
-  const destinoOptions = endpointOptions.filter(o => o.value !== form.origen)
-    .filter(o => !(central.activo && o.value.startsWith('route:')))
-  const origenSel = decodeEndpoint(form.origen)
-  const destinoSel = decodeEndpoint(form.destino)
-  const origenDisponible = origenSel?.type === 'route' ? resumen[origenSel.id]?.disponible ?? null : null
-  const superaDisponible = origenDisponible != null && form.valor > origenDisponible
-
-  async function guardarSocio() {
-    if (!origenSel || !destinoSel) { toast.error('Selecciona origen y destino'); return }
-    if (origenSel.type !== 'partner' && destinoSel.type !== 'partner') { toast.error('Entre rutas usa «Nueva operación» → Transferir entre rutas.'); return }
-    if (form.valor <= 0) { toast.error('El valor debe ser mayor a 0'); return }
-    if (form.origen === form.destino) { toast.error('Origen y destino no pueden ser iguales'); return }
-    if (superaDisponible) { toast.error(`El valor supera el disponible de la ruta origen (${money(origenDisponible ?? 0)}).`); return }
-    setSaving(true)
-    try {
-      // El servicio valida alcance, Oficina activa, responsable y fondos de la ruta origen.
-      const r = await registerTransfer({ actor: user, tenantId, origen: origenSel, destino: destinoSel, valor: form.valor, descripcion: form.descripcion, fecha: form.fecha, operationId: socioOpId })
-      toast.success(`Transferencia registrada · Ref. ${r.transfer.id.slice(0, 8).toUpperCase()}`)
-      setSocioOpen(false)
-      await load()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error') } finally { setSaving(false) }
-  }
-
-  // ---------- Aporte de socio a la bolsa (capital centralizado) ----------
-  async function guardarAporte() {
-    if (!aporte.partnerId || !aporte.routeId || aporte.valor <= 0) { toast.error('Socio, ruta y valor son obligatorios'); return }
-    setSaving(true)
-    try {
-      // Alcance, responsable, empresa y fecha: en el servicio.
-      const r = await registerPartnerContribution({ actor: user, tenantId, partnerId: aporte.partnerId, routeId: aporte.routeId, amount: aporte.valor, descripcion: aporte.descripcion, fecha: aporte.fecha, operationId: aporteOpId })
-      toast.success(`Aporte registrado en tu bolsa · Ref. ${r.entry.id.slice(0, 8).toUpperCase()}`)
-      setAporteOpen(false)
-      await load()
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error') } finally { setSaving(false) }
-  }
-
-  // ---------- Historial agrupado ----------
-  const enFiltroDeOficina = (t: Transfer): boolean => {
-    if (!officeFilter.hasOfficeFilter && !officeFilter.routeId) return true
-    const extremos = [t.routeOrigenId, t.routeDestinoId].filter(Boolean) as string[]
-    return extremos.some(id => officeFilter.visibleRouteIds.has(id))
-  }
-  const visibleTransfers = transfers.filter(t => enFiltroDeOficina(t) && (!desde || t.fecha >= desde) && (!hasta || t.fecha <= hasta))
-  const groups: EntityGroup[] = (() => {
-    const build = (type: TransferEntityType, id: string, nombre: string): EntityGroup => {
-      const t = transferTotalsFor(visibleTransfers, type, id)
-      return { key: encodeEndpoint(type, id), type, id, nombre, entrante: t.entrante, saliente: t.saliente, neto: t.neto, cantidad: t.cantidad, ultimoMovimiento: t.transfers[0]?.fecha, transfers: t.transfers }
-    }
-    return [...routes.map(r => build('route', r.id, r.nombre)), ...partners.map(p => build('partner', p.id, p.nombre))]
-  })()
-  const detailGroup = detailKey ? groups.find(g => g.key === detailKey) ?? null : null
-  const filteredGroups = groups.filter(g => (tipoFiltro === 'all' || g.type === tipoFiltro) && (!search || g.nombre.toLowerCase().includes(search.toLowerCase())))
   const rutasVisibles = routes.filter(r => officeFilter.visibleRouteIds.has(r.id))
+  const totalEnManos = rutasVisibles.reduce((s, r) => s + (enManos[r.id] ?? 0), 0)
+  const pendientes = transfers.filter(t => t.state === 'pending')
+  const porDecidir = pendientes.filter(t => t.canConfirm || t.canReject)
+  const userName = (id?: string) => users.find(u => u.id === id)?.nombre ?? ''
 
-  async function handleReverse(reason: string) {
-    if (!reversing) return
-    await reverseTransfer({ actor: user, tenantId, movementId: reversing.id, reason })
-    toast.success('Transferencia anulada')
-    setReversing(null)
-    await load()
+  function start(op: NewOp) {
+    setChooser(false)
+    if (op.kind === 'admin-transfer') setAdminForm(true)
+    else setWizard({ kind: op.kind })
   }
-
-  const etiquetaCustodia = (m: CashCustodyMovement) =>
-    m.origen === 'admin-pool' && m.tipo === 'BASE_ASSIGNMENT' ? `${m.reversesId ? 'Anulación de entrega' : 'Entrega de capital'} · bolsa → ${userName(m.toUserId)} (${routeNombre(m.routeId)})`
-      : m.origen === 'admin-pool' && m.tipo === 'BASE_RETURN' ? `${m.reversesId ? 'Anulación de entrega' : 'Devolución de capital'} · ${userName(m.fromUserId)} → bolsa (${routeNombre(m.routeId)})`
-      : m.tipo === 'BASE_ASSIGNMENT' ? `Entrega de Base · caja de ${routeNombre(m.routeId)} → ${userName(m.toUserId)}`
-      : m.tipo === 'BASE_RETURN' ? `Devolución · ${userName(m.fromUserId)} → caja de ${routeNombre(m.routeId)}`
-        : `Traspaso · ${userName(m.fromUserId)} → ${userName(m.toUserId)} (${routeNombre(m.routeId)})`
-
-  const sumaRutas = (k: keyof RouteSummary) => rutasVisibles.reduce((s, r) => s + (resumen[r.id]?.[k] ?? 0), 0)
-  const heredadoTotal = rutasVisibles.reduce((s, r) => s + Math.max(0, resumen[r.id]?.sinAsignar ?? 0), 0)
+  const opTitle = (op: NewOp) => op.kind === 'admin-transfer' ? 'Transferir a otro Administrador' : operationDef(op.kind, modo).titulo
+  const opHelp = (op: NewOp) => op.kind === 'admin-transfer' ? 'Sale de tu bolsa al confirmarlo el destino.'
+    : op.kind === 'entregar-capital' ? 'De tu bolsa a un cobrador o supervisor de tu ruta.'
+      : op.kind === 'devolver-capital' ? 'Efectivo que un trabajador devuelve a la bolsa.'
+        : operationDef(op.kind, modo).ayuda
+  const opIcon = (op: NewOp) => op.kind === 'admin-transfer' ? <Users className="w-5 h-5" />
+    : op.kind === 'devolver-capital' || op.kind === 'devolver-base' || op.kind === 'retirar' ? <ArrowDownLeft className="w-5 h-5" /> : <ArrowUpRight className="w-5 h-5" />
 
   return (
-    <div className="p-4 md:p-6 space-y-6">
+    <div className="p-4 md:p-6 space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Transferencias</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{central.activo
-            ? 'Capital centralizado: entregas capital de tu bolsa a los trabajadores de tus rutas y recibes sus devoluciones. Las rutas ya no tienen caja propia.'
-            : 'Mover efectivo entre la caja de tus rutas, sus trabajadores y tu bolsa. Cada operación usa su registro de siempre.'}</p>
-        </div>
+        <h1 className="text-xl font-bold text-gray-900">Transferencias</h1>
         <div className="flex flex-wrap gap-2 sm:justify-end">
-          {user?.rol === 'admin' && (
-            <Link to="/admin/capital" className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-lg bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 shadow-sm">
-              <Wallet className="w-4 h-4" /> Caja principal
-            </Link>
-          )}
-          {operaciones.length > 0 && <Button onClick={() => setWizard({})} icon={<Plus className="w-4 h-4" />}>Nueva operación</Button>}
+          <Button variant="secondary" onClick={() => setMovements(true)} icon={<History className="w-4 h-4" />} data-testid="open-movements">Ver movimientos</Button>
+          {ops.length > 0 && <Button onClick={() => setChooser(true)} icon={<Plus className="w-4 h-4" />} data-testid="new-operation">Nueva operación</Button>}
         </div>
       </div>
 
-      {!loading && operaciones.length === 0 && (
-        <p className="flex items-start gap-2 text-sm text-gray-600 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2" data-testid="transfers-readonly">
-          <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-400" />
-          {user?.rol === 'superadmin'
-            ? 'Consulta: el SuperAdmin asigna capital a los Administradores (Capital). El efectivo de cada ruta solo lo mueve su Administrador responsable de capital.'
-            : 'Consulta: no eres el Administrador responsable de capital de ninguna de estas rutas. Solo su responsable puede mover su efectivo.'}
-        </p>
-      )}
-
-      {/* ---------- OPERACIONES (solo las autorizadas) ---------- */}
-      {operaciones.length > 0 && (
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" data-testid="op-categories">
-          {transferCategories(modo).filter(c => c.kinds.some(k => operaciones.includes(k))).map(c => (
-            <button key={c.categoria} type="button" onClick={() => setWizard(c.kinds.filter(k => operaciones.includes(k)).length === 1 ? { kind: c.kinds.find(k => operaciones.includes(k)) } : {})}
-              className="text-left rounded-2xl border border-gray-100 bg-white shadow-card p-4 hover:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-500">
-              <span className="block text-sm font-semibold text-gray-900">{c.titulo}</span>
-              <span className="block text-xs text-gray-500 mt-1">{c.ayuda}</span>
-            </button>
-          ))}
-          <a href="#historial" className="rounded-2xl border border-gray-100 bg-white shadow-card p-4 hover:border-primary-300">
-            <span className="flex items-center gap-1.5 text-sm font-semibold text-gray-900"><History className="w-4 h-4 text-gray-400" />Consultar movimientos</span>
-            <span className="block text-xs text-gray-500 mt-1">Transferencias, entregas y devoluciones registradas.</span>
-          </a>
-        </section>
-      )}
-
-      <OfficeRouteFilterBar
-        offices={officeFilter.offices}
-        officeId={officeFilter.officeId}
-        onOfficeChange={officeFilter.setOfficeId}
-        routesInOffice={officeFilter.routesInOffice}
-        routeId={officeFilter.routeId}
-        onRouteChange={officeFilter.setRouteId}
-        hasUnassigned={officeFilter.hasUnassigned}
-        contextLabel={officeFilter.contextLabel}
-        showContext={officeFilter.hasOfficeFilter}
-      />
-
-      {/* ---------- RESUMEN: bolsa, cajas de ruta y efectivo en manos de trabajadores (separados) ---------- */}
+      {/* ---------- RESUMEN ---------- */}
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-3" data-testid="transfers-summary">
         {user?.rol === 'admin' && (
           <div className="rounded-2xl bg-primary-50 border border-primary-100 p-4">
-            <p className="text-xs text-gray-600">Mi bolsa (Caja principal)</p>
-            <p className="text-lg font-bold text-primary-700" data-testid="summary-pool">{bolsa == null ? 'No disponible' : money(bolsa)}</p>
-            <p className="text-[11px] text-gray-500">{central.activo ? 'Para entregar capital a tus trabajadores o pagar gastos.' : 'Para distribuir a tus rutas o pagar gastos administrativos.'}</p>
+            <p className="text-xs text-gray-600">Capital disponible</p>
+            <p className="text-lg font-bold text-primary-700" data-testid="summary-pool">{pool == null ? 'No disponible' : money(pool.available)}</p>
+            {pool && pool.pendingOut > 0 && <p className="text-[11px] text-amber-700">{money(pool.pendingOut)} comprometido en transferencias pendientes</p>}
           </div>
         )}
-        {central.activo ? (
-          <div className="rounded-2xl bg-white border border-gray-100 shadow-card p-4">
-            <p className="text-xs text-gray-600">Saldo heredado de cajas de ruta</p>
-            <p className="text-lg font-bold text-gray-900" data-testid="summary-heritage">{money(heredadoTotal)}</p>
-            <p className="text-[11px] text-gray-500">Lo que quedó en la antigua caja de {rutasVisibles.length} ruta(s). Solo puede bajar.</p>
-          </div>
-        ) : (
-          <div className="rounded-2xl bg-white border border-gray-100 shadow-card p-4">
-            <p className="text-xs text-gray-600">Disponible en cajas de ruta</p>
-            <p className="text-lg font-bold text-gray-900" data-testid="summary-routes">{money(sumaRutas('disponible'))}</p>
-            <p className="text-[11px] text-gray-500">{rutasVisibles.length} ruta(s) en tu alcance. Caja sin asignar, acotada por la Base.</p>
+        {user?.rol === 'superadmin' && (
+          <div className="rounded-2xl bg-primary-50 border border-primary-100 p-4">
+            <p className="text-xs text-gray-600">Capital de la empresa sin asignar</p>
+            <p className="text-lg font-bold text-primary-700">{companyAvailable == null ? 'No disponible' : money(companyAvailable)}</p>
+            <Link to="/admin/capital" className="text-[11px] text-primary-700 hover:underline">Asignar en Capital</Link>
           </div>
         )}
         <div className="rounded-2xl bg-white border border-gray-100 shadow-card p-4">
           <p className="text-xs text-gray-600">En manos de trabajadores</p>
-          <p className="text-lg font-bold text-gray-900" data-testid="summary-workers">{money(sumaRutas('enTrabajadores'))}</p>
-          <p className="text-[11px] text-gray-500">Base entregada y recaudo aún no cuadrado. No se mueve desde la caja.</p>
+          <p className="text-lg font-bold text-gray-900" data-testid="summary-workers">{money(totalEnManos)}</p>
+          <p className="text-[11px] text-gray-500">{rutasVisibles.length} ruta(s)</p>
+        </div>
+        <div className={`rounded-2xl border p-4 ${porDecidir.length ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-100 shadow-card'}`}>
+          <p className="text-xs text-gray-600">Pendientes</p>
+          <p className="text-lg font-bold text-gray-900" data-testid="summary-pending">{pendientes.length}</p>
+          <p className="text-[11px] text-gray-500">{porDecidir.length ? `${porDecidir.length} esperan tu confirmación` : 'Transferencias entre Administradores'}</p>
         </div>
       </section>
 
-      {/* ---------- CAJAS DE RUTA ---------- */}
+      {/* ---------- PENDIENTES ---------- */}
+      {pendientes.length > 0 && (
+        <section className="space-y-3" data-testid="pending-transfers">
+          <h2 className="text-sm font-semibold text-gray-900">Por confirmar</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {pendientes.map(t => <TransferCard key={t.id} t={t} currency={currency} onAction={(x, what) => setDecision({ t: x, what })} />)}
+          </div>
+        </section>
+      )}
+
+      {/* ---------- RUTAS (consulta) ---------- */}
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-gray-900">{central.activo ? 'Rutas' : 'Cajas de ruta'}</h2>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <h2 className="text-sm font-semibold text-gray-900">Rutas</h2>
+          <OfficeRouteFilterBar
+            offices={officeFilter.offices} officeId={officeFilter.officeId} onOfficeChange={officeFilter.setOfficeId}
+            routesInOffice={officeFilter.routesInOffice} routeId={officeFilter.routeId} onRouteChange={officeFilter.setRouteId}
+            hasUnassigned={officeFilter.hasUnassigned} contextLabel={officeFilter.contextLabel} showContext={officeFilter.hasOfficeFilter}
+          />
+        </div>
         {loading ? (
           <div className="flex justify-center py-10"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
         ) : rutasVisibles.length === 0 ? (
           <EmptyState icon={<MapPin className="w-8 h-8" />} title="No hay rutas en tu alcance" />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {rutasVisibles.map(r => {
-              const s = resumen[r.id]
-              const ops = opsDeRuta(r)
-              const neto = groups.find(g => g.key === encodeEndpoint('route', r.id))?.neto ?? 0
-              return (
-                <div key={r.id} className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-3" data-testid={`route-card-${r.id}`}>
-                  <div className="flex items-start gap-2 min-w-0">
-                    <div className="w-9 h-9 rounded-xl bg-primary-100 flex items-center justify-center flex-shrink-0"><MapPin className="w-4 h-4 text-primary-600" /></div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">{r.nombre}</p>
-                      <CapitalControllerBadge className="block mt-0.5" route={r} users={users} currentUserId={user?.id} />
-                    </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+            {rutasVisibles.map(r => (
+              <div key={r.id} className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 flex items-start justify-between gap-3" data-testid={`route-card-${r.id}`}>
+                <div className="flex items-start gap-2 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-primary-100 flex items-center justify-center flex-shrink-0"><MapPin className="w-4 h-4 text-primary-600" /></div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{r.nombre}</p>
+                    <CapitalControllerBadge className="block mt-0.5" route={r} users={users} currentUserId={user?.id} />
+                    {central.bloqueos[r.id] && <p className="text-[11px] font-medium text-amber-700 mt-1" data-testid="route-blocked">Bloqueada para capital nuevo</p>}
+                    {(heredado[r.id] ?? 0) > 0 && <p className="text-[11px] text-gray-500 mt-1">Saldo heredado {money(heredado[r.id])}</p>}
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {central.activo ? (
-                      <div className="bg-primary-50 rounded-xl p-2.5" data-testid="route-heritage">
-                        <p className="text-xs text-gray-600">Saldo heredado</p>
-                        <p className="text-sm font-bold text-primary-700">{s == null ? 'No disponible' : money(s.sinAsignar)}</p>
-                      </div>
-                    ) : (
-                      <div className="bg-primary-50 rounded-xl p-2.5" data-testid="route-available">
-                        <p className="text-xs text-gray-600">Disponible para mover</p>
-                        <p className="text-sm font-bold text-primary-700">{s == null ? 'No disponible' : money(s.disponible)}</p>
-                      </div>
-                    )}
-                    <div className="bg-gray-50 rounded-xl p-2.5">
-                      <p className="text-xs text-gray-600">En manos de trabajadores</p>
-                      <p className="text-sm font-bold text-gray-800">{s == null ? 'No disponible' : money(s.enTrabajadores)}</p>
-                    </div>
-                  </div>
-                  {central.bloqueos[r.id] && <p className="text-[11px] font-medium text-amber-700" data-testid="route-blocked">Bloqueada para capital nuevo hasta que el SuperAdmin la revise.</p>}
-                  <p className="text-[11px] text-gray-500">Neto de transferencias: {money(neto)} (entrante − saliente). No es el efectivo en caja.</p>
-                  {ops.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {ops.map(k => (
-                        <Button key={k} size="sm" variant={k === 'entregar-base' && !central.activo || k === 'entregar-capital' ? 'primary' : 'secondary'} onClick={() => setWizard({ kind: k, routeId: r.id })}>
-                          {operationButtonLabel(k, modo)}
-                        </Button>
-                      ))}
-                    </div>
-                  )}
                 </div>
-              )
-            })}
-          </div>
-        )}
-        {saldosAt && <p className="text-[11px] text-gray-500">Saldos calculados {formatDateTime(saldosAt)}. Cada operación los vuelve a comprobar al registrar.</p>}
-      </section>
-
-      {/* ---------- OPERACIONES CON SOCIOS (existentes; sin nuevos accesos) ---------- */}
-      {puedeSocios && central.activo && rutasControladas.length > 0 && (
-        <section className="rounded-2xl border border-purple-200 bg-purple-50 p-4 space-y-2" data-testid="partner-contribution">
-          <p className="flex items-center gap-2 text-sm font-semibold text-purple-900"><Users className="w-4 h-4" />Aporte de socio a mi bolsa</p>
-          <p className="text-xs text-purple-900">El capital que un socio aporta para trabajar una ruta entra primero a tu bolsa (Caja principal). Desde ahí lo entregas a los trabajadores.</p>
-          <Button size="sm" variant="secondary" onClick={() => { setAporte({ partnerId: '', routeId: rutasControladas.length === 1 ? rutasControladas[0].id : '', valor: 0, descripcion: '', fecha: today() }); setAporteOpId(generateId()); setAporteOpen(true) }}
-            icon={<Plus className="w-4 h-4" />}>Registrar aporte de socio</Button>
-        </section>
-      )}
-
-      {puedeSocios && (
-        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-2" data-testid="partner-ops">
-          <p className="flex items-center gap-2 text-sm font-semibold text-amber-900"><AlertTriangle className="w-4 h-4" />Operaciones con socios</p>
-          <p className="text-xs text-amber-900">
-            {central.activo
-              ? 'Con capital centralizado solo quedan la salida desde el saldo heredado de una ruta hacia un socio y los movimientos entre socios. Pendiente de revisión (D1).'
-              : 'Se conservan como estaban. Pendientes de revisión (D1): una salida Ruta → Socio no pasa por tu bolsa y un aporte Socio → Ruta no comprueba el saldo de Caja socios. Por eso no forman parte del asistente.'}
-          </p>
-          {/* ADEX Online: sin Caja socios en el servidor (D1): no disponible. */}
-          <Button size="sm" variant="secondary" disabled onClick={() => { setForm({ origen: '', destino: '', valor: 0, descripcion: '', fecha: today() }); setSocioOpId(generateId()); setSocioOpen(true) }}
-            icon={<Users className="w-4 h-4" />}>Operación con socio</Button>
-          <p className="text-xs font-medium text-amber-900" data-testid="partner-ops-unavailable">No disponible en ADEX Online: Caja socios no existe en el servidor hasta resolver D1.</p>
-        </section>
-      )}
-
-      {/* ---------- HISTORIAL ---------- */}
-      <section id="historial" className="space-y-4 scroll-mt-4">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-gray-900">Historial</h2>
-          <Link to="/admin/movements" className="text-sm text-primary-700 hover:underline" data-testid="go-history">Historial completo y comprobantes</Link>
-        </div>
-        <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-2" data-testid="custody-history">
-          <p className="text-sm font-semibold text-gray-800">Entregas y devoluciones de Base recientes</p>
-          {custodia.length === 0 ? <p className="text-sm text-gray-400">Sin movimientos de Base.</p> : (
-            <div className="divide-y divide-gray-50">
-              {custodia.map(m => (
-                <div key={m.id} className="flex flex-wrap items-start justify-between gap-x-3 gap-y-0.5 py-2 text-xs">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-gray-800 break-words">{etiquetaCustodia(m)}</p>
-                    <p className="text-gray-500 break-words">{formatDateTime(m.createdAt)} · registró {userName(m.createdByUserId)} · {m.motivo} · Ref. {m.id.slice(0, 8).toUpperCase()}</p>
-                  </div>
-                  <span className="font-semibold text-gray-800 whitespace-nowrap">{money(m.amount)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          {user?.rol === 'admin' && <p className="text-[11px] text-gray-500">Colocaciones y retiros de capital: en <Link className="text-primary-700 hover:underline" to="/admin/capital">Caja principal</Link> → Movimientos de la bolsa.</p>}
-        </div>
-
-        <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta} onClear={() => { setDesde(''); setHasta('') }}>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Buscar</label>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Nombre..."
-                className="h-9 w-full sm:w-48 rounded-lg border border-gray-300 pl-8 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Tipo</label>
-            <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value as 'all' | 'route' | 'partner')}
-              className="h-9 rounded-lg border border-gray-300 pl-3 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
-              <option value="all">Todas</option>
-              <option value="route">Rutas</option>
-              <option value="partner">Socios</option>
-            </select>
-          </div>
-        </DateRangeFilter>
-
-        {filteredGroups.length === 0 ? (
-          <EmptyState icon={<ArrowLeftRight className="w-8 h-8" />} title="Sin transferencias" />
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredGroups.map(g => (
-              <div key={g.key} className="bg-white rounded-2xl shadow-card border border-gray-100 p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${g.type === 'route' ? 'bg-primary-100' : 'bg-purple-100'}`}>
-                      {g.type === 'route' ? <MapPin className="w-4 h-4 text-primary-600" /> : <Users className="w-4 h-4 text-purple-600" />}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">{g.nombre}</p>
-                      <Badge variant={g.type === 'route' ? 'info' : 'purple'} size="sm">{g.type === 'route' ? 'Ruta' : 'Socio'}</Badge>
-                    </div>
-                  </div>
-                  <span className="text-xs text-gray-500">{g.cantidad} mov.</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 mt-3">
-                  <div className="bg-emerald-50 rounded-xl p-2.5"><p className="text-xs text-gray-500">Entrante</p><p className="text-sm font-bold text-emerald-600">{money(g.entrante)}</p></div>
-                  <div className="bg-amber-50 rounded-xl p-2.5"><p className="text-xs text-gray-500">Saliente</p><p className="text-sm font-bold text-amber-600">{money(g.saliente)}</p></div>
-                </div>
-                <div className="mt-2 bg-gray-50 rounded-xl p-2.5 flex items-center justify-between gap-2">
-                  <div className="min-w-0"><p className="text-xs text-gray-500">Neto de transferencias</p><p className="text-[11px] text-gray-500">Entrante − saliente. No es el efectivo en caja.</p></div>
-                  <p className={`text-sm font-bold ${g.neto >= 0 ? 'text-gray-800' : 'text-red-600'}`}>{money(g.neto)}</p>
-                </div>
-                <div className="flex items-center justify-between mt-3">
-                  <p className="text-xs text-gray-500">{g.ultimoMovimiento ? `Último: ${formatDate(g.ultimoMovimiento)}` : 'Sin movimientos'}</p>
-                  <Button variant="secondary" size="sm" disabled={g.cantidad === 0} onClick={() => setDetailKey(g.key)} icon={<ChevronRight className="w-3.5 h-3.5" />}>Ver movimientos</Button>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-[11px] text-gray-500">En trabajadores</p>
+                  <p className="text-sm font-bold text-gray-800">{enManos[r.id] == null ? '—' : money(enManos[r.id] ?? 0)}</p>
                 </div>
               </div>
             ))}
@@ -511,97 +202,155 @@ export default function TransfersPage() {
         )}
       </section>
 
-      {/* Asistente: cada operación con su servicio existente */}
+      {/* ---------- NUEVA OPERACIÓN: solo lo que el rol activo puede hacer ---------- */}
+      <Modal open={chooser} onClose={() => setChooser(false)} title="Nueva operación" size="md">
+        <div className="grid grid-cols-1 gap-2" data-testid="op-chooser">
+          {ops.map(op => (
+            <button key={op.kind} type="button" onClick={() => start(op)} data-testid={`op-${op.kind}`}
+              className="flex items-center gap-3 text-left rounded-xl border border-gray-200 bg-white p-3 hover:border-primary-300 hover:bg-primary-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 transition-colors">
+              <span className="w-10 h-10 rounded-xl bg-primary-100 text-primary-700 flex items-center justify-center flex-shrink-0">{opIcon(op)}</span>
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-gray-900">{opTitle(op)}</span>
+                <span className="block text-xs text-gray-500">{opHelp(op)}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </Modal>
+
       <OperationWizard open={!!wizard} onClose={() => setWizard(null)} onDone={() => { void load() }}
         routes={routes} users={users} inicial={wizard ?? undefined} modo={modo} />
-
-      {/* Aporte de socio a la bolsa del responsable (capital centralizado) */}
-      <Modal open={aporteOpen} onClose={() => { if (!saving) setAporteOpen(false) }} title="Aporte de socio a mi bolsa"
-        footer={<><Button variant="secondary" onClick={() => setAporteOpen(false)}>Cancelar</Button><Button onClick={guardarAporte} loading={saving}>Registrar aporte</Button></>}>
-        <div className="space-y-4" data-testid="partner-contribution-form">
-          <p className="text-xs text-purple-800 bg-purple-50 border border-purple-100 rounded-xl px-3 py-2">Entra a tu bolsa, no a la ruta ni a un trabajador. Queda también en Caja socios como salida del socio.</p>
-          <Select label="Socio" value={aporte.partnerId} onChange={e => setAporte(a => ({ ...a, partnerId: e.target.value }))} required placeholder="Seleccionar socio"
-            options={partners.map(p => ({ value: p.id, label: p.nombre }))} />
-          <Select label="Ruta que el aporte va a operar" value={aporte.routeId} onChange={e => setAporte(a => ({ ...a, routeId: e.target.value }))} required placeholder="Seleccionar ruta"
-            options={rutasControladas.map(r => ({ value: r.id, label: r.nombre }))} hint="Solo rutas de las que eres responsable de capital." />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <MoneyInput label="Valor" currency={currency} value={aporte.valor} onValueChange={v => setAporte(a => ({ ...a, valor: v }))} required />
-            <Input label="Fecha" type="date" value={aporte.fecha} onChange={e => setAporte(a => ({ ...a, fecha: e.target.value }))} />
-          </div>
-          <Textarea label="Descripción" value={aporte.descripcion} onChange={e => setAporte(a => ({ ...a, descripcion: e.target.value }))} rows={2} />
-        </div>
-      </Modal>
-
-      {/* Operación con socio (formulario y reglas existentes) */}
-      <Modal open={socioOpen} onClose={() => { if (!saving) setSocioOpen(false) }} title="Operación con socio"
-        footer={<><Button variant="secondary" onClick={() => setSocioOpen(false)}>Cancelar</Button><Button onClick={guardarSocio} loading={saving} disabled={superaDisponible}>Registrar</Button></>}>
-        <div className="space-y-4">
-          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">{central.activo
-            ? 'Al menos un extremo es un socio. Una ruta solo puede ser origen y por su saldo heredado.'
-            : 'Al menos un extremo es un socio; se registra también en Caja socios. Entre rutas usa el asistente.'}</p>
-          <div className="grid grid-cols-1 gap-3">
-            <Select label="Origen (sale de)" value={form.origen} onChange={e => setForm(f => ({ ...f, origen: e.target.value }))} options={origenOptions} placeholder="Seleccionar origen" required />
-            <Select label="Destino (llega a)" value={form.destino} onChange={e => setForm(f => ({ ...f, destino: e.target.value }))} options={destinoOptions} placeholder="Seleccionar destino" required />
-          </div>
-          {origenSel?.type === 'route' && (
-            <p className="text-xs text-gray-600" data-testid="partner-origin-available">Disponible de la ruta origen: <b>{origenDisponible == null ? 'No disponible' : money(origenDisponible)}</b>{superaDisponible && <span className="text-red-600"> · Insuficiente</span>}</p>
-          )}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <MoneyInput label="Valor" currency={currency} value={form.valor} onValueChange={v => setForm(f => ({ ...f, valor: v }))} required />
-            <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
-          </div>
-          <Textarea label="Descripción" value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} rows={2} />
-        </div>
-      </Modal>
-
-      {/* Detalle de movimientos de una entidad */}
-      <Modal open={!!detailGroup} onClose={() => setDetailKey(null)} title={detailGroup ? `Movimientos · ${detailGroup.nombre}` : 'Movimientos'} size="lg"
-        footer={<Button variant="secondary" onClick={() => setDetailKey(null)}>Cerrar</Button>}>
-        {detailGroup && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bg-emerald-50 rounded-xl p-3"><p className="text-xs text-gray-500">Entrante</p><p className="font-bold text-emerald-600">{money(detailGroup.entrante)}</p></div>
-              <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs text-gray-500">Saliente</p><p className="font-bold text-amber-600">{money(detailGroup.saliente)}</p></div>
-              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-500">Neto</p><p className="font-bold text-gray-800">{money(detailGroup.neto)}</p></div>
-            </div>
-            {detailGroup.transfers.length === 0 ? (
-              <div className="flex justify-center py-8 text-gray-400 text-sm">Sin movimientos</div>
-            ) : (
-              <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
-                {pairReversals(detailGroup.transfers).map(({ movement: t, reversal }) => {
-                  const entrada = detailGroup.type === 'route' ? t.routeDestinoId === detailGroup.id : t.socioDestinoId === detailGroup.id
-                  const estado = reversalStateOf(t)
-                  const signo = entrada ? 1 : -1
-                  return (
-                    <div key={t.id}>
-                      <div className="flex items-center justify-between gap-2 py-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center flex-shrink-0"><ArrowLeftRight className="w-4 h-4 text-blue-500" /></div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-gray-900 flex items-center gap-1.5 flex-wrap">
-                              {estado === 'reversion' ? 'Reversión · ' : ''}{originLabel(t)} → {destinoLabel(t)}
-                              {estado === 'anulado' && <AnnulledBadge />}
-                            </p>
-                            <p className="text-xs text-gray-500">{formatDate(t.fecha)}{userName(t.userId) ? ` · ${userName(t.userId)}` : ''}{t.descripcion ? ` · ${t.descripcion}` : ''} · Ref. {t.id.slice(0, 8).toUpperCase()}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          {canReverseTransfer(user, t, partnerRouteIds, routes, users) && <ReverseButton onClick={() => setReversing(t)} />}
-                          <span className={`text-sm font-bold ${estado === 'anulado' ? 'text-gray-400 line-through' : signo * t.valor >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>{signedMoney(signo * t.valor, currency)}</span>
-                        </div>
-                      </div>
-                      {estado === 'anulado' && <ReversalDetail original={t} reversal={reversal} currency={currency} signo={signo} userName={userName} />}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )}
-      </Modal>
-
-      <ReverseMovementModal currency={currency} onCancel={() => setReversing(null)} onConfirm={handleReverse}
-        target={reversing && { tipo: 'Transferencia', valor: reversing.valor, fecha: reversing.fecha, detalle: `${originLabel(reversing)} → ${destinoLabel(reversing)}` }} />
+      <TransferRegisterModal open={adminForm} onClose={() => setAdminForm(false)} onDone={() => { setAdminForm(false); void load() }}
+        currency={currency} asSecretary={false} available={pool?.available ?? null} />
+      <TransferDecisionModal target={decision} currency={currency} onClose={() => setDecision(null)} onDone={() => { setDecision(null); void load() }} />
+      <MovementsModal open={movements} onClose={() => setMovements(false)} routes={routes} users={users} transfers={transfers}
+        currency={currency} userName={userName} routeLabel={officeFilter.labelFor} />
     </div>
+  )
+}
+
+// ============================================================
+// Movimientos bajo demanda (entregas, devoluciones, traspasos)
+// ============================================================
+
+type MovementKind = 'entrega' | 'devolucion' | 'traspaso' | 'administradores'
+interface MovementRow {
+  key: string; kind: MovementKind; createdAt: string; amount: number; title: string; routeId?: string
+  participants: string[]; estado: string; ref: string; detail: [string, string][]
+}
+
+const KIND_LABEL: Record<MovementKind, string> = {
+  entrega: 'Entregas a trabajadores', devolucion: 'Devoluciones', traspaso: 'Traspasos entre trabajadores', administradores: 'Entre Administradores',
+}
+
+function MovementsModal({ open, onClose, routes, users, transfers, currency, userName, routeLabel }: {
+  open: boolean; onClose: () => void; routes: Route[]; users: User[]; transfers: AdminTransfer[]; currency: string
+  userName: (id?: string) => string; routeLabel: (id: string) => string
+}) {
+  const [custody, setCustody] = useState<CashCustodyMovement[] | null>(null)
+  const [f, setF] = useState({ kind: '', estado: '', desde: '', hasta: '', ruta: '', persona: '', q: '' })
+  const [openKey, setOpenKey] = useState<string | null>(null)
+
+  // Se lee al abrir (no con la pantalla): el historial no viaja si nadie lo consulta.
+  useEffect(() => {
+    if (!open) return
+    setCustody(null)
+    let alive = true
+    Promise.all(routes.map(r => listCustodyMovements(r.id).catch(() => [] as CashCustodyMovement[])))
+      .then(list => { if (alive) setCustody(list.flat()) })
+    return () => { alive = false }
+  }, [open, routes])
+
+  const rows = useMemo<MovementRow[]>(() => {
+    const out: MovementRow[] = []
+    for (const m of custody ?? []) {
+      const kind: MovementKind = m.tipo === 'BASE_ASSIGNMENT' ? 'entrega' : m.tipo === 'BASE_RETURN' ? 'devolucion' : 'traspaso'
+      const anulacion = !!m.reversesId
+      const who = kind === 'entrega' ? userName(m.toUserId) : kind === 'devolucion' ? userName(m.fromUserId) : `${userName(m.fromUserId)} → ${userName(m.toUserId)}`
+      out.push({
+        key: `c:${m.id}`, kind, createdAt: m.createdAt, amount: m.amount, routeId: m.routeId,
+        title: `${anulacion ? 'Anulación · ' : ''}${kind === 'entrega' ? 'Entrega a' : kind === 'devolucion' ? 'Devolución de' : 'Traspaso'} ${who}`,
+        participants: [m.toUserId, m.fromUserId, m.createdByUserId].filter(Boolean) as string[],
+        estado: anulacion ? 'Anulación' : m.reversalId ? 'Anulada' : 'Vigente', ref: m.id.slice(0, 8).toUpperCase(),
+        detail: [['Ruta', routeLabel(m.routeId)], ['Registró', userName(m.createdByUserId) || '—'], ['Concepto', m.motivo || '—'], ['Referencia', m.id.slice(0, 8).toUpperCase()]],
+      })
+    }
+    for (const t of transfers) {
+      out.push({
+        key: `t:${t.id}`, kind: 'administradores', createdAt: t.createdAt, amount: t.amount,
+        title: `${t.origin.name ?? 'Administrador'} → ${t.destination.name ?? 'Administrador'}`,
+        participants: [t.origin.adminId, t.destination.adminId, t.registeredBy.membershipId], estado: STATE_LABEL[t.state], ref: t.id.slice(0, 8).toUpperCase(),
+        detail: [['Concepto', t.reason], ['Modalidad', t.mode === 'secretary' ? `Registrada por ${t.registeredBy.name ?? 'Secretaría'}` : 'Directa'],
+          ['Origen', `${t.origin.decision === 'confirmed' ? 'Confirmó' : t.origin.decision === 'rejected' ? 'Rechazó' : 'Pendiente'}${t.origin.reason ? ` · ${t.origin.reason}` : ''}`],
+          ['Destino', `${t.destination.decision === 'confirmed' ? 'Confirmó' : t.destination.decision === 'rejected' ? 'Rechazó' : 'Pendiente'}${t.destination.reason ? ` · ${t.destination.reason}` : ''}`],
+          ...(t.closeReason ? [['Motivo de cierre', t.closeReason] as [string, string]] : []), ['Referencia', t.id.slice(0, 8).toUpperCase()]],
+      })
+    }
+    return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  }, [custody, transfers, userName, routeLabel])
+
+  const q = f.q.trim().toLowerCase()
+  const visible = rows.filter(r => (!f.kind || r.kind === f.kind) && (!f.estado || r.estado === f.estado)
+    && (!f.desde || r.createdAt.slice(0, 10) >= f.desde) && (!f.hasta || r.createdAt.slice(0, 10) <= f.hasta)
+    && (!f.ruta || r.routeId === f.ruta) && (!f.persona || r.participants.includes(f.persona))
+    && (!q || r.title.toLowerCase().includes(q) || r.ref.toLowerCase().includes(q) || r.detail.some(([, v]) => v.toLowerCase().includes(q))))
+  const estados = [...new Set(rows.map(r => r.estado))]
+  const personas = users.filter(u => rows.some(r => r.participants.includes(u.id))).sort((a, b) => a.nombre.localeCompare(b.nombre))
+  const limpio = !Object.values(f).some(Boolean)
+
+  return (
+    <Modal open={open} onClose={onClose} title="Movimientos" size="xl"
+      footer={<><Link to="/admin/movements" className="text-sm text-primary-700 hover:underline mr-auto" data-testid="go-history">Historial general y comprobantes</Link>
+        <Button variant="secondary" onClick={onClose}>Cerrar</Button></>}>
+      <div className="space-y-3" data-testid="movements-modal">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          <Select label="Tipo" value={f.kind} onChange={e => setF(x => ({ ...x, kind: e.target.value }))} placeholder="Todos"
+            options={(Object.keys(KIND_LABEL) as MovementKind[]).map(k => ({ value: k, label: KIND_LABEL[k] }))} />
+          <Select label="Estado" value={f.estado} onChange={e => setF(x => ({ ...x, estado: e.target.value }))} placeholder="Todos" options={estados.map(s => ({ value: s, label: s }))} />
+          <Input label="Desde" type="date" value={f.desde} onChange={e => setF(x => ({ ...x, desde: e.target.value }))} />
+          <Input label="Hasta" type="date" value={f.hasta} onChange={e => setF(x => ({ ...x, hasta: e.target.value }))} />
+          <Select label="Ruta" value={f.ruta} onChange={e => setF(x => ({ ...x, ruta: e.target.value }))} placeholder="Todas" options={routes.map(r => ({ value: r.id, label: r.nombre }))} />
+          <Select label="Persona" value={f.persona} onChange={e => setF(x => ({ ...x, persona: e.target.value }))} placeholder="Todas" options={personas.map(u => ({ value: u.id, label: u.nombre }))} />
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" aria-hidden />
+            <input value={f.q} onChange={e => setF(x => ({ ...x, q: e.target.value }))} placeholder="Referencia, nombre o concepto" aria-label="Buscar movimientos"
+              className="h-10 w-full rounded-lg border border-gray-300 pl-8 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+          </div>
+          {!limpio && <Button variant="ghost" size="sm" onClick={() => setF({ kind: '', estado: '', desde: '', hasta: '', ruta: '', persona: '', q: '' })}>Limpiar filtros</Button>}
+          <p className="text-xs text-gray-500 sm:ml-auto">{custody == null ? 'Cargando…' : `${visible.length} de ${rows.length}`}</p>
+        </div>
+        {custody == null ? (
+          <div className="flex justify-center py-10"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
+        ) : visible.length === 0 ? (
+          <EmptyState icon={<ArrowLeftRight className="w-8 h-8" />} title={rows.length ? 'Ningún movimiento con estos filtros' : 'Sin movimientos'} />
+        ) : (
+          <ul className="divide-y divide-gray-100 border border-gray-100 rounded-xl max-h-[55vh] overflow-y-auto">
+            {visible.slice(0, 300).map(r => (
+              <li key={r.key}>
+                <button type="button" onClick={() => setOpenKey(k => k === r.key ? null : r.key)} aria-expanded={openKey === r.key}
+                  className="w-full flex items-start justify-between gap-3 px-3 py-2.5 text-left hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50">
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-gray-900 break-words">{r.title}</span>
+                    <span className="block text-xs text-gray-500">{KIND_LABEL[r.kind]} · {formatDateTime(r.createdAt)}{r.routeId ? ` · ${routeLabel(r.routeId)}` : ''} · {r.estado}</span>
+                  </span>
+                  <span className="flex items-center gap-1 flex-shrink-0">
+                    <span className={`text-sm font-bold ${r.estado === 'Anulada' || r.estado === 'Cancelada' || r.estado === 'Rechazada' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{formatCurrency(r.amount, currency)}</span>
+                    <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${openKey === r.key ? 'rotate-180' : ''}`} aria-hidden />
+                  </span>
+                </button>
+                {openKey === r.key && (
+                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 px-3 pb-3 text-xs">
+                    {r.detail.map(([k, v]) => <div key={k} className="min-w-0"><dt className="inline text-gray-500">{k}: </dt><dd className="inline text-gray-800 break-words">{v}</dd></div>)}
+                  </dl>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {visible.length > 300 && <p className="text-xs text-gray-500">Se muestran los 300 más recientes. Usa los filtros o el Historial general.</p>}
+      </div>
+    </Modal>
   )
 }

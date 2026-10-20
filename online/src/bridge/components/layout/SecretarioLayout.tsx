@@ -1,0 +1,89 @@
+// ADEX Online: COPIA de src/components/layout/SecretarioLayout.tsx (CLEAN). Único cambio, marcado:
+// la entrada «Transferencias» (Ronda 53).
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Users, ClipboardCheck, Receipt, UserCog, LogOut, Wifi, WifiOff, ArrowLeftRight } from 'lucide-react'
+import { useAuth } from '@/hooks/useAuth'
+import { useOnlineStatus } from '@/hooks/useOnlineStatus'
+import { CountBadge } from '@/components/ui/CountBadge'
+import { usePendingSaleRequests } from '@/hooks/usePendingBadges'
+import { cn } from '@/lib/utils'
+import { initials } from '@/lib/formatters'
+import { BrandLogo } from '@/components/ui/BrandLogo'
+
+/**
+ * Layout del SECRETARIO. Acceso limitado a: Clientes (edición operativa),
+ * Autorizaciones, Corrección de pagos y, en ADEX Online, el REGISTRO de transferencias entre
+ * Administradores (que confirman ellos). Sin caja ni configuración.
+ *
+ * BADGE DE AUTORIZACIONES (Fase 0): el Secretario es quien revisa las solicitudes
+ * de venta, pero no tenía ningún aviso de que hubiera trabajo esperando. Cuenta
+ * SOLO las solicitudes `pending` de sus rutas autorizadas, con el mismo criterio
+ * que usa su propia pantalla, de modo que el globo y la lista nunca discrepan.
+ *
+ * NO cuenta solicitudes de ajuste de pago: el Secretario las ORIGINA, no las
+ * aprueba (no tiene `payment.approveAdjustment`), así que un globo ahí le pediría
+ * una acción que no puede ejecutar.
+ */
+const nav = [
+  { to: '/secretario/clientes', label: 'Clientes', icon: <Users className="w-4 h-4" /> },
+  { to: '/secretario/autorizaciones', label: 'Autorizaciones', icon: <ClipboardCheck className="w-4 h-4" /> },
+  { to: '/secretario/correccion-pagos', label: 'Corrección de pagos', icon: <Receipt className="w-4 h-4" /> },
+  // ADEX Online (Ronda 53): registro de transferencias entre Administradores.
+  { to: '/secretario/transferencias', label: 'Transferencias', icon: <ArrowLeftRight className="w-4 h-4" /> },
+  { to: '/secretario/cuenta', label: 'Cuenta', icon: <UserCog className="w-4 h-4" /> },
+]
+
+export function SecretarioLayout() {
+  const { user, tenant, logout } = useAuth()
+  const isOnline = useOnlineStatus()
+  const navigate = useNavigate()
+  const tenantId = tenant?.id ?? user?.tenantId ?? ''
+  const pendingAuth = usePendingSaleRequests(user, tenantId)
+
+  const badges: Record<string, number> = {
+    '/secretario/autorizaciones': pendingAuth,
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <header className="bg-primary-900 text-white flex-shrink-0">
+        <div className="px-4 md:px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            <BrandLogo variant="on-dark" className="h-9 flex-shrink-0 -ml-1" />
+            <div className="min-w-0">
+              <p className="font-bold text-sm leading-tight">Secretario</p>
+              <p className="text-primary-300 text-xs truncate">{tenant?.nombre ?? user?.nombre}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className={cn('flex items-center gap-1 text-[11px] px-2 py-1 rounded-full', isOnline ? 'bg-emerald-500/25 text-emerald-100' : 'bg-red-500/25 text-red-100')}>
+              {isOnline ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+              {isOnline ? 'Online' : 'Offline'}
+            </div>
+            <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center text-white text-xs font-bold">{initials(user?.nombre ?? 'S')}</div>
+            <button onClick={() => { logout(); navigate('/login') }} className="p-2 rounded-lg hover:bg-primary-800" aria-label="Cerrar sesión">
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+        <nav className="px-2 md:px-4 flex gap-1 overflow-x-auto">
+          {nav.map(n => (
+            <NavLink key={n.to} to={n.to}
+              className={({ isActive }) => cn(
+                'flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors',
+                isActive ? 'border-white text-white' : 'border-transparent text-primary-300 hover:text-white'
+              )}>
+              {n.icon}{n.label}
+              {badges[n.to] > 0 && <CountBadge count={badges[n.to]} />}
+            </NavLink>
+          ))}
+        </nav>
+      </header>
+
+
+      <main className="flex-1 overflow-y-auto">
+        <Outlet />
+      </main>
+    </div>
+  )
+}

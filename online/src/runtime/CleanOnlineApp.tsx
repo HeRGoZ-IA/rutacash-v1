@@ -7,8 +7,10 @@
 //   · El portal Owner no vive aquí: es otra página y otro servicio (DS-17).
 //   · Cobrador y Supervisor: la CAPA OPERATIVA de CLEAN (`operationalRoutes`, mismas
 //     pantallas y mismo layout bajo `/collector` y `/supervisor`).
-//   · Socio y Secretario: sus layouts y pantallas originales, con las mismas rutas.
-//   · Ronda 50: las pantallas de Administración, Socio y Secretario se cargan BAJO DEMANDA
+//   · Secretario: su layout y pantallas originales, con las mismas rutas, más el registro de
+//     transferencias entre Administradores (Ronda 53).
+//   · Ronda 53: el rol Socio, sus pantallas y Caja socios NO existen en ADEX Online (CLEAN los conserva).
+//   · Ronda 50: las pantallas de Administración y Secretario se cargan BAJO DEMANDA
 //     (`lazy`): el Cobrador no descarga dashboards ni gráficas (recharts) que no usa. Las
 //     del Cobrador y el Supervisor siguen en el paquete inicial (uso de campo, sin esperas).
 
@@ -18,19 +20,13 @@ import { Toaster } from '@/components/ui/Toast';
 import { AdminLayout } from '@/components/layout/AdminLayout';
 import { CollectorLayout } from '@/components/layout/CollectorLayout';
 import { SupervisorLayout } from '@/components/layout/SupervisorLayout';
-import { SocioLayout } from '@/components/layout/SocioLayout';
 import { SecretarioLayout } from '@/components/layout/SecretarioLayout';
-const SocioDashboardPage = lazy(() => import('@/pages/socio/SocioDashboardPage'));
-const SocioClientsPage = lazy(() => import('@/pages/socio/SocioClientsPage'));
-const SocioReportsPage = lazy(() => import('@/pages/socio/SocioReportsPage'));
-const SocioPartnerCashPage = lazy(() => import('@/pages/socio/SocioPartnerCashPage'));
-const SocioAccountPage = lazy(() => import('@/pages/socio/SocioAccountPage'));
 const SecretarioClientsPage = lazy(() => import('@/pages/secretario/SecretarioClientsPage'));
 const SecretarioAuthorizationsPage = lazy(() => import('@/pages/secretario/SecretarioAuthorizationsPage'));
 const SecretarioPaymentCorrectionPage = lazy(() => import('@/pages/secretario/SecretarioPaymentCorrectionPage'));
 const SecretarioAccountPage = lazy(() => import('@/pages/secretario/SecretarioAccountPage'));
 const PaymentAdjustmentsPage = lazy(() => import('@/pages/admin/PaymentAdjustmentsPage'));
-const PartnerCashPage = lazy(() => import('@/pages/admin/PartnerCashPage'));
+const SecretarioTransfersPage = lazy(() => import('./SecretarioTransfersPage.tsx'));
 const ReportsPage = lazy(() => import('@/pages/admin/ReportsPage'));
 import CollectorHomePage from '@/pages/collector/CollectorHomePage';
 import CollectorRoutePage from '@/pages/collector/CollectorRoutePage';
@@ -186,7 +182,7 @@ export function CleanOnlineApp() {
             <Route path="expense-categories" element={<ExpenseCategoriesPage />} />
             <Route path="transfers" element={<TransfersPage />} />
             <Route path="movements" element={<MovementHistoryPage />} />
-            <Route path="partner-cash" element={<PartnerCashPage />} />
+            <Route path="partner-cash" element={<Navigate to="/admin/cashbox" replace />} />
             <Route path="withdrawals" element={<WithdrawalsPage />} />
             <Route path="cashbox" element={<CashboxPage />} />
             <Route path="reports" element={<ReportsPage />} />
@@ -210,19 +206,6 @@ export function CleanOnlineApp() {
             {operationalRoutes()}
           </Route>
 
-          {/* Socio (perfil de consulta / solo lectura): rutas de CLEAN (src/app/App.tsx). */}
-          <Route path="/socio" element={
-            <RequireAuth roles={['socio']}>
-              <SocioLayout />
-            </RequireAuth>
-          }>
-            <Route index element={<Navigate to="/socio/resumen" replace />} />
-            <Route path="resumen" element={<SocioDashboardPage />} />
-            <Route path="clientes" element={<SocioClientsPage />} />
-            <Route path="reportes" element={<SocioReportsPage />} />
-            <Route path="caja" element={<SocioPartnerCashPage />} />
-            <Route path="cuenta" element={<SocioAccountPage />} />
-          </Route>
           {/* Secretario (Clientes, Autorizaciones, Corrección de pagos): rutas de CLEAN. */}
           <Route path="/secretario" element={
             <RequireAuth roles={['secretario']}>
@@ -233,6 +216,7 @@ export function CleanOnlineApp() {
             <Route path="clientes" element={<SecretarioClientsPage />} />
             <Route path="autorizaciones" element={<SecretarioAuthorizationsPage />} />
             <Route path="correccion-pagos" element={<SecretarioPaymentCorrectionPage />} />
+            <Route path="transferencias" element={<SecretarioTransfersPage />} />
             <Route path="cuenta" element={<SecretarioAccountPage />} />
           </Route>
 

@@ -13,6 +13,10 @@ const ERRORS: Record<string, string> = {
   MEMBERSHIP_NOT_FOUND: 'Esa membresía ya no existe.',
   PERMISSION_DENIED: 'Su rol no permite esta operación.',
   INSUFFICIENT_FUNDS: 'No hay fondos suficientes para esta operación.',
+  // Ronda 53 · transferencias entre Administradores.
+  TRANSFER_NOT_PENDING: 'Esta transferencia ya no está pendiente.',
+  DECISION_ALREADY_REGISTERED: 'Tu decisión ya estaba registrada.',
+  REGISTRANT_CANNOT_BE_PARTY: 'Quien registra la transferencia no puede ser una de las partes.',
   CAPITAL_AUTHORITY_REQUIRED: 'Solo el Administrador responsable de la ruta puede hacerlo.',
   SELF_APPROVAL_FORBIDDEN: 'Nadie puede resolver su propia solicitud (tampoco con otra membresía).',
   SELF_REDUCTION_FORBIDDEN: 'Nadie registra la reducción de su propia custodia.',
@@ -156,9 +160,11 @@ export const FREQUENCY: Record<string, string> = {
 
 export const OPERATION_KIND: Record<string, string> = {
   COMPANY_DEPOSIT: 'Aporte a la empresa', COMPANY_WITHDRAWAL: 'Retiro de la empresa', ADMIN_ALLOCATION: 'Asignación a bolsa',
-  ADMIN_RETURN: 'Devolución de bolsa', PARTNER_CONTRIBUTION: 'Aporte de socio', WORKER_DELIVERY: 'Entrega al trabajador',
+  ADMIN_RETURN: 'Devolución de bolsa', PARTNER_CONTRIBUTION: 'Aporte externo (histórico)', WORKER_DELIVERY: 'Entrega al trabajador',
   WORKER_RETURN: 'Devolución del trabajador', WORKER_TRANSFER: 'Traspaso entre trabajadores', ROUTE_REASSIGNMENT: 'Reasignación entre rutas',
   REVERSAL: 'Anulación', LOAN_DISBURSEMENT: 'Desembolso de crédito',
   COLLECTION: 'Recaudo', WORKER_EXPENSE: 'Gasto de trabajador', ROUTE_EXPENSE: 'Gasto de la ruta', COMPANY_EXPENSE: 'Gasto administrativo',
   EXPENSE_REFUND: 'Reintegro de gasto', SETTLEMENT_RETURN: 'Efectivo entregado en cuadre', SETTLEMENT_SURPLUS: 'Sobrante de cuadre (en control)',
+  ADMIN_TRANSFER_HOLD: 'Transferencia a otro Administrador (comprometida)', ADMIN_TRANSFER_APPLY: 'Transferencia recibida de otro Administrador',
+  ADMIN_TRANSFER_RELEASE: 'Transferencia entre Administradores liberada',
 };

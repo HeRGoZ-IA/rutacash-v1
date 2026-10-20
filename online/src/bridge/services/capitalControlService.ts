@@ -4,7 +4,8 @@
 // CIFRAS: solo las que el servidor tiene con el MISMO significado que CLEAN (capital
 // centralizado):
 //   · disponible de la empresa y de cada bolsa ............ GET /v1/capital/summary
-//   · capital neto recibido del SuperAdmin, aportes de socios (por bolsa) . summary
+//   · capital neto recibido del SuperAdmin, aportes externos históricos y transferencias
+//     entre Administradores (Ronda 53), por bolsa ............ summary
 //   · gastos administrativos de una bolsa (neto) .. fórmula de CLEAN sobre los gastos del
 //     servidor con esa bolsa (si el listado está completo)
 // Las que CLEAN obtiene de su libro local y el servidor NO tiene («capital total
@@ -34,6 +35,7 @@ export * from '@clean/services/capitalControlService';
 
 interface AdminPool {
   adminId: string; name: string; status: string; availableMinor: number; allocatedNetMinor: number; partnerContributionsMinor: number;
+  adminTransfersNetMinor?: number; pendingTransfersOutMinor?: number;
 }
 interface Summary {
   company?: { availableMinor: number; partnerContributionsMinor: number };
@@ -149,6 +151,9 @@ async function getAdminPoolStatementOnline(params: { actor: User | null | undefi
   const completo = !recs.truncated;
   const recibidoSA = pool ? toMajor(pool.allocatedNetMinor) : 0;
   const aportesSocios = pool ? toMajor(pool.partnerContributionsMinor) : 0;
+  // Ronda 53: transferencias entre Administradores ya aplicadas (neto) y lo comprometido en pendientes.
+  const traspasos = pool ? toMajor(pool.adminTransfersNetMinor ?? 0) : 0;
+  const comprometido = pool ? toMajor(pool.pendingTransfersOutMinor ?? 0) : 0;
   return {
     adminId,
     capital: {
@@ -158,12 +163,12 @@ async function getAdminPoolStatementOnline(params: { actor: User | null | undefi
     partidas: {
       // Asignaciones y devoluciones por separado: suma de sus registros, solo si el listado está completo.
       asignaciones: completo ? de('asignacion') : SIN_DATO, devolucionesSA: completo ? -de('devolucionSA') : SIN_DATO,
-      recibidoSA, aportesSocios,
+      recibidoSA, aportesSocios, ...({ traspasos, comprometido } as object),
       // El servidor no traspasa capital al cambiar el responsable de una ruta (no hay «capital con la ruta»).
       rutasRecibidas: 0, rutasEntregadas: 0,
       colocado: SIN_DATO, retiradoDeRutas: SIN_DATO,
     },
-    conciliacion: { entradas: recibidoSA + aportesSocios, explicado: SIN_DATO, diferencia: SIN_DATO },
+    conciliacion: { entradas: recibidoSA + aportesSocios + traspasos - comprometido, explicado: SIN_DATO, diferencia: SIN_DATO },
     movimientos,
   };
 }

@@ -101,8 +101,10 @@ export default function UsersPage() {
     }
   }
 
-  const roleOptions = assignableRoles(currentUser).map(r => ({ value: r, label: ROLE_LABELS[r] }))
-  const defaultRole: UserRole = (assignableRoles(currentUser)[0] ?? 'cobrador') as UserRole
+  // Ronda 53: ADEX Online no tiene el rol Socio (el servidor tampoco lo acepta).
+  const onlineRoles: UserRole[] = assignableRoles(currentUser).filter(r => r !== 'socio')
+  const roleOptions = onlineRoles.map(r => ({ value: r, label: ROLE_LABELS[r] }))
+  const defaultRole: UserRole = (onlineRoles[0] ?? 'cobrador') as UserRole
 
   // MODELO PURO (#7): ROL BASE + RUTAS AUTORIZADAS. Sin permisos individuales.
   const [form, setForm] = useState({
@@ -178,7 +180,7 @@ export default function UsersPage() {
       return
     }
     // Jerarquía: el actor solo puede crear/editar roles permitidos.
-    if (!assignableRoles(currentUser).includes(form.rol)) {
+    if (!onlineRoles.includes(form.rol)) {
       toast.error('No puedes asignar ese rol.')
       return
     }
