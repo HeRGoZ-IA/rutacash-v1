@@ -23,10 +23,10 @@ type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => Promise<
  * El frontend solo se construye en Vercel cuando la API publicada declara lo que necesita
  * (`online/scripts/deploy-gate.mjs`): así un push nunca adelanta el frontend a la API.
  */
-export const API_FEATURES: readonly string[] = ['collections-v1', 'settlements-v1', 'clean-online-v1', 'changes-v1'];
+export const API_FEATURES: readonly string[] = ['collections-v1', 'settlements-v1', 'clean-online-v1', 'changes-v1', 'access-links-v1'];
 
 /** Módulos del servicio Owner (servicio aparte, ver controlStart.ts). */
-export const CONTROL_FEATURES: readonly string[] = ['owner-v1'];
+export const CONTROL_FEATURES: readonly string[] = ['owner-v1', 'owner-clean-v1'];
 
 export interface OnlineServerOptions {
   company: Handler | null;

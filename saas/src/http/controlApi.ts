@@ -5,15 +5,19 @@
 //
 //   GET  /control/v1/me                                perfil del Owner de la sesión
 //   GET  /control/v1/companies                         fichas de control (sin datos operativos)
-//   POST /control/v1/companies                         alta de empresa
+//   POST /control/v1/companies                         alta de empresa (+ estado inicial y primer SuperAdmin, Ronda 40)
 //   GET  /control/v1/companies/:id                     ficha + historial + cobros SaaS
-//   POST /control/v1/companies/:id/superadmins         primer SuperAdmin (invitación del proveedor)
+//   POST /control/v1/companies/:id/superadmins         primer SuperAdmin (identidad del proveedor, sin contraseña)
+//   POST /control/v1/companies/:id/superadmins/:m/access-link   enlace de PRIMER ACCESO (un solo uso; Ronda 40)
+//   PUT  /control/v1/companies/:id/profile             nombre, identificación y contacto (Ronda 40)
 //   POST /control/v1/companies/:id/status              trial | active | suspended
 //   POST /control/v1/companies/:id/route-counts        recuento de rutas (lo calcula el servidor)
 //   PUT  /control/v1/companies/:id/billing             condiciones de facturación SaaS
 //   POST /control/v1/companies/:id/payments            cobro de ADEX a la empresa
 //   GET  /control/v1/payments                          todos los cobros SaaS
 //   POST /control/v1/payments/:id/status               estado de un cobro SaaS
+//   GET  /control/v1/operators                         Owners de la plataforma (Ronda 40)
+//   POST /control/v1/session/start                     acceso correcto: primer/último ingreso del Owner (Ronda 40)
 //   POST /control/v1/session/logout
 
 import http from 'node:http';
@@ -23,8 +27,8 @@ import { withTransaction, type SessionClaims } from '../db/tx.ts';
 import { bearer, type TokenVerifier } from '../auth/jwt.ts';
 import type { IdentityProvider } from '../auth/provider.ts';
 import {
-  addSuperadmin, companyDetail, createCompany, listCompanies, listPayments, operatorLogout, operatorProfile, refreshRouteCounts,
-  registerPayment, resolveOperator, setCompanyStatus, setPaymentStatus, updateBilling,
+  addSuperadmin, companyDetail, createCompany, listCompanies, listOperators, listPayments, operatorLogout, operatorProfile, recordOperatorLogin,
+  refreshRouteCounts, registerPayment, resolveOperator, setCompanyStatus, setPaymentStatus, superadminAccessLink, updateBilling, updateProfile,
 } from '../control/service.ts';
 import { readJson, scopeOf, send } from './common.ts';
 
@@ -36,7 +40,8 @@ export interface ControlApiOptions {
   onError?: (err: unknown) => void;
 }
 
-const COMPANY_FIELDS = ['name', 'email', 'plan', 'countryCode', 'countryLabel', 'currencyCode', 'timezone', 'taxId', 'contactName', 'billingMode', 'billingRate'];
+const COMPANY_FIELDS = ['name', 'email', 'plan', 'countryCode', 'countryLabel', 'currencyCode', 'timezone', 'taxId', 'contactName', 'billingMode', 'billingRate',
+  'status', 'superAdmin'];
 type Handler = (c: pg.PoolClient, b: Record<string, unknown>, claims: SessionClaims) => Promise<{ status: number; body: unknown }>;
 
 /** Manejador HTTP de la API Owner (montable en el servicio Owner, ver server/controlStart.ts). */
@@ -48,7 +53,8 @@ export function createControlHandler(opts: ControlApiOptions): (req: http.Incomi
       const token = bearer(req.headers['authorization']);
       const claims = await opts.verifyToken(token);
       const p = url.pathname;
-      const one = /^\/control\/v1\/companies\/([^/]+)(?:\/(superadmins|status|route-counts|billing|payments))?$/.exec(p);
+      const one = /^\/control\/v1\/companies\/([^/]+)(?:\/(superadmins|status|route-counts|billing|payments|profile))?$/.exec(p);
+      const link = /^\/control\/v1\/companies\/([^/]+)\/superadmins\/([^/]+)\/access-link$/.exec(p);
       const payment = /^\/control\/v1\/payments\/([^/]+)\/status$/.exec(p);
 
       let fields: string[] | null = null;
@@ -59,7 +65,17 @@ export function createControlHandler(opts: ControlApiOptions): (req: http.Incomi
         handler = async (c) => ({ status: 200, body: { companies: await listCompanies(c) } });
       } else if (method === 'POST' && p === '/control/v1/companies') {
         fields = COMPANY_FIELDS;
-        handler = async (c, b) => ({ status: 201, body: await createCompany(c, b) });
+        handler = async (c, b) => ({ status: 201, body: await createCompany(c, b, opts.provider) });
+      } else if (method === 'GET' && p === '/control/v1/operators') {
+        handler = async (c, _b, cl) => ({ status: 200, body: { operators: await listOperators(c, cl) } });
+      } else if (method === 'POST' && p === '/control/v1/session/start') {
+        fields = [];
+        handler = async (c, _b, cl) => ({ status: 200, body: await recordOperatorLogin(c, cl) });
+      } else if (method === 'POST' && link) {
+        const id = decodeURIComponent(link[1]!);
+        const mid = decodeURIComponent(link[2]!);
+        fields = [];
+        handler = async (c) => ({ status: 200, body: await superadminAccessLink(c, id, mid, opts.provider) });
       } else if (method === 'GET' && p === '/control/v1/payments') {
         handler = async (c) => ({ status: 200, body: { payments: await listPayments(c) } });
       } else if (one) {
@@ -69,6 +85,7 @@ export function createControlHandler(opts: ControlApiOptions): (req: http.Incomi
         if (method === 'POST' && sub === 'superadmins') { fields = ['email', 'displayName']; handler = async (c, b) => ({ status: 201, body: await addSuperadmin(c, id, b, opts.provider) }); }
         if (method === 'POST' && sub === 'status') { fields = ['status', 'detail']; handler = async (c, b) => ({ status: 200, body: await setCompanyStatus(c, id, b) }); }
         if (method === 'POST' && sub === 'route-counts') { fields = []; handler = async (c) => ({ status: 200, body: await refreshRouteCounts(c, id) }); }
+        if (method === 'PUT' && sub === 'profile') { fields = ['name', 'taxId', 'contactName', 'contactEmail']; handler = async (c, b) => ({ status: 200, body: await updateProfile(c, id, b) }); }
         if (method === 'PUT' && sub === 'billing') { fields = ['billingMode', 'billingRate', 'nextBillingDate', 'paymentStatus']; handler = async (c, b) => ({ status: 200, body: await updateBilling(c, id, b) }); }
         if (method === 'POST' && sub === 'payments') { fields = ['period', 'amount', 'expectedDate', 'status', 'paidDate', 'note']; handler = async (c, b) => ({ status: 201, body: await registerPayment(c, id, b) }); }
       } else if (method === 'POST' && payment) {

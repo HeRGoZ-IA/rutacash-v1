@@ -78,7 +78,7 @@ describe('Fase 1 · plano de control Owner', () => {
     assert.equal(created.body['status'], 'trial');
     const sa = await control.call('POST', `/control/v1/companies/${cid}/superadmins`, { token: owner, body: { email: 'delta-sa@example.test', displayName: 'SA Delta' } });
     assert.equal(sa.status, 201);
-    assert.deepEqual(Object.keys(sa.body), ['membershipId']);
+    assert.deepEqual(Object.keys(sa.body), ['membershipId', 'identity']);
     const saToken = await issuer.issue(provider.ids.get('delta-sa@example.test')!);
     const ctx = await api.call('POST', '/v1/context/select', { token: saToken, membership: sa.body['membershipId'] as string, body: {} });
     assert.equal(ctx.status, 200, JSON.stringify(ctx.body));
@@ -88,7 +88,7 @@ describe('Fase 1 · plano de control Owner', () => {
     assert.equal((await control.call('POST', `/control/v1/companies/${cid}/superadmins`, { token: owner, body: { email: 'owner@example.test', displayName: 'Yo' } })).status, 403);
     assert.deepEqual((await api.call('GET', '/v1/me/memberships', { token: owner })).body['memberships'], []);
     const ev = await db.admin.query(`select type from adex_control.control_events where company_id = $1 order by at`, [cid]);
-    assert.deepEqual(ev.rows.map((x) => x.type), ['COMPANY_CREATED', 'FIRST_LOGIN']);
+    assert.deepEqual(ev.rows.map((x) => x.type), ['COMPANY_CREATED', 'SUPERADMIN_ASSIGNED', 'FIRST_LOGIN']);
   });
 
   test('OWN-005 · DS-17: billableRouteCount lo calcula el servidor (rutas en estado activa)', async () => {

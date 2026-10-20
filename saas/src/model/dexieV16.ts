@@ -394,7 +394,8 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
   {
     dexieTable: 'controlEvents', entity: 'ControlEvent', source: 'platform', sqlTable: 'adex_control.control_events',
     fields: [id('id', 'id'), id('companyId', 'company_id'), f('type', 'type'), instant('at', 'at'), f('detail', 'detail')],
-    omitted: [], added: [],
+    omitted: [],
+    added: [{ column: 'actor_identity_id', reason: 'Ronda 40 (0021): autor de cada evento administrativo, sellado por el servidor con la identidad del contexto; CLEAN no lo registraba' }],
   },
 ];
 

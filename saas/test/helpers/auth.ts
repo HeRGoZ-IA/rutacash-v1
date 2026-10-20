@@ -69,12 +69,23 @@ export async function createLocalIssuer(): Promise<LocalIssuer> {
 const PEOPLE_SET = new Set<string>(['ana', 'bruno', 'carla', 'diego', 'elisa', 'fabio', 'gabi', 'hugo', 'irene', 'owner']);
 
 /** Proveedor en memoria: un `sub` estable por correo; registra los cierres de sesión. */
-export function createMemoryProvider(): IdentityProvider & { signOuts: { scope: string }[]; ids: Map<string, string> } {
+export function createMemoryProvider(): IdentityProvider & { signOuts: { scope: string }[]; ids: Map<string, string>; signedIn: Set<string>; links: string[] } {
   const ids = new Map<string, string>();
   const signOuts: { scope: string }[] = [];
+  /** Identidades que ya iniciaron sesión (el proveedor real lo sabe por `last_sign_in_at`). */
+  const signedIn = new Set<string>();
+  const links: string[] = [];
   return {
     ids,
     signOuts,
+    signedIn,
+    links,
+    async issueAccessLink(identityId) {
+      if (signedIn.has(identityId)) return { status: 'already_active' };
+      const tokenHash = randomUUID().replaceAll('-', '');
+      links.push(identityId);
+      return { status: 'issued', tokenHash };
+    },
     async ensureIdentity(email) {
       const e = email.trim().toLowerCase();
       const existing = ids.get(e);

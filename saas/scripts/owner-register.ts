@@ -27,7 +27,10 @@ import pg from '../src/db/pgTypes.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STAGING_REF = 'hyqaufsagtsucztjfjvc';
-const OWNER_PAGE = process.env['ADEX_OWNER_PAGE'] ?? 'https://adex-online.vercel.app/owner/';
+const OWNER_PAGE = process.env['ADEX_OWNER_PAGE'] ?? 'https://adex-online.vercel.app/owner/login';
+// Ronda 40: el enlace de recuperación vuelve a la pantalla de llegada común (/activar), donde
+// la persona fija su contraseña; después entra por /owner/login.
+const RECOVERY_PAGE = process.env['ADEX_RECOVERY_PAGE'] ?? 'https://adex-online.vercel.app/activar';
 const fail = (m: string): never => { console.error(`DETENIDO: ${m}`); process.exit(2); };
 
 const envFile = path.join(root, '.env.staging');
@@ -140,9 +143,9 @@ try {
   // 4. Contraseña: solo el propietario la conoce.
   if (sendLink) {
     const r = await fetch(`${SB}/auth/v1/recover`, { method: 'POST', headers: { apikey: env['SUPABASE_PUBLISHABLE_KEY']!, 'content-type': 'application/json' },
-      body: JSON.stringify({ email, redirect_to: OWNER_PAGE }) });
+      body: JSON.stringify({ email, redirect_to: RECOVERY_PAGE }) });
     if (r.status >= 500) fail('el proveedor no pudo enviar el enlace');
-    console.log(`\nEnlace enviado a su correo. Ábralo en el navegador: le llevará a ${OWNER_PAGE} para fijar la contraseña.`);
+    console.log(`\nEnlace enviado a su correo. Ábralo en el navegador: le llevará a ${RECOVERY_PAGE} para fijar la contraseña; después entre en ${OWNER_PAGE}.`);
     console.log('Si el enlace le lleva a otra dirección, el proveedor aún no admite esa página: use este script sin --send-link.');
   } else {
     const a = await line('Elija su contraseña (12+ caracteres, no se muestra): ', true);

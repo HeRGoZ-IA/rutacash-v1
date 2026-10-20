@@ -168,6 +168,30 @@ export async function createMember(client: pg.PoolClient, ctx: ActiveContext, in
   return { ...(await viewOf(client, ctx, membershipId)), controllerEvents: events };
 }
 
+/**
+ * Enlace de PRIMER ACCESO de un usuario de la empresa (Ronda 40). Quien puede crear y
+ * gestionar a esa persona (misma regla que el alta: `user.create` para su rol + jerarquía y
+ * alcance) obtiene un enlace de un solo uso para entregárselo; la persona fija su propia
+ * contraseña con él. Solo si la identidad es exclusiva de esta empresa (no pertenece a otra
+ * ni es Owner) y NUNCA ha iniciado sesión: a quien ya tiene acceso nadie le fija la
+ * contraseña desde fuera. El token no se guarda ni se registra; la auditoría anota quién lo
+ * emitió y para quién.
+ */
+export async function memberAccessLink(client: pg.PoolClient, ctx: ActiveContext, membershipId: string, provider: IdentityProvider) {
+  const target = await loadMember(client, ctx, membershipId);
+  if (!allowed(ctx, 'user.create', { targetRole: target.role }) || !mayManage(ctx, target)) throw new ApiError(403, 'PERMISSION_DENIED');
+  const r = await client.query<{ identity_id: string; email: string; exclusive: boolean }>(
+    'select identity_id, email, exclusive from adex.access_link_target($1)', [target.membershipId]);
+  const t = r.rows[0];
+  if (!t) throw new ApiError(409, 'MEMBERSHIP_INACTIVE');
+  if (!t.exclusive) throw new ApiError(409, 'IDENTITY_SHARED');
+  const out = await provider.issueAccessLink(t.identity_id, t.email);
+  if (out.status === 'already_active') return { status: 'already_active' as const };
+  await audit(client, ctx, { action: 'ISSUE_ACCESS_LINK', entityType: 'membership', entityId: target.membershipId,
+    description: 'Enlace de primer acceso emitido' });
+  return { status: 'issued' as const, tokenHash: out.tokenHash };
+}
+
 async function companyMembers(client: pg.PoolClient, ctx: ActiveContext): Promise<MembershipFacts[]> {
   const r = await client.query<{ id: string; role: UserRole; status: 'activo' | 'inactivo'; display_name: string }>(
     'select id, role, status, display_name from adex.memberships where company_id = $1', [ctx.companyId]);

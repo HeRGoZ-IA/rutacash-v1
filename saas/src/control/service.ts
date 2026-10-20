@@ -57,8 +57,14 @@ const str = (v: unknown, field: string, re?: RegExp): string => {
   return v.trim();
 };
 
-export async function createCompany(client: pg.PoolClient, body: Record<string, unknown>) {
+export async function createCompany(client: pg.PoolClient, body: Record<string, unknown>, provider: IdentityProvider) {
   const id = randomUUID();
+  // Ronda 40: el alta de la Plataforma Owner original (CLEAN) crea la empresa, su estado
+  // comercial inicial y su PRIMER SuperAdmin en UNA transacción: nunca queda una empresa
+  // sin SuperAdmin por un fallo a medias.
+  const status = body['status'] === undefined ? 'trial' : str(body['status'], 'status', /^(trial|active)$/);
+  const sa = body['superAdmin'];
+  if (sa !== undefined && (typeof sa !== 'object' || sa === null || Array.isArray(sa))) throw new ApiError(400, 'INVALID_SUPERADMIN');
   await client.query('select adex_control.create_company($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)', [
     id, str(body['name'], 'name'), str(body['email'], 'email', /^[^\s@]+@[^\s@]+\.[^\s@]+$/),
     str(body['plan'] ?? 'basico', 'plan'), str(body['countryCode'], 'countryCode', /^[A-Z]{2}$/), str(body['countryLabel'], 'countryLabel'),
@@ -66,18 +72,22 @@ export async function createCompany(client: pg.PoolClient, body: Record<string, 
     typeof body['taxId'] === 'string' ? body['taxId'] : null, typeof body['contactName'] === 'string' ? body['contactName'] : null,
     str(body['billingMode'] ?? 'per_route', 'billingMode'), Number(body['billingRate'] ?? 0),
   ]);
-  return getCompany(client, id);
+  if (status === 'active') await client.query('select adex_control.set_company_status($1, $2, $3)', [id, 'active', null]);
+  const superAdmin = sa === undefined ? null : await addSuperadmin(client, id, sa as Record<string, unknown>, provider);
+  return { ...(await getCompany(client, id)), superAdmin };
 }
 
 export async function addSuperadmin(client: pg.PoolClient, companyId: string, body: Record<string, unknown>, provider: IdentityProvider) {
+  for (const k of Object.keys(body)) if (!['email', 'displayName'].includes(k)) throw new ApiError(400, 'UNKNOWN_FIELD');
   const email = str(body['email'], 'email', /^[^\s@]+@[^\s@]+\.[^\s@]+$/).toLowerCase();
   const displayName = str(body['displayName'], 'displayName');
   await getCompany(client, companyId);
-  const { identityId } = await provider.ensureIdentity(email);
+  const { identityId, created } = await provider.ensureIdentity(email);
   const membershipId = randomUUID();
   await client.query('select adex_control.create_company_superadmin($1, $2, $3, $4, $5)', [companyId, membershipId, identityId, email, displayName]);
-  // Solo el id de la membresía creada: el Owner no recibe nada más de la empresa.
-  return { membershipId };
+  // Solo el id de la membresía creada y si la persona es nueva en ADEX: el Owner no recibe
+  // nada más de la empresa. Una identidad que ya existía entra con su contraseña de siempre.
+  return { membershipId, identity: created ? 'new' : 'existing' };
 }
 
 export async function setCompanyStatus(client: pg.PoolClient, companyId: string, body: Record<string, unknown>) {
@@ -117,6 +127,12 @@ const paymentView = (p: PaymentRow) => ({
 /** Ficha de una empresa: datos de control, historial estructural/comercial y cobros SaaS. */
 export async function companyDetail(client: pg.PoolClient, companyId: string) {
   const company = await getCompany(client, companyId);
+  // Ronda 40 (0021): país, moneda y zona horaria (solo lectura) y los SuperAdmins (nombre,
+  // correo, estado): aprovisionamiento, nada operativo.
+  const locale = (await client.query<{ country_code: string; country_label: string; currency_code: string; timezone: string }>(
+    'select * from adex_control.company_locale($1)', [companyId])).rows[0];
+  const superadmins = (await client.query<{ membership_id: string; email: string; display_name: string; status: string; exclusive: boolean; created_at: Date }>(
+    'select membership_id, email, display_name, status, exclusive, created_at from adex_control.company_superadmins($1)', [companyId])).rows;
   const events = await client.query<{ type: string; at: Date; detail: string | null }>(
     'select type, at, detail from adex_control.control_events where company_id = $1 order by at desc limit 100', [companyId]);
   const payments = await client.query<PaymentRow>(
@@ -124,9 +140,56 @@ export async function companyDetail(client: pg.PoolClient, companyId: string) {
        from adex_control.saas_payments where company_id = $1 order by period desc, created_at desc`, [companyId]);
   return {
     company,
+    locale: locale ? { countryCode: locale.country_code, countryLabel: locale.country_label, currencyCode: locale.currency_code, timezone: locale.timezone } : null,
+    superadmins: superadmins.map((m) => ({ id: m.membership_id, email: m.email, displayName: m.display_name, status: m.status,
+      linkAllowed: m.exclusive && m.status === 'activo', createdAt: m.created_at.toISOString() })),
     events: events.rows.map((e) => ({ type: e.type, at: e.at.toISOString(), detail: e.detail })),
     payments: payments.rows.map(paymentView),
   };
+}
+
+/**
+ * Enlace de PRIMER ACCESO de un SuperAdmin (Ronda 40). Solo para una membresía SuperAdmin
+ * activa de esa empresa cuya identidad sea exclusiva de ella (no pertenece a otra empresa
+ * ni es Owner) y que NUNCA haya iniciado sesión (lo comprueba el proveedor). El token se
+ * devuelve una vez y no se guarda ni se registra; el historial anota que se emitió y quién.
+ */
+export async function superadminAccessLink(client: pg.PoolClient, companyId: string, membershipId: string, provider: IdentityProvider) {
+  await getCompany(client, companyId);
+  const r = await client.query<{ identity_id: string; email: string; status: string; exclusive: boolean }>(
+    'select identity_id, email, status, exclusive from adex_control.company_superadmins($1) where membership_id = $2', [companyId, membershipId]);
+  const t = r.rows[0];
+  if (!t) throw new ApiError(404, 'NOT_FOUND');
+  if (t.status !== 'activo') throw new ApiError(409, 'MEMBERSHIP_INACTIVE');
+  if (!t.exclusive) throw new ApiError(409, 'IDENTITY_SHARED');
+  const out = await provider.issueAccessLink(t.identity_id, t.email);
+  if (out.status === 'already_active') return { status: 'already_active' as const };
+  await client.query('select adex_control.record_access_link($1, $2)', [companyId, membershipId]);
+  return { status: 'issued' as const, tokenHash: out.tokenHash };
+}
+
+/** Nombre, identificación y contacto de la empresa (Ficha comercial de CLEAN). */
+export async function updateProfile(client: pg.PoolClient, companyId: string, body: Record<string, unknown>) {
+  const opt = (k: string) => (typeof body[k] === 'string' && (body[k] as string).trim() ? (body[k] as string).trim() : null);
+  const contactEmail = opt('contactEmail');
+  if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) throw new ApiError(400, 'INVALID_CONTACTEMAIL');
+  await client.query('select adex_control.update_company_profile($1, $2, $3, $4, $5)',
+    [companyId, str(body['name'], 'name'), opt('taxId'), opt('contactName'), contactEmail]);
+  return getCompany(client, companyId);
+}
+
+/** Owners de la plataforma (Configuración del portal). */
+export async function listOperators(client: pg.PoolClient, claims: SessionClaims) {
+  const r = await client.query<{ identity_id: string; display_name: string; email: string; status: string; first_login_at: Date | null; last_login_at: Date | null; created_at: Date }>(
+    'select * from adex_control.list_operators()');
+  return r.rows.map((o) => ({ displayName: o.display_name, email: o.email, status: o.status, self: o.identity_id === claims.identityId,
+    firstLoginAt: o.first_login_at?.toISOString() ?? null, lastLoginAt: o.last_login_at?.toISOString() ?? null, createdAt: o.created_at.toISOString() }));
+}
+
+/** Acceso correcto al portal Owner: sella primer y último ingreso del propio Owner. */
+export async function recordOperatorLogin(client: pg.PoolClient, claims: SessionClaims) {
+  await client.query('select adex_control.record_operator_login()');
+  return operatorProfile(client, claims);
 }
 
 /** Todos los cobros SaaS (vista de facturación). Solo hechos de ADEX con sus clientes. */

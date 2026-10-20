@@ -46,7 +46,7 @@ describe('Ronda 20 · panel Owner SaaS', () => {
   test('OWP-002 · ficha de empresa: control + historial + cobros, sin nada operativo', async () => {
     const r = await control.call('GET', `/control/v1/companies/${companyId('c1')}`, { token: await issuer.issue('owner') });
     assert.equal(r.status, 200, JSON.stringify(r.body));
-    assert.deepEqual(Object.keys(r.body).sort(), ['company', 'events', 'payments']);
+    assert.deepEqual(Object.keys(r.body).sort(), ['company', 'events', 'locale', 'payments', 'superadmins']);
     const text = JSON.stringify(r.body).toLowerCase();
     for (const k of ['client', 'loan', 'capital', 'balance', 'ledger', 'membership', 'document', 'phone', 'address']) assert.ok(!text.includes(`"${k}`), k);
     assert.equal((await control.call('GET', '/control/v1/companies/no-existe', { token: await issuer.issue('owner') })).status, 404);
@@ -120,7 +120,7 @@ describe('Ronda 20 · panel Owner SaaS', () => {
     try {
       const owner = await issuer.issue('owner');
       const get = (p: string, token = owner, membership?: string) => fetch(base + p, { headers: { authorization: `Bearer ${token}`, connection: 'close', ...(membership ? { 'x-adex-membership': membership } : {}) } });
-      assert.deepEqual(await (await fetch(`${base}/healthz`)).json(), { status: 'ok', features: ['owner-v1'] });
+      assert.deepEqual(await (await fetch(`${base}/healthz`)).json(), { status: 'ok', features: [...CONTROL_FEATURES] });
       assert.equal((await get('/readyz')).status, 200);
       assert.equal((await get('/control/v1/companies')).status, 200);
       const bruno = await issuer.issue('bruno');

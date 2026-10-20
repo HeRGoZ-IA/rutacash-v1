@@ -21,7 +21,7 @@ import type { IdentityProvider } from '../auth/provider.ts';
 import { listOwnMemberships, resolveContext, resolveIdentity, type ActiveContext } from '../authz/context.ts';
 import { capabilitiesOf } from '../authz/cleanRules.ts';
 import {
-  createMember, deleteMember, listMembers, logout, setMemberOfficeRoutes, setMemberRoutes, setMemberStatus, updateMember,
+  createMember, deleteMember, listMembers, logout, memberAccessLink, setMemberOfficeRoutes, setMemberRoutes, setMemberStatus, updateMember,
 } from '../identity/service.ts';
 import { COMPANY_FIELDS, getCompany, updateCompany } from '../structure/company.ts';
 import {
@@ -136,6 +136,9 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'PUT', pattern: new RegExp(`^/v1/members/${ID}/office-routes$`), fields: ['officeId', 'selectedRouteIds'],
     handler: ([id]) => async (c, ctx, b) => ok(await setMemberOfficeRoutes(c, ctx, id!, b)) },
   { method: 'POST', pattern: new RegExp(`^/v1/members/${ID}/delete$`), fields: [], handler: ([id]) => async (c, ctx) => ok(await deleteMember(c, ctx, id!)) },
+  // Ronda 40: enlace de primer acceso (no idempotente: el token nunca se guarda en `operations`).
+  { method: 'POST', pattern: new RegExp(`^/v1/members/${ID}/access-link$`), fields: [],
+    handler: ([id], provider) => async (c, ctx) => ok(await memberAccessLink(c, ctx, id!, provider)) },
   // ---------- Categorías de gasto ----------
   { method: 'GET', pattern: /^\/v1\/expense-categories$/, fields: null, handler: () => async (c, ctx) => ok({ categories: await listCategories(c, ctx) }) },
   { method: 'POST', pattern: /^\/v1\/expense-categories$/, fields: ['name', 'icon'], idempotent: 'expense_categories.create',
