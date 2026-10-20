@@ -17,6 +17,15 @@
     @apply bg-gray-50 text-gray-900;
   }
 
+  /* Ronda 49: cifras alineadas en columnas (importes, saldos, cantidades). */
+  td, th {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Columnas numéricas (alineadas a la derecha): el importe nunca se parte en dos líneas. */
+  td.text-right, th.text-right {
+    white-space: nowrap;
+  }
+
   input[type='number']::-webkit-outer-spin-button,
   input[type='number']::-webkit-inner-spin-button {
     -webkit-appearance: none;

@@ -63,6 +63,19 @@ export function getCurrencySymbol(currency = 'COP'): string {
 }
 
 /**
+ * Ronda 50: importe ABREVIADO para ejes de gráficas, legible en COP y BRL
+ * («$ 1,5 M», «R$ 850 mil»). Solo presentación: tooltips y tablas siguen con el importe exacto.
+ */
+export function formatCompactCurrency(value: number, currency = 'COP'): string {
+  if (!Number.isFinite(value)) return '—'
+  // Escrito a mano: el formato «compact» del navegador varía (algunos dan «30 k»).
+  const abs = Math.abs(value)
+  const n = (v: number, d: number) => new Intl.NumberFormat('es-CO', { maximumFractionDigits: d }).format(v)
+  const compact = abs >= 1_000_000 ? `${n(value / 1_000_000, 1)} M` : abs >= 1_000 ? `${n(value / 1_000, 0)} mil` : n(value, 0)
+  return `${getCurrencySymbol(currency)} ${compact}`
+}
+
+/**
  * Convierte lo que el usuario escribe en el input a un número entero.
  * Ignora símbolo, espacios y separadores de miles. Si está vacío → 0.
  */

@@ -2,10 +2,11 @@
 // Misma tabla, columnas, alta y modales. Cambios, marcados con «ADEX Online:»:
 //   · el alta fija PAÍS, MONEDA y ZONA HORARIA (solo las que el servidor admite: COP y BRL);
 //   · el primer Super Admin no recibe una contraseña inventada por el Owner: recibe un
-//     ENLACE DE PRIMER ACCESO de un solo uso para fijar la suya (nadie más la conoce).
-import { useEffect, useState } from 'react'
+//     ENLACE DE PRIMER ACCESO de un solo uso para fijar la suya (nadie más la conoce);
+//   · Ronda 50: búsqueda, filtro por estado y orden; en móvil, tarjetas en vez de tabla.
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Building2, Loader2 } from 'lucide-react'
+import { Plus, Building2, Loader2, Search } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { Input, Select } from '@/components/ui/Input'
@@ -58,6 +59,22 @@ export default function OwnerCompaniesPage() {
     pais: 'CO' as string, moneda: 'COP' as string, zonaHoraria: 'America/Bogota' as string,
   }
   const [form, setForm] = useState(emptyForm)
+  // ADEX Online (Ronda 50): búsqueda, filtro y orden del listado (solo presentación).
+  const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | CompanyControlRecord['status'] | 'overdue'>('all')
+  const [sort, setSort] = useState<'name' | 'created' | 'lastLogin' | 'nextBilling'>('name')
+  const visible = useMemo(() => {
+    const q = query.trim().toLocaleLowerCase('es')
+    const list = rows.filter(r =>
+      (!q || r.nombre.toLocaleLowerCase('es').includes(q) || (r.contactoEmail ?? '').toLocaleLowerCase('es').includes(q))
+      && (statusFilter === 'all' || (statusFilter === 'overdue' ? r.paymentStatus === 'overdue' : r.status === statusFilter)))
+    const time = (v: string | null | undefined, empty: number) => (v ? Date.parse(v) : empty)
+    return [...list].sort((a, b) =>
+      sort === 'created' ? time(b.createdAt, 0) - time(a.createdAt, 0)
+      : sort === 'lastLogin' ? time(b.lastLoginAt, 0) - time(a.lastLoginAt, 0)
+      : sort === 'nextBilling' ? time(a.nextBillingDate, Infinity) - time(b.nextBillingDate, Infinity)
+      : a.nombre.localeCompare(b.nombre, 'es'))
+  }, [rows, query, statusFilter, sort])
 
   useEffect(() => { load() }, [])
 
@@ -125,13 +142,31 @@ export default function OwnerCompaniesPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Empresas</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{rows.length} empresa(s) en la plataforma</p>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {visible.length === rows.length ? `${rows.length} empresa(s) en la plataforma` : `${visible.length} de ${rows.length} empresa(s)`}
+          </p>
         </div>
         <Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Nueva empresa</Button>
       </div>
+
+      {rows.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-end gap-3" data-testid="owner-companies-toolbar">
+          <Input containerClassName="w-full sm:flex-1" aria-label="Buscar empresa" placeholder="Buscar por nombre o correo"
+            leftIcon={<Search className="w-4 h-4" />} value={query} onChange={e => setQuery(e.target.value)} />
+          <Select containerClassName="w-full sm:w-48" aria-label="Filtrar por estado" value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value as typeof statusFilter)}
+            options={[{ value: 'all', label: 'Todos los estados' }, { value: 'active', label: COMMERCIAL_STATUS_LABEL.active },
+              { value: 'trial', label: COMMERCIAL_STATUS_LABEL.trial }, { value: 'suspended', label: COMMERCIAL_STATUS_LABEL.suspended },
+              { value: 'overdue', label: 'Pago vencido' }]} />
+          <Select containerClassName="w-full sm:w-48" aria-label="Ordenar por" value={sort}
+            onChange={e => setSort(e.target.value as typeof sort)}
+            options={[{ value: 'name', label: 'Nombre (A–Z)' }, { value: 'created', label: 'Alta más reciente' },
+              { value: 'lastLogin', label: 'Último ingreso' }, { value: 'nextBilling', label: 'Próximo cobro' }]} />
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-16">
@@ -143,8 +178,42 @@ export default function OwnerCompaniesPage() {
           <p className="text-sm text-gray-500 mt-3">Todavía no hay ninguna empresa.</p>
           <Button className="mt-4" onClick={openCreate}>Crear la primera empresa</Button>
         </div>
+      ) : visible.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-card px-6 py-10 text-center">
+          <p className="text-sm text-gray-500">Ninguna empresa coincide con la búsqueda o el filtro.</p>
+          <Button className="mt-3" variant="secondary" size="sm" onClick={() => { setQuery(''); setStatusFilter('all') }}>Limpiar filtros</Button>
+        </div>
       ) : (
-        <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-x-auto">
+        <>
+        {/* Móvil: una tarjeta por empresa, sin desplazamiento horizontal. */}
+        <ul className="md:hidden space-y-3" data-testid="owner-companies-cards">
+          {visible.map(r => (
+            <li key={r.companyId} className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <button onClick={() => navigate(`/owner/empresas/${r.companyId}`)} className="text-left min-w-0">
+                  <span className="block font-semibold text-gray-900 hover:text-primary-600 [overflow-wrap:anywhere]">{r.nombre}</span>
+                  <span className="block text-xs text-gray-500 [overflow-wrap:anywhere]">{r.contactoEmail ?? '—'}</span>
+                </button>
+                <Badge variant={statusVariant(r.status)} size="sm">{COMMERCIAL_STATUS_LABEL[r.status]}</Badge>
+              </div>
+              <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                <div><dt className="text-gray-500">Rutas</dt><dd className="font-semibold text-gray-900 tabular-nums">{r.billableRouteCount} / {r.routeCount}</dd></div>
+                <div><dt className="text-gray-500">Pago</dt><dd><Badge variant={payVariant(r.paymentStatus)} size="sm">{SAAS_PAYMENT_STATUS_LABEL[r.paymentStatus]}</Badge></dd></div>
+                <div><dt className="text-gray-500">Próximo cobro</dt><dd className="text-gray-800 tabular-nums">{r.nextBillingDate ? formatDate(r.nextBillingDate) : '—'}</dd></div>
+                <div><dt className="text-gray-500">Esperado</dt><dd className="text-gray-800 tabular-nums">{formatCurrency(expectedPeriodAmount(r))}</dd></div>
+                <div className="col-span-2"><dt className="text-gray-500">Último ingreso</dt><dd className="text-gray-800">{r.lastLoginAt ? formatDateTime(r.lastLoginAt) : '—'}</dd></div>
+              </dl>
+              <div className="flex items-center justify-between border-t border-gray-100 pt-3">
+                <button onClick={() => navigate(`/owner/empresas/${r.companyId}`)} className="text-sm font-medium text-primary-600">Ver ficha</button>
+                <button onClick={() => setStatusTarget(r)}
+                  className={`text-sm font-medium ${r.status === 'suspended' ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {r.status === 'suspended' ? 'Reactivar' : 'Suspender'}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <div className="hidden md:block bg-white rounded-2xl shadow-card border border-gray-100 overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500">
               <tr className="text-left">
@@ -161,14 +230,14 @@ export default function OwnerCompaniesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {rows.map(r => (
+              {visible.map(r => (
                 <tr key={r.companyId} className="hover:bg-gray-50/70">
                   <td className="px-4 py-3">
                     <button onClick={() => navigate(`/owner/empresas/${r.companyId}`)}
                       className="font-medium text-gray-900 hover:text-primary-600 hover:underline">
                       {r.nombre}
                     </button>
-                    <p className="text-xs text-gray-400">{r.contactoEmail ?? '—'}</p>
+                    <p className="text-xs text-gray-500">{r.contactoEmail ?? '—'}</p>
                   </td>
                   <td className="px-4 py-3 text-gray-600">{formatDate(r.createdAt)}</td>
                   <td className="px-4 py-3"><Badge variant={statusVariant(r.status)} size="sm">{COMMERCIAL_STATUS_LABEL[r.status]}</Badge></td>
@@ -180,11 +249,11 @@ export default function OwnerCompaniesPage() {
                   </td>
                   <td className="px-4 py-3 text-gray-600">
                     {formatCurrency(r.billingRate)}
-                    <span className="text-xs text-gray-400"> · {BILLING_MODE_LABEL[r.billingMode]}</span>
+                    <span className="text-xs text-gray-500"> · {BILLING_MODE_LABEL[r.billingMode]}</span>
                   </td>
                   <td className="px-4 py-3 text-gray-600">
                     {r.nextBillingDate ? formatDate(r.nextBillingDate) : '—'}
-                    <p className="text-xs text-gray-400">Esperado {formatCurrency(expectedPeriodAmount(r))}</p>
+                    <p className="text-xs text-gray-500">Esperado {formatCurrency(expectedPeriodAmount(r))}</p>
                   </td>
                   <td className="px-4 py-3"><Badge variant={payVariant(r.paymentStatus)} size="sm">{SAAS_PAYMENT_STATUS_LABEL[r.paymentStatus]}</Badge></td>
                   <td className="px-4 py-3 text-right">
@@ -198,6 +267,7 @@ export default function OwnerCompaniesPage() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {/* --- Alta de empresa + primer Super Admin --- */}

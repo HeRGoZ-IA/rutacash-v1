@@ -364,7 +364,39 @@ export default function ActiveSalesPage() {
       ) : filtered.length === 0 ? (
         <EmptyState icon={<CreditCard className="w-8 h-8" />} title="No hay ventas" action={<Button onClick={() => setCreateOpen(true)} icon={<Plus className="w-4 h-4" />}>Nueva venta</Button>} />
       ) : (
-        <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
+        <>
+        {/* Ronda 50 · móvil: una tarjeta por venta (sin desplazamiento horizontal ni importes cortados). */}
+        <ul className="sm:hidden space-y-2" data-testid="active-sales-cards">
+          {filtered.map(s => {
+            const client = clientMap.get(s.clientId)
+            const route = routeMap.get(s.routeId)
+            return (
+              <li key={s.id}>
+                <button type="button" onClick={() => openDetail(s)} className="w-full text-left bg-white rounded-2xl shadow-card border border-gray-100 p-4 active:bg-primary-50/40">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 [overflow-wrap:anywhere]">{client?.nombre ?? 'N/A'}</p>
+                      <p className="text-xs text-gray-500">{client?.documento ?? ''}</p>
+                    </div>
+                    <SaleStatusBadge status={s.status} />
+                  </div>
+                  <div className="mt-3 flex items-end justify-between gap-3">
+                    <div>
+                      <p className="text-xs text-gray-500">Saldo</p>
+                      <p className={`text-lg font-bold tabular-nums leading-tight ${s.saldo > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{formatCurrency(s.saldo)}</p>
+                    </div>
+                    <div className="text-right text-xs text-gray-500 tabular-nums">
+                      <p>Venta <span className="font-medium text-gray-800">{formatCurrency(s.valorVenta)}</span> · {s.tasaInteres}%</p>
+                      <p>Cuota <span className="font-medium text-gray-800">{formatCurrency(s.valorCuota)}</span> · {paidBySale[s.id] ?? 0}/{s.numeroCuotas}</p>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs text-gray-500">{route?.nombre ?? '—'} · {formatDate(s.fechaInicio)}</p>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+        <div className="hidden sm:block bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -387,12 +419,12 @@ export default function ActiveSalesPage() {
                     <tr key={s.id} onClick={() => openDetail(s)} className="hover:bg-primary-50/40 cursor-pointer transition-colors">
                       <td className="px-4 py-3">
                         <p className="text-sm font-medium text-gray-900">{client?.nombre ?? 'N/A'}</p>
-                        <p className="text-xs text-gray-400">{client?.documento ?? ''}</p>
+                        <p className="text-xs text-gray-500">{client?.documento ?? ''}</p>
                       </td>
                       <td className="px-4 py-3 text-right hidden sm:table-cell">
                         {/* Revisión 2 socio 30-jun: "Venta" muestra el valor prestado SIN interés. */}
                         <p className="text-sm font-medium text-gray-900">{formatCurrency(s.valorVenta)}</p>
-                        <p className="text-xs text-gray-400">{s.tasaInteres}% interés</p>
+                        <p className="text-xs text-gray-500">{s.tasaInteres}% interés</p>
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className={`text-sm font-bold ${s.saldo > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{formatCurrency(s.saldo)}</span>
@@ -414,13 +446,14 @@ export default function ActiveSalesPage() {
             </table>
           </div>
         </div>
+        </>
       )}
 
       {/* Create Sale Modal */}
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nueva venta" size="mdPlus"
         footer={<><Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancelar</Button><Button onClick={handleCreateSale} loading={saving} disabled={capExcedido}>Crear venta</Button></>}>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Select label="Ruta" value={form.routeId} onChange={e => handleRouteChange(e.target.value)}
               options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
             <Select label="Cliente" value={form.clientId} onChange={e => setForm(f => ({ ...f, clientId: e.target.value }))}
@@ -442,7 +475,7 @@ export default function ActiveSalesPage() {
               </div>
             </div>
           )}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <MoneyInput label="Valor de la venta" currency={currency} value={form.valorVenta} onValueChange={v => setForm(f => ({ ...f, valorVenta: v }))} required />
             <Select label="Tasa interés" value={String(form.tasaInteres)} onChange={e => setForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={TASA_OPTIONS} />
             <Input label="N° de parcelas" type="number" min={1} required value={form.numeroCuotas || ''} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
@@ -453,7 +486,7 @@ export default function ActiveSalesPage() {
               {capExcedido && <p className="text-xs mt-1 font-medium">El valor supera la Base de la ruta. Reduce el monto o inyecta capital a la ruta.</p>}
             </div>
           )}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Select label="Frecuencia de pago" value={form.frecuenciaPago} onChange={e => setForm(f => ({ ...f, frecuenciaPago: e.target.value as any }))} options={freqOptions} />
             <Input label="Fecha inicio de cobro" type="date" min={today()} value={form.fechaInicio} onChange={e => setForm(f => ({ ...f, fechaInicio: e.target.value }))} hint="No puede ser anterior a hoy" />
           </div>
@@ -478,7 +511,7 @@ export default function ActiveSalesPage() {
                 )
               })}
             </div>
-            <p className="mt-1 text-xs text-gray-400">Selecciona los días en que se cobrará. Para frecuencia semanal puedes dejar un solo día.</p>
+            <p className="mt-1 text-xs text-gray-500">Selecciona los días en que se cobrará. Para frecuencia semanal puedes dejar un solo día.</p>
           </div>
           {calculated && (
             <div className="bg-primary-50 rounded-xl p-4 grid grid-cols-2 gap-3">
@@ -507,10 +540,10 @@ export default function ActiveSalesPage() {
           }>
           <div className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400">Venta</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorVenta)}</p></div>
-              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400">Total+interés</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorTotal)}</p></div>
-              <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs text-gray-400">Saldo</p><p className="font-bold text-amber-600">{formatCurrency(detailSale.saldo)}</p></div>
-              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400">Cuota</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorCuota)}</p></div>
+              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-500">Venta</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorVenta)}</p></div>
+              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-500">Total+interés</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorTotal)}</p></div>
+              <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs text-gray-500">Saldo</p><p className="font-bold text-amber-600">{formatCurrency(detailSale.saldo)}</p></div>
+              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-500">Cuota</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorCuota)}</p></div>
             </div>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-sm">
               <p className="text-gray-500">Frecuencia: <span className="font-medium text-gray-800 capitalize">{detailSale.frecuenciaPago}</span></p>
@@ -537,7 +570,7 @@ export default function ActiveSalesPage() {
             <div>
               <p className="text-sm font-semibold text-gray-700 mb-2">Pagos ({effectivePayments(detailPayments).length} vigentes)</p>
               {detailPayments.length === 0 ? (
-                <p className="text-xs text-gray-400">Sin pagos registrados.</p>
+                <p className="text-xs text-gray-500">Sin pagos registrados.</p>
               ) : (
                 <div className="max-h-64 overflow-y-auto space-y-1.5">
                   {paymentHistoryRows(detailPayments).map(({ payment: p, reversal }) => {

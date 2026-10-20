@@ -167,7 +167,34 @@ export default function SaleAuthorizationsPage() {
       ) : filtered.length === 0 ? (
         <EmptyState icon={<ClipboardCheck className="w-8 h-8" />} title="No hay solicitudes" description="Cuando un cobrador envíe una solicitud de venta, aparecerá aquí." />
       ) : (
-        <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
+        <>
+        {/* Ronda 50 · móvil: tarjetas; la decisión sigue en el detalle («Revisar»). */}
+        <ul className="sm:hidden space-y-2" data-testid="authorization-cards">
+          {filtered.map(r => {
+            const c = clientMap.get(r.clientId)
+            const meta = STATUS_META[r.status]
+            return (
+              <li key={r.id} className="bg-white rounded-2xl shadow-card border border-gray-100 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 [overflow-wrap:anywhere]">{c?.nombre ?? 'Cliente'}</p>
+                    <p className="text-xs text-gray-500">{c?.documento ?? '—'} · {routeMap.get(r.routeId)?.nombre ?? '—'}</p>
+                  </div>
+                  <Badge variant={meta.variant} size="sm">{meta.label}</Badge>
+                </div>
+                <div className="mt-3 flex items-end justify-between gap-3">
+                  <div>
+                    <p className="text-lg font-bold text-gray-900 tabular-nums leading-tight">{formatCurrency(r.amount, currency)}</p>
+                    <p className="text-xs text-gray-500">{r.installmentsCount} parcelas · {formatDate(r.requestedAt)}</p>
+                  </div>
+                  <Button variant={r.status === 'pending' ? 'primary' : 'secondary'} size="sm" onClick={() => openDetail(r)}
+                    icon={<Eye className="w-3.5 h-3.5" />}>{r.status === 'pending' ? 'Revisar' : 'Ver'}</Button>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+        <div className="hidden sm:block bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -198,7 +225,7 @@ export default function SaleAuthorizationsPage() {
                       <td className="px-4 py-3 hidden sm:table-cell text-sm text-gray-600">{c?.documento ?? '—'}</td>
                       <td className="px-4 py-3 hidden md:table-cell text-sm text-gray-600">{routeMap.get(r.routeId)?.nombre ?? '—'}</td>
                       <td className="px-4 py-3 hidden lg:table-cell text-sm text-gray-600">{userMap.get(r.collectorId)?.nombre ?? '—'}</td>
-                      <td className="px-4 py-3 text-right text-sm font-medium text-gray-900">{formatCurrency(r.amount, currency)}</td>
+                      <td className="px-4 py-3 text-right text-sm font-medium text-gray-900 whitespace-nowrap">{formatCurrency(r.amount, currency)}</td>
                       <td className="px-4 py-3 text-center hidden sm:table-cell text-sm text-gray-600">{r.installmentsCount}</td>
                       <td className="px-4 py-3 text-center"><Badge variant={meta.variant} size="sm">{meta.label}</Badge></td>
                       <td className="px-4 py-3 text-sm text-gray-500">{formatDate(r.requestedAt)}</td>
@@ -223,6 +250,7 @@ export default function SaleAuthorizationsPage() {
             </table>
           </div>
         </div>
+        </>
       )}
 
       {/* Tooltip flotante "Ver historial" con estilo RutaCash. Posición fija que sigue
@@ -268,7 +296,7 @@ export default function SaleAuthorizationsPage() {
               <div>
                 <h3 className="text-base font-bold text-gray-900">{detailClient?.nombre ?? 'Cliente'}</h3>
                 <p className="text-sm text-gray-500">{detailClient?.documento}</p>
-                <p className="text-xs text-gray-400">{routeMap.get(detail.routeId)?.nombre} · Cobrador: {userMap.get(detail.collectorId)?.nombre ?? '—'}</p>
+                <p className="text-xs text-gray-500">{routeMap.get(detail.routeId)?.nombre} · Cobrador: {userMap.get(detail.collectorId)?.nombre ?? '—'}</p>
               </div>
             </div>
 
@@ -317,13 +345,13 @@ export default function SaleAuthorizationsPage() {
                 <TrendingUp className="w-4 h-4 text-primary-600" /> Indicadores comparativos
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Solicitud actual</p><p className="text-sm font-bold text-gray-900">{formatCurrency(history.actual, currency)}</p></div>
-                <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Promedio histórico</p><p className="text-sm font-bold text-gray-900">{history.count > 0 ? formatCurrency(history.promedio, currency) : '—'}</p></div>
-                <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Mayor venta anterior</p><p className="text-sm font-bold text-gray-900">{history.count > 0 ? formatCurrency(history.mayor, currency) : '—'}</p></div>
+                <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-500">Solicitud actual</p><p className="text-sm font-bold text-gray-900">{formatCurrency(history.actual, currency)}</p></div>
+                <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-500">Promedio histórico</p><p className="text-sm font-bold text-gray-900">{history.count > 0 ? formatCurrency(history.promedio, currency) : '—'}</p></div>
+                <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-500">Mayor venta anterior</p><p className="text-sm font-bold text-gray-900">{history.count > 0 ? formatCurrency(history.mayor, currency) : '—'}</p></div>
                 {history.count > 0 && (
                   <>
-                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Dif. vs promedio</p><p className={`text-sm font-bold ${history.difVsPromedio > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{history.difVsPromedio >= 0 ? '+' : ''}{formatCurrency(history.difVsPromedio, currency)}</p></div>
-                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Dif. vs mayor</p><p className={`text-sm font-bold ${history.difVsMayor > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{history.difVsMayor >= 0 ? '+' : ''}{formatCurrency(history.difVsMayor, currency)}</p></div>
+                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-500">Dif. vs promedio</p><p className={`text-sm font-bold ${history.difVsPromedio > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{history.difVsPromedio >= 0 ? '+' : ''}{formatCurrency(history.difVsPromedio, currency)}</p></div>
+                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-500">Dif. vs mayor</p><p className={`text-sm font-bold ${history.difVsMayor > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{history.difVsMayor >= 0 ? '+' : ''}{formatCurrency(history.difVsMayor, currency)}</p></div>
                   </>
                 )}
               </div>
@@ -352,7 +380,7 @@ export default function SaleAuthorizationsPage() {
                 Historial de ventas del cliente ({clientSales.length}) · Activas: {history.activas.length} · Cerradas: {history.cerradas.length} · Perdidas: {history.perdidas.length}
               </p>
               {clientSales.length === 0 ? (
-                <p className="text-xs text-gray-400">Este cliente no tiene ventas anteriores.</p>
+                <p className="text-xs text-gray-500">Este cliente no tiene ventas anteriores.</p>
               ) : (
                 <div className="space-y-1.5">
                   {clientSales.map(s => {

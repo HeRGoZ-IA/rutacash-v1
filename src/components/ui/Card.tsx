@@ -52,7 +52,7 @@ export function KPICard({ title, value, subtitle, icon, trend, color = 'blue', c
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide truncate">{title}</p>
-          <p className="mt-1.5 text-2xl font-bold text-gray-900 truncate">{value}</p>
+          <p className="mt-1.5 text-xl sm:text-2xl font-bold text-gray-900 tabular-nums leading-tight">{value}</p>
           {subtitle && <p className="mt-1 text-xs text-gray-500 truncate">{subtitle}</p>}
           {trend && (
             <p className={cn('mt-1.5 text-xs font-medium', trend.value >= 0 ? 'text-emerald-600' : 'text-red-500')}>

@@ -32,30 +32,35 @@ interface NavItem {
   label: string
   icon: React.ReactNode
   roles?: string[]
+  /** Ronda 50: sección del menú (mismos nombres y rutas; solo se agrupan). */
+  group?: NavGroup
 }
+
+type NavGroup = 'Estructura' | 'Cartera' | 'Dinero' | 'Control'
+const GROUP_ORDER: (NavGroup | undefined)[] = [undefined, 'Estructura', 'Cartera', 'Dinero', 'Control']
 
 const navItems: NavItem[] = [
   { path: '/admin/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
   // Oficinas = CATÁLOGO/agrupación. No sustituye a Rutas: las rutas siguen siendo
   // accesibles directamente, sin obligar a pasar por una Oficina.
-  { path: '/admin/offices', label: 'Oficinas', icon: <Building2 className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
-  { path: '/admin/routes', label: 'Rutas', icon: <MapPin className="w-4 h-4" /> },
-  { path: '/admin/clients', label: 'Clientes', icon: <Users className="w-4 h-4" /> },
-  { path: '/admin/active-sales', label: 'Ventas Activas', icon: <CreditCard className="w-4 h-4" /> },
-  { path: '/admin/sale-authorizations', label: 'Autorizaciones', icon: <ClipboardCheck className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
-  { path: '/admin/payment-adjustments', label: 'Ajustes de pago', icon: <Receipt className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
+  { path: '/admin/offices', label: 'Oficinas', icon: <Building2 className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Estructura' },
+  { path: '/admin/routes', label: 'Rutas', icon: <MapPin className="w-4 h-4" />, group: 'Estructura' },
+  { path: '/admin/clients', label: 'Clientes', icon: <Users className="w-4 h-4" />, group: 'Cartera' },
+  { path: '/admin/active-sales', label: 'Ventas Activas', icon: <CreditCard className="w-4 h-4" />, group: 'Cartera' },
+  { path: '/admin/sale-authorizations', label: 'Autorizaciones', icon: <ClipboardCheck className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Cartera' },
+  { path: '/admin/payment-adjustments', label: 'Ajustes de pago', icon: <Receipt className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Cartera' },
   // Ronda 3/6: para el Administrador, Capital es su CAJA PRINCIPAL (misma página y bolsa).
-  { path: '/admin/capital', label: 'Caja principal', icon: <DollarSign className="w-4 h-4" />, roles: ['admin'] },
-  { path: '/admin/capital', label: 'Capital', icon: <DollarSign className="w-4 h-4" />, roles: ['superadmin'] },
-  { path: '/admin/expenses', label: 'Gastos', icon: <TrendingDown className="w-4 h-4" /> },
-  { path: '/admin/transfers', label: 'Transferencias', icon: <ArrowLeftRight className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
+  { path: '/admin/capital', label: 'Caja principal', icon: <DollarSign className="w-4 h-4" />, roles: ['admin'], group: 'Dinero' },
+  { path: '/admin/capital', label: 'Capital', icon: <DollarSign className="w-4 h-4" />, roles: ['superadmin'], group: 'Dinero' },
+  { path: '/admin/expenses', label: 'Gastos', icon: <TrendingDown className="w-4 h-4" />, group: 'Dinero' },
+  { path: '/admin/transfers', label: 'Transferencias', icon: <ArrowLeftRight className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Dinero' },
   // Ronda 5/6: historial unificado de movimientos reales (con comprobantes).
-  { path: '/admin/movements', label: 'Historial', icon: <History className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
-  { path: '/admin/withdrawals', label: 'Retiros', icon: <Wallet className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
-  { path: '/admin/cashbox', label: 'Caja', icon: <Archive className="w-4 h-4" /> },
-  { path: '/admin/reports', label: 'Reportes', icon: <BarChart3 className="w-4 h-4" /> },
-  { path: '/admin/weekly-settlement', label: 'Liquidación', icon: <CalendarRange className="w-4 h-4" /> },
-  { path: '/admin/users', label: 'Usuarios', icon: <Users className="w-4 h-4" />, roles: ['admin', 'superadmin'] },
+  { path: '/admin/movements', label: 'Historial', icon: <History className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Control' },
+  { path: '/admin/withdrawals', label: 'Retiros', icon: <Wallet className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Dinero' },
+  { path: '/admin/cashbox', label: 'Caja', icon: <Archive className="w-4 h-4" />, group: 'Dinero' },
+  { path: '/admin/reports', label: 'Reportes', icon: <BarChart3 className="w-4 h-4" />, group: 'Control' },
+  { path: '/admin/weekly-settlement', label: 'Liquidación', icon: <CalendarRange className="w-4 h-4" />, group: 'Control' },
+  { path: '/admin/users', label: 'Usuarios', icon: <Users className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Estructura' },
   { path: '/admin/settings', label: 'Configuración', icon: <Settings className="w-4 h-4" /> },
 ]
 
@@ -97,14 +102,38 @@ export function AdminLayout() {
   const visibleItems = navItems.filter(
     (item) => !item.roles || !user?.rol || item.roles.includes(user.rol)
   )
+  // Ronda 50: secciones en orden fijo; Configuración siempre al final.
+  const settings = visibleItems.filter((i) => i.path === '/admin/settings')
+  const sections = GROUP_ORDER
+    .map((g) => ({ group: g, items: visibleItems.filter((i) => i.group === g && i.path !== '/admin/settings') }))
+    .filter((s) => s.items.length > 0)
+  const renderItem = (item: NavItem) => (
+    <NavLink
+      key={`${item.path}-${item.label}`}
+      to={item.path}
+      onClick={() => setSidebarOpen(false)}
+      className={({ isActive }) =>
+        cn(
+          'flex items-center gap-3 px-3 py-1.5 lg:py-1 rounded-xl text-sm font-medium transition-colors',
+          isActive
+            ? 'bg-primary-600 text-white'
+            : 'text-gray-300 hover:bg-primary-800 hover:text-white'
+        )
+      }
+    >
+      {item.icon}
+      <span className="flex-1">{item.label}</span>
+      {badges[item.path] > 0 && <CountBadge count={badges[item.path]} />}
+    </NavLink>
+  )
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
       {/* Logo + rol real (nunca "Admin" fijo: refleja ROLE_LABELS del usuario) */}
-      <div className="px-5 py-5 border-b border-primary-800/40">
+      <div className="px-5 py-4 border-b border-primary-800/40">
         <div>
           <BrandLogo variant="on-dark" className="h-10 lg:h-12 -ml-1.5" />
-          <p className="text-primary-300 text-xs opacity-70 mt-0.5">{roleLabel}</p>
+          {!tenant && <p className="text-primary-300 text-xs opacity-70 mt-0.5">{roleLabel}</p>}
         </div>
       </div>
 
@@ -119,31 +148,19 @@ export function AdminLayout() {
       )}
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
-        {visibleItems.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            onClick={() => setSidebarOpen(false)}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-primary-600 text-white'
-                  : 'text-gray-300 hover:bg-primary-800 hover:text-white'
-              )
-            }
-          >
-            {item.icon}
-            <span className="flex-1">{item.label}</span>
-            {badges[item.path] > 0 && <CountBadge count={badges[item.path]} />}
-          </NavLink>
+      <nav className="flex-1 overflow-y-auto px-3 py-2.5" aria-label="Menú principal" data-testid="admin-nav">
+        {sections.map(({ group, items }) => (
+          <div key={group ?? 'inicio'} className={group ? 'mt-2 first:mt-0' : ''} role={group ? 'group' : undefined} aria-label={group}>
+            {group && <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-primary-300/80">{group}</p>}
+            <div className="space-y-0.5">{items.map(renderItem)}</div>
+          </div>
         ))}
+        {settings.length > 0 && <div className="mt-2 pt-2 border-t border-primary-800/40 space-y-0.5">{settings.map(renderItem)}</div>}
       </nav>
 
       {/* User */}
-      <div className="px-3 py-4 border-t border-primary-800/40">
-        <div className="flex items-center gap-3 mb-3 px-2">
+      <div className="px-3 py-3 border-t border-primary-800/40">
+        <div className="flex items-center gap-3 mb-2 px-2">
           <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
             {initials(user?.nombre ?? 'U')}
           </div>
@@ -156,7 +173,7 @@ export function AdminLayout() {
         {multiMembership && (
           <button
             onClick={handleSwitch}
-            className="w-full flex items-center gap-2 px-3 py-2 text-gray-400 hover:text-white hover:bg-primary-800 rounded-xl text-sm transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-gray-400 hover:text-white hover:bg-primary-800 rounded-xl text-sm transition-colors"
           >
             <Repeat className="w-4 h-4" />
             Cambiar empresa o rol
@@ -164,7 +181,7 @@ export function AdminLayout() {
         )}
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-2 px-3 py-2 text-gray-400 hover:text-white hover:bg-primary-800 rounded-xl text-sm transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-gray-400 hover:text-white hover:bg-primary-800 rounded-xl text-sm transition-colors"
         >
           <LogOut className="w-4 h-4" />
           Cerrar sesión
