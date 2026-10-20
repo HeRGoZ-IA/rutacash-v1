@@ -65,7 +65,7 @@ describe('Fase 2 · responsable de capital (v16) como restricción transaccional
   test('CAP-002 · cambio de responsable (SuperAdmin): el capital colocado viaja de una bolsa a otra con un asiento; nunca en dos ni en ninguna', async () => {
     const x = (await bruno('POST', '/v1/members', { email: 'admin-y@example.test', role: 'admin', displayName: 'Admin Y', routeIds: [r1] })).body['membershipId'] as string;
     const carried = await placement(db.admin, c1, r1, M.anaAdmin);
-    assert.equal(carried, 480_000, 'seed: 5.000 − 200 BRL en unidades menores');
+    assert.equal(carried, 470_000, 'seed: 5.000 − 200 − 100 BRL en unidades menores (Ronda 53: tr3 ya no va a un Socio sino a la ruta 3)');
     assert.equal((await ana('PUT', `/v1/routes/${r1}/capital-controller`, { membershipId: x, reason: 'Reorganización' })).status, 403, 'el Administrador no cambia responsables');
     assert.equal((await bruno('PUT', `/v1/routes/${r1}/capital-controller`, { membershipId: x, reason: 'no' })).body['error'], 'REASON_REQUIRED');
     assert.equal((await bruno('PUT', `/v1/routes/${r1}/capital-controller`, { membershipId: M.anaAdmin, reason: 'Igual' })).body['error'], 'ALREADY_CONTROLLER');
@@ -73,20 +73,20 @@ describe('Fase 2 · responsable de capital (v16) como restricción transaccional
     const r = await bruno('PUT', `/v1/routes/${r1}/capital-controller`, { membershipId: x, reason: 'Reorganización de cartera' });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const ev = r.body['event'] as { kind: string; capitalTransferredMinor: number; fromMembershipId: string; toMembershipId: string };
-    assert.deepEqual([ev.kind, ev.fromMembershipId, ev.toMembershipId, ev.capitalTransferredMinor], ['CHANGE', M.anaAdmin, x, 480_000]);
+    assert.deepEqual([ev.kind, ev.fromMembershipId, ev.toMembershipId, ev.capitalTransferredMinor], ['CHANGE', M.anaAdmin, x, 470_000]);
     const led = await db.admin.query(
       `select amount_minor::int a, from_admin_membership_id f, to_admin_membership_id t, actor_membership_id act, actor_role role, related_event_id is not null linked
          from adex.capital_ledger where route_id = $1 and kind = 'ROUTE_CONTROL_TRANSFER' and created_at > now() - interval '1 minute'`, [r1]);
-    assert.deepEqual(led.rows, [{ a: 480_000, f: M.anaAdmin, t: x, act: M.brunoSa, role: 'superadmin', linked: true }]);
+    assert.deepEqual(led.rows, [{ a: 470_000, f: M.anaAdmin, t: x, act: M.brunoSa, role: 'superadmin', linked: true }]);
     assert.equal(await placement(db.admin, c1, r1, M.anaAdmin), 0, 'la bolsa anterior ya no responde por la ruta');
-    assert.equal(await placement(db.admin, c1, r1, x), 480_000, 'la nueva sí, por el mismo importe');
+    assert.equal(await placement(db.admin, c1, r1, x), 470_000, 'la nueva sí, por el mismo importe');
     assert.equal(await controllerOf(r1), x);
     const e = await db.admin.query('select reason, capital_transferred_minor::int c, base_at_change_minor from adex.route_capital_controller_events where id = $1', [(r.body['event'] as { eventId: string }).eventId]);
-    assert.deepEqual(e.rows, [{ reason: 'Reorganización de cartera', c: 480_000, base_at_change_minor: '0' }], 'Fase 3: custodia de la ruta al cambiar (sin entregas: 0)');
+    assert.deepEqual(e.rows, [{ reason: 'Reorganización de cartera', c: 470_000, base_at_change_minor: '0' }], 'Fase 3: custodia de la ruta al cambiar (sin entregas: 0)');
     // ADEX Online: historial consultable (SuperAdmin: todo; Administrador: los suyos; Cobrador: nada).
     const hist = (await bruno('GET', `/v1/capital/controller-events?routeId=${r1}`)).body['events'] as Record<string, unknown>[];
     assert.deepEqual(hist.filter((h) => h['reason'] === 'Reorganización de cartera').map((h) => [h['kind'], h['fromAdminId'], h['toAdminId'], h['capitalTransferredMinor']]),
-      [['CHANGE', M.anaAdmin, x, 480_000]]);
+      [['CHANGE', M.anaAdmin, x, 470_000]]);
     const anaHist = (await ana('GET', `/v1/capital/controller-events?routeId=${r1}`)).body['events'] as Record<string, unknown>[];
     assert.ok(anaHist.every((h) => h['fromAdminId'] === M.anaAdmin || h['toAdminId'] === M.anaAdmin) && anaHist.some((h) => h['kind'] === 'CHANGE'));
     const cob = caller(api, issuer, 'ana', M.anaCob);

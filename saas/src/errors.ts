@@ -49,6 +49,10 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX411': return new ApiError(400, 'INVALID_INPUT');
     case 'AX412': return new ApiError(404, 'NOT_FOUND');
     case 'AX413': return new ApiError(409, 'FUNDS_ALREADY_USED');
+    // Ronda 53 · traspasos entre Administradores.
+    case 'AX414': return new ApiError(409, 'TRANSFER_NOT_PENDING');
+    case 'AX415': return new ApiError(409, 'DECISION_ALREADY_REGISTERED');
+    case 'AX416': return new ApiError(403, 'REGISTRANT_CANNOT_BE_PARTY');
     // Fase 4 · solicitudes y desembolsos.
     case 'AX501': return new ApiError(409, 'REQUEST_STATE_INVALID');
     case 'AX502': return new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED');

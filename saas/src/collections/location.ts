@@ -105,8 +105,17 @@ export async function storePaymentLocation(
  * publica contra una API cuyo esquema aún no tiene la tabla (Ronda 48).
  */
 export async function paymentLocationsReady(pool: pg.Pool): Promise<boolean> {
+  return relationExists(pool, 'adex.payment_locations');
+}
+
+/** Ronda 53: `admin-transfers-v1` solo si 0023 está aplicada (sin Socio, con traspasos entre Administradores). */
+export async function adminTransfersReady(pool: pg.Pool): Promise<boolean> {
+  return relationExists(pool, 'adex.admin_transfers');
+}
+
+async function relationExists(pool: pg.Pool, name: string): Promise<boolean> {
   try {
-    const r = await pool.query<{ ok: boolean }>(`select to_regclass('adex.payment_locations') is not null as ok`);
+    const r = await pool.query<{ ok: boolean }>('select to_regclass($1) is not null as ok', [name]);
     return r.rows[0]?.ok === true;
   } catch {
     return false;

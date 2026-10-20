@@ -64,7 +64,7 @@ describe('Fase 5 · recaudos', () => {
     ana = caller(api, issuer, 'ana', M.anaAdmin); $ana = money(ana);
     $anaCob = money(caller(api, issuer, 'ana', M.anaCob));
     gabi = caller(api, issuer, 'gabi', M.gabiSec);
-    fabio = caller(api, issuer, 'fabio', M.fabioSocio);
+    fabio = caller(api, issuer, 'fabio', M.fabioSec);
     today = (await db.admin.query(`select (now() at time zone 'America/Sao_Paulo')::date::text d`)).rows[0].d;
     const mk = (email: string, role: string, displayName: string, routeIds: string[]) => newPerson(api, issuer, provider.ids, bruno, { email, role, displayName, routeIds });
     carlos = await mk('carlos-col@example.test', 'cobrador', 'Carlos', [r1]);

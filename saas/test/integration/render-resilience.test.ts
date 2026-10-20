@@ -137,7 +137,7 @@ describe('ADEX Online · resiliencia para Render Free (proceso real, TLS, reinic
     const lan = Object.values(os.networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal);
     if (lan) assert.equal((await fetch(`http://${lan.address}:${a.port}/healthz`)).status, 200, 'bound to 0.0.0.0');
     const health = await call('GET', '/healthz', { membership: null });
-    assert.deepEqual([health.status, health.body], [200, { status: 'ok', features: ['collections-v1', 'settlements-v1', 'clean-online-v1', 'changes-v1', 'access-links-v1', 'payment-location-v1'] }]);
+    assert.deepEqual([health.status, health.body], [200, { status: 'ok', features: ['collections-v1', 'settlements-v1', 'clean-online-v1', 'changes-v1', 'access-links-v1', 'payment-location-v1', 'admin-transfers-v1'] }]);
     const ready = await call('GET', '/readyz', { membership: null });
     assert.deepEqual([ready.status, ready.body], [200, { status: 'ready' }], 'PostgreSQL over TLS with the CA file');
     assert.equal(health.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');

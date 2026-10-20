@@ -15,7 +15,9 @@ import type { User, UserRole } from '@/models/types';
 
 export type { Capability, UserRole };
 
-export const USER_ROLES: readonly UserRole[] = ['superadmin', 'admin', 'socio', 'supervisor', 'cobrador', 'secretario'];
+// Roles de ADEX Online. Socio se retiró en la Ronda 53 (sigue existiendo en el tipo de CLEAN,
+// que CLEAN conserva para su propio uso; el servidor no lo acepta: 0023 lo excluye del esquema).
+export const USER_ROLES: readonly UserRole[] = ['superadmin', 'admin', 'supervisor', 'cobrador', 'secretario'];
 
 export interface MembershipFacts {
   membershipId: string;

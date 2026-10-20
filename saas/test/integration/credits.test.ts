@@ -53,7 +53,7 @@ describe('Fase 4 · créditos: solicitud, autorización y desembolso', () => {
     ana = caller(api, issuer, 'ana', M.anaAdmin); $ana = money(ana);
     gabi = caller(api, issuer, 'gabi', M.gabiSec);
     anaCob = caller(api, issuer, 'ana', M.anaCob);
-    fabio = caller(api, issuer, 'fabio', M.fabioSocio);
+    fabio = caller(api, issuer, 'fabio', M.fabioSec);
     today = (await db.admin.query(`select (now() at time zone 'America/Sao_Paulo')::date::text d`)).rows[0].d;
     const mk = (email: string, role: string, displayName: string, routeIds: string[]) => newPerson(api, issuer, provider.ids, bruno, { email, role, displayName, routeIds });
     carlos = await mk('carlos-cr@example.test', 'cobrador', 'Carlos', [r1]);

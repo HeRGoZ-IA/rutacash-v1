@@ -81,13 +81,13 @@ describe('Fase 2 · DS-11 historia protegida', () => {
     assert.equal(r2.body['error'], 'HAS_HISTORY');
     assert.ok(refsOf(r2).includes('route_capital_controller_events.route_id'));
 
-    const member = (await bruno('POST', '/v1/members', { email: 'efimero@example.test', role: 'socio', displayName: 'Efímero' })).body;
+    const member = (await bruno('POST', '/v1/members', { email: 'efimero@example.test', role: 'secretario', displayName: 'Efímero' })).body;
     assert.equal((await ana('POST', `/v1/members/${member['membershipId']}/delete`, {})).status, 403, 'solo el SuperAdmin');
     assert.equal((await bruno('POST', `/v1/members/${M.brunoSa}/delete`, {})).body['error'], 'CANNOT_DELETE_SELF');
     assert.equal((await bruno('POST', `/v1/members/${member['membershipId']}/delete`, {})).status, 200);
     assert.equal(await count(db.admin, 'select 1 from adex.identities where email = $1', ['efimero@example.test']), 1, 'la identidad de la persona no se toca');
     // Con una decisión auditada sobre ella (desactivación), ya tiene historia.
-    const other = (await bruno('POST', '/v1/members', { email: 'otro@example.test', role: 'socio', displayName: 'Otro' })).body;
+    const other = (await bruno('POST', '/v1/members', { email: 'otro@example.test', role: 'secretario', displayName: 'Otro' })).body;
     await bruno('POST', `/v1/members/${other['membershipId']}/deactivate`, {});
     assert.deepEqual(refsOf(await bruno('POST', `/v1/members/${other['membershipId']}/delete`, {})), ['audit_log.entity_id']);
   });

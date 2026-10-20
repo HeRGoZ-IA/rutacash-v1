@@ -76,7 +76,7 @@ describe('Fase 3 · comandos de capital y custodia', () => {
     assert.equal(await balance(db.admin, c1, 'external', null), -2_000_000);
     const sa = (await bruno('GET', '/v1/capital/summary')).body;
     assert.deepEqual(sa['company'], { availableMinor: 800_000, externalNetInMinor: 2_000_000, partnerContributionsMinor: 0, adminPoolsMinor: 1_200_000, custodyMinor: 0, portfolioMinor: 0,
-      interestCollectedMinor: 0, expensesMinor: 0, unidentifiedSurplusMinor: 0 });
+      interestCollectedMinor: 0, expensesMinor: 0, unidentifiedSurplusMinor: 0, inTransitMinor: 0 });
     const own = (await ana('GET', '/v1/capital/summary')).body;
     assert.equal(own['company'], undefined, 'el Administrador no ve la empresa');
     assert.deepEqual((own['admins'] as Body[]).map((a) => [a['adminId'], a['availableMinor'], a['allocatedNetMinor']]), [[M.anaAdmin, 1_000_000, 1_000_000]]);
@@ -181,7 +181,7 @@ describe('Fase 3 · comandos de capital y custodia', () => {
     const deliver = (m: Money, routeId: string, workerId: string) => m('/v1/capital/deliveries', { routeId, workerId, amountMinor: 1_000, reason: 'Intento' });
     assert.equal((await deliver(xavier.money, r1, carlos.membershipId)).body['error'], 'CAPITAL_AUTHORITY_REQUIRED', 'Admin asignado que no es responsable');
     assert.equal((await deliver($bruno, r1, carlos.membershipId)).body['error'], 'CAPITAL_AUTHORITY_REQUIRED', 'el SuperAdmin asigna a bolsas, no entrega');
-    for (const [who, label] of [[carlos.money, 'cobrador'], [money(caller(api, issuer, 'gabi', M.gabiSec)), 'secretaria'], [money(caller(api, issuer, 'fabio', M.fabioSocio)), 'socio']] as const) {
+    for (const [who, label] of [[carlos.money, 'cobrador'], [money(caller(api, issuer, 'gabi', M.gabiSec)), 'secretaria'], [money(caller(api, issuer, 'fabio', M.fabioSec)), 'segundo secretario']] as const) {
       assert.equal((await deliver(who, r1, dora.membershipId)).status, 403, label);
     }
     assert.equal((await carlos.call('GET', '/v1/capital/summary')).status, 403);
@@ -221,32 +221,20 @@ describe('Fase 3 · comandos de capital y custodia', () => {
     assert.deepEqual(await reconcile(db.admin, c1), CLEAN);
   });
 
-  test('CAP3-010 · aporte de socio: entra a la bolsa del responsable, nunca a una ruta; contabilizado una sola vez', async () => {
-    const r = await $ana('/v1/capital/partner-contributions', { partnerId: M.fabioSocio, routeId: r1, amountMinor: 300_000, reason: 'Aporte de Fabio para la ruta 1' });
-    assert.equal(r.status, 201, JSON.stringify(r.body));
-    assert.equal(await pool(M.anaAdmin), 1_159_999);
-    assert.equal(await balance(db.admin, c1, 'partner', M.fabioSocio), -300_000);
-    assert.equal(await balance(db.admin, c1, 'company', null), 800_000, 'no es capital de la empresa');
-    assert.equal(await count(db.admin, `select 1 from adex.partner_cash_movements where company_id = $1 and created_at > now() - interval '1 hour'`, [c1]), 0, 'Caja socios (D1) intacta');
-    const sa = (await bruno('GET', '/v1/capital/summary')).body['company'] as Body;
-    assert.equal(sa['partnerContributionsMinor'], 300_000);
-    assert.equal((await $bruno('/v1/capital/partner-contributions', { partnerId: M.fabioSocio, routeId: r1, amountMinor: 1, reason: 'El SuperAdmin no recibe' })).body['error'], 'CAPITAL_AUTHORITY_REQUIRED');
-    assert.equal((await $ana('/v1/capital/partner-contributions', { partnerId: carlos.membershipId, routeId: r1, amountMinor: 1, reason: 'No es socio' })).body['error'], 'NOT_FOUND');
-    // El socio ve su aporte y la custodia de sus rutas (`cashbox.viewRoute`), nunca una bolsa.
-    const fabio = caller(api, issuer, 'fabio', M.fabioSocio);
-    const seen = (await fabio('GET', '/v1/capital/operations')).body['operations'] as Body[];
-    assert.ok(seen.some((o) => o['id'] === opOf(r)['id']));
-    assert.ok(seen.every((o) => o['id'] === opOf(r)['id'] || ([r1, r2].includes(o['routeId'] as string) && o['kind'] !== 'PARTNER_CONTRIBUTION')), 'nada fuera de sus rutas');
-    const entries = (await fabio('GET', `/v1/capital/operations/${opOf(r)['id']}`)).body['entries'] as Body[];
-    assert.deepEqual(entries.map((e) => (e['account'] as Body)['kind']), ['partner'], 'el socio no ve el saldo de la bolsa');
-    for (const o of seen.filter((x) => x['kind'] === 'WORKER_DELIVERY')) {
-      const legs = (await fabio('GET', `/v1/capital/operations/${o['id']}`)).body['entries'] as Body[];
-      assert.deepEqual(legs.map((e) => (e['account'] as Body)['kind']), ['custody'], 'de una entrega, solo la custodia');
-    }
-    const rev = await $ana(`/v1/capital/operations/${opOf(r)['id']}/reverse`, { reason: 'Aporte registrado por error' });
-    assert.equal(rev.status, 201, JSON.stringify(rev.body));
-    assert.equal(await balance(db.admin, c1, 'partner', M.fabioSocio), 0);
-    assert.equal(await pool(M.anaAdmin), 859_999);
+  test('CAP3-010 · Ronda 53: el modelo Socio no existe (ni comando, ni rol, ni Caja socios, ni cuentas de socio)', async () => {
+    const r = await $ana('/v1/capital/partner-contributions', { partnerId: M.fabioSec, routeId: r1, amountMinor: 300_000, reason: 'Aporte de un socio' });
+    assert.deepEqual([r.status, r.body], [404, { error: 'NOT_FOUND' }], 'el endpoint ya no existe');
+    const alta = await bruno('POST', '/v1/members', { email: 'socio-r53@example.test', role: 'socio', displayName: 'Socio R53' });
+    assert.deepEqual([alta.status, alta.body['error']], [400, 'INVALID_ROLE'], 'el rol no se puede asignar');
+    await assert.rejects(db.admin.query(`insert into adex.memberships (id, company_id, identity_id, role, status, display_name, created_at, updated_at)
+      values ('m-socio-r53', $1, $2, 'socio', 'activo', 'Socio', now(), now())`, [c1, uid('identity:fabio')]), /memberships_role_check/, 'tampoco por SQL');
+    assert.equal((await db.admin.query(`select to_regclass('adex.partner_cash_movements') t`)).rows[0].t, null, 'sin Caja socios');
+    assert.equal(await count(db.admin, `select 1 from adex.memberships where role = 'socio'`), 0);
+    assert.equal(await count(db.admin, `select 1 from adex.capital_accounts where kind = 'partner'`), 0);
+    assert.equal(await count(db.admin, `select 1 from pg_policies where schemaname like 'adex%' and (qual ilike '%socio%' or with_check ilike '%socio%')`), 0);
+    assert.equal((await db.admin.query(`select adex.ctx_can('payment.viewHistory') x`)).rows[0].x, false, 'sin contexto, nada');
+    assert.ok(!/'socio'/.test((await db.admin.query(`select prosrc from pg_proc where proname = 'ctx_can'`)).rows[0].prosrc));
+    assert.equal(await pool(M.anaAdmin), 859_999, 'nada cambió');
   });
 
   test('CAP3-011 · anulaciones: asiento espejo; nunca sobre capital consumido, dos veces, ni que cree dinero', async () => {
@@ -323,7 +311,7 @@ describe('Fase 3 · comandos de capital y custodia', () => {
   test('CAP3-014 · sin caja de ruta: ni capital inicial, ni cuenta de ruta, ni escrituras en la caja heredada', async () => {
     assert.equal((await bruno('POST', '/v1/routes', { name: 'Con capital', interestRate: 20, freeRate: false, maxLoanMinor: 1, initialCapitalMinor: 1_000 })).body['error'], 'ROUTE_INITIAL_CAPITAL_NOT_ALLOWED');
     const kinds = (await db.admin.query('select distinct kind from adex.capital_accounts order by 1')).rows.map((r) => r.kind);
-    assert.ok(kinds.every((k) => ['admin', 'company', 'custody', 'external', 'partner'].includes(k)), kinds.join());
+    assert.ok(kinds.every((k) => ['admin', 'company', 'custody', 'external'].includes(k)), kinds.join());
     await assert.rejects(db.admin.query(`insert into adex.capital_accounts (id, company_id, kind, route_id) values ('acc-ruta', $1, 'route', $2)`, [c1, r1]), { code: '23514' });
     await assert.rejects(db.admin.query(`insert into adex.capital_accounts (id, company_id, kind, route_id) values ('acc-ruta', $1, 'company', $2)`, [c1, r1]), { code: '23514' });
     assert.equal(await count(db.admin, `select 1 from adex.capital_movements where created_at > now() - interval '1 day'

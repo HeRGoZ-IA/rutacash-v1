@@ -20,7 +20,7 @@ interface Actor { person: Person; membership: string; company: 'c1' | 'c2'; role
 const ACTORS: Actor[] = [
   { person: 'bruno', membership: M.brunoSa, company: 'c1', role: 'superadmin' },
   { person: 'ana', membership: M.anaAdmin, company: 'c1', role: 'admin' },
-  { person: 'fabio', membership: M.fabioSocio, company: 'c1', role: 'socio' },
+  { person: 'fabio', membership: M.fabioSec, company: 'c1', role: 'secretario' },
   { person: 'ana', membership: M.anaSup, company: 'c2', role: 'supervisor' },
   { person: 'ana', membership: M.anaCob, company: 'c1', role: 'cobrador' },
   { person: 'gabi', membership: M.gabiSec, company: 'c1', role: 'secretario' },
@@ -113,7 +113,7 @@ describe('Fase 2 · puerta `permissions`: la matriz de CLEAN aplicada por el ser
   }
 
   test('AUTHZ-P2 · cobertura: los 6 roles y cada capacidad de estructura y catálogo usada por la API', () => {
-    assert.deepEqual([...new Set(ACTORS.map((a) => a.role))].sort(), ['admin', 'cobrador', 'secretario', 'socio', 'superadmin', 'supervisor']);
+    assert.deepEqual([...new Set(ACTORS.map((a) => a.role))].sort(), ['admin', 'cobrador', 'secretario', 'superadmin', 'supervisor']);
     const caps = new Set(COMMANDS.flatMap((c) => c.caps));
     for (const cap of ['settings.access', 'office.create', 'office.edit', 'office.changeStatus', 'route.create', 'route.edit', 'route.block',
       'capital.assignController', 'user.viewAll', 'client.view', 'client.create', 'client.edit', 'client.editLimited', 'client.deactivate'] as Capability[]) {

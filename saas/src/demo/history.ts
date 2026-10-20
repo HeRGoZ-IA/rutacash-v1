@@ -6,7 +6,7 @@
 // acepta mientras la Demo está en aprovisionamiento (0018). Nada se escribe por fuera.
 //
 // A diferencia de demo-v1, los puestos ASIGNABLES también actúan: así cada persona
-// invitada (SuperAdmin, Administrador, Cobrador, Supervisor, Socio, Secretario) encuentra
+// invitada (SuperAdmin, Administrador, Cobrador, Supervisor, Secretario) encuentra
 // SU historia (sus cobros, su efectivo, sus cuadres, sus autorizaciones). La auditoría
 // conserva la identidad sintética que actuó antes de la asignación.
 //
@@ -34,14 +34,12 @@ export const HISTORY_SEATS: readonly SeatSpec[] = [
   { seat: 'admin-centro', role: 'admin', displayName: 'Administrador Centro (puesto libre)', assignable: true },
   { seat: 'cobrador-centro', role: 'cobrador', displayName: 'Cobrador Centro (puesto libre)', assignable: true },
   { seat: 'supervisor-centro', role: 'supervisor', displayName: 'Supervisor Centro (puesto libre)', assignable: true },
-  { seat: 'socio-invitado', role: 'socio', displayName: 'Socio (puesto libre)', assignable: true },
   { seat: 'secretario-invitado', role: 'secretario', displayName: 'Secretario (puesto libre)', assignable: true },
   { seat: 'admin-anterior', role: 'admin', displayName: 'Jorge Restrepo (Adm. anterior, sintético)', assignable: false },
   { seat: 'admin-norte', role: 'admin', displayName: 'Marta Gil (Adm. Norte y Sur, sintética)', assignable: false },
   { seat: 'cobrador-norte', role: 'cobrador', displayName: 'Wilmer Ortiz (Cobrador Norte, sintético)', assignable: false },
   { seat: 'cobrador-sur', role: 'cobrador', displayName: 'Yamile Duarte (Cobradora Sur, sintética)', assignable: false },
   { seat: 'supervisor-norte', role: 'supervisor', displayName: 'Hernán Pardo (Supervisor Norte, sintético)', assignable: false },
-  { seat: 'socio-fundador', role: 'socio', displayName: 'Alberto Fundador (Socio, sintético)', assignable: false },
 ];
 
 export interface HistoryOptions {
@@ -143,8 +141,6 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
   const setRoutes = (seat: string, ids: string[]) => c({ seat: 'direccion', method: 'PUT', path: `/v1/members/${m(seat)}/routes`, day: d0, body: { routeIds: ids } });
   await setRoutes('supervisor-centro', [routes.centro]);
   await setRoutes('supervisor-norte', [routes.norte]);
-  await setRoutes('socio-invitado', [routes.centro, routes.norte]);
-  await setRoutes('socio-fundador', [routes.centro, routes.norte, routes.sur]);
   await setRoutes('secretario-invitado', [routes.centro, routes.norte, routes.sur]);
   // El responsable de capital inicial de cada ruta es su primer Administrador.
   const controller: Record<RouteKey, string> = { centro: 'admin-centro', norte: 'admin-anterior', sur: 'admin-norte', expansion: 'admin-centro' };
@@ -180,7 +176,7 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
   await c({ seat: 'direccion', method: 'POST', path: `/v1/clients/${idle.id}/status`, day: d0, body: { status: 'inactivo' } });
 
   // ============================================================ 2. Capital inicial
-  await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/company/deposits', operation: true, day: d0, body: { amountMinor: COP(60_000_000 * Math.max(scale, 0.3)), reason: 'Capital inicial de los socios (ficticio)' } });
+  await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/company/deposits', operation: true, day: d0, body: { amountMinor: COP(60_000_000 * Math.max(scale, 0.3)), reason: 'Capital inicial de la empresa (ficticio)' } });
   const alloc = (seat: string, pesos: number, day: string, reason: string) =>
     c({ seat: 'direccion', method: 'POST', path: '/v1/capital/allocations', operation: true, day, body: { adminId: m(seat), amountMinor: COP(pesos * Math.max(scale, 0.3)), reason } });
   await alloc('admin-centro', 18_000_000, d0, 'Bolsa inicial de Ruta Centro');
@@ -205,7 +201,7 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
 
   /**
    * Antes de entregar capital o vender con la bolsa: si la bolsa del Administrador no
-   * alcanza, la Dirección le asigna más; si la empresa tampoco tiene, los socios aportan.
+   * alcanza, la Dirección le asigna más; si la empresa tampoco tiene, la Dirección deposita capital nuevo.
    */
   async function ensurePool(seat: string, needMinor: number, day: string) {
     const s = await c({ seat: 'direccion', method: 'GET', path: '/v1/capital/summary', day });
@@ -215,7 +211,7 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
     const company = Number((s['company'] as { availableMinor?: number } | undefined)?.availableMinor ?? 0);
     if (company < allocation) {
       await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/company/deposits', operation: true, day, body: {
-        amountMinor: Math.max(COP(20_000_000), allocation * 2), reason: 'Aporte adicional de capital de los socios' } });
+        amountMinor: Math.max(COP(20_000_000), allocation * 2), reason: 'Depósito adicional de capital de la empresa' } });
     }
     await alloc(seat, allocation / 100 / Math.max(scale, 0.3), day, 'Refuerzo de capital para la operación');
   }
@@ -384,14 +380,13 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
     }
     if (i === m01) await alloc('admin-centro', 4_000_000, day, 'Refuerzo de capital Ruta Centro');
     if (i === m30) {
-      await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/company/deposits', operation: true, day, body: { amountMinor: COP(10_000_000 * Math.max(scale, 0.3)), reason: 'Nuevo aporte de capital de los socios' } });
-      await c({ seat: 'admin-centro', method: 'POST', path: '/v1/capital/partner-contributions', operation: true, day, body: {
-        partnerId: m('socio-invitado'), routeId: routes.centro, amountMinor: COP(3_000_000 * Math.max(scale, 0.3)), reason: 'Aporte del socio para Ruta Centro' } });
+      await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/company/deposits', operation: true, day, body: { amountMinor: COP(10_000_000 * Math.max(scale, 0.3)), reason: 'Nuevo depósito de capital de la empresa' } });
+      await alloc('admin-centro', 3_000_000 * Math.max(scale, 0.3), day, 'Capital nuevo para Ruta Centro');
     }
     if (i === m45) {
-      const dup = await c({ seat: 'admin-centro', method: 'POST', path: '/v1/capital/partner-contributions', operation: true, day, body: {
-        partnerId: m('socio-fundador'), routeId: routes.centro, amountMinor: COP(1_500_000), reason: 'Aporte registrado dos veces' } });
-      await c({ seat: 'admin-centro', method: 'POST', path: `/v1/capital/operations/${str((dup['operation'] as Record<string, unknown>)?.['id'], 'op')}/reverse`, operation: true, day, body: { reason: 'Registro duplicado del aporte' } });
+      const dup = await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/allocations', operation: true, day, body: {
+        adminId: m('admin-centro'), amountMinor: COP(1_500_000), reason: 'Asignación registrada dos veces' } });
+      await c({ seat: 'direccion', method: 'POST', path: `/v1/capital/operations/${str((dup['operation'] as Record<string, unknown>)?.['id'], 'op')}/reverse`, operation: true, day, body: { reason: 'Registro duplicado de la asignación' } });
     }
     if (i === m60) await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/company/withdrawals', operation: true, day, body: { amountMinor: COP(2_000_000), reason: 'Distribución parcial de utilidades' } });
     // ---- Cambio de responsable de Ruta Norte (Jorge → Marta) y baja de Jorge.

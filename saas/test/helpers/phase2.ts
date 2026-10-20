@@ -6,7 +6,7 @@ import type { ApiResponse, LocalIssuer, TestServer } from './auth.ts';
 
 export const M = {
   brunoSa: membershipId('c1', 'bruno-sa'), anaAdmin: membershipId('c1', 'ana-admin'), anaCob: membershipId('c1', 'ana-cob'),
-  fabioSocio: membershipId('c1', 'fabio-socio'), gabiSec: membershipId('c1', 'gabi-sec'), ivanHist: membershipId('c1', 'ivan-hist'),
+  fabioSec: membershipId('c1', 'fabio-sec'), gabiSec: membershipId('c1', 'gabi-sec'), ivanHist: membershipId('c1', 'ivan-hist'),
   carlaSa: membershipId('c2', 'carla-sa'), hugoAdmin: membershipId('c2', 'hugo-admin'), anaSup: membershipId('c2', 'ana-sup'),
   elisaCob: membershipId('c2', 'elisa-cob'), diegoSa: membershipId('c3', 'diego-sa'),
 };

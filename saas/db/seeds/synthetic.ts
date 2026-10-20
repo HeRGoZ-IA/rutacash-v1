@@ -11,7 +11,7 @@
 // Personas (una identidad cada una, DS-05):
 //   ana    → admin c1 (rutas r1, r2) + cobradora c1 (solo r1) + supervisora c2 (r1)
 //   bruno  → superadmin c1 · carla → superadmin c2 · diego → superadmin c3
-//   elisa  → cobradora c2 (r1) · fabio → socio c1 · gabi → secretaria c1
+//   elisa  → cobradora c2 (r1) · gabi → secretaria c1 · fabio → secretario c1 (r1, r2; Ronda 53: antes Socio)
 //   hugo   → admin c2 (responsable de capital de c2/r1) · irene → admin c3
 //   owner  → Owner del plano de control (sin membresías)
 //   + una membresía HISTÓRICA sin identidad (c1, cobrador inactivo)
@@ -24,7 +24,7 @@
 import { createHash } from 'node:crypto';
 import type {
   AuditLog, CapitalLedgerEntry, CapitalMovement, CashCustodyMovement, CashSettlement, Client, Expense, ExpenseCategory,
-  Installment, NoPaymentVisit, Office, PartnerCashMovement, Payment, PaymentAdjustmentRequest, Route,
+  Installment, NoPaymentVisit, Office, Payment, PaymentAdjustmentRequest, Route,
   RouteCapitalControllerEvent, Sale, SaleRequest, Tenant, Transfer, User, WeeklySettlement, Withdrawal,
 } from '@/models/types';
 import type { CompanyControlRecord, ControlEvent, PlatformUser, SaaSPayment } from '@/platform/types';
@@ -60,8 +60,8 @@ export const COMPANIES: readonly CompanySpec[] = [
       { key: 'bruno-sa', person: 'bruno', rol: 'superadmin', routes: [] },
       { key: 'ana-admin', person: 'ana', rol: 'admin', routes: ['r1', 'r2'] },
       { key: 'ana-cob', person: 'ana', rol: 'cobrador', routes: ['r1'] },
-      { key: 'fabio-socio', person: 'fabio', rol: 'socio', routes: ['r1', 'r2'] },
       { key: 'gabi-sec', person: 'gabi', rol: 'secretario', routes: ['r1'] },
+      { key: 'fabio-sec', person: 'fabio', rol: 'secretario', routes: ['r1', 'r2'] },
       { key: 'ivan-hist', person: null, rol: 'cobrador', routes: ['r2'], status: 'inactivo' },
     ],
   },
@@ -227,19 +227,18 @@ function companyRecords(c: CompanySpec): DexieSnapshot {
     fechaPromesaPago: day(4), observacion: 'Volver el jueves', fecha: day(3), syncStatus: 'synced', createdAt: at(3, 2),
   }];
 
-  // Transferencias: Ruta→Ruta (mismo responsable) y Socio→Ruta (origen '' en Dexie).
-  const partner = m(c.members.find((x) => x.rol === 'socio')?.key ?? c.members[0]!.key);
+  // Transferencias Ruta→Ruta (mismo responsable). Sin Socio desde la Ronda 53.
   const tr1 = id('transfer:1'), tr2 = id('transfer:2'), tr2rev = id('transfer:2:rev'), tr3 = id('transfer:3');
   const transfers: Transfer[] = [
     { id: tr1, tenantId, routeOrigenId: r(1), routeDestinoId: r(2), origenType: 'route', destinoType: 'route', valor: v(200),
       descripcion: 'Refuerzo', fecha: day(1), userId: admin, createdAt: at(1, 1), adminId: admin },
-    { id: tr2, tenantId, routeOrigenId: '', socioOrigenId: partner, routeDestinoId: r(1), origenType: 'partner', destinoType: 'route',
+    { id: tr2, tenantId, routeOrigenId: r(2), routeDestinoId: r(1), origenType: 'route', destinoType: 'route', descripcion: 'Devolución',
       valor: v(300), fecha: day(2), userId: admin, createdAt: at(2, 1), reversalId: tr2rev, reversedAt: at(2, 6), reversedByUserId: admin,
       reversalReason: 'Duplicado' },
-    { id: tr2rev, tenantId, routeOrigenId: '', socioOrigenId: partner, routeDestinoId: r(1), origenType: 'partner', destinoType: 'route',
+    { id: tr2rev, tenantId, routeOrigenId: r(2), routeDestinoId: r(1), origenType: 'route', destinoType: 'route',
       valor: v(-300), fecha: day(2), userId: admin, createdAt: at(2, 6), reversalReason: 'Duplicado', reversesId: tr2 },
-    { id: tr3, tenantId, routeOrigenId: r(1), socioDestinoId: partner, origenType: 'route', destinoType: 'partner', valor: v(100),
-      fecha: day(3), userId: admin, createdAt: at(3, 1) },
+    { id: tr3, tenantId, routeOrigenId: r(1), routeDestinoId: r(3), origenType: 'route', destinoType: 'route', valor: v(100),
+      fecha: day(3), userId: admin, createdAt: at(3, 1), adminId: admin },
   ];
   const capitalMovements: CapitalMovement[] = [
     { id: id('cap:1'), tenantId, routeId: r(1), tipo: 'ingresoCapital', valor: v(5000), descripcion: 'Colocación', fecha: day(-28),
@@ -278,15 +277,6 @@ function companyRecords(c: CompanySpec): DexieSnapshot {
       motivo: 'Migración v16', createdAt: at(-28), actorUserId: 'system:migration-v16', actorRole: 'system', syncStatus: 'synced' },
     { id: id('rce:2'), tenantId, routeId: r(1), kind: 'CHANGE', fromAdminId: admin, toAdminId: admin, capitalTransferido: v(5000),
       baseAlCambio: v(4800), motivo: 'Reasignación de prueba', createdAt: at(-28, 2), actorUserId: sa, actorRole: 'superadmin', syncStatus: 'synced' },
-  ];
-  const partnerCash: PartnerCashMovement[] = [
-    { id: id('pcm:1'), tenantId, partnerId: partner, type: 'salida', category: 'transferencia', amount: v(300), description: 'Aporte a Ruta 1',
-      relatedTransferId: tr2, fecha: day(2), createdAt: at(2, 1), createdBy: admin, reversalId: id('pcm:1:rev'), reversedAt: at(2, 6),
-      reversedByUserId: admin, reversalReason: 'Duplicado' },
-    { id: id('pcm:1:rev'), tenantId, partnerId: partner, type: 'salida', category: 'transferencia', amount: v(-300), relatedTransferId: tr2,
-      fecha: day(2), createdAt: at(2, 6), createdBy: admin, reversalReason: 'Duplicado', reversesId: id('pcm:1') },
-    { id: id('pcm:2'), tenantId, partnerId: partner, type: 'ingreso', category: 'transferencia', amount: v(100), relatedTransferId: tr3,
-      fecha: day(3), createdAt: at(3, 1), createdBy: admin },
   ];
   const second = c.members.filter((x) => x.rol === 'cobrador' || x.rol === 'supervisor')[1];
   const custody: CashCustodyMovement[] = [
@@ -359,7 +349,7 @@ function companyRecords(c: CompanySpec): DexieSnapshot {
   return {
     tenants: [tenant], offices, users, routes, expenseCategories: categories, clients, saleRequests, sales, installments, payments,
     paymentAdjustmentRequests: adjustments, noPaymentVisits: visits, expenses, capitalMovements, transfers, withdrawals, capitalLedger: ledger,
-    routeCapitalControllerEvents: controllerEvents, partnerCashMovements: partnerCash, cashCustodyMovements: custody,
+    routeCapitalControllerEvents: controllerEvents, cashCustodyMovements: custody,
     cashSettlements, weeklySettlements: weekly, auditLogs: audit,
     companyControl: [{
       companyId: tenantId, nombre: c.name, identificacion: tenant.nit, contacto: 'Responsable Sintético', contactoEmail: tenant.email,

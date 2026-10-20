@@ -17,7 +17,7 @@
 
 export type FieldKind =
   | 'id'          // adex.eid
-  | 'idOrEmpty'   // '' en Dexie ↔ NULL (Transfer.routeOrigenId cuando el origen es un socio)
+  | 'idOrEmpty'   // '' en Dexie ↔ NULL (Transfer.routeOrigenId de un modelo anterior a la Ronda 53)
   | 'text'
   | 'money'       // número entero de la moneda ↔ bigint en unidades menores
   | 'int'
@@ -231,11 +231,13 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
     dexieTable: 'transfers', entity: 'Transfer', source: 'models', sqlTable: 'adex.transfers',
     fields: [
       id('id', 'id'), tenant, f('routeOrigenId', 'route_origin_id', 'idOrEmpty'), id('routeDestinoId', 'route_destination_id'),
-      id('socioOrigenId', 'partner_origin_membership_id'), id('socioDestinoId', 'partner_destination_membership_id'),
       f('origenType', 'origin_type'), f('destinoType', 'destination_type'), money('valor', 'amount_minor'), f('descripcion', 'description'),
       date('fecha', 'transfer_date'), id('userId', 'registered_by_membership_id'), created, id('adminId', 'admin_membership_id'), ...REVERSAL,
     ],
-    omitted: [], added: [],
+    omitted: [
+      { field: 'socioOrigenId', reason: `Ronda 53 (2026-10-20): el rol Socio y Caja socios se retiraron de ADEX Online por decisión del propietario; la migración 0023 eliminó las columnas de socio: en el servidor solo existe Ruta → Ruta` },
+      { field: 'socioDestinoId', reason: `Ronda 53 (2026-10-20): el rol Socio y Caja socios se retiraron de ADEX Online por decisión del propietario; la migración 0023 eliminó las columnas de socio: en el servidor solo existe Ruta → Ruta` },
+    ], added: [],
   },
   {
     dexieTable: 'withdrawals', entity: 'Withdrawal', source: 'models', sqlTable: 'adex.withdrawals',
@@ -298,13 +300,9 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
     ],
   },
   {
-    dexieTable: 'partnerCashMovements', entity: 'PartnerCashMovement', source: 'models', sqlTable: 'adex.partner_cash_movements',
-    fields: [
-      id('id', 'id'), tenant, id('partnerId', 'partner_membership_id'), f('type', 'type'), f('category', 'category'), money('amount', 'amount_minor'),
-      f('description', 'description'), id('relatedTransferId', 'related_transfer_id'), date('fecha', 'movement_date'), created,
-      id('createdBy', 'created_by_membership_id'), ...REVERSAL,
-    ],
-    omitted: [{ field: 'relatedLedgerEntryId', reason: 'Capital centralizado C1/C2 de CLEAN (2026-10-15): estado local por navegador. El SaaS empieza de cero y la Fase 3 implementa el modelo en PostgreSQL con su propio esquema; no se importa' }], added: [],
+    dexieTable: 'partnerCashMovements', entity: 'PartnerCashMovement', source: 'models', sqlTable: null,
+    fields: [], omitted: [], added: [],
+    dropped: `Ronda 53 (2026-10-20): el rol Socio y Caja socios se retiraron de ADEX Online por decisión del propietario; la migración 0023 eliminó adex.partner_cash_movements (Caja socios). CLEAN la conserva para su propio uso`,
   },
   {
     dexieTable: 'paymentAdjustmentRequests', entity: 'PaymentAdjustmentRequest', source: 'models', sqlTable: 'adex.payment_adjustment_requests',

@@ -19,7 +19,7 @@ export const SCENARIO_VERSION = 'demo-v1';
 
 export interface SeatSpec {
   seat: string;
-  role: 'superadmin' | 'admin' | 'supervisor' | 'cobrador' | 'socio' | 'secretario';
+  role: 'superadmin' | 'admin' | 'supervisor' | 'cobrador' | 'secretario';
   displayName: string;
   assignable: boolean;
 }

@@ -48,6 +48,8 @@ describe('Ronda 33 · RLS con contexto evaluado una vez (0020)', () => {
     }
     return out;
   }
+  // Ronda 53 (0023): Caja socios ya no existe; su política se omite al revertir y reaplicar 0020.
+  const withoutPartnerCash = (sql: string) => sql.replace(/alter policy partner_cash_movements_ctx[\s\S]*?;\n/g, '');
   async function asOwner(sql: string): Promise<void> {
     const c = await db.admin.connect();
     try {
@@ -83,7 +85,7 @@ describe('Ronda 33 · RLS con contexto evaluado una vez (0020)', () => {
       { label: 'sin-contexto', ctx: { identityId: '', membershipId: '', companyId: c1 } },
       { label: 'identidad-ajena-misma-empresa', ctx: { identityId: identityOf('carla'), membershipId: M.brunoSa, companyId: c1 } },
       { label: 'cobrador-desactivado', ctx: { identityId: identityOf('ana'), membershipId: M.anaCob, companyId: c1 } },
-      { label: 'sesion-revocada', ctx: { identityId: identityOf('fabio'), membershipId: M.fabioSocio, companyId: c1, sessionId: REVOKED } },
+      { label: 'sesion-revocada', ctx: { identityId: identityOf('fabio'), membershipId: M.fabioSec, companyId: c1, sessionId: REVOKED } },
     );
     // Membresía con identidad desactivada y sesión revocada (deben ver lo mismo: nada).
     await db.admin.query(`update adex.memberships set status = 'inactivo' where id = $1`, [M.anaCob]);
@@ -95,7 +97,7 @@ describe('Ronda 33 · RLS con contexto evaluado una vez (0020)', () => {
     assert.ok(tables.length >= 30, `tablas con política SELECT: ${tables.length}`);
     assert.ok(contexts.length >= 12, `contextos: ${contexts.length}`);
     const roles = new Set(contexts.map((c) => c.label.split('/')[0]));
-    for (const r of ['superadmin', 'admin', 'socio', 'cobrador', 'secretario']) assert.ok(roles.has(r), `rol ${r} presente`);
+    for (const r of ['superadmin', 'admin', 'cobrador', 'secretario']) assert.ok(roles.has(r), `rol ${r} presente`);
     const withMigration = await visibility();
     // Hay datos de verdad que comparar (no huellas de tablas vacías).
     for (const t of ['payments', 'sales', 'clients', 'capital_operations', 'audit_log']) {
@@ -107,11 +109,11 @@ describe('Ronda 33 · RLS con contexto evaluado una vez (0020)', () => {
     for (const l of illegit) for (const t of ['payments', 'sales', 'installments', 'clients', 'expenses', 'capital_operations', 'capital_accounts', 'routes', 'audit_log']) {
       assert.ok(withMigration[`${l}:${t}`]?.startsWith('0:'), `${l} no ve ${t}`);
     }
-    await asOwner(ROLLBACK.replace(/^(begin|commit|set local role adex_owner);$/gm, ''));
+    await asOwner(withoutPartnerCash(ROLLBACK).replace(/^(begin|commit|set local role adex_owner);$/gm, ''));
     const previous = await visibility();
     const policies = (await db.admin.query(`select count(*)::int n from pg_policies where schemaname = 'adex' and qual like '%route_in_scope%'`)).rows[0].n;
     assert.equal(policies, 0, 'la reversión restaura las políticas anteriores');
-    await asOwner(MIGRATION);
+    await asOwner(withoutPartnerCash(MIGRATION));
     const again = await visibility();
     const diff = Object.keys(previous).filter((k) => previous[k] !== withMigration[k] || previous[k] !== again[k]);
     assert.deepEqual(diff, [], 'ninguna diferencia de filas ni de contenido');

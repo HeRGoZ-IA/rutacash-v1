@@ -11,16 +11,20 @@
 //
 // Equivalencias con C1 de CLEAN (src/services/centralCapitalService.ts):
 //   deliverCapitalToWorker → WORKER_DELIVERY · returnCapitalFromWorker → WORKER_RETURN
-//   reverseCapitalDelivery → REVERSAL · registerPartnerContribution → PARTNER_CONTRIBUTION
-//   transferBaseBetweenWorkers → WORKER_TRANSFER · registrarLedger → COMPANY_* / ADMIN_*
+//   reverseCapitalDelivery → REVERSAL · transferBaseBetweenWorkers → WORKER_TRANSFER
+//   registrarLedger → COMPANY_* / ADMIN_*
 // y, nuevo en el servidor, ROUTE_REASSIGNMENT: la devolución en una ruta y la entrega
 // en otra del MISMO responsable en una sola operación (C1 lo hace en dos pasos).
+//
+// Ronda 53: el rol Socio no existe en ADEX Online. PARTNER_CONTRIBUTION queda solo como
+// historia (ni se crea ni se anula; su contrapartida es la cuenta externa). Los traspasos
+// entre Administradores (ADMIN_TRANSFER_*) tienen su propio módulo (adminTransfers.ts).
 //
 // Visibilidad: toda lectura pasa por RLS con el contexto activo. El Cobrador solo ve
 // su custodia; nadie ve la bolsa de otro Administrador; los errores nunca llevan cifras.
 
 import type pg from 'pg';
-import { isTransferInScope, routeCashAuthorityError, type RouteCashOperation } from '@/lib/permissions';
+import { routeCashAuthorityError, type RouteCashOperation } from '@/lib/permissions';
 import { hasPersonalCashbox } from '@/lib/collectorAttribution';
 import { ApiError } from '../errors.ts';
 import type { ActiveContext } from '../authz/context.ts';
@@ -33,14 +37,14 @@ export type CapitalKind =
   | 'COMPANY_DEPOSIT' | 'COMPANY_WITHDRAWAL' | 'ADMIN_ALLOCATION' | 'ADMIN_RETURN' | 'PARTNER_CONTRIBUTION'
   | 'WORKER_DELIVERY' | 'WORKER_RETURN' | 'WORKER_TRANSFER' | 'ROUTE_REASSIGNMENT' | 'REVERSAL' | 'LOAN_DISBURSEMENT'
   | 'COLLECTION' | 'WORKER_EXPENSE' | 'ROUTE_EXPENSE' | 'COMPANY_EXPENSE' | 'EXPENSE_REFUND'
-  | 'SETTLEMENT_RETURN' | 'SETTLEMENT_SURPLUS';
+  | 'SETTLEMENT_RETURN' | 'SETTLEMENT_SURPLUS' | 'ADMIN_TRANSFER_HOLD' | 'ADMIN_TRANSFER_APPLY' | 'ADMIN_TRANSFER_RELEASE';
 
 /**
  * Recaudos y gastos (Fase 5) y asientos de un cuadre (Fase 6): se corrigen por su propio
  * comando (el cuadre, solo reabriéndolo), nunca por la anulación genérica.
  */
 const OWN_CORRECTION_KINDS: readonly string[] = ['COLLECTION', 'WORKER_EXPENSE', 'ROUTE_EXPENSE', 'COMPANY_EXPENSE', 'EXPENSE_REFUND',
-  'SETTLEMENT_RETURN', 'SETTLEMENT_SURPLUS'];
+  'SETTLEMENT_RETURN', 'SETTLEMENT_SURPLUS', 'ADMIN_TRANSFER_HOLD', 'ADMIN_TRANSFER_APPLY', 'ADMIN_TRANSFER_RELEASE'];
 
 const COMPANY_KINDS: readonly string[] = ['COMPANY_DEPOSIT', 'COMPANY_WITHDRAWAL', 'ADMIN_ALLOCATION', 'ADMIN_RETURN'];
 
@@ -166,6 +170,7 @@ const ACTIONS: Record<CapitalKind, string> = {
   ROUTE_REASSIGNMENT: 'CENTRAL_CAPITAL_REASSIGNED', REVERSAL: 'CAPITAL_OPERATION_REVERSED', LOAN_DISBURSEMENT: 'CONFIRM_DISBURSEMENT',
   COLLECTION: 'REGISTER_PAYMENT', WORKER_EXPENSE: 'CREATE_EXPENSE', ROUTE_EXPENSE: 'CREATE_EXPENSE', COMPANY_EXPENSE: 'CREATE_EXPENSE',
   EXPENSE_REFUND: 'EXPENSE_REFUNDED', SETTLEMENT_RETURN: 'CASH_SETTLEMENT_CLOSED', SETTLEMENT_SURPLUS: 'CASH_SETTLEMENT_CLOSED',
+  ADMIN_TRANSFER_HOLD: 'ADMIN_TRANSFER_REGISTERED', ADMIN_TRANSFER_APPLY: 'ADMIN_TRANSFER_APPLIED', ADMIN_TRANSFER_RELEASE: 'ADMIN_TRANSFER_RELEASED',
 };
 
 /** Escribe, audita (misma transacción) y responde con lo que el actor puede ver. */
@@ -223,28 +228,6 @@ export async function returnFromAdmin(client: pg.PoolClient, ctx: ActiveContext,
   const amount = amountOf(body);
   return execute(client, ctx, operationId, { kind: 'ADMIN_RETURN', amount, reason: reasonOf(body), admin: admin.membershipId },
     `Capital ${amount} devuelto por ${admin.displayName} a la empresa.`);
-}
-
-/**
- * Socio → bolsa del Administrador responsable de la ruta que el aporte va a operar
- * (C1). Lo registra ese responsable. Nunca entra a una ruta ni a un trabajador. Caja
- * socios (D1) no se toca: si debe tener saldo sigue abierta.
- */
-export async function partnerContribution(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
-  const route = await routeOf(client, ctx, reqId(body, 'routeId'));
-  const routeId = route.id;
-  need(ctx, 'transfer.create');
-  need(ctx, 'capital.manage', { routeId });
-  const members = await loadMembers(client, ctx);
-  requireAuthority(ctx, route, 'structural', members);
-  const partner = members.get(reqId(body, 'partnerId'));
-  if (!partner || partner.role !== 'socio') throw new ApiError(404, 'NOT_FOUND');
-  const inScope = isTransferInScope(toCleanUser(ctx), { origenType: 'partner', socioOrigenId: partner.membershipId, destinoType: 'route', routeDestinoId: routeId },
-    (id) => [...(members.get(id)?.routeIds ?? [])]);
-  if (!inScope) throw new ApiError(403, 'PERMISSION_DENIED');
-  const amount = amountOf(body);
-  return execute(client, ctx, operationId, { kind: 'PARTNER_CONTRIBUTION', amount, reason: reasonOf(body), route: routeId, counterpart: partner.membershipId },
-    `Aporte ${amount} de ${partner.displayName} a la bolsa del responsable de ${route.name}.`);
 }
 
 /**
@@ -349,12 +332,13 @@ export async function reverseOperation(client: pg.PoolClient, ctx: ActiveContext
   if (!orig) throw new ApiError(404, 'NOT_FOUND');
   // Un crédito desembolsado no se «anula»: el dinero está en manos del cliente (cobros y castigo, fases 4–5).
   if (orig.kind === 'LOAN_DISBURSEMENT') throw new ApiError(409, 'REVERSAL_NOT_ALLOWED');
+  // Un aporte histórico de socio (Ronda 53) ya no tiene contrapartida a la que volver.
+  if (orig.kind === 'PARTNER_CONTRIBUTION') throw new ApiError(409, 'REVERSAL_NOT_ALLOWED', 'historical partner contributions cannot be reversed');
   // Un recaudo o un gasto se anula con su comando (recalcula el crédito o enlaza el gasto).
   if (OWN_CORRECTION_KINDS.includes(orig.kind) || (orig.kind === 'REVERSAL' && OWN_CORRECTION_KINDS.includes(orig.reverses_kind ?? ''))) {
-    throw new ApiError(409, 'REVERSAL_NOT_ALLOWED', 'use the collection or expense correction command');
+    throw new ApiError(409, 'REVERSAL_NOT_ALLOWED', 'use the command of the operation (collection, expense, settlement or administrator transfer)');
   }
   if (COMPANY_KINDS.includes(orig.kind)) need(ctx, 'capital.allocateAdmins');
-  else if (orig.kind === 'PARTNER_CONTRIBUTION') need(ctx, 'transfer.create');
   else need(ctx, 'capital.manage', { routeId: orig.route_id ?? undefined });
   if (orig.route_id && !COMPANY_KINDS.includes(orig.kind)) {
     const members = await loadMembers(client, ctx);
@@ -415,6 +399,10 @@ interface AdminPool {
   collectionsReceivedMinor: number; disbursedFromPoolMinor: number;
   /** Efectivo en custodia de trabajadores en las rutas que HOY controla. No es disponible. */
   custodyUnderResponsibilityMinor: number;
+  /** Traspasos entre Administradores ya aplicados (neto: recibidos − enviados). */
+  adminTransfersNetMinor: number;
+  /** Capital comprometido en traspasos PENDIENTES que salen de esta bolsa (ya no está en el disponible). */
+  pendingTransfersOutMinor: number;
 }
 
 /** Bolsas de Administradores (flujos por tipo) y posición de la empresa. */
@@ -422,13 +410,17 @@ async function adminPools(client: pg.PoolClient, ctx: ActiveContext, onlyAdmin: 
   const r = await client.query<{
     membership_id: string; display_name: string; status: string; balance: string;
     allocated: string; contributions: string; delivered: string; returned: string; reassigned: string; custody: string;
-    expenses: string; collections: string; disbursed: string;
+    expenses: string; collections: string; disbursed: string; transfers: string; pending_out: string;
   }>(
     // Las patas se agregan POR CUENTA (lateral sobre el índice company_id + account_id): con un
     // join y group by, el planificador podía recorrer el libro de todas las empresas evaluando
     // la RLS fila a fila (minutos en staging). Mismas sumas, mismos filtros.
     `select a.membership_id, m.display_name, m.status, a.balance_minor balance,
             f.allocated, f.contributions, f.delivered, f.returned, f.reassigned, f.expenses, f.collections, f.disbursed,
+            coalesce(f.applied_in, 0) - coalesce((select sum(t.amount_minor) from adex.admin_transfers t where t.company_id = a.company_id
+                       and t.origin_admin_membership_id = a.membership_id and t.state = 'applied'), 0) transfers,
+            coalesce((select sum(t.amount_minor) from adex.admin_transfers t where t.company_id = a.company_id
+                       and t.origin_admin_membership_id = a.membership_id and t.state = 'pending'), 0) pending_out,
             coalesce((select sum(c.balance_minor) from adex.capital_accounts c join adex.routes ro on ro.company_id = c.company_id and ro.id = c.route_id
                        where c.company_id = a.company_id and c.kind = 'custody' and ro.capital_controller_membership_id = a.membership_id), 0) custody
        from adex.capital_accounts a
@@ -441,7 +433,9 @@ async function adminPools(client: pg.PoolClient, ctx: ActiveContext, onlyAdmin: 
                 coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'ROUTE_REASSIGNMENT'), 0) reassigned,
                 coalesce(-sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) in ('ROUTE_EXPENSE', 'COMPANY_EXPENSE', 'EXPENSE_REFUND')), 0) expenses,
                 coalesce(sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'COLLECTION'), 0) collections,
-                coalesce(-sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'LOAN_DISBURSEMENT'), 0) disbursed
+                coalesce(-sum(e.amount_minor) filter (where coalesce(o.reverses_kind, o.kind) = 'LOAN_DISBURSEMENT'), 0) disbursed,
+                -- Traspasos recibidos y APLICADOS (lo enviado se descuenta arriba con sus traspasos aplicados).
+                coalesce(sum(e.amount_minor) filter (where o.kind = 'ADMIN_TRANSFER_APPLY'), 0) applied_in
            from adex.capital_entries e
            join adex.capital_operations o on o.company_id = e.company_id and o.id = e.operation_id
           where e.company_id = a.company_id and e.account_id = a.id) f
@@ -453,6 +447,7 @@ async function adminPools(client: pg.PoolClient, ctx: ActiveContext, onlyAdmin: 
     deliveredToWorkersMinor: Number(x.delivered), returnedFromWorkersMinor: Number(x.returned), reassignedNetMinor: Number(x.reassigned),
     expensesPaidMinor: Number(x.expenses), collectionsReceivedMinor: Number(x.collections), disbursedFromPoolMinor: Number(x.disbursed),
     custodyUnderResponsibilityMinor: Number(x.custody),
+    adminTransfersNetMinor: Number(x.transfers), pendingTransfersOutMinor: Number(x.pending_out),
   }));
 }
 
@@ -465,12 +460,16 @@ export async function capitalSummary(client: pg.PoolClient, ctx: ActiveContext) 
     const t = (await client.query<{ kind: string; total: string }>(
       `select kind, sum(balance_minor)::text total from adex.capital_accounts where company_id = $1 group by kind`, [ctx.companyId])).rows;
     const total = (k: string) => Number(t.find((x) => x.kind === k)?.total ?? 0);
+    const admins = await adminPools(client, ctx, null);
+    // Aportes HISTÓRICOS de socio (Ronda 53): su contrapartida es ya la cuenta externa; se
+    // informan aparte para que el neto externo siga siendo depósitos − retiros.
+    const historicPartner = admins.reduce((s, a) => s + a.partnerContributionsMinor, 0);
     return {
       currencyCode: ctx.company.currencyCode, minorUnits: ctx.company.minorUnits,
       company: {
         availableMinor: total('company'),
-        // Lo que entró a la cadena desde fuera (depósitos − retiros) y desde socios.
-        externalNetInMinor: -total('external'), partnerContributionsMinor: -total('partner'),
+        // Lo que entró a la cadena desde fuera: depósitos − retiros, y aportes históricos de socio.
+        externalNetInMinor: -total('external') - historicPartner, partnerContributionsMinor: historicPartner,
         adminPoolsMinor: total('admin'), custodyMinor: total('custody'),
         // Capital prestado pendiente de cobro (cartera de las rutas): deuda de clientes, no efectivo.
         portfolioMinor: total('portfolio'),
@@ -479,8 +478,10 @@ export async function capitalSummary(client: pg.PoolClient, ctx: ActiveContext) 
         // Fase 6: sobrantes de cuadres en control (recibidos, sin identificar). NO es capital
         // disponible ni se gasta; su destino es una decisión pendiente (F6-D02).
         unidentifiedSurplusMinor: total('suspense'),
+        // Ronda 53: capital comprometido en traspasos entre Administradores pendientes.
+        inTransitMinor: total('transit'),
       },
-      admins: await adminPools(client, ctx, null),
+      admins,
     };
   }
   need(ctx, 'capital.manage');
@@ -490,7 +491,7 @@ export async function capitalSummary(client: pg.PoolClient, ctx: ActiveContext) 
 /**
  * Conciliación reproducible (SuperAdmin): saldos materializados = Σ patas; cada
  * operación cuadra; sin sobregiros; y conservación:
- *   −(externa + socios) = empresa + Σ bolsas + Σ custodias
+ *   −externa = empresa + Σ bolsas + tránsito + Σ custodias + …
  * (lo que entró a la cadena está en alguna cuenta; ninguna operación lo crea ni lo destruye).
  */
 export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveContext) {
@@ -502,9 +503,9 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
   const l = (k: string) => Number(ledger[k]);
   const mismatched = l('mismatched');
   const unbalanced = l('unbalanced');
-  // Contrapartidas (externa, socios, interés) miden lo que entró; la custodia solo puede
+  // Contrapartidas (externa, interés) miden lo que entró; la custodia solo puede
   // quedar negativa por un gasto del trabajador (73209ce), comprobado pata a pata.
-  const overdrawn = await q(`select count(*)::text n from adex.capital_accounts where company_id = $1 and kind not in ('external', 'partner', 'income', 'custody', 'unidentified') and balance_minor < 0`);
+  const overdrawn = await q(`select count(*)::text n from adex.capital_accounts where company_id = $1 and kind not in ('external', 'income', 'custody', 'unidentified') and balance_minor < 0`);
   const negativeCustody = l('negativeCustody');
   const foreignCurrency = await q(
     `select count(*)::text n from adex.capital_operations o join adex.companies c on c.id = o.company_id
@@ -571,6 +572,10 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
   const surplusDrift = l('surplusDrift');
   // Cierres de periodo: lo archivado no cambia (nadie fecha asientos en un periodo cerrado).
   const closedDrift = l('closedDrift');
+  // Ronda 53: la cuenta de tránsito es exactamente lo comprometido en traspasos pendientes.
+  const transitDrift = await q(
+    `select count(*)::text n from (select coalesce((select sum(balance_minor) from adex.capital_accounts where company_id = $1 and kind = 'transit'), 0)
+        <> coalesce((select sum(amount_minor) from adex.admin_transfers where company_id = $1 and state = 'pending'), 0) bad) x where bad`);
   const checks = [
     { name: 'positions-match-ledger', ok: mismatched === 0, detail: mismatched },
     { name: 'operations-balanced', ok: unbalanced === 0, detail: unbalanced },
@@ -590,6 +595,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
     { name: 'settlements-match-ledger', ok: settlementDrift === 0, detail: settlementDrift },
     { name: 'surplus-control-matches-settlements', ok: surplusDrift === 0, detail: surplusDrift },
     { name: 'closed-periods-unchanged', ok: closedDrift === 0, detail: closedDrift },
+    { name: 'transit-matches-pending-transfers', ok: transitDrift === 0, detail: transitDrift },
   ];
   return { ok: checks.every((c) => c.ok), checks };
 }

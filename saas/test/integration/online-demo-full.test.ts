@@ -32,7 +32,7 @@ describe('ADEX Online · Empresa Demo histórica (demo-v2-6m, escala real)', { s
     operator = await person(online, 'operador-hist@example.test');
     await grantDemoOperator(db, operator.identityId, operator.email);
     for (const [seat, email] of [['superadmin-invitado', 'sa-hist'], ['admin-centro', 'admin-hist'], ['cobrador-centro', 'cob-hist'],
-      ['supervisor-centro', 'sup-hist'], ['socio-invitado', 'socio-hist'], ['secretario-invitado', 'sec-hist']] as const) {
+      ['supervisor-centro', 'sup-hist'], ['secretario-invitado', 'sec-hist']] as const) {
       const p = await person(online, `${email}@example.test`);
       people[seat] = p;
       const r = await online.call('PUT', `/demo/v1/slots/${slot}/participants/${seat}`, { token: operator.token, body: { email: p.email, displayName: email } });
@@ -100,9 +100,8 @@ describe('ADEX Online · Empresa Demo histórica (demo-v2-6m, escala real)', { s
     assert.equal(cob['role'], 'cobrador');
     assert.ok(await n(`select count(*) n from adex.payments where company_id = $1 and collector_membership_id = $2`, [demoId, cob['membershipId']]) >= 3,
       'el Cobrador invitado ve SUS cobros históricos');
-    const socio = (await memberships(people['socio-invitado']!))[0]!;
     const sec = (await memberships(people['secretario-invitado']!))[0]!;
-    assert.deepEqual([socio['role'], sec['role']], ['socio', 'secretario']);
+    assert.equal(sec['role'], 'secretario');
     // La historia la registró la identidad sintética del puesto, no la persona.
     const actors = await db.admin.query(`select distinct a.actor_identity_id from adex.audit_log a where a.company_id = $1 and a.actor_membership_id = $2`, [demoId, cob['membershipId']]);
     assert.ok(actors.rows.length >= 1);

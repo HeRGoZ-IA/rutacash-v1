@@ -87,7 +87,7 @@ describe('ADEX Online · capa operativa', () => {
     await assert.rejects(db.admin.query(`update adex.no_payment_visits set note = 'x' where company_id = $1`, [c1]));
     await assert.rejects(db.admin.query(`delete from adex.no_payment_visits where company_id = $1`, [c1]));
     // Un Socio (sin `payment.register`) no registra visitas.
-    const fabio = caller(api, issuer, 'fabio', M.fabioSocio);
+    const fabio = caller(api, issuer, 'fabio', M.fabioSec);
     const r = await fabio('POST', '/v1/no-payment-visits', { saleId: s, reason: 'no_estaba' }, { 'x-adex-operation-id': randomUUID() });
     assert.ok([403, 404].includes(r.status), `socio: ${r.status}`);
   });

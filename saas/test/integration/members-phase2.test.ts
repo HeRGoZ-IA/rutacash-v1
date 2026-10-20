@@ -49,13 +49,13 @@ describe('Fase 2 · trabajadores y asignaciones', () => {
 
   test('MEM-003 · asignación desde una Oficina: solo cambian las rutas de esa Oficina', async () => {
     const office1 = uid('c1:office:1');
-    const r = await bruno('PUT', `/v1/members/${M.fabioSocio}/office-routes`, { officeId: office1, selectedRouteIds: [] });
+    const r = await bruno('PUT', `/v1/members/${M.fabioSec}/office-routes`, { officeId: office1, selectedRouteIds: [] });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.deepEqual(r.body['routeIds'], [routeId('c1', 2)], 'conserva r2 (Oficina Norte)');
-    const back = await bruno('PUT', `/v1/members/${M.fabioSocio}/office-routes`, { officeId: office1, selectedRouteIds: [routeId('c1', 1), routeId('c1', 2)] });
+    const back = await bruno('PUT', `/v1/members/${M.fabioSec}/office-routes`, { officeId: office1, selectedRouteIds: [routeId('c1', 1), routeId('c1', 2)] });
     assert.deepEqual((back.body['routeIds'] as string[]).sort(), [routeId('c1', 1), routeId('c1', 2)].sort(), 'r2 no es de la Oficina: se ignora en la selección');
-    assert.equal((await anaCob('PUT', `/v1/members/${M.fabioSocio}/office-routes`, { officeId: office1, selectedRouteIds: [] })).status, 403);
-    assert.equal((await bruno('PUT', `/v1/members/${M.fabioSocio}/office-routes`, { officeId: uid('c2:office:1'), selectedRouteIds: [] })).body['error'], 'OFFICE_NOT_FOUND');
+    assert.equal((await anaCob('PUT', `/v1/members/${M.fabioSec}/office-routes`, { officeId: office1, selectedRouteIds: [] })).status, 403);
+    assert.equal((await bruno('PUT', `/v1/members/${M.fabioSec}/office-routes`, { officeId: uid('c2:office:1'), selectedRouteIds: [] })).body['error'], 'OFFICE_NOT_FOUND');
   });
 
   test('MEM-099 · sin errores inesperados en el servidor', () => {

@@ -54,7 +54,7 @@ describe('Fase 5 · gastos', () => {
     bruno = caller(api, issuer, 'bruno', M.brunoSa); $bruno = money(bruno);
     ana = caller(api, issuer, 'ana', M.anaAdmin); $ana = money(ana);
     gabi = caller(api, issuer, 'gabi', M.gabiSec);
-    fabio = caller(api, issuer, 'fabio', M.fabioSocio);
+    fabio = caller(api, issuer, 'fabio', M.fabioSec);
     today = (await db.admin.query(`select (now() at time zone 'America/Sao_Paulo')::date::text d`)).rows[0].d;
     const mk = (email: string, role: string, displayName: string, routeIds: string[]) => newPerson(api, issuer, provider.ids, bruno, { email, role, displayName, routeIds });
     carlos = await mk('carlos-exp@example.test', 'cobrador', 'Carlos', [r1]);
@@ -338,7 +338,7 @@ describe('Fase 5 · gastos', () => {
     assert.ok(caps.length >= 17);
     const byRole: Record<string, { identityId: string; membershipId: string }> = {
       superadmin: { identityId: identityOf('bruno'), membershipId: M.brunoSa }, admin: { identityId: identityOf('ana'), membershipId: M.anaAdmin },
-      socio: { identityId: identityOf('fabio'), membershipId: M.fabioSocio }, secretario: { identityId: identityOf('gabi'), membershipId: M.gabiSec },
+      socio: { identityId: identityOf('fabio'), membershipId: M.fabioSec }, secretario: { identityId: identityOf('gabi'), membershipId: M.gabiSec },
       supervisor: { identityId: dora.identityId, membershipId: dora.membershipId }, cobrador: { identityId: carlos.identityId, membershipId: carlos.membershipId },
     };
     for (const role of USER_ROLES) {
@@ -353,7 +353,7 @@ describe('Fase 5 · gastos', () => {
   test('CAN-SQL-002 · las comprobaciones del libro (0019, propietario) solo responden al SuperAdmin del contexto', async () => {
     const byRole: Record<string, { identityId: string; membershipId: string }> = {
       superadmin: { identityId: identityOf('bruno'), membershipId: M.brunoSa }, admin: { identityId: identityOf('ana'), membershipId: M.anaAdmin },
-      socio: { identityId: identityOf('fabio'), membershipId: M.fabioSocio }, secretario: { identityId: identityOf('gabi'), membershipId: M.gabiSec },
+      socio: { identityId: identityOf('fabio'), membershipId: M.fabioSec }, secretario: { identityId: identityOf('gabi'), membershipId: M.gabiSec },
       supervisor: { identityId: dora.identityId, membershipId: dora.membershipId }, cobrador: { identityId: carlos.identityId, membershipId: carlos.membershipId },
     };
     for (const role of USER_ROLES) {

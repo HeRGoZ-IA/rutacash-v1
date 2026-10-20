@@ -120,7 +120,7 @@ describe('Fase 6 · cuadres y cierres', () => {
     for (const k of ['A', 'B', 'C', 'D', 'F', 'G', 'H', 'S', 'R', 'Q', 'X']) cob[k] = await mk(`f6-cob-${k.toLowerCase()}@example.test`, 'cobrador', `Cobrador ${k}`, [routes[k]!]);
     xavier = await mk('f6-xavier@example.test', 'admin', 'Xavier (no responsable)', [routes['A']!, routes['S']!]);
     dora = await mk('f6-dora@example.test', 'supervisor', 'Dora Supervisora', [routes['A']!, routes['E']!, routes['S']!]);
-    socio = await mk('f6-socio@example.test', 'socio', 'Socio Fabio', [routes['A']!]);
+    socio = await mk('f6-sec@example.test', 'secretario', 'Secretario Fabio', [routes['A']!]);
     olga = await mk('f6-olga@example.test', 'admin', 'Olga Administradora', [routes['Q']!]);
     assert.equal((await sara('PUT', `/v1/members/${mm.anaCob}/routes`, { routeIds: [routes['Own']!] })).status, 200);
     cat = (await sara('POST', '/v1/expense-categories', { name: 'Combustible' })).body['id'] as string;
@@ -401,7 +401,7 @@ describe('Fase 6 · cuadres y cierres', () => {
     assert.equal((again['operations'] as Body)['hash'], archived['ledgerHash']);
     const now = (await ana('GET', `/v1/periods/liquidation?routeId=${r}&from=${today}&to=${today}`)).body;
     assert.equal((now['custody'] as Body)['workerExpensesMinor'], -$(20_000), 'la corrección aparece en el periodo abierto');
-    // Visibilidad: el Cobrador no ve los cierres; la Supervisora y el Socio de la ruta, sí.
+    // Visibilidad: el Cobrador no ve los cierres; la Supervisora de la ruta, sí (Ronda 53: sin Socio).
     assert.equal((await w.call('GET', `/v1/periods?routeId=${r}`)).status, 403);
     assert.equal((await ana('GET', `/v1/periods?routeId=${r}`)).body['closures'] instanceof Array, true);
     await reconciliation();
@@ -430,14 +430,14 @@ describe('Fase 6 · cuadres y cierres', () => {
   // ==========================================================
   // Autoridad, identidad (DS-05), RLS y segunda barrera
   // ==========================================================
-  test('SEC6-001 · quién cuadra: responsable, SuperAdmin y Supervisor de la ruta; no el Cobrador, el Administrador no responsable, el Socio ni otra empresa', async () => {
+  test('SEC6-001 · quién cuadra: responsable, SuperAdmin y Supervisor de la ruta; no el Cobrador, el Administrador no responsable, el Secretario ni otra empresa', async () => {
     const [r, w] = [routes['S']!, cob['S']!];
     await deliver(r, w.membershipId, $(10_000));
     const p = await preview(ana, r, w.membershipId);
     const before = await custody(w.membershipId, r);
     assert.equal((await settle(w.money, r, w.membershipId, $(10_000), p)).status, 403, 'el Cobrador no cuadra (ni a sí mismo)');
     assert.equal((await settle(xavier.money, r, w.membershipId, $(10_000), p)).body['error'], 'CAPITAL_AUTHORITY_REQUIRED', 'Administrador asignado, no responsable');
-    assert.equal((await settle(socio.money, r, w.membershipId, $(10_000), p)).status, 404, 'Socio sin la ruta');
+    assert.ok([403, 404].includes((await settle(socio.money, r, w.membershipId, $(10_000), p)).status), 'el Secretario no cuadra');
     assert.equal((await settle(money(caller(api, issuer, 'carla', M.carlaSa)), r, w.membershipId, $(10_000), p)).status, 404, 'otra empresa: indistinguible de inexistente');
     assert.equal((await settle(money(caller(api, issuer, 'gabi', M.gabiSec)), r, w.membershipId, $(10_000), p)).status, 404, 'Secretaria de otra empresa');
     assert.equal(await custody(w.membershipId, r), before);

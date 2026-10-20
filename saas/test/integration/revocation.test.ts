@@ -18,7 +18,7 @@ import {
 
 const M = {
   brunoSa: membershipId('c1', 'bruno-sa'), anaCob: membershipId('c1', 'ana-cob'), anaAdmin: membershipId('c1', 'ana-admin'),
-  gabiSec: membershipId('c1', 'gabi-sec'), fabioSocio: membershipId('c1', 'fabio-socio'), carlaSa: membershipId('c2', 'carla-sa'),
+  gabiSec: membershipId('c1', 'gabi-sec'), fabioSec: membershipId('c1', 'fabio-sec'), carlaSa: membershipId('c2', 'carla-sa'),
   elisaCob: membershipId('c2', 'elisa-cob'),
 };
 
@@ -102,8 +102,8 @@ describe('Fase 1 · REVOKE-004: revocación serializada con las operaciones', ()
     const tx = await db.admin.connect();
     try {
       await tx.query('begin');
-      await tx.query('delete from adex.membership_routes where membership_id = $1 and route_id = $2', [M.fabioSocio, routeId('c1', 1)]);
-      const op = api.call('GET', `/v1/routes/${routeId('c1', 1)}`, { token: await issuer.issue('fabio'), membership: M.fabioSocio });
+      await tx.query('delete from adex.membership_routes where membership_id = $1 and route_id = $2', [M.fabioSec, routeId('c1', 1)]);
+      const op = api.call('GET', `/v1/routes/${routeId('c1', 1)}`, { token: await issuer.issue('fabio'), membership: M.fabioSec });
       await waitingAdvisory();
       await tx.query('commit');
       assert.equal((await op).status, 404, 'al continuar ya no ve la ruta');

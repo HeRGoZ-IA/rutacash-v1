@@ -125,7 +125,6 @@ describe('Fase 0 · aislamiento por empresa y privilegios', () => {
         assert.equal(await count(q, `select 1 from ${table} where route_id is distinct from $1`, [routeId('c1', 1)]), 0, table);
       }
       assert.ok(await count(q, 'select 1 from adex.payments') > 0);
-      assert.equal(await count(q, 'select 1 from adex.partner_cash_movements'), 0, 'Caja socios: solo SuperAdmin (fase 0)');
       assert.equal(await count(q, 'select 1 from adex.identities where id <> $1', [identityOf('ana')]), 0, 'cobradora no ve correos ajenos');
     });
   });

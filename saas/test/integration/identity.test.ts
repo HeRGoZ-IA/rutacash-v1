@@ -12,7 +12,7 @@ import { createLocalIssuer, createMemoryProvider, startCompanyApi, type LocalIss
 
 const M = {
   brunoSa: membershipId('c1', 'bruno-sa'), anaAdmin: membershipId('c1', 'ana-admin'), anaCob: membershipId('c1', 'ana-cob'),
-  gabiSec: membershipId('c1', 'gabi-sec'), fabioSocio: membershipId('c1', 'fabio-socio'), carlaSa: membershipId('c2', 'carla-sa'),
+  gabiSec: membershipId('c1', 'gabi-sec'), fabioSec: membershipId('c1', 'fabio-sec'), carlaSa: membershipId('c2', 'carla-sa'),
   hugoAdmin: membershipId('c2', 'hugo-admin'), anaSup: membershipId('c2', 'ana-sup'), elisaCob: membershipId('c2', 'elisa-cob'),
 };
 
@@ -186,9 +186,9 @@ describe('Fase 1 · identidad, contexto y membresías por la API', () => {
   test('IDN-042 · persona desactivada (identidad) → ninguna de sus membresías opera', async () => {
     const fabio = await issuer.issue('fabio');
     await db.admin.query(`update adex.identities set status = 'disabled' where id = $1`, [identityOf('fabio')]);
-    assert.deepEqual((await api.call('GET', '/v1/context', { token: fabio, membership: M.fabioSocio })).body, { error: 'IDENTITY_DISABLED' });
+    assert.deepEqual((await api.call('GET', '/v1/context', { token: fabio, membership: M.fabioSec })).body, { error: 'IDENTITY_DISABLED' });
     await db.admin.query(`update adex.identities set status = 'active' where id = $1`, [identityOf('fabio')]);
-    assert.equal((await api.call('GET', '/v1/context', { token: fabio, membership: M.fabioSocio })).status, 200);
+    assert.equal((await api.call('GET', '/v1/context', { token: fabio, membership: M.fabioSec })).status, 200);
   });
 
   test('IDN-043 · ningún error inesperado en el servidor durante la batería', () => {

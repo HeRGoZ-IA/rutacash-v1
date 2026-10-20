@@ -25,7 +25,7 @@ describe('Fase 2 · estructura de empresa, Oficinas, rutas y categorías', () =>
     bruno = caller(api, issuer, 'bruno', M.brunoSa);
     ana = caller(api, issuer, 'ana', M.anaAdmin);
     anaCob = caller(api, issuer, 'ana', M.anaCob);
-    fabio = caller(api, issuer, 'fabio', M.fabioSocio);
+    fabio = caller(api, issuer, 'fabio', M.fabioSec);
     carla = caller(api, issuer, 'carla', M.carlaSa);
   });
   after(async () => { await api.close(); await control.close(); await db.close(); });
