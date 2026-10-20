@@ -292,7 +292,14 @@ export default function ActiveSalesPage() {
         // si la ruta tiene varios cobradores y no se indicó cuál).
         collectorId: paymentCollectorId || undefined,
       })
-      if (!result.ok) { toast.error(result.message); return }
+      // Ronda 48.1 (Online): sin confirmación no es un error. Registrar otra vez con el MISMO
+      // valor comprueba ese abono; nunca crea otro.
+      if (!result.ok) {
+        const aviso = result.code === 'PAYMENT_UNCONFIRMED' || result.code === 'PREVIOUS_PAYMENT_CONFIRMED'
+        ;(aviso ? toast.warning : toast.error)(result.message)
+        if (result.code === 'PREVIOUS_PAYMENT_CONFIRMED') await load()
+        return
+      }
       if (result.capped) {
         toast.warning(`El pago se limitó al saldo pendiente: ${formatCurrency(result.appliedAmount, currency)}. La deuda queda en ${formatCurrency(0, currency)}.`)
       } else {

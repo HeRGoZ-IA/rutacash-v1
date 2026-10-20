@@ -408,6 +408,13 @@ describe('Fase 5 · gastos', () => {
       // Solo código: los comentarios pueden nombrar lo que está prohibido.
       const text = readFileSync(path.join(dir, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
       const rel = f.replace(/\\/g, '/');
+      // Ronda 48.1: única excepción, el registro del abono EN VUELO (id + cuerpo exacto) para
+      // comprobarlo tras una recarga sin crear otro. Una sola clave; nada de saldos ni cálculos.
+      if (rel === 'runtime/unconfirmedPayments.ts') {
+        assert.deepEqual([...text.matchAll(/'adex\.[a-z.-]+\.v\d+'/g)].map((m) => m[0]), ["'adex.unconfirmed-payments.v1'"], 'una sola clave local');
+        assert.doesNotMatch(text, /sessionStorage|openDatabase|indexedDB|balance|saldo/i, 'solo el registro del abono en vuelo');
+        continue;
+      }
       if (/localStorage|sessionStorage|openDatabase/.test(text)) hits.push(f);
       // Ronda 24/25: el puente (`bridge/`) SUSTITUYE la base local de CLEAN y por eso lleva sus
       // nombres (`RutaCashDB`, el sustituto bloqueante de `dexie`); fuera del puente siguen prohibidos.

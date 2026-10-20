@@ -41,12 +41,15 @@ export class UncertainOperation extends Error {
   readonly method: string;
   readonly path: string;
   readonly body: unknown;
-  constructor(operationId: string, method: string, path: string, body: unknown) {
+  /** Membresía con la que se envió: solo con ella se consulta o repite (Ronda 48.1). */
+  readonly membershipId: string | null;
+  constructor(operationId: string, method: string, path: string, body: unknown, membershipId: string | null = null) {
     super('UNCERTAIN_OPERATION');
     this.operationId = operationId;
     this.method = method;
     this.path = path;
     this.body = body;
+    this.membershipId = membershipId;
   }
 }
 
@@ -58,6 +61,30 @@ export class UncertainOperation extends Error {
  */
 export function isUnconfirmed(err: unknown): boolean {
   return err instanceof NetworkFailure || (err instanceof ApiFailure && err.status >= 500);
+}
+
+/** Rechazos de la API ANTERIORES a la operación: no dicen nada de un intento previo con ese id. */
+const BEFORE_OPERATION = new Set(['INVALID_TOKEN', 'MISSING_TOKEN', 'SESSION_EXPIRED', 'SESSION_REVOKED', 'NOT_SIGNED_IN', 'IDENTITY_DISABLED',
+  'IDENTITY_NOT_PROVISIONED', 'MEMBERSHIP_REQUIRED', 'INVALID_MEMBERSHIP_ID', 'MEMBERSHIP_NOT_FOUND', 'MEMBERSHIP_INACTIVE', 'COMPANY_BLOCKED',
+  'CONTEXT_INVALID', 'RATE_LIMITED']);
+
+/**
+ * ¿El rechazo ocurrió antes de que el servidor llegara a la operación (sesión, contexto,
+ * límite de peticiones)? Al REPETIR un comando incierto, un rechazo así no prueba que el
+ * primer intento no se confirmara: el resultado sigue siendo desconocido (Ronda 48.1).
+ */
+export function isBeforeOperation(err: unknown): boolean {
+  return err instanceof ApiFailure && (err.status === 401 || err.status === 408 || err.status === 429 || BEFORE_OPERATION.has(err.code));
+}
+
+/**
+ * Al REPETIR un comando con su mismo id, ¿la respuesta NO es definitiva sobre esa operación?
+ * Rechazos previos a la operación, el id ya usado (la operación EXISTE), y respuestas que no
+ * vienen de la API de empresa (ruta no encontrada durante un despliegue, origen, proxy sin cuerpo).
+ */
+export function isNotAboutOperation(err: unknown): boolean {
+  return isBeforeOperation(err) || (err instanceof ApiFailure
+    && (err.code === 'OPERATION_ID_REUSED' || err.code === 'NOT_FOUND' || err.code === 'ORIGIN_NOT_ALLOWED' || err.code.startsWith('HTTP_')));
 }
 
 /** Una petición que tarda más que esto suele ser el servidor despertando (Render Free). */
@@ -113,6 +140,7 @@ export class OnlineClient {
   }
 
   get signedIn(): boolean { return this.session !== null; }
+  get identityId(): string | null { return this.session?.identityId ?? null; }
   get activeMembershipId(): string | null { return this.session?.activeMembershipId ?? null; }
 
   async restore(): Promise<boolean> {
@@ -232,32 +260,46 @@ export class OnlineClient {
    * Nunca se repite con un id nuevo: eso sí podría duplicar el movimiento.
    */
   async command<T = Record<string, unknown>>(method: string, path: string, body: unknown, operationId: string = crypto.randomUUID()): Promise<T> {
+    const membership = this.activeMembershipId;
     try {
       return (await this.request(method, path, { body, operationId })) as T;
     } catch (err) {
       if (!isUnconfirmed(err)) throw err;
-      return this.resolveUncertain<T>(new UncertainOperation(operationId, method, path, body));
+      return this.resolveUncertain<T>(new UncertainOperation(operationId, method, path, body, membership));
     }
   }
 
+  /**
+   * Resuelve un comando incierto SIN crear otro: consulta por su id y, si el servidor no lo
+   * tiene, lo repite con el MISMO id y el MISMO cuerpo (el servidor serializa los intentos
+   * sobre `operations` y devuelve el guardado). Lanza `ApiFailure` solo cuando la respuesta
+   * es definitiva sobre ESA operación; en cualquier otro caso, la misma `UncertainOperation`.
+   * Ronda 48.1: un fallo de la CONSULTA (sesión caducada, contexto perdido, límite de
+   * peticiones…) nunca se toma como resultado de la operación.
+   */
   async resolveUncertain<T = Record<string, unknown>>(u: UncertainOperation): Promise<T> {
+    const membership = u.membershipId ?? undefined;
     for (let attempt = 0; attempt < 3; attempt++) {
+      let known: Record<string, unknown> | null = null;
       try {
-        const known = await this.request('GET', `/v1/operations/${u.operationId}`);
+        known = await this.request('GET', `/v1/operations/${u.operationId}`, { membership });
+      } catch (err) {
+        if (err instanceof ApiFailure && err.code === 'OPERATION_NOT_FOUND') {
+          try {
+            return (await this.request(u.method, u.path, { body: u.body, operationId: u.operationId, membership })) as T;
+          } catch (again) {
+            if (isNotAboutOperation(again)) throw u;
+            if (!isUnconfirmed(again)) throw again;
+          }
+        } else if (!isUnconfirmed(err)) {
+          throw u;
+        }
+      }
+      if (known) {
         const httpStatus = Number(known['httpStatus'] ?? 0);
         const result = known['result'] as Record<string, unknown>;
         if (httpStatus >= 400) throw new ApiFailure(httpStatus, String(result?.['error'] ?? 'ERROR'));
         return result as T;
-      } catch (err) {
-        if (err instanceof ApiFailure && err.code === 'OPERATION_NOT_FOUND') {
-          try {
-            return (await this.request(u.method, u.path, { body: u.body, operationId: u.operationId })) as T;
-          } catch (again) {
-            if (!isUnconfirmed(again)) throw again;
-          }
-        } else if (!isUnconfirmed(err)) {
-          throw err;
-        }
       }
       await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
     }
@@ -338,7 +380,7 @@ export class OnlineClient {
         this.session = null;
         await this.store.clear();
         this.emit('session');
-      } else if (CONTEXT_LOST.has(code) && membership) {
+      } else if (CONTEXT_LOST.has(code) && membership && membership === this.activeMembershipId) {
         await this.clearContext();
         this.emit('context', code);
       }

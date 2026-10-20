@@ -11,7 +11,10 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatCurrencyInput, parseCurrencyInput, getCurrencySymbol } from '@/lib/formatters'
 import { calculateCurrentInstallment } from '@/services/installmentEngine'
-import { registerPayment, quickAmounts } from '@/services/paymentService'
+import {
+  registerPayment, quickAmounts, getUnconfirmedPayment, checkUnconfirmedPayment,
+  type RegisterPaymentSuccess, type UnconfirmedPayment,
+} from '@/services/paymentService'
 import { CollectorPicker } from '@/components/ui/CollectorPicker'
 import { buildWhatsAppMessage } from '@/lib/utils'
 import { resolveWhatsAppRecipient, whatsAppLink } from '@/lib/whatsapp'
@@ -19,6 +22,9 @@ import {
   captureLocation, geolocationSupport, GEO_STATUS_LABEL, type GeoCapture, type GeoRecordStatus,
 } from '@/lib/geolocation'
 import type { Sale, Client, Installment } from '@/models/types'
+
+/** Hora del envío de un abono sin confirmar (hora local del dispositivo). */
+const sentAt = (iso: string) => new Date(iso).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
 
 export default function PaymentPage() {
   const { saleId } = useParams<{ saleId: string }>()
@@ -48,8 +54,23 @@ export default function PaymentPage() {
   // Estado de ubicación del abono registrado (el del servidor cuando lo hay).
   const [geoResult, setGeoResult] = useState<{ status: GeoRecordStatus; accuracyM?: number } | null>(null)
   const geoSupport = geolocationSupport()
+  // Ronda 48.1: abono ENVIADO cuya confirmación no llegó (solo ADEX Online). Mientras exista,
+  // no se registra otro en este crédito: se comprueba ese mismo (nunca crea un segundo pago).
+  const [unconfirmed, setUnconfirmed] = useState<UnconfirmedPayment | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [checkNote, setCheckNote] = useState('')
+  const [recovered, setRecovered] = useState(false)
+  const currentSaleRef = useRef(saleId)
+  currentSaleRef.current = saleId
 
   useEffect(() => { load() }, [saleId])
+  // Tras una recarga o al volver a la pantalla, se comprueba solo lo que quedó sin confirmar.
+  useEffect(() => {
+    if (!saleId) return
+    const u = getUnconfirmedPayment(saleId)
+    setUnconfirmed(u)
+    if (u) void runCheck()
+  }, [saleId])  // eslint-disable-line react-hooks/exhaustive-deps
   // Un pago anulado en otra pestaña cambia saldo y parcela: se relee la venta sin
   // tocar el importe que se está digitando (el servicio revalida igualmente).
   const revision = useDataRevision()
@@ -86,9 +107,11 @@ export default function PaymentPage() {
   // y las parcelas desde Dexie dentro de su propia transacción.
   async function handlePay() {
     if (!sale || busyRef.current) return
+    setConfirmLiquidar(false)
+    const previo = getUnconfirmedPayment(sale.id)
+    if (previo) { setUnconfirmed(previo); return }
     busyRef.current = true
     setSaving(true)
-    setConfirmLiquidar(false)
     try {
       // Ubicación (D-UX48-02/03): una lectura al registrar. Siempre resuelve; si no hay
       // posición se conserva la causa y el abono continúa igual.
@@ -109,23 +132,58 @@ export default function PaymentPage() {
         location: geo,
         syncStatus: navigator.onLine ? 'synced' : 'pending',
       })
-      if (!result.ok) { toast.error(result.message); return }
-
-      if (result.capped) {
-        toast.warning(`Abono limitado al saldo pendiente: ${formatCurrency(result.appliedAmount, currency)}. La deuda queda en ${formatCurrency(0, currency)}.`)
+      if (!result.ok) {
+        // Sin confirmación: NO es un error ni un éxito. Se muestra el abono pendiente de comprobar.
+        if (result.code === 'PAYMENT_UNCONFIRMED' && result.unconfirmed) { setCheckNote(''); setUnconfirmed(result.unconfirmed); return }
+        if (result.code === 'PREVIOUS_PAYMENT_CONFIRMED') { toast.warning(result.message); await load(); return }
+        toast.error(result.message)
+        return
       }
-      setPaidNumber(result.paidInstallmentNumber)
-      setAppliedAmount(result.appliedAmount)
-      // El estado de ubicación es el CONFIRMADO por el servidor cuando existe (Online);
-      // en local, el de la lectura. Nunca se confunde con el resultado del pago.
-      setGeoResult({ status: result.locationStatus ?? geo.status, accuracyM: geo.status === 'captured' ? geo.accuracyM : undefined })
-      setSuccess(true)
-      // Refresco desde la base (fuente única), nunca desde un cálculo local.
-      await refreshFromDb()
+      await showConfirmed(result, geo)
     } finally {
       busyRef.current = false
       setSaving(false)
       setPhase('idle')
+    }
+  }
+
+  /** Pantalla de éxito SOLO con la confirmación del servidor (o de la base local en CLEAN). */
+  async function showConfirmed(result: RegisterPaymentSuccess, geo?: GeoCapture) {
+    if (result.capped) {
+      toast.warning(`Abono limitado al saldo pendiente: ${formatCurrency(result.appliedAmount, currency)}. La deuda queda en ${formatCurrency(0, currency)}.`)
+    }
+    setPaidNumber(result.paidInstallmentNumber)
+    setAppliedAmount(result.appliedAmount)
+    // El estado de ubicación es el CONFIRMADO por el servidor cuando existe (Online);
+    // en local, el de la lectura. Nunca se confunde con el resultado del pago.
+    const status = result.locationStatus ?? geo?.status
+    setGeoResult(status ? { status, accuracyM: geo?.status === 'captured' ? geo.accuracyM : undefined } : null)
+    setRecovered(result.recovered === true)
+    setUnconfirmed(null)
+    setSuccess(true)
+    // Refresco desde la base (fuente única), nunca desde un cálculo local.
+    await refreshFromDb()
+  }
+
+  /** «Comprobar ahora»: consulta ese MISMO abono; si el servidor no lo tiene, lo repite con el mismo id. */
+  async function runCheck() {
+    if (!saleId || busyRef.current) return
+    const forSale = saleId
+    busyRef.current = true
+    setChecking(true)
+    try {
+      const r = await checkUnconfirmedPayment(forSale)
+      // La pantalla cambió de crédito mientras se comprobaba: este resultado no es de ella.
+      if (currentSaleRef.current !== forSale) return
+      if (r.status === 'confirmed') await showConfirmed(r.result)
+      else if (r.status === 'unconfirmed') { setUnconfirmed(r.payment); setCheckNote(r.message) }
+      else {
+        setUnconfirmed(null)
+        if (r.status === 'not_registered') { toast.warning(r.message); await load() }
+      }
+    } finally {
+      busyRef.current = false
+      setChecking(false)
     }
   }
 
@@ -191,6 +249,11 @@ export default function PaymentPage() {
             <CheckCircle className="w-8 h-8 text-emerald-600" />
           </div>
           <p className="text-lg font-bold text-gray-900">¡Abono registrado!</p>
+          {recovered && (
+            <p className="max-w-xs text-center text-xs text-gray-500" data-testid="payment-recovered">
+              Confirmado por el servidor al comprobar el envío anterior. Es el mismo abono: no se registró otro.
+            </p>
+          )}
           {paidNumber != null && (
             <span className="inline-flex items-center gap-1.5 bg-primary-50 text-primary-700 border border-primary-200 rounded-full px-3 py-1 text-sm font-semibold">
               Parcela <span className="font-bold">{paidNumber}</span> de {sale.numeroCuotas} registrada
@@ -215,6 +278,29 @@ export default function PaymentPage() {
             </p>
           )}
           <button onClick={() => navigate(`${base}/route`)} className="text-primary-600 text-sm font-medium">Volver a la ruta</button>
+        </div>
+      ) : unconfirmed ? (
+        // Ronda 48.1: resultado DESCONOCIDO. Ni éxito ni error; nunca invita a cobrar otra vez.
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3" data-testid="payment-unconfirmed" role="status" aria-live="polite">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
+            <div className="space-y-1.5 text-sm text-amber-900">
+              <p className="font-semibold">Abono sin confirmar</p>
+              <p>
+                A las {sentAt(unconfirmed.startedAt)} se envió un abono de <span className="font-semibold tabular-nums">{formatCurrency(unconfirmed.requestedAmount, currency)}</span>,
+                pero el servidor no alcanzó a confirmarlo. Puede que ya esté registrado.
+              </p>
+              <p className="font-semibold">No le vuelva a cobrar al cliente.</p>
+            </div>
+          </div>
+          {checkNote && !checking && <p className="text-xs text-amber-700" data-testid="payment-unconfirmed-note">{checkNote}</p>}
+          <Button variant="primary" size="xl" fullWidth onClick={() => void runCheck()} loading={checking} data-testid="payment-check">
+            {checking ? 'Comprobando…' : 'Comprobar ahora'}
+          </Button>
+          <p className="text-xs text-amber-700">
+            Comprobar nunca crea otro abono. Hasta confirmarlo no se puede registrar otro en este crédito. Si sigue sin respuesta, revise la conexión o avise a su administrador.
+          </p>
+          <button onClick={() => navigate(`${base}/route`)} disabled={checking} className="w-full text-gray-500 text-sm py-2">Volver a la ruta</button>
         </div>
       ) : (
         <>

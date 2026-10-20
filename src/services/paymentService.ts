@@ -184,16 +184,61 @@ export interface RegisterPaymentSuccess {
   auditError?: string
   /** Ronda 48: estado de ubicación que confirmó el servidor (solo ADEX Online). */
   locationStatus?: GeoRecordStatus
+  /**
+   * Ronda 48.1 (solo ADEX Online): el servidor confirmó este abono al COMPROBAR un envío
+   * cuya respuesta se había perdido. Es el mismo abono, no uno nuevo.
+   */
+  recovered?: boolean
 }
 
 export interface RegisterPaymentFailure {
   ok: false
-  code: PaymentRejectionCode
+  code: PaymentRejectionCode | UnconfirmedPaymentCode
   /** Mensaje listo para mostrar al usuario. */
   message: string
+  /** Ronda 48.1: abono enviado cuya confirmación no llegó (solo con `PAYMENT_UNCONFIRMED`). */
+  unconfirmed?: UnconfirmedPayment
 }
 
 export type RegisterPaymentResult = RegisterPaymentSuccess | RegisterPaymentFailure
+
+// ------------------------------------------------------------
+// Abono sin confirmar (Ronda 48.1)
+// ------------------------------------------------------------
+// En ADEX Online el abono viaja por red: si la respuesta se pierde, el resultado es
+// DESCONOCIDO hasta comprobarlo con el servidor (mismo id de operación; nunca otro abono).
+// En CLEAN el registro es una transacción local atómica: nunca queda incierto, así que
+// aquí no hay nada pendiente. ADEX Online sustituye estas dos funciones en su puente.
+
+export type UnconfirmedPaymentCode =
+  | 'PAYMENT_UNCONFIRMED'              // enviado sin confirmación: comprobar antes de cobrar otra vez
+  | 'PREVIOUS_PAYMENT_CONFIRMED'       // se pidió otro abono, pero el anterior sí quedó registrado
+  | 'PREVIOUS_PAYMENT_NOT_REGISTERED'  // se pidió otro abono; el anterior no quedó registrado
+  | 'TOO_MANY_UNCONFIRMED'             // demasiados abonos sin confirmar en el dispositivo: no se envió
+
+export interface UnconfirmedPayment {
+  saleId: string
+  /** Importe enviado. */
+  requestedAmount: number
+  /** Momento del envío (ISO). */
+  startedAt: string
+}
+
+export type UnconfirmedPaymentCheck =
+  | { status: 'none' }
+  | { status: 'confirmed'; result: RegisterPaymentSuccess }
+  | { status: 'not_registered'; message: string }
+  | { status: 'unconfirmed'; payment: UnconfirmedPayment; message: string }
+
+/** Abono de esta venta enviado sin confirmación (CLEAN: nunca). */
+export function getUnconfirmedPayment(_saleId: string): UnconfirmedPayment | null {
+  return null
+}
+
+/** Comprueba con el servidor el abono sin confirmar de esta venta (CLEAN: no hay ninguno). */
+export async function checkUnconfirmedPayment(_saleId: string): Promise<UnconfirmedPaymentCheck> {
+  return { status: 'none' }
+}
 
 /**
  * Destino del registro de auditoría. Por defecto `auditService.logAction` (mecanismo
