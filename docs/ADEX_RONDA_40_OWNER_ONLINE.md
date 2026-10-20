@@ -2,10 +2,13 @@
 
 Fecha: 2026-10-19. Base: `origin/main` 1018391 + 23abb2e (informe R39, solo documentación).
 
-**Estado: BLOQUEADA POR ACCIÓN MANUAL.** El código, la migración y las pruebas locales están
-completos (Owner y servidor 31/31, E2E local 50/50). Para publicarlo, el propietario tiene que
-hacer cinco pasos (§7). Mientras no los haga, ADEX Online, CLEAN y la DEMO local siguen sirviendo
-exactamente lo mismo que antes. Las cuatro barreras que lo garantizan:
+**Estado: CERRADA (publicada y verificada el 2026-10-20, §9).** Migración 0021 aplicada, API y
+servicio Owner en Render, frontend `b6b09d3` en Vercel, Owner real registrado y E2E publicado
+32/32. El texto de §1–§8 describe la entrega previa a la publicación.
+
+Antes de publicar, el código, la migración y las pruebas locales estaban completos (Owner y
+servidor 31/31, E2E local 50/50) y ADEX Online, CLEAN y la DEMO local servían exactamente lo
+mismo que antes gracias a cuatro barreras:
 
 - La puerta de Vercel omite el frontend hasta que la API declara `access-links-v1`.
 - Render tiene el despliegue automático desactivado.
@@ -194,3 +197,44 @@ La ronda pasa a **CERRADA** solo con ese resultado.
   - sin procedimiento de discrepancias.
 
 Superar estas pruebas sintéticas no significa que una empresa real esté lista para operar.
+
+## 9. Publicación controlada (2026-10-20)
+
+Un paso manual por vez, cada uno comprobado antes del siguiente.
+
+| Paso | Quién | Comprobación |
+|---|---|---|
+| 1. Migración 0021 (`npm run staging:migrate`) | Propietario | Huella 0001–0021 en ADEX-Staging `hyqaufsagtsucztjfjvc`; 10 funciones, 4 disparadores, `actor_identity_id`; RLS 35/35; `adex_api` sin funciones Owner. Contraseñas de roles reutilizadas (sin rotación); TLS con la CA de Supabase |
+| 2. Render `adex-online-api`, Manual Deploy | Propietario | `/healthz` con `access-links-v1`, `/readyz` ready; validación financiera R39 sin navegador **53/53**; huella DEMO igual |
+| 3. Render `adex-owner-api` (creado a mano, sin Blueprint) | Propietario | Live; `/healthz` `owner-v1, owner-clean-v1`; sin token o token falso → 401; identidad que no es Owner → rechazada; `/v1/*` y `/demo/v1/*` → 404; CORS solo `adex-online.vercel.app` |
+| 4. Vercel `adex-online` | Variable: Claude Code (autorizado). Redeploy: propietario | `VITE_ADEX_CONTROL_URL` (Production y Preview), sin tocar otras. Producción = `b6b09d3`; `/owner` → `owner-CWwRkmy3.js` con la pantalla original «Acceso Owner» (Chrome real, sin errores) |
+| 5. Owner real (`owner-register.ts`) | Propietario, en su terminal | 1 Owner real activo con **0 membresías**; admitido en staging por id; correo nunca en el chat ni en Git |
+| 6. E2E publicado (`tmp/r40/e2e-published.mjs`) | Claude Code | **32/32** |
+
+**Corrección previa al paso 5** (`11c26b7`): `owner-register.ts` se conectaba sin verificar TLS
+(`rejectUnauthorized: false`); ahora exige `ADEX_PG_SSL_CA`. Además, `--deactivate` abortaba Node
+en Windows (código 127) por salir con la conexión abierta; ahora sale con 0.
+
+**E2E publicado 32/32** (evidencia `tmp/r40/evidence/`): despliegues (P-01…P-05), Owner temporal
+sintético por el procedimiento real, Dashboard original, alta de «Empresa Prueba Brasil R40 4e0fce
+(sintética)» BR/BRL/America/Sao_Paulo, enlace de primer acceso en otro navegador y no reutilizable,
+oficina, Administrador, ruta y Cobrador (este por la pantalla Usuarios), capital aporte →
+Administrador → Cobrador por comandos ordinarios, ficha Owner con recuento de rutas, **auditoría
+con autor** (AU-01: alta, SuperAdmin y enlace con autor = Owner; ruta y accesos registrados),
+aislamiento Brasil ↔ DEMO, Owner sin acceso financiero, revocación del Owner temporal y huella
+DEMO `6191a239…` igual. El verificador se ajustó antes de ejecutarlo: TLS con la CA y la
+comprobación AU-01. Oficina, Administrador y ruta se crean con la API publicada (los mismos
+comandos que la aplicación); nada se inserta por SQL.
+
+**Resultado consolidado de la suite SaaS de la ronda:** 336 casos; 332 en la primera pasada; los
+3 fallos (SCHEMA-004 por la columna nueva, corregido; RND-010/011, cortes por carga) pasan al
+repetirlos (15/15 + 1 omitida solo POSIX). Ningún fallo sin explicar.
+
+**Pendientes no bloqueantes:**
+
+- `C:\Users\Usuario\ADEX_PRIVADO\RENDER_OWNER_VARIABLES.txt`: transcripción temporal; sus valores
+  existen en `saas/.env.staging` y `saas/.env.online` (ignorados por Git). Se conserva hasta que el
+  propietario autorice borrarlo.
+- `saas/scripts/demo-accounts.ts` también usa `rejectUnauthorized: false` (no se usó en esta ronda).
+- El Owner temporal sintético queda inactivo y la empresa de prueba Brasil queda en staging.
+- Las decisiones de §8 siguen abiertas.
