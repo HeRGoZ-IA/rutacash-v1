@@ -62,6 +62,7 @@ const MESSAGES: Record<string, string> = {
   MEMBERSHIP_INACTIVE: 'Ese Super Admin está inactivo.',
   NOT_FOUND: 'No existe en el plano de control.',
   IDENTITY_PROVIDER_ERROR: 'El proveedor de identidad no respondió. Intente de nuevo.',
+  EMAIL_TAKEN: 'Ese correo ya lo usa otra cuenta de ADEX. Elige otro.',
 };
 export function ownerErrorText(e: unknown): string {
   const code = (e as { code?: string })?.code ?? '';
@@ -79,6 +80,21 @@ export async function issueSuperadminAccessLink(companyId: string, membershipId:
     return r.status === 'issued' ? { status: 'issued', url: accessLinkUrl(r.tokenHash) } : { status: 'already_active' };
   } catch (e) {
     return { status: 'failed', message: ownerErrorText(e) };
+  }
+}
+
+/**
+ * Ronda 54: cambia el correo de ACCESO de un Super Admin. Misma persona para ADEX (identidad,
+ * permisos, contraseña e información no cambian); a partir de ahora entra con el correo nuevo.
+ */
+export async function changeSuperadminEmail(companyId: string, membershipId: string, email: string): Promise<{ ok: true; changed: boolean } | { ok: false; error: string }> {
+  if (!emailOk(email)) return { ok: false, error: 'Escribe un correo válido.' };
+  try {
+    const r = await ownerApiOrFail().send<{ status: 'changed' | 'unchanged' }>('PUT',
+      `/control/v1/companies/${encodeURIComponent(companyId)}/superadmins/${encodeURIComponent(membershipId)}/email`, { email: email.trim().toLowerCase() });
+    return { ok: true, changed: r.status === 'changed' };
+  } catch (e) {
+    return { ok: false, error: ownerErrorText(e) };
   }
 }
 

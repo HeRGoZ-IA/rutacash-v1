@@ -2,7 +2,8 @@
 // Misma ficha, botones, modales e historial. Cambios, marcados con «ADEX Online:»:
 //   · país, moneda y zona horaria de la empresa (solo lectura);
 //   · bloque «Super Admin» con su estado y el ENLACE DE PRIMER ACCESO (un solo uso), que el
-//     servidor solo emite para quien nunca ha entrado y no pertenece a otra empresa.
+//     servidor solo emite para quien nunca ha entrado y no pertenece a otra empresa;
+//   · Ronda 54: «Cambiar correo» del Super Admin (misma identidad, permisos e información).
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Pencil, PauseCircle, CheckCircle, Receipt } from 'lucide-react'
@@ -24,7 +25,7 @@ import {
 import type { CompanyControlRecord, ControlEvent, SaaSPayment, SaaSPaymentStatus } from '@/platform/types'
 // ADEX Online: país/moneda/zona y Super Admins (servidor Owner) y enlace de primer acceso.
 import { companyDetail, type ServerLocale, type ServerSuperadmin } from '@/platform/controlPlane'
-import { issueSuperadminAccessLink, type AccessLinkResult } from '@/platform/companyControlService'
+import { changeSuperadminEmail, issueSuperadminAccessLink, type AccessLinkResult } from '@/platform/companyControlService'
 import { AccessLinkPanel } from '@/pages/owner/AccessLinkPanel'
 
 /**
@@ -58,6 +59,10 @@ export default function OwnerCompanyDetailPage() {
   const [superadmins, setSuperadmins] = useState<ServerSuperadmin[]>([])
   const [acceso, setAcceso] = useState<{ nombre: string; result: AccessLinkResult } | null>(null)
   const [linking, setLinking] = useState<string | null>(null)
+  // ADEX Online (Ronda 54): cambio del correo de acceso del Super Admin.
+  const [emailTarget, setEmailTarget] = useState<ServerSuperadmin | null>(null)
+  const [newEmail, setNewEmail] = useState('')
+  const [emailError, setEmailError] = useState('')
 
   const [form, setForm] = useState({
     nombre: '', identificacion: '', contacto: '', contactoEmail: '',
@@ -94,6 +99,17 @@ export default function OwnerCompanyDetailPage() {
     const result = await issueSuperadminAccessLink(record.companyId, sa.id)
     setLinking(null)
     setAcceso({ nombre: sa.displayName, result })
+    await load()
+  }
+
+  async function handleChangeEmail() {
+    if (!record || !emailTarget) return
+    setSaving(true)
+    const res = await changeSuperadminEmail(record.companyId, emailTarget.id, newEmail)
+    setSaving(false)
+    if (!res.ok) { setEmailError(res.error); return }
+    toast.success(res.changed ? 'Correo actualizado. El Super Admin entra ahora con el correo nuevo.' : 'El correo no cambió')
+    setEmailTarget(null)
     await load()
   }
 
@@ -246,6 +262,9 @@ export default function OwnerCompanyDetailPage() {
                     Enlace de primer acceso
                   </Button>
                 )}
+                <Button size="sm" variant="secondary" onClick={() => { setEmailTarget(sa); setNewEmail(sa.email); setEmailError('') }}>
+                  Cambiar correo
+                </Button>
               </div>
             ))}
           </div>
@@ -307,6 +326,24 @@ export default function OwnerCompanyDetailPage() {
           <div className="space-y-3">
             <p className="text-sm text-gray-600">Super Admin: <span className="font-semibold text-gray-900">{acceso.nombre}</span></p>
             <AccessLinkPanel result={acceso.result} />
+          </div>
+        )}
+      </Modal>
+
+      {/* ADEX Online (Ronda 54): correo de acceso del Super Admin. */}
+      <Modal open={!!emailTarget} onClose={() => !saving && setEmailTarget(null)} title="Cambiar correo del Super Admin"
+        footer={<>
+          <Button variant="secondary" onClick={() => setEmailTarget(null)} disabled={saving}>Cancelar</Button>
+          <Button onClick={handleChangeEmail} loading={saving}>Guardar correo</Button>
+        </>}>
+        {emailTarget && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Super Admin: <span className="font-semibold text-gray-900">{emailTarget.displayName}</span>. Sigue siendo la misma
+              persona: conserva su contraseña, sus permisos y toda la información de la empresa. Desde ahora entra con el correo nuevo.
+            </p>
+            <Input label="Correo nuevo" type="email" autoComplete="off" value={newEmail}
+              onChange={e => { setNewEmail(e.target.value); setEmailError('') }} error={emailError || undefined} />
           </div>
         )}
       </Modal>
