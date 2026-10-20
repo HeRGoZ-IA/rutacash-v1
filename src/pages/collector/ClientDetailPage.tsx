@@ -10,6 +10,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import { calculateCurrentInstallment, getLastPaidInstallmentNumber } from '@/services/installmentEngine'
 import { buildWhatsAppMessage } from '@/lib/utils'
+import { resolveWhatsAppRecipient, whatsAppLink } from '@/lib/whatsapp'
 import type { Client, Sale, Installment } from '@/models/types'
 
 /**
@@ -40,7 +41,7 @@ export default function ClientDetailPage() {
   const navigate = useNavigate()
   const base = useOpBase()
   const { user } = useAuth()
-  const { currency } = useTenant()
+  const { tenant, currency } = useTenant()
   const [client, setClient] = useState<Client | null>(null)
   const [sales, setSales] = useState<Sale[]>([])
   const [installmentsBySale, setInstallmentsBySale] = useState<Record<string, Installment[]>>({})
@@ -87,8 +88,11 @@ export default function ClientDetailPage() {
   // Ventas activas del cliente (para el conmutador cuando hay más de una).
   const activeSales = sales.filter(s => s.status === 'activa')
 
+  // Ronda 48 (H-02): destinatario deducido del país de la EMPRESA; si es ambiguo, no hay enlace.
+  const whatsapp = resolveWhatsAppRecipient(client?.telefonoPrincipal, tenant?.pais)
+
   function openWhatsApp() {
-    if (!client || !selectedSale) return
+    if (!client || !selectedSale || !whatsapp.ok) return
     // WhatsApp usa los datos de la venta seleccionada, no de otra venta.
     const msg = buildWhatsAppMessage({
       clientName: client.nombre,
@@ -98,8 +102,7 @@ export default function ClientDetailPage() {
       totalCuotas: selectedSale.numeroCuotas,
       currency,
     })
-    const phone = client.telefonoPrincipal.replace(/\D/g, '')
-    window.open(`https://wa.me/57${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+    window.open(whatsAppLink(whatsapp, msg), '_blank', 'noopener')
   }
 
   const recentInstallments = sortInstallmentsForDetail(selectedInsts, today()).slice(0, 10)
@@ -165,11 +168,18 @@ export default function ClientDetailPage() {
                   className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2">
                   <CreditCard className="w-4 h-4" /> Registrar abono
                 </button>
-                <button onClick={openWhatsApp}
-                  className="flex-1 py-2.5 bg-green-500 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2">
+                <button onClick={openWhatsApp} disabled={!whatsapp.ok}
+                  title={whatsapp.ok ? `Enviar a ${whatsapp.display}` : whatsapp.reason}
+                  aria-label={whatsapp.ok ? `Enviar recibo por WhatsApp a ${whatsapp.display}` : `WhatsApp no disponible: ${whatsapp.reason}`}
+                  className="flex-1 py-2.5 bg-green-500 disabled:bg-gray-300 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2">
                   <MessageSquare className="w-4 h-4" /> WhatsApp
                 </button>
               </div>
+            )}
+            {selectedSale.status === 'activa' && (
+              <p className="text-xs text-gray-500" data-testid="whatsapp-recipient">
+                {whatsapp.ok ? `Recibo por WhatsApp a ${whatsapp.display}` : `WhatsApp no disponible: ${whatsapp.reason}`}
+              </p>
             )}
           </div>
         )}

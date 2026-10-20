@@ -4,6 +4,7 @@
 // reintento nunca duplica). La fecha del abono es la de la EMPRESA (no se elige).
 
 import type { User } from '@clean/models/types';
+import type { GeoCapture, GeoRecordStatus } from '@clean/lib/geolocation';
 import { money } from '../../runtime/commands.ts';
 import { toMajor, toMinor } from '../../runtime/mappers.ts';
 import { generateId } from '@/lib/utils';
@@ -12,11 +13,32 @@ export * from '@clean/services/paymentService';
 import * as Clean from '@clean/services/paymentService';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-async function registerPaymentOnline(input: { saleId: string; requestedAmount: number; actor: User | null | undefined; collectorId?: string; observacion?: string }): Promise<any> {
+/**
+ * Ronda 48: lectura de ubicación del dispositivo, tal cual, con su estado. Viaja en el
+ * MISMO cuerpo del comando (mismo id de operación): un reintento repite exactamente la
+ * misma petición y el servidor devuelve el resultado guardado, sin duplicar el abono ni
+ * la ubicación. El servidor la valida y la trata como dato no confiable.
+ */
+function locationBody(g: GeoCapture | undefined): Record<string, unknown> | undefined {
+  if (!g) return undefined;
+  const loc: Record<string, unknown> = { status: g.status };
+  if (g.status === 'captured') {
+    loc['lat'] = g.lat; loc['lng'] = g.lng;
+    if (g.accuracyM != null) loc['accuracyM'] = g.accuracyM;
+    if (g.capturedAt) loc['capturedAt'] = g.capturedAt;
+  } else if (g.reason) {
+    loc['reason'] = g.reason.slice(0, 200);
+  }
+  return loc;
+}
+
+async function registerPaymentOnline(input: { saleId: string; requestedAmount: number; actor: User | null | undefined; collectorId?: string; observacion?: string; location?: GeoCapture }): Promise<any> {
   try {
     const body: Record<string, unknown> = { saleId: input.saleId, amountMinor: toMinor(input.requestedAmount) };
     if (input.collectorId) body['collectorId'] = input.collectorId;
     if (input.observacion) body['note'] = input.observacion;
+    const location = locationBody(input.location);
+    if (location) body['location'] = location;
     const r = await money<Record<string, any>>('POST', '/v1/collections', body, generateId());
     const inst = (r['installments'] ?? []) as { number: number; status: string }[];
     const pending = inst.find((i) => i.status !== 'pagada');
@@ -27,6 +49,7 @@ async function registerPaymentOnline(input: { saleId: string; requestedAmount: n
       cappedAmount: toMajor(r['cappedMinor'] ?? 0), previousBalance: toMajor(r['previousBalanceMinor']), newBalance: toMajor(r['newBalanceMinor']),
       saleStatus: r['credit']?.status, paidInstallmentNumber: null, currentInstallmentNumber: pending?.number ?? null,
       lastPaidInstallmentNumber: paid.length ? Math.max(...paid) : 0, installmentsCompleted: [], audited: true,
+      locationStatus: (r['location'] as { status?: GeoRecordStatus } | undefined)?.status,
     };
   } catch (e) {
     return { ok: false, code: (e as { code?: string }).code ?? 'ERROR', message: e instanceof Error ? e.message : String(e) };

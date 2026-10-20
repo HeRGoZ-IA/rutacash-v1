@@ -31,6 +31,7 @@
 // rechaza (fail closed); el efectivo de un Cobrador o Supervisor no cambia.
 // ============================================================
 import { db } from '@/lib/db'
+import type { GeoCapture, GeoRecordStatus } from '@/lib/geolocation'
 import { generateId } from '@/lib/utils'
 import { nowISO, today } from '@/lib/formatters'
 import { can } from '@/lib/permissions'
@@ -137,6 +138,12 @@ export interface RegisterPaymentInput {
   lng?: number
   /** 'pending' cuando el dispositivo está sin conexión (App Cobrador). */
   syncStatus?: SyncStatus
+  /**
+   * Ronda 48: lectura de ubicación del dispositivo con su ESTADO (también cuando no
+   * hay posición). ADEX Online la envía al servidor; este servicio local solo usa
+   * `lat`/`lng`, como siempre.
+   */
+  location?: GeoCapture
 }
 
 export interface RegisterPaymentSuccess {
@@ -175,6 +182,8 @@ export interface RegisterPaymentSuccess {
   audited: boolean
   /** Descripción del fallo de auditoría, cuando `audited` es false. */
   auditError?: string
+  /** Ronda 48: estado de ubicación que confirmó el servidor (solo ADEX Online). */
+  locationStatus?: GeoRecordStatus
 }
 
 export interface RegisterPaymentFailure {

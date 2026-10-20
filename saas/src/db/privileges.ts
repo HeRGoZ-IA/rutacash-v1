@@ -35,6 +35,8 @@ export const EXPECTED_API_WRITES: Record<string, string[]> = {
   'adex.offices': ['DELETE', 'INSERT', 'UPDATE'],
   'adex.payment_adjustment_requests': ['INSERT', 'UPDATE'],
   'adex.operations': ['INSERT', 'UPDATE'],
+  // Ronda 48 (0022): ubicación del cobro, solo alta (sin lectura ni cambios).
+  'adex.payment_locations': ['INSERT'],
   'adex.revoked_sessions': ['INSERT'],
   'adex.route_capital_controller_events': ['INSERT'],
   'adex.routes': ['DELETE', 'INSERT', 'UPDATE'],

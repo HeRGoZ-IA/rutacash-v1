@@ -26,7 +26,8 @@ import { createSupabaseProvider } from '../auth/provider.ts';
 import { createCompanyExecutor, createCompanyHandler } from '../http/companyApi.ts';
 import { createDemoHandler } from '../http/demoApi.ts';
 import { createDemoService } from '../demo/service.ts';
-import { createOnlineServer } from './app.ts';
+import { API_FEATURES, createOnlineServer } from './app.ts';
+import { paymentLocationsReady } from '../collections/location.ts';
 
 /** Configuración común a los dos servicios (empresa y Owner): TLS, CORS, proveedor, límites. */
 export function readCommonConfig(env: NodeJS.ProcessEnv) {
@@ -89,8 +90,11 @@ export async function start(env: NodeJS.ProcessEnv = process.env) {
         // Escenario de las Demos que cree o reinicie ESTE servicio (por defecto demo-v1).
         scenario: env['ADEX_DEMO_SCENARIO'] === 'demo-v2-6m' ? 'demo-v2-6m' : 'demo-v1' }) })
     : null;
+  // Ronda 48: `payment-location-v1` solo si 0022 está aplicada (la puerta de Vercel lo exige).
+  const features = (await paymentLocationsReady(apiPool)) ? API_FEATURES : API_FEATURES.filter((f) => f !== 'payment-location-v1');
   const server = createOnlineServer({
     company: createCompanyHandler(companyOpts), demo, readinessPool: apiPool, allowedOrigins: cfg.origins, trustProxy: cfg.trustProxy, rateLimit: cfg.rateLimit,
+    features,
   });
   server.requestTimeout = 120_000;
   server.headersTimeout = 30_000;

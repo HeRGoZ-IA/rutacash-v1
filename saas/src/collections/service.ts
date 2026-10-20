@@ -22,6 +22,7 @@ import { audit } from '../db/audit.ts';
 import { loadMembers, need } from '../structure/common.ts';
 import { optId, optText, PAGE_ORDER, pageFilters, pathId, reqId, reqText } from '../structure/input.ts';
 import { requireOperationId, routeOf } from '../capital/service.ts';
+import { parseLocation, storePaymentLocation } from './location.ts';
 
 interface PaymentRow {
   id: string; sale_id: string; client_id: string; route_id: string; collector_membership_id: string; created_by_membership_id: string | null;
@@ -95,7 +96,8 @@ async function loadPayment(client: pg.PoolClient, ctx: ActiveContext, id: string
   return r.rows[0];
 }
 
-export const COLLECTION_FIELDS = ['saleId', 'amountMinor', 'collectorId', 'note'] as const;
+/** `location` (Ronda 48, 0022): lectura del dispositivo con su estado; ver collections/location.ts. */
+export const COLLECTION_FIELDS = ['saleId', 'amountMinor', 'collectorId', 'note', 'location'] as const;
 
 /**
  * Registro de un abono (`registerPayment`). El importe pedido puede superar el saldo: se
@@ -110,6 +112,9 @@ export async function registerCollection(client: pg.PoolClient, ctx: ActiveConte
   need(ctx, 'payment.register', { routeId: route.id });
   const amount = amountOf(body);
   const note = optText(body, 'note', 500);
+  // Ubicación (Ronda 48): se normaliza ANTES del comando, pero nunca lo condiciona: una
+  // lectura malformada queda como `invalid` y el abono sigue su curso.
+  const location = parseLocation(body['location']);
   // Quién responde por el dinero, con la regla de CLEAN y las personas REALES de la ruta.
   const members = await loadMembers(client, ctx);
   const routeCollectors = [...members.values()].filter((m) => hasPersonalCashbox(m.role) && m.routeIds.includes(route.id)).map(toCleanUser);
@@ -125,6 +130,10 @@ export async function registerCollection(client: pg.PoolClient, ctx: ActiveConte
     previousBalanceMinor: Number(r['previousBalanceMinor']), newBalanceMinor: Number(r['newBalanceMinor']),
     paymentDate: r['paymentDate'] as string,
   };
+  // Misma transacción del abono, bajo savepoint: un fallo aquí no revierte el pago.
+  const locationStatus = location
+    ? await storePaymentLocation(client, ctx, { paymentId: outcome.paymentId, routeId: route.id, location })
+    : null;
   const state = await creditState(client, ctx, saleId);
   await audit(client, ctx, {
     action: 'REGISTER_PAYMENT', entityType: 'Payment', entityId: outcome.paymentId, routeId: route.id,
@@ -134,10 +143,13 @@ export async function registerCollection(client: pg.PoolClient, ctx: ActiveConte
     before: { saldo: outcome.previousBalanceMinor, status: 'activa' }, after: { saldo: outcome.newBalanceMinor, status: state.credit.status },
     metadata: { operationId: opId, saleId, collectorId: outcome.collectorId, createdBy: ctx.membershipId, collectorSource: outcome.collectorSource,
       receiver: outcome.receiver, requestedAmount: outcome.requestedMinor, appliedAmount: outcome.appliedMinor, capped: outcome.capped,
-      principalMinor: Number(r['principalMinor']), interestMinor: Number(r['interestMinor']) },
+      principalMinor: Number(r['principalMinor']), interestMinor: Number(r['interestMinor']),
+      // Solo el ESTADO de ubicación: las coordenadas no se copian a la auditoría.
+      locationStatus },
   });
   return { ...outcome, payment: paymentView(await loadPayment(client, ctx, outcome.paymentId)), ...state,
-    entries: await visibleEntries(client, ctx, outcome.operationId) };
+    entries: await visibleEntries(client, ctx, outcome.operationId),
+    location: locationStatus ? { status: locationStatus } : null };
 }
 
 /**

@@ -12,7 +12,11 @@
 // temporizador pendiente abortó Node en Windows, y un código anómalo significaría «construir»).
 
 const API = process.env.ADEX_DEPLOY_GATE_API ?? 'https://adex-online-api.onrender.com';
-const REQUIRED = ['settlements-v1', 'clean-online-v1', 'access-links-v1'];
+// Ronda 48: el frontend envía la ubicación del cobro (campo `location`). Una API anterior
+// la rechazaría (UNKNOWN_FIELD) y bloquearía los abonos. La API publicada solo anuncia
+// `payment-location-v1` cuando su base YA tiene la tabla de 0022 (saas/src/server/start.ts),
+// así que el orden obligatorio es: aplicar 0022 → desplegar la API → desplegar el frontend.
+const REQUIRED = ['settlements-v1', 'clean-online-v1', 'access-links-v1', 'payment-location-v1'];
 // Ronda 40: si este despliegue activa la Plataforma Owner (VITE_ADEX_CONTROL_URL), el
 // servicio Owner publicado tiene que servir la versión que usan las pantallas originales.
 const CONTROL = (process.env.VITE_ADEX_CONTROL_URL ?? '').replace(/\/$/, '');
