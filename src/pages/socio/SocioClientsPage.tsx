@@ -69,8 +69,7 @@ export default function SocioClientsPage() {
         <span className="inline-flex items-center gap-1 text-xs text-gray-400"><Lock className="w-3 h-3" /> Solo lectura</span>
       </div>
 
-      <div className="max-w-sm">
-      {/* FILTRO OFICINA → RUTA. Solo estrecha lo ya autorizado. */}
+      {/* FILTRO OFICINA → RUTA y buscador (Ronda 48). Solo estrecha lo ya autorizado. */}
       <OfficeRouteFilterBar
         offices={officeFilter.offices}
         officeId={officeFilter.officeId}
@@ -81,10 +80,8 @@ export default function SocioClientsPage() {
         hasUnassigned={officeFilter.hasUnassigned}
         contextLabel={officeFilter.contextLabel}
         showContext={officeFilter.hasOfficeFilter}
+        search={<Input aria-label="Buscar clientes" placeholder="Buscar por nombre o documento…" value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />}
       />
-
-        <Input placeholder="Buscar por nombre o documento…" value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />
-      </div>
 
       {loading ? (
         <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>

@@ -195,12 +195,12 @@ export default function ReportsPage() {
       <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-5 space-y-4">
         <div className="flex flex-wrap gap-3 items-end">
           <Select label="Tipo de reporte" value={reportType} onChange={e => setReportType(e.target.value as ReportType)}
-            options={REPORT_OPTIONS} className="w-56" />
+            options={REPORT_OPTIONS} containerClassName="w-full sm:w-56" />
           {/* OFICINA: filtro PREVIO. Solo estrecha las rutas ya autorizadas. */}
           <OfficeSelector offices={offices} value={officeId} onChange={changeOffice}
-            includeUnassigned={hasUnassigned} className="w-56" />
+            includeUnassigned={hasUnassigned} className="w-full sm:w-56" />
           {/* "Todas las rutas" = todas las AUTORIZADAS dentro del filtro de Oficina. */}
-          <RouteSelector routes={routesInOffice} value={routeId} onChange={setRouteId} allowAll className="w-56" />
+          <RouteSelector routes={routesInOffice} value={routeId} onChange={setRouteId} allowAll className="w-full sm:w-56" />
           <div>
             <label className="block text-xs text-gray-500 mb-1.5">Desde</label>
             <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)}

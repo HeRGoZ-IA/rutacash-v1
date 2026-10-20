@@ -338,24 +338,19 @@ export default function ActiveSalesPage() {
         <Button onClick={() => setCreateOpen(true)} icon={<Plus className="w-4 h-4" />}>Nueva venta</Button>
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <div className="flex-1 min-w-48">
-          {/* FILTRO OFICINA → RUTA. La Oficina solo estrecha las rutas autorizadas;
-              el contexto activo queda a la vista cuando se llega desde una Oficina. */}
-          <OfficeRouteFilterBar
-            offices={officeFilter.offices}
-            officeId={officeFilter.officeId}
-            onOfficeChange={officeFilter.setOfficeId}
-            routesInOffice={officeFilter.routesInOffice}
-            routeId={officeFilter.routeId}
-            onRouteChange={officeFilter.setRouteId}
-            hasUnassigned={officeFilter.hasUnassigned}
-            contextLabel={officeFilter.contextLabel}
-            showContext={officeFilter.hasOfficeFilter}
-          />
-          <Input placeholder="Buscar cliente..." value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />
-        </div>
-      </div>
+      {/* FILTROS (Ronda 48): buscador y Oficina → Ruta en una fila en escritorio. */}
+      <OfficeRouteFilterBar
+        offices={officeFilter.offices}
+        officeId={officeFilter.officeId}
+        onOfficeChange={officeFilter.setOfficeId}
+        routesInOffice={officeFilter.routesInOffice}
+        routeId={officeFilter.routeId}
+        onRouteChange={officeFilter.setRouteId}
+        hasUnassigned={officeFilter.hasUnassigned}
+        contextLabel={officeFilter.contextLabel}
+        showContext={officeFilter.hasOfficeFilter}
+        search={<Input aria-label="Buscar ventas por cliente" placeholder="Buscar cliente..." value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />}
+      />
 
       {loading ? (
         <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>

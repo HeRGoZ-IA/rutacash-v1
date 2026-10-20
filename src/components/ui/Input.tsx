@@ -7,12 +7,19 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   hint?: string
   leftIcon?: React.ReactNode
   rightIcon?: React.ReactNode
+  /**
+   * Clases del CONTENEDOR (etiqueta + control). Por defecto el campo ocupa todo el
+   * ancho (`w-full`), que es lo correcto en formularios. Las barras de filtros lo usan
+   * para fijar un ancho propio (p. ej. `w-full sm:w-44`); si se indica, REEMPLAZA a
+   * `w-full`. `className` sigue aplicándose al control, como siempre.
+   */
+  containerClassName?: string
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, hint, leftIcon, rightIcon, className, ...props }, ref) => {
+  ({ label, error, hint, leftIcon, rightIcon, className, containerClassName, ...props }, ref) => {
     return (
-      <div className="w-full">
+      <div className={containerClassName ?? 'w-full'}>
         {label && (
           <label className="block text-sm font-medium text-gray-700 mb-1.5">
             {label}
@@ -58,12 +65,14 @@ interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   hint?: string
   options: { value: string; label: string }[]
   placeholder?: string
+  /** Ver `containerClassName` de Input. */
+  containerClassName?: string
 }
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
-  ({ label, error, hint, options, placeholder, className, ...props }, ref) => {
+  ({ label, error, hint, options, placeholder, className, containerClassName, ...props }, ref) => {
     return (
-      <div className="w-full">
+      <div className={containerClassName ?? 'w-full'}>
         {label && (
           <label className="block text-sm font-medium text-gray-700 mb-1.5">
             {label}

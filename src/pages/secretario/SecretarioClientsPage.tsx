@@ -128,11 +128,8 @@ export default function SecretarioClientsPage() {
         hasUnassigned={officeFilter.hasUnassigned}
         contextLabel={officeFilter.contextLabel}
         showContext={officeFilter.hasOfficeFilter}
+        search={<Input aria-label="Buscar clientes" placeholder="Buscar por nombre o documento…" value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />}
       />
-
-      <div className="max-w-sm">
-        <Input placeholder="Buscar por nombre o documento…" value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />
-      </div>
 
       {loading ? (
         <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>

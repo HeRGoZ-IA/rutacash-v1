@@ -21,7 +21,13 @@ export interface OfficeSelectorProps {
   /** Ofrecer el grupo "Sin Oficina" (solo si el usuario tiene rutas así). */
   includeUnassigned?: boolean
   label?: string
+  /**
+   * Ancho del selector (Ronda 48: se aplica al CONTENEDOR, etiqueta incluida).
+   * Sin valor, ocupa todo el ancho disponible (`w-full`).
+   */
   className?: string
+  /** Igual que `className`; tiene prioridad (nombre explícito para barras de filtros). */
+  containerClassName?: string
   disabled?: boolean
 }
 
@@ -31,7 +37,8 @@ export function OfficeSelector({
   onChange,
   includeUnassigned = false,
   label = 'Oficina',
-  className = 'w-56',
+  className,
+  containerClassName,
   disabled,
 }: OfficeSelectorProps) {
   const options = [
@@ -55,7 +62,7 @@ export function OfficeSelector({
       disabled={disabled}
       onChange={e => onChange(e.target.value)}
       options={options}
-      className={className}
+      containerClassName={containerClassName ?? className}
     />
   )
 }

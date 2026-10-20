@@ -31,7 +31,13 @@ export interface RouteSelectorProps {
   /** Si true, ofrece "Todas las rutas". Si false, la selección es obligatoria. */
   allowAll?: boolean
   label?: string
+  /**
+   * Ancho del selector (Ronda 48: se aplica al CONTENEDOR, etiqueta incluida).
+   * Sin valor, ocupa todo el ancho disponible (`w-full`).
+   */
   className?: string
+  /** Igual que `className`; tiene prioridad (nombre explícito para barras de filtros). */
+  containerClassName?: string
   disabled?: boolean
 }
 
@@ -41,7 +47,8 @@ export function RouteSelector({
   onChange,
   allowAll = false,
   label = 'Ruta',
-  className = 'w-56',
+  className,
+  containerClassName,
   disabled,
 }: RouteSelectorProps) {
   const options = routes.map(r => ({
@@ -59,7 +66,7 @@ export function RouteSelector({
       options={allowAll ? [{ value: ALL_ROUTES, label: 'Todas las rutas' }, ...options] : options}
       // Sin `allowAll` el placeholder obliga a elegir explícitamente una ruta.
       placeholder={allowAll ? undefined : 'Selecciona una ruta'}
-      className={className}
+      containerClassName={containerClassName ?? className}
     />
   )
 }

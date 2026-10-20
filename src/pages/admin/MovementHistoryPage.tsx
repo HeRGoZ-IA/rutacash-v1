@@ -105,21 +105,23 @@ export default function MovementHistoryPage() {
         </div>
       </div>
 
+      {/* Ronda 48 (H-08): cada selector toma el ancho de su opción más larga (con tope),
+          en vez de 11 rem fijos que cortaban «Todos los estados» o «Todos los trabajadores». */}
       <DateRangeFilter desde={filtros.desde ?? ''} hasta={filtros.hasta ?? ''} onDesde={v => setFiltro('desde', v)} onHasta={v => setFiltro('hasta', v)}
         onClear={() => { setParams(new URLSearchParams(), { replace: true }); setRef('') }}>
-        <div className="w-full sm:w-44"><Select aria-label="Tipo" value={filtros.categoria ?? ''} onChange={e => setFiltro('categoria', e.target.value)}
+        <div className="w-full sm:w-auto sm:min-w-[10rem] sm:max-w-[17rem]"><Select aria-label="Tipo" value={filtros.categoria ?? ''} onChange={e => setFiltro('categoria', e.target.value)}
           options={(Object.keys(HISTORY_CATEGORY_LABEL) as HistoryCategory[]).map(c => ({ value: c, label: HISTORY_CATEGORY_LABEL[c] }))} placeholder="Todos los tipos" /></div>
-        <div className="w-full sm:w-44"><Select aria-label="Estado" value={filtros.estado ?? ''} onChange={e => setFiltro('estado', e.target.value)}
+        <div className="w-full sm:w-auto sm:min-w-[10rem] sm:max-w-[17rem]"><Select aria-label="Estado" value={filtros.estado ?? ''} onChange={e => setFiltro('estado', e.target.value)}
           options={(Object.keys(HISTORY_STATE_LABEL) as HistoryState[]).map(c => ({ value: c, label: HISTORY_STATE_LABEL[c] }))} placeholder="Todos los estados" /></div>
-        <div className="w-full sm:w-44"><Select aria-label="Ruta" value={filtros.routeId ?? ''} onChange={e => setFiltro('routeId', e.target.value)}
+        <div className="w-full sm:w-auto sm:min-w-[10rem] sm:max-w-[17rem]"><Select aria-label="Ruta" value={filtros.routeId ?? ''} onChange={e => setFiltro('routeId', e.target.value)}
           options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Todas las rutas" /></div>
         {user?.rol === 'superadmin' && (
-          <div className="w-full sm:w-44"><Select aria-label="Administrador" value={filtros.adminId ?? ''} onChange={e => setFiltro('adminId', e.target.value)}
+          <div className="w-full sm:w-auto sm:min-w-[10rem] sm:max-w-[17rem]"><Select aria-label="Administrador" value={filtros.adminId ?? ''} onChange={e => setFiltro('adminId', e.target.value)}
             options={admins.map(a => ({ value: a.id, label: a.nombre }))} placeholder="Todos los Administradores" /></div>
         )}
-        <div className="w-full sm:w-44"><Select aria-label="Trabajador" value={filtros.workerId ?? ''} onChange={e => setFiltro('workerId', e.target.value)}
+        <div className="w-full sm:w-auto sm:min-w-[10rem] sm:max-w-[17rem]"><Select aria-label="Trabajador" value={filtros.workerId ?? ''} onChange={e => setFiltro('workerId', e.target.value)}
           options={trabajadores.map(u => ({ value: u.id, label: u.nombre }))} placeholder="Todos los trabajadores" /></div>
-        <div className="w-full sm:w-44"><Select aria-label="Cuenta" value={filtros.cuenta ?? ''} onChange={e => setFiltro('cuenta', e.target.value)}
+        <div className="w-full sm:w-auto sm:min-w-[10rem] sm:max-w-[17rem]"><Select aria-label="Cuenta" value={filtros.cuenta ?? ''} onChange={e => setFiltro('cuenta', e.target.value)}
           options={(Object.keys(ACCOUNT_KIND_LABEL) as AccountKind[]).map(c => ({ value: c, label: ACCOUNT_KIND_LABEL[c] }))} placeholder="Todas las cuentas" /></div>
         <form className="w-full sm:w-48" onSubmit={e => { e.preventDefault(); setFiltro('referencia', ref.trim()) }}>
           <label className="block text-xs text-gray-500 mb-1">Referencia</label>

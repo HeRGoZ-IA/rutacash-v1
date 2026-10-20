@@ -126,7 +126,7 @@ export default function UnassignedRoutesPage() {
                   options={offices.map(o => ({
                     value: o.id, label: o.status === 'inactiva' ? `${o.nombre} (inactiva)` : o.nombre,
                   }))}
-                  placeholder="Selecciona una oficina" className="w-64"
+                  placeholder="Selecciona una oficina" containerClassName="w-full sm:w-64"
                   hint={offices.length === 0 ? 'Aún no hay oficinas creadas.' : undefined} />
                 <Button onClick={() => asignar(selected)} loading={saving}
                   disabled={selected.length === 0 || !destino}>

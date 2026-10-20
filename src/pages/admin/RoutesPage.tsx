@@ -465,6 +465,7 @@ export default function RoutesPage() {
           value={officeFilter}
           onChange={setOfficeFilter}
           includeUnassigned={routes.some(r => !r.officeId)}
+          className="w-full sm:w-56"
         />
         <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta}
           onClear={() => { setDesde(''); setHasta('') }} />

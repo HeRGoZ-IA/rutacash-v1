@@ -85,10 +85,10 @@ export default function CashboxPage() {
       <div className="flex flex-wrap gap-3 items-end">
         {/* Oficina → Ruta compartido. La caja sigue siendo por ruta. */}
         <OfficeSelector offices={officeFilter.offices} value={officeFilter.officeId}
-          onChange={officeFilter.setOfficeId} includeUnassigned={officeFilter.hasUnassigned} className="w-48" />
+          onChange={officeFilter.setOfficeId} includeUnassigned={officeFilter.hasUnassigned} className="w-full sm:w-48" />
         <Select label="Ruta" value={selectedRoute} onChange={e => setSelectedRoute(e.target.value)}
           options={officeFilter.routesInOffice.map(r => ({ value: r.id, label: r.nombre }))}
-          placeholder="Seleccionar ruta" className="w-48" />
+          placeholder="Seleccionar ruta" containerClassName="w-full sm:w-48" />
         <div>
           <label className="block text-xs text-gray-500 mb-1">Desde</label>
           <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)}

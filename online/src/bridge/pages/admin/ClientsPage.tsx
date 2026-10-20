@@ -305,27 +305,25 @@ export default function ClientsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <div className="flex-1 min-w-48">
-          {/* FILTRO OFICINA → RUTA. La Oficina solo estrecha las rutas autorizadas;
-              el contexto activo queda a la vista cuando se llega desde una Oficina. */}
-          <OfficeRouteFilterBar
-            offices={officeFilter.offices}
-            officeId={officeFilter.officeId}
-            onOfficeChange={officeFilter.setOfficeId}
-            routesInOffice={officeFilter.routesInOffice}
-            routeId={officeFilter.routeId}
-            onRouteChange={officeFilter.setRouteId}
-            hasUnassigned={officeFilter.hasUnassigned}
-            contextLabel={officeFilter.contextLabel}
-            showContext={officeFilter.hasOfficeFilter}
-          />
-          <Input placeholder="Buscar nombre, doc, teléfono..." value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />
-        </div>
-        <Select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+      {/* FILTROS (Ronda 48): buscador, Oficina → Ruta y Estado en una fila en escritorio.
+          La Oficina solo estrecha las rutas autorizadas; el contexto activo queda a la
+          vista cuando se llega desde una Oficina. */}
+      <OfficeRouteFilterBar
+        offices={officeFilter.offices}
+        officeId={officeFilter.officeId}
+        onOfficeChange={officeFilter.setOfficeId}
+        routesInOffice={officeFilter.routesInOffice}
+        routeId={officeFilter.routeId}
+        onRouteChange={officeFilter.setRouteId}
+        hasUnassigned={officeFilter.hasUnassigned}
+        contextLabel={officeFilter.contextLabel}
+        showContext={officeFilter.hasOfficeFilter}
+        search={<Input aria-label="Buscar clientes" placeholder="Buscar nombre, doc, teléfono..." value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />}
+      >
+        <Select label="Estado" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
           options={[{ value: 'activo', label: 'Activo' }, { value: 'inactivo', label: 'Inactivo' }, { value: 'moroso', label: 'Moroso' }, { value: 'perdido', label: 'Perdido' }]}
-          placeholder="Todos los estados" className="w-44" />
-      </div>
+          placeholder="Todos los estados" containerClassName="min-w-0 lg:w-52" />
+      </OfficeRouteFilterBar>
 
       {/* Table */}
       {loading ? (
