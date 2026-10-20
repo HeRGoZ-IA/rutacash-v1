@@ -71,6 +71,7 @@ import SettingsPage from '@/pages/admin/SettingsPage';
 import { boot, useRuntime } from './session.ts';
 import { markNavigation } from './projection.ts';
 import { ContextSelectPage } from './ContextSelectPage.tsx';
+import { ActivatePage } from './ActivatePage.tsx';
 
 function Boot({ children }: { children: ReactNode }) {
   const booted = useRuntime((s) => s.booted);
@@ -139,6 +140,8 @@ export function CleanOnlineApp() {
         <Routes>
           <Route path="/login" element={<LoginGate />} />
           <Route path="/contexto" element={<ContextSelectPage />} />
+          {/* Ronda 40: primer acceso y recuperación (la persona fija su propia contraseña). */}
+          <Route path="/activar" element={<ActivatePage />} />
           <Route path="/" element={<Navigate to="/login" replace />} />
 
           {/* Comprobante imprimible (CLEAN), con los registros del libro central. */}

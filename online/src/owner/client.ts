@@ -1,4 +1,6 @@
-// Cliente del PANEL OWNER (ADEX Soluciones). Independiente del cliente de empresas:
+// Cliente del PANEL OWNER (ADEX Soluciones): capa de datos y sesión de la Plataforma Owner
+// ORIGINAL de CLEAN en ADEX Online (Ronda 40; las pantallas son las de CLEAN, ver main.tsx).
+// Independiente del cliente de empresas:
 //   · habla SOLO con el servicio Owner (`VITE_ADEX_CONTROL_URL`, /control/v1/*);
 //   · su sesión vive en su PROPIA base del navegador (`adex-owner-mode`): nunca se mezcla
 //     con la sesión de una empresa ni con `RutaCashDB` de CLEAN;
@@ -48,7 +50,10 @@ export class OwnerClient {
     return this.session !== null;
   }
 
-  /** Inicia sesión y exige que la identidad sea un Owner activo; si no, no queda sesión. */
+  /**
+   * Inicia sesión y exige que la identidad sea un Owner activo; si no, no queda sesión. El
+   * acceso correcto sella el primer/último ingreso del Owner en el servidor.
+   */
   async login(email: string, password: string): Promise<OwnerProfile> {
     let t;
     try { t = await this.auth.signInWithPassword(email.trim().toLowerCase(), password); }
@@ -56,29 +61,34 @@ export class OwnerClient {
     this.session = { ...t, activeMembershipId: null };
     await this.store.save(this.session);
     try {
-      return await this.profile();
+      return await (this.request('POST', '/control/v1/session/start', {}) as unknown as Promise<OwnerProfile>);
     } catch (e) {
       await this.forget();
       throw e;
     }
   }
 
+  /** Correo de la sesión (del token verificado por el proveedor; solo para mostrarlo). */
+  email(): string | null {
+    const token = this.session?.accessToken;
+    if (!token) return null;
+    try {
+      const part = token.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/');
+      const claims = JSON.parse(atob(part.padEnd(part.length + ((4 - (part.length % 4)) % 4), '='))) as { email?: unknown };
+      return typeof claims.email === 'string' ? claims.email : null;
+    } catch { return null; }
+  }
+
   profile(): Promise<OwnerProfile> {
     return this.request('GET', '/control/v1/me') as unknown as Promise<OwnerProfile>;
   }
 
-  /** «Primer acceso / olvidé mi contraseña»: el proveedor envía el enlace al correo real. */
-  async recover(email: string): Promise<void> {
-    await this.auth.recover(email.trim().toLowerCase(), `${window.location.origin}/owner/`);
-  }
-
-  /** Fija la contraseña con el token de un enlace de recuperación del proveedor. */
-  async setPasswordFromLink(accessToken: string, password: string): Promise<void> {
-    await this.updatePassword(accessToken, password);
-  }
-
-  /** Cambia la contraseña de la sesión actual (directamente en el proveedor). */
-  async changePassword(password: string): Promise<void> {
+  /** Cambia la contraseña propia: verifica la actual con el proveedor y fija la nueva allí. */
+  async changePassword(current: string, password: string): Promise<void> {
+    const email = this.email();
+    if (!email) throw new OwnerFailure(401, 'NOT_SIGNED_IN');
+    try { await this.auth.signInWithPassword(email, current); }
+    catch { throw new OwnerFailure(401, 'INVALID_CREDENTIALS'); }
     await this.updatePassword(await this.freshToken(), password);
   }
 

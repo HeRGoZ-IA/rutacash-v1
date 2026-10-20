@@ -6,6 +6,9 @@
 //   2. Al EDITAR, correo y rol quedan fijos: el correo identifica a la persona y el rol es
 //      una membresía (DS-05). El servidor rechazaría el cambio.
 //   3. Al eliminar, el aviso de error muestra el motivo del servidor.
+//   4. (Ronda 40) PRIMER ACCESO: al crear un usuario, y desde la llave de cada tarjeta, se
+//      genera un ENLACE de un solo uso para que la persona fije su propia contraseña. El
+//      servidor solo lo emite si nunca ha entrado y no pertenece a otra empresa.
 // Altas, edición del nombre, rutas, activar/desactivar y eliminar van a la API.
 import { useState, useEffect } from 'react'
 import { Plus, Users, ToggleLeft, ToggleRight, Trash2, AlertTriangle, Search, KeyRound } from 'lucide-react'
@@ -18,6 +21,9 @@ import { useDirtyForm } from '@/hooks/useDirtyForm'
 import { toast } from '@/components/ui/Toast'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { db } from '@/lib/db'
+// ADEX Online: enlace de primer acceso (servidor) para la membresía creada.
+import { api } from '../../../runtime/session.ts'
+import { memberId } from '../../../runtime/writeAdapters.ts'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { generateId, generateTemporaryPassword } from '@/lib/utils'
@@ -73,6 +79,27 @@ export default function UsersPage() {
   const [checkingId, setCheckingId] = useState<string | null>(null)
   const [resetTarget, setResetTarget] = useState<User | null>(null)
   const [resetPass, setResetPass] = useState(generateTemporaryPassword)
+  // ADEX Online: estado del enlace de primer acceso del usuario de la llave.
+  const [accessLink, setAccessLink] = useState<{ status: 'idle' | 'loading' | 'issued' | 'already_active' | 'error'; url?: string; message?: string }>({ status: 'idle' })
+  const [linkCopied, setLinkCopied] = useState(false)
+
+  const LINK_ERRORS: Record<string, string> = {
+    IDENTITY_SHARED: 'Esta persona ya usa ADEX en otra empresa: entra con su propia contraseña y elige esta empresa.',
+    MEMBERSHIP_INACTIVE: 'El usuario está inactivo: actívalo antes de generar el enlace.',
+    PERMISSION_DENIED: 'No tienes permiso sobre este usuario.',
+    NETWORK: 'Sin conexión con el servidor. Intenta de nuevo.',
+  }
+  async function issueAccessLink(id: string) {
+    setAccessLink({ status: 'loading' })
+    setLinkCopied(false)
+    try {
+      const r = await api().memberAccessLink(memberId(id))
+      setAccessLink(r.status === 'issued' ? { status: 'issued', url: r.url } : { status: 'already_active' })
+    } catch (e) {
+      const code = (e as { code?: string })?.code ?? ''
+      setAccessLink({ status: 'error', message: LINK_ERRORS[code] ?? 'No se pudo generar el enlace. Intenta de nuevo.' })
+    }
+  }
 
   const roleOptions = assignableRoles(currentUser).map(r => ({ value: r, label: ROLE_LABELS[r] }))
   const defaultRole: UserRole = (assignableRoles(currentUser)[0] ?? 'cobrador') as UserRole
@@ -238,6 +265,8 @@ export default function UsersPage() {
       toast.success(editing ? 'Usuario actualizado' : 'Usuario creado')
       closeModal()
       await load()
+      // ADEX Online: tras el alta, el enlace de primer acceso para entregárselo a la persona.
+      if (isNew) { setResetTarget({ id: userId, nombre: form.nombre } as User); void issueAccessLink(userId) }
     } catch (e) { toast.error(e instanceof Error && e.message ? e.message : 'Error al guardar') } finally { setSaving(false) }
   }
 
@@ -388,8 +417,8 @@ export default function UsersPage() {
                   </div>
                   <Badge variant={u.status === 'activo' ? 'success' : 'gray'} size="sm">{u.status}</Badge>
                   <div className="flex gap-1 flex-shrink-0">
-                    <Button variant="ghost" size="sm" title="Restablecer contraseña" disabled={!manageable}
-                      onClick={(e) => { e.stopPropagation(); setResetTarget(u); setResetPass(generateTemporaryPassword()) }}
+                    <Button variant="ghost" size="sm" title="Acceso del usuario" disabled={!manageable}
+                      onClick={(e) => { e.stopPropagation(); setResetTarget(u); setResetPass(generateTemporaryPassword()); setAccessLink({ status: 'idle' }) }}
                       icon={<KeyRound className="w-3.5 h-3.5 text-primary-500" />} />
                     <Button variant="ghost" size="sm" disabled={!manageable} onClick={(e) => { e.stopPropagation(); toggleStatus(u) }}
                       icon={u.status === 'activo' ? <ToggleRight className="w-3.5 h-3.5 text-emerald-500" /> : <ToggleLeft className="w-3.5 h-3.5 text-gray-400" />} />
@@ -470,12 +499,39 @@ export default function UsersPage() {
       </Modal>
 
       {/* Reset password modal */}
-      {/* ADEX Online: no hay restablecimiento de contraseña en la aplicación (proveedor de identidad). */}
-      <Modal open={!!resetTarget} onClose={() => setResetTarget(null)} title="Restablecer contraseña"
+      {/* ADEX Online: ENLACE DE PRIMER ACCESO (un solo uso). Nadie fija ni conoce la contraseña de otra persona. */}
+      <Modal open={!!resetTarget} onClose={() => setResetTarget(null)} title="Acceso del usuario"
         footer={<Button variant="secondary" onClick={() => setResetTarget(null)}>Cerrar</Button>}>
         <div className="space-y-3">
           <p className="text-sm text-gray-600">Usuario: <span className="font-semibold">{resetTarget?.nombre}</span></p>
-          <p className="text-sm text-gray-600">En ADEX Online la contraseña la gestiona el proveedor de identidad: ni la empresa ni la aplicación la conocen ni la fijan. El restablecimiento por enlace al correo está pendiente de su pantalla de llegada.</p>
+          {accessLink.status === 'idle' && (
+            <>
+              <p className="text-sm text-gray-600">La contraseña la elige cada persona. Si todavía no ha entrado, genera un enlace de primer acceso y entrégaselo por un canal privado.</p>
+              <Button onClick={() => resetTarget && issueAccessLink(resetTarget.id)} icon={<KeyRound className="w-4 h-4" />}>Generar enlace de primer acceso</Button>
+            </>
+          )}
+          {accessLink.status === 'loading' && <p className="text-sm text-gray-500">Generando enlace…</p>}
+          {accessLink.status === 'issued' && (
+            <>
+              <p className="text-sm text-gray-600">Entrega este enlace a la persona. Con él fijará su propia contraseña y después entrará por <span className="font-mono">/login</span>.</p>
+              <div className="rounded-xl bg-gray-50 border border-gray-200 p-3 flex items-start gap-2">
+                <p className="font-mono text-xs text-gray-800 break-all flex-1 select-all" data-testid="access-link">{accessLink.url}</p>
+                <button type="button" className="text-xs font-medium text-primary-600 hover:underline flex-shrink-0"
+                  onClick={async () => { try { await navigator.clipboard.writeText(accessLink.url ?? ''); setLinkCopied(true) } catch { /* sigue visible */ } }}>
+                  {linkCopied ? 'Copiado' : 'Copiar'}
+                </button>
+              </div>
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                Un solo uso y caduca (1 hora con la configuración actual). No vuelve a mostrarse; si se pierde o caduca, genera otro: el anterior deja de servir.
+              </p>
+            </>
+          )}
+          {accessLink.status === 'already_active' && (
+            <p className="text-sm text-gray-600">Esta persona ya inició sesión: entra con su propia contraseña. Si la olvidó, la recupera con «¿Olvidaste tu contraseña?» en el acceso.</p>
+          )}
+          {accessLink.status === 'error' && (
+            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">{accessLink.message}</p>
+          )}
         </div>
       </Modal>
 

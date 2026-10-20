@@ -1,7 +1,8 @@
 // ADEX Online: COPIA de la LoginPage original de CLEAN (src/pages/auth/LoginPage.tsx).
-// Idéntica salvo una frase de presentación, marcada abajo: ADEX Online no funciona sin
-// conexión (DS-07), así que no puede anunciarlo. La autenticación la hace el puente de
-// `useAuth` (proveedor de identidad + contexto del servidor).
+// Idéntica salvo lo marcado abajo: ADEX Online no funciona sin conexión (DS-07), así que no
+// puede anunciarlo; y (Ronda 40) «¿Olvidaste tu contraseña?», que pide al proveedor de
+// identidad el enlace de recuperación (llega a /activar). La autenticación la hace el
+// puente de `useAuth` (proveedor de identidad + contexto del servidor).
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, Loader2, TrendingUp, Shield, Smartphone } from 'lucide-react'
@@ -11,6 +12,8 @@ import { homePathForRole } from '@/lib/permissions'
 import { getLastLoginEmail } from '@/lib/lastLoginEmail'
 import type { UserRole } from '@/models/types'
 import { BrandLogo } from '@/components/ui/BrandLogo'
+// ADEX Online: recuperación de acceso por el proveedor de identidad.
+import { api } from '../../../runtime/session.ts'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -22,6 +25,19 @@ export default function LoginPage() {
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  // ADEX Online: recuperación de acceso.
+  const [recoverNote, setRecoverNote] = useState('')
+
+  async function handleRecover() {
+    if (!email) { setError('Escribe tu correo para recuperar el acceso'); return }
+    setError('')
+    try {
+      await api().recover(email)
+      setRecoverNote('Si el correo está registrado, el proveedor de identidad enviará un enlace para fijar una nueva contraseña. Si no llega en unos minutos, avisa a tu administrador.')
+    } catch {
+      setRecoverNote('El servicio de identidad no respondió. Intenta de nuevo en unos minutos.')
+    }
+  }
 
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -152,6 +168,14 @@ export default function LoginPage() {
               {loading ? 'Ingresando...' : 'Ingresar'}
             </button>
           </form>
+
+          {/* ADEX Online: recuperación de acceso (enlace del proveedor de identidad al correo). */}
+          <div className="mt-4 text-center">
+            <button type="button" onClick={handleRecover} className="text-sm text-primary-600 font-medium hover:underline">
+              ¿Olvidaste tu contraseña?
+            </button>
+            {recoverNote && <p className="text-xs text-gray-500 mt-2">{recoverNote}</p>}
+          </div>
 
         </div>
       </div>

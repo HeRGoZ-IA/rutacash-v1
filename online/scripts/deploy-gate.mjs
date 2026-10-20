@@ -12,18 +12,31 @@
 // temporizador pendiente abortó Node en Windows, y un código anómalo significaría «construir»).
 
 const API = process.env.ADEX_DEPLOY_GATE_API ?? 'https://adex-online-api.onrender.com';
-const REQUIRED = ['settlements-v1', 'clean-online-v1'];
+const REQUIRED = ['settlements-v1', 'clean-online-v1', 'access-links-v1'];
+// Ronda 40: si este despliegue activa la Plataforma Owner (VITE_ADEX_CONTROL_URL), el
+// servicio Owner publicado tiene que servir la versión que usan las pantallas originales.
+const CONTROL = (process.env.VITE_ADEX_CONTROL_URL ?? '').replace(/\/$/, '');
+const CONTROL_REQUIRED = ['owner-clean-v1'];
+
+async function features(base, signal) {
+  const res = await fetch(`${base}/healthz`, { signal });
+  const body = await res.json();
+  return { ok: res.ok, list: Array.isArray(body?.features) ? body.features : [] };
+}
 
 async function decide() {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 120_000);   // Render Free puede tardar en despertar
   try {
-    const res = await fetch(`${API}/healthz`, { signal: ctl.signal });
-    const body = await res.json();
-    const features = Array.isArray(body?.features) ? body.features : [];
-    const missing = REQUIRED.filter((f) => !features.includes(f));
-    if (res.ok && missing.length === 0) return { build: true, why: `la API publicada sirve ${REQUIRED.join(', ')}` };
-    return { build: false, why: `a la API publicada le falta ${missing.join(', ') || '(no responde bien)'}` };
+    const api = await features(API, ctl.signal);
+    const missing = REQUIRED.filter((f) => !api.list.includes(f));
+    if (!api.ok || missing.length) return { build: false, why: `a la API publicada le falta ${missing.join(', ') || '(no responde bien)'}` };
+    if (CONTROL) {
+      const owner = await features(CONTROL, ctl.signal);
+      const lack = CONTROL_REQUIRED.filter((f) => !owner.list.includes(f));
+      if (!owner.ok || lack.length) return { build: false, why: `al servicio Owner publicado le falta ${lack.join(', ') || '(no responde bien)'}` };
+    }
+    return { build: true, why: `la API publicada sirve ${REQUIRED.join(', ')}${CONTROL ? ` y el servicio Owner ${CONTROL_REQUIRED.join(', ')}` : ''}` };
   } catch (e) {
     return { build: false, why: `no se pudo comprobar la API (${e instanceof Error ? e.message : e})` };
   } finally {

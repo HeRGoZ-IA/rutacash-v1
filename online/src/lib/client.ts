@@ -128,8 +128,54 @@ export class OnlineClient {
     return decideContext(await this.memberships());
   }
 
+  /** «¿Olvidaste tu contraseña?»: el proveedor envía al correo un enlace que vuelve a /activar. */
   async recover(email: string): Promise<void> {
-    await this.auth.recover(email.trim().toLowerCase(), window.location.origin);
+    await this.auth.recover(email.trim().toLowerCase(), `${window.location.origin}/activar`);
+  }
+
+  // ---------- Primer acceso (Ronda 40) ----------
+  // La persona fija SU contraseña con un enlace de un solo uso. Todo ocurre entre el
+  // navegador y el proveedor de identidad: ADEX nunca ve la contraseña. Esta sesión
+  // temporal no se guarda: se cierra en cuanto la contraseña queda fijada.
+
+  /** Canjea el token de un enlace de primer acceso (un solo uso) por una sesión temporal. */
+  async redeemAccessLink(tokenHash: string): Promise<string> {
+    const res = await this.authFetch('/auth/v1/verify', { method: 'POST', body: JSON.stringify({ type: 'recovery', token_hash: tokenHash }) });
+    if (res.status === 403 || res.status === 401 || res.status === 400) throw new ApiFailure(res.status, 'LINK_EXPIRED');
+    if (!res.ok) throw new ApiFailure(res.status, 'AUTH_UNAVAILABLE');
+    const body = (await res.json()) as { access_token?: unknown };
+    if (typeof body.access_token !== 'string') throw new ApiFailure(502, 'AUTH_UNAVAILABLE');
+    return body.access_token;
+  }
+
+  /** Fija la contraseña de la persona de esa sesión temporal y la cierra. */
+  async setOwnPassword(accessToken: string, password: string): Promise<void> {
+    const res = await this.authFetch('/auth/v1/user', { method: 'PUT', token: accessToken, body: JSON.stringify({ password }) });
+    if (res.status === 422) {
+      const body = (await res.json().catch(() => ({}))) as { error_code?: string };
+      throw new ApiFailure(422, body.error_code === 'same_password' ? 'SAME_PASSWORD' : 'WEAK_PASSWORD');
+    }
+    if (res.status === 401 || res.status === 403) throw new ApiFailure(res.status, 'LINK_EXPIRED');
+    if (!res.ok) throw new ApiFailure(res.status, 'AUTH_UNAVAILABLE');
+    await this.authFetch('/auth/v1/logout?scope=local', { method: 'POST', token: accessToken }).catch(() => undefined);
+  }
+
+  /** Enlace de primer acceso de un usuario de la empresa (lo emite el servidor; no se guarda). */
+  async memberAccessLink(membershipId: string): Promise<{ status: 'issued'; url: string } | { status: 'already_active' }> {
+    const body = await this.request('POST', `/v1/members/${encodeURIComponent(membershipId)}/access-link`, { body: {} });
+    return body['status'] === 'issued'
+      ? { status: 'issued', url: `${window.location.origin}/activar#t=${encodeURIComponent(String(body['tokenHash']))}` }
+      : { status: 'already_active' };
+  }
+
+  private async authFetch(path: string, o: { method: string; body?: string; token?: string }): Promise<Response> {
+    const headers: Record<string, string> = { apikey: this.cfg.publishableKey, 'content-type': 'application/json' };
+    if (o.token) headers['authorization'] = `Bearer ${o.token}`;
+    try {
+      return await fetch(`${this.cfg.supabaseUrl}${path}`, { method: o.method, headers, body: o.body, cache: 'no-store' });
+    } catch {
+      throw new ApiFailure(0, 'NETWORK');
+    }
   }
 
   async memberships(): Promise<SelectableMembership[]> {
