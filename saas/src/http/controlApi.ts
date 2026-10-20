@@ -9,6 +9,7 @@
 //   GET  /control/v1/companies/:id                     ficha + historial + cobros SaaS
 //   POST /control/v1/companies/:id/superadmins         primer SuperAdmin (identidad del proveedor, sin contraseña)
 //   POST /control/v1/companies/:id/superadmins/:m/access-link   enlace de PRIMER ACCESO (un solo uso; Ronda 40)
+//   PUT  /control/v1/companies/:id/superadmins/:m/email         correo de acceso del SuperAdmin (misma identidad; Ronda 54)
 //   PUT  /control/v1/companies/:id/profile             nombre, identificación y contacto (Ronda 40)
 //   POST /control/v1/companies/:id/status              trial | active | suspended
 //   POST /control/v1/companies/:id/route-counts        recuento de rutas (lo calcula el servidor)
@@ -27,7 +28,7 @@ import { withTransaction, type SessionClaims } from '../db/tx.ts';
 import { bearer, type TokenVerifier } from '../auth/jwt.ts';
 import type { IdentityProvider } from '../auth/provider.ts';
 import {
-  addSuperadmin, companyDetail, createCompany, listCompanies, listOperators, listPayments, operatorLogout, operatorProfile, recordOperatorLogin,
+  addSuperadmin, changeSuperadminEmail, companyDetail, createCompany, listCompanies, listOperators, listPayments, operatorLogout, operatorProfile, recordOperatorLogin,
   refreshRouteCounts, registerPayment, resolveOperator, setCompanyStatus, setPaymentStatus, superadminAccessLink, updateBilling, updateProfile,
 } from '../control/service.ts';
 import { readJson, scopeOf, send } from './common.ts';
@@ -55,6 +56,7 @@ export function createControlHandler(opts: ControlApiOptions): (req: http.Incomi
       const p = url.pathname;
       const one = /^\/control\/v1\/companies\/([^/]+)(?:\/(superadmins|status|route-counts|billing|payments|profile))?$/.exec(p);
       const link = /^\/control\/v1\/companies\/([^/]+)\/superadmins\/([^/]+)\/access-link$/.exec(p);
+      const saEmail = /^\/control\/v1\/companies\/([^/]+)\/superadmins\/([^/]+)\/email$/.exec(p);
       const payment = /^\/control\/v1\/payments\/([^/]+)\/status$/.exec(p);
 
       let fields: string[] | null = null;
@@ -76,6 +78,11 @@ export function createControlHandler(opts: ControlApiOptions): (req: http.Incomi
         const mid = decodeURIComponent(link[2]!);
         fields = [];
         handler = async (c) => ({ status: 200, body: await superadminAccessLink(c, id, mid, opts.provider) });
+      } else if (method === 'PUT' && saEmail) {
+        const id = decodeURIComponent(saEmail[1]!);
+        const mid = decodeURIComponent(saEmail[2]!);
+        fields = ['email'];
+        handler = async (c, b) => ({ status: 200, body: await changeSuperadminEmail(c, id, mid, b, opts.provider) });
       } else if (method === 'GET' && p === '/control/v1/payments') {
         handler = async (c) => ({ status: 200, body: { payments: await listPayments(c) } });
       } else if (one) {

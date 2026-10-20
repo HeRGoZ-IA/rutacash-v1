@@ -2,7 +2,8 @@
 // SINTÉTICOS). Antes de cualquier SQL se detiene con BLOQUEADO si algo no cuadra.
 //
 //   node scripts/staging.ts --check     → solo comprobaciones, sin escrituras
-//   node scripts/staging.ts --migrate   → migraciones + semillas sintéticas
+//   node scripts/staging.ts --migrate   → migraciones (Ronda 54: sin semillas; ADEX Online empieza vacía)
+//   node scripts/staging.ts --migrate --seed → además, semillas sintéticas si no hay ninguna empresa
 //   node scripts/staging.ts --test      → test/auth-real (Auth real + RLS gestionada)
 //   node scripts/staging.ts --online-credentials
 //        → ADEX Online v1: rota las contraseñas de adex_api, adex_control y adex_demo y
@@ -157,7 +158,10 @@ try {
     const r = await migrate(admin, passwords);
     console.log(`migraciones aplicadas: ${r.applied.join(', ') || 'ninguna'} · omitidas: ${r.skipped.length}`);
     const has = await admin.query('select count(*)::int n from adex.companies');
-    if (has.rows[0].n === 0) {
+    // Ronda 54: ADEX Online quedó vacía para los negocios reales; las semillas sintéticas ya no
+    // se importan solas al migrar una base sin empresas (solo con --seed, explícito).
+    if (has.rows[0].n === 0 && !process.argv.includes('--seed')) console.log('sin empresas: no se importan semillas (use --seed para hacerlo)');
+    if (has.rows[0].n === 0 && process.argv.includes('--seed')) {
       const { snapshot, options } = syntheticDataset();
       await importSnapshot(admin, snapshot, options);
       console.log('semillas sintéticas importadas');

@@ -18,6 +18,7 @@ const UNIQUE_CODES: Record<string, string> = {
   offices_company_code_key: 'OFFICE_CODE_DUPLICATE',
   expense_categories_company_name_key: 'CATEGORY_NAME_DUPLICATE',
   sale_requests_one_pending_per_client: 'PENDING_REQUEST_EXISTS',     // una solicitud pendiente por cliente
+  identities_email_key: 'EMAIL_TAKEN',                                // Ronda 54: el correo ya es de otra identidad
 };
 
 /** Traduce errores de PostgreSQL que la API sabe explicar; el resto es 500. */

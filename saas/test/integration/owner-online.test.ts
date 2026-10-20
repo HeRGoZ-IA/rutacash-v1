@@ -186,6 +186,47 @@ describe('Ronda 40 · Owner Online y primer acceso', () => {
     assert.equal(other.status, 403);
   });
 
+  test('OWO-009 · Ronda 54: el Owner cambia el correo del SuperAdmin; misma identidad, membresía y datos', async () => {
+    const p = `/control/v1/companies/${nova.companyId}/superadmins/${nova.saMembership}/email`;
+    const before = (await db.admin.query('select id, role, status, identity_id::text from adex.memberships where company_id = $1 order by id', [nova.companyId])).rows;
+    const r = await control.call('PUT', p, { token: owner, body: { email: '  SA-R54-Nuevo@Example.test ' } });
+    assert.deepEqual([r.status, r.body], [200, { status: 'changed', email: 'sa-r54-nuevo@example.test' }]);
+    const idn = (await db.admin.query('select id::text, email from adex.identities where id = $1', [nova.saIdentity])).rows[0];
+    assert.deepEqual(idn, { id: nova.saIdentity, email: 'sa-r54-nuevo@example.test' });
+    assert.equal(provider.ids.get('sa-r54-nuevo@example.test'), nova.saIdentity, 'el proveedor cambia el correo de la MISMA cuenta');
+    assert.ok(!provider.ids.has('sa-r40@example.test'));
+    assert.deepEqual((await db.admin.query('select id, role, status, identity_id::text from adex.memberships where company_id = $1 order by id', [nova.companyId])).rows, before);
+    const ev = (await events(nova.companyId)).at(-1)!;
+    assert.equal(ev.type, 'SUPERADMIN_EMAIL_CHANGED');
+    assert.equal(ev.actor, identityOf('owner'));
+    assert.match(ev.detail ?? '', /sa-r40@example\.test → sa-r54-nuevo@example\.test/);
+    // La sesión de la misma identidad sigue operando su empresa con sus datos.
+    const routes = await api.call('GET', '/v1/routes', { token: await issuer.issue(nova.saIdentity), membership: nova.saMembership });
+    assert.equal(routes.status, 200, JSON.stringify(routes.body));
+    assert.ok(JSON.stringify(routes.body).includes('Rota 1'), 'la ruta de la empresa sigue ahí');
+    const detail = await control.call('GET', `/control/v1/companies/${nova.companyId}`, { token: owner });
+    assert.equal((detail.body['superadmins'] as { email: string }[])[0]!.email, 'sa-r54-nuevo@example.test');
+    // Mismo correo: nada cambia.
+    assert.deepEqual((await control.call('PUT', p, { token: owner, body: { email: 'sa-r54-nuevo@example.test' } })).body, { status: 'unchanged', email: 'sa-r54-nuevo@example.test' });
+    // Correo de otra identidad de ADEX o de otra cuenta del proveedor: rechazado y sin cambios.
+    const taken = await control.call('PUT', p, { token: owner, body: { email: 'ana@example.test' } });
+    assert.deepEqual([taken.status, taken.body['error']], [409, 'EMAIL_TAKEN']);
+    provider.ids.set('otra-cuenta-r54@example.test', '00000000-0000-4000-8000-000000000054');
+    const takenAuth = await control.call('PUT', p, { token: owner, body: { email: 'otra-cuenta-r54@example.test' } });
+    assert.deepEqual([takenAuth.status, takenAuth.body['error']], [409, 'EMAIL_TAKEN']);
+    assert.equal((await db.admin.query('select email from adex.identities where id = $1', [nova.saIdentity])).rows[0].email, 'sa-r54-nuevo@example.test',
+      'si el proveedor lo rechaza, ADEX deshace el cambio');
+    // Identidad compartida con otra empresa, membresía ajena, no Owner, correo inválido.
+    const shared = (await db.admin.query(`select m.company_id, m.id from adex.memberships m join adex.companies c on c.id = m.company_id
+      where c.name = 'Compartida' and m.role = 'superadmin'`)).rows[0];
+    const sh = await control.call('PUT', `/control/v1/companies/${shared.company_id}/superadmins/${shared.id}/email`, { token: owner, body: { email: 'bruno-nuevo@example.test' } });
+    assert.deepEqual([sh.status, sh.body['error']], [409, 'IDENTITY_SHARED']);
+    assert.equal((await control.call('PUT', `/control/v1/companies/${companyId('c1')}/superadmins/${nova.saMembership}/email`, { token: owner, body: { email: 'x-r54@example.test' } })).status, 404);
+    assert.equal((await control.call('PUT', p, { token: await issuer.issue('bruno'), body: { email: 'x-r54@example.test' } })).status, 403);
+    assert.equal((await control.call('PUT', p, { token: owner, body: { email: 'no-es-correo' } })).status, 400);
+    assert.equal((await control.call('PUT', p, { token: owner, body: { email: 'x-r54@example.test', role: 'owner' } })).status, 400);
+  });
+
   test('OWO-008 · Owners: lista, primer/último ingreso y revocación efectiva', async () => {
     const start = await control.call('POST', '/control/v1/session/start', { token: owner, body: {} });
     assert.equal(start.status, 200, JSON.stringify(start.body));

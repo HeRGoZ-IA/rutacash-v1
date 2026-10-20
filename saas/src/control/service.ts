@@ -168,6 +168,30 @@ export async function superadminAccessLink(client: pg.PoolClient, companyId: str
   return { status: 'issued' as const, tokenHash: out.tokenHash };
 }
 
+/**
+ * Cambio del CORREO de acceso de un SuperAdmin (Ronda 54, 0024). La identidad no cambia (mismo
+ * `sub`): conserva membresías, permisos, contraseña e historial. Solo identidades exclusivas de
+ * la empresa. Primero ADEX (en esta transacción) y después el proveedor: si el proveedor lo
+ * rechaza, la excepción deshace el cambio en ADEX.
+ */
+export async function changeSuperadminEmail(client: pg.PoolClient, companyId: string, membershipId: string, body: Record<string, unknown>,
+  provider: IdentityProvider) {
+  const raw = typeof body['email'] === 'string' ? body['email'].trim() : body['email'];
+  const email = str(raw, 'email', /^[^\s@]+@[^\s@]+\.[^\s@]+$/).toLowerCase();
+  if (email.length > 160) throw new ApiError(400, 'INVALID_EMAIL');
+  await getCompany(client, companyId);
+  const t = (await client.query<{ exclusive: boolean }>(
+    'select exclusive from adex_control.company_superadmins($1) where membership_id = $2', [companyId, membershipId])).rows[0];
+  if (!t) throw new ApiError(404, 'NOT_FOUND');
+  if (!t.exclusive) throw new ApiError(409, 'IDENTITY_SHARED');
+  const r = (await client.query<{ identity_id: string; changed: boolean }>(
+    'select identity_id::text, changed from adex_control.change_superadmin_email($1, $2, $3)', [companyId, membershipId, email])).rows[0]!;
+  if (!r.changed) return { status: 'unchanged' as const, email };
+  const out = await provider.changeEmail(r.identity_id, email);
+  if (out.status === 'taken') throw new ApiError(409, 'EMAIL_TAKEN');
+  return { status: 'changed' as const, email };
+}
+
 /** Nombre, identificación y contacto de la empresa (Ficha comercial de CLEAN). */
 export async function updateProfile(client: pg.PoolClient, companyId: string, body: Record<string, unknown>) {
   const opt = (k: string) => (typeof body[k] === 'string' && (body[k] as string).trim() ? (body[k] as string).trim() : null);

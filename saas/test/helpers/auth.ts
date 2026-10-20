@@ -94,6 +94,14 @@ export function createMemoryProvider(): IdentityProvider & { signOuts: { scope: 
       ids.set(e, id);
       return { identityId: id, created: true };
     },
+    async changeEmail(identityId, email) {
+      const e = email.trim().toLowerCase();
+      const holder = ids.get(e);
+      if (holder && holder !== identityId) return { status: 'taken' };
+      for (const [k, v] of ids) if (v === identityId) ids.delete(k);
+      ids.set(e, identityId);
+      return { status: 'changed' };
+    },
     async signOut(_token, scope) {
       signOuts.push({ scope });
     },

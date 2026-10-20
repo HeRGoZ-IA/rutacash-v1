@@ -7,6 +7,8 @@
 //     por nadie; la persona la fija con el flujo de recuperación del proveedor.
 //   · issueAccessLink: enlace de PRIMER ACCESO de un solo uso (Ronda 40) para quien
 //     nunca ha iniciado sesión; la persona fija su propia contraseña con él.
+//   · changeEmail: cambiar el correo de acceso de una identidad (Ronda 54) sin cambiar su
+//     `sub` ni su contraseña.
 //   · signOut: revocar la sesión en el proveedor (el refresco deja de funcionar).
 //     ADEX revoca ANTES en su propio registro, que es el que manda (0005).
 //
@@ -26,6 +28,12 @@ export interface IdentityProvider {
    * devuelve a quien lo pidió para que se lo entregue a la persona.
    */
   issueAccessLink(identityId: string, email: string): Promise<{ status: 'issued'; tokenHash: string } | { status: 'already_active' }>;
+  /**
+   * Cambia el correo de acceso de la identidad (Ronda 54). Mismo `sub`, misma contraseña; el
+   * correo nuevo queda confirmado (lo decide un Owner, no la persona). `taken`: el proveedor ya
+   * tiene ese correo en otra cuenta.
+   */
+  changeEmail(identityId: string, email: string): Promise<{ status: 'changed' } | { status: 'taken' }>;
   /** Revoca en el proveedor la sesión del token (`local`) o todas (`global`). */
   signOut(accessToken: string, scope: 'local' | 'global'): Promise<void>;
 }
@@ -84,6 +92,15 @@ export function createSupabaseProvider(cfg: SupabaseProviderConfig): IdentityPro
         throw new ApiError(502, 'IDENTITY_PROVIDER_ERROR');
       }
       return { status: 'issued', tokenHash };
+    },
+    async changeEmail(identityId, email) {
+      const res = await f(`${base}/auth/v1/admin/users/${encodeURIComponent(identityId)}`, {
+        method: 'PUT', headers: admin, body: JSON.stringify({ email: email.trim().toLowerCase(), email_confirm: true }),
+      });
+      if (res.status === 422) return { status: 'taken' };
+      if (!res.ok) throw new ApiError(502, 'IDENTITY_PROVIDER_ERROR');
+      if ((await userIdFrom(res)) !== identityId.toLowerCase()) throw new ApiError(502, 'IDENTITY_PROVIDER_ERROR');
+      return { status: 'changed' };
     },
     async signOut(accessToken, scope) {
       const res = await f(`${base}/auth/v1/logout?scope=${scope}`, {

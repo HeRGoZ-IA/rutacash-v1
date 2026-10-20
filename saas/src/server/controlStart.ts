@@ -36,6 +36,13 @@ export async function assertControlRole(pool: pg.Pool): Promise<void> {
   if (r.rows[0]?.adex) throw new Error('adex_control must not have USAGE on schema adex');
 }
 
+/** Ronda 54: la función de 0024 existe y `adex_control` puede ejecutarla. */
+export async function superadminEmailReady(pool: pg.Pool): Promise<boolean> {
+  const r = await pool.query<{ ok: boolean }>(`select coalesce(has_function_privilege(
+    to_regprocedure('adex_control.change_superadmin_email(text,text,text)'), 'EXECUTE'), false) ok`);
+  return r.rows[0]?.ok === true;
+}
+
 export async function startControl(env: NodeJS.ProcessEnv = process.env) {
   const cfg = readControlConfig(env);
   const pool = new pg.Pool({ connectionString: cfg.controlUrl, ssl: cfg.ssl, max: 3, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 10_000 });
@@ -43,8 +50,10 @@ export async function startControl(env: NodeJS.ProcessEnv = process.env) {
   await assertControlRole(pool);
   const verifyToken = createTokenVerifier({ issuer: `${cfg.supabaseUrl}/auth/v1` });
   const provider = createSupabaseProvider({ url: cfg.supabaseUrl, publishableKey: cfg.publishableKey, secretKey: cfg.secretKey });
+  const emailReady = await superadminEmailReady(pool);
+  const features = CONTROL_FEATURES.filter((f) => f !== 'owner-email-v1' || emailReady);
   const server = createOnlineServer({
-    company: null, demo: null, control: createControlHandler({ pool, verifyToken, provider, onError: logError }), features: CONTROL_FEATURES,
+    company: null, demo: null, control: createControlHandler({ pool, verifyToken, provider, onError: logError }), features,
     readinessPool: pool, allowedOrigins: cfg.origins, trustProxy: cfg.trustProxy, rateLimit: { perIpPerMinute: 120, perTokenPerMinute: 120 },
   });
   server.requestTimeout = 60_000;

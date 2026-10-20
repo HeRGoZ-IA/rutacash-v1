@@ -27,7 +27,8 @@ export const API_FEATURES: readonly string[] = ['collections-v1', 'settlements-v
   'admin-transfers-v1'];
 
 /** Módulos del servicio Owner (servicio aparte, ver controlStart.ts). */
-export const CONTROL_FEATURES: readonly string[] = ['owner-v1', 'owner-clean-v1'];
+// Ronda 54: `owner-email-v1` (cambio del correo del SuperAdmin) solo si 0024 está aplicada (controlStart.ts).
+export const CONTROL_FEATURES: readonly string[] = ['owner-v1', 'owner-clean-v1', 'owner-email-v1'];
 
 export interface OnlineServerOptions {
   company: Handler | null;
