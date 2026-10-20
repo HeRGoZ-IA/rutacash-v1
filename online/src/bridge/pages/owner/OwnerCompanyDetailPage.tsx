@@ -8,6 +8,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Pencil, PauseCircle, CheckCircle, Receipt } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
+import { CompanyStatusConfirmModal } from '@/components/owner/CompanyStatusConfirmModal'
 import { Modal } from '@/components/ui/Modal'
 import { Input, Select } from '@/components/ui/Input'
 import { toast } from '@/components/ui/Toast'
@@ -50,6 +51,8 @@ export default function OwnerCompanyDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [payOpen, setPayOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Ronda 48 (H-01): suspender/reactivar pasa siempre por una confirmación.
+  const [confirmStatus, setConfirmStatus] = useState(false)
   // ADEX Online: datos de aprovisionamiento de la ficha del servidor.
   const [locale, setLocale] = useState<ServerLocale | null>(null)
   const [superadmins, setSuperadmins] = useState<ServerSuperadmin[]>([])
@@ -127,13 +130,14 @@ export default function OwnerCompanyDetailPage() {
     await load()
   }
 
-  async function handleToggle() {
-    if (!owner || !record) return
+  async function handleToggle(): Promise<boolean> {
+    if (!owner || !record) return false
     const next = record.status === 'suspended' ? 'active' : 'suspended'
     const res = await setCompanyCommercialStatus(owner, record.companyId, next, statusDatabase)
-    if (!res.ok) { toast.error(res.error ?? 'No se pudo cambiar el estado'); return }
+    if (!res.ok) { toast.error(res.error ?? 'No se pudo cambiar el estado'); return false }
     toast.success(next === 'suspended' ? 'Servicio suspendido' : 'Servicio reactivado')
     await load()
+    return true
   }
 
   async function handleRegisterPayment() {
@@ -191,7 +195,7 @@ export default function OwnerCompanyDetailPage() {
         <div className="flex gap-2">
           <Button variant="secondary" onClick={openEdit} icon={<Pencil className="w-4 h-4" />}>Editar</Button>
           <Button variant="secondary" onClick={() => setPayOpen(true)} icon={<Receipt className="w-4 h-4" />}>Registrar cobro</Button>
-          <Button variant={record.status === 'suspended' ? 'primary' : 'danger'} onClick={handleToggle}
+          <Button variant={record.status === 'suspended' ? 'primary' : 'danger'} onClick={() => setConfirmStatus(true)}
             icon={record.status === 'suspended' ? <CheckCircle className="w-4 h-4" /> : <PauseCircle className="w-4 h-4" />}>
             {record.status === 'suspended' ? 'Reactivar' : 'Suspender'}
           </Button>
@@ -306,6 +310,8 @@ export default function OwnerCompanyDetailPage() {
           </div>
         )}
       </Modal>
+
+      <CompanyStatusConfirmModal target={confirmStatus ? record : null} onClose={() => setConfirmStatus(false)} onConfirm={handleToggle} />
 
       <Modal open={editOpen} onClose={() => !saving && setEditOpen(false)} title="Datos comerciales"
         footer={<>

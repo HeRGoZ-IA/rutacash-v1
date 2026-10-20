@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { Input, Select } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
+import { CompanyStatusConfirmModal } from '@/components/owner/CompanyStatusConfirmModal'
 import { toast } from '@/components/ui/Toast'
 import { formatCurrency, formatDate, formatDateTime, today } from '@/lib/formatters'
 import { generateTemporaryPassword } from '@/lib/utils'
@@ -35,6 +36,8 @@ export default function OwnerCompaniesPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Ronda 48 (H-01): el cambio de estado comercial pasa siempre por una confirmación.
+  const [statusTarget, setStatusTarget] = useState<CompanyControlRecord | null>(null)
   const [credenciales, setCredenciales] = useState<{ empresa: string; email: string; password: string } | null>(null)
 
   const emptyForm = {
@@ -92,13 +95,14 @@ export default function OwnerCompaniesPage() {
     await load()
   }
 
-  async function toggleStatus(r: CompanyControlRecord) {
-    if (!owner) return
+  async function toggleStatus(r: CompanyControlRecord): Promise<boolean> {
+    if (!owner) return false
     const next = r.status === 'suspended' ? 'active' : 'suspended'
     const res = await setCompanyCommercialStatus(owner, r.companyId, next, statusDatabase)
-    if (!res.ok) { toast.error(res.error ?? 'No se pudo cambiar el estado'); return }
+    if (!res.ok) { toast.error(res.error ?? 'No se pudo cambiar el estado'); return false }
     toast.success(next === 'suspended' ? 'Servicio suspendido' : 'Servicio reactivado')
     await load()
+    return true
   }
 
   const statusVariant = (s: CompanyControlRecord['status']) =>
@@ -171,7 +175,7 @@ export default function OwnerCompaniesPage() {
                   </td>
                   <td className="px-4 py-3"><Badge variant={payVariant(r.paymentStatus)} size="sm">{SAAS_PAYMENT_STATUS_LABEL[r.paymentStatus]}</Badge></td>
                   <td className="px-4 py-3 text-right">
-                    <button onClick={() => toggleStatus(r)}
+                    <button onClick={() => setStatusTarget(r)}
                       className={`text-xs font-medium hover:underline ${r.status === 'suspended' ? 'text-emerald-600' : 'text-red-600'}`}>
                       {r.status === 'suspended' ? 'Reactivar' : 'Suspender'}
                     </button>
@@ -253,6 +257,9 @@ export default function OwnerCompaniesPage() {
           </div>
         )}
       </Modal>
+
+      <CompanyStatusConfirmModal target={statusTarget} onClose={() => setStatusTarget(null)}
+        onConfirm={() => statusTarget ? toggleStatus(statusTarget) : Promise.resolve(false)} />
 
       {saving && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/10 pointer-events-none">

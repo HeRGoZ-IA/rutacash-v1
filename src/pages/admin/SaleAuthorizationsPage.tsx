@@ -43,8 +43,9 @@ export default function SaleAuthorizationsPage() {
   const [rejecting, setRejecting] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const [working, setWorking] = useState(false)
-  // Anti doble-clic para las acciones rápidas por fila.
-  const [rowWorkingId, setRowWorkingId] = useState<string | null>(null)
+  // Ronda 48 (H-03): «Aprobar» solo existe dentro del detalle y se habilita cuando el
+  // historial del cliente ya está a la vista (nunca se aprueba a ciegas).
+  const [historyLoading, setHistoryLoading] = useState(false)
   // Tooltip "Ver historial" (posición fija que sigue al cursor; evita el recorte
   // del contenedor con overflow de la tabla). Se oculta sobre Aprobar/Rechazar.
   const [tipPos, setTipPos] = useState<{ x: number; y: number } | null>(null)
@@ -73,30 +74,20 @@ export default function SaleAuthorizationsPage() {
     setDetail(req)
     setRejecting(startRejecting)
     setRejectReason('')
-    const sales = await db.sales.where('clientId').equals(req.clientId).toArray()
-    setClientSales(sales.sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
-  }
-
-  // Aprobación rápida desde la fila (mismo flujo que el modal, con anti doble-clic).
-  async function handleApproveRow(req: SaleRequest) {
-    if (!user || rowWorkingId) return
-    if (!canAccessRoute(user, req.routeId)) { toast.error('No tienes permiso sobre la ruta de esta solicitud.'); return }
-    setRowWorkingId(req.id)
+    setClientSales([])
+    setHistoryLoading(true)
     try {
-      await approveSaleRequest(req, user)
-      await logAction({ tenantId, userId: user.id, action: 'CREATE_SALE', entityType: 'SaleRequest', entityId: req.id, descripcion: `Solicitud de venta aprobada (${formatCurrency(req.amount, currency)})` })
-      toast.success('Solicitud aprobada. Venta creada, pendiente de desembolso por el cobrador.')
-      await load()
-    } catch (e) { toast.error(e instanceof Error && e.name.startsWith('SaleR') ? e.message : 'Error al aprobar la solicitud') } finally { setRowWorkingId(null) }
-  }
-
-  // Rechazo rápido: abre el modal directamente en modo "rechazar" para pedir el motivo.
-  async function openRejectRow(req: SaleRequest) {
-    await openDetail(req, true)
+      const sales = await db.sales.where('clientId').equals(req.clientId).toArray()
+      setClientSales(sales.sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+      setHistoryLoading(false)
+    } catch {
+      // Sin historial no se aprueba: el botón sigue deshabilitado (Rechazar sigue disponible).
+      toast.error('No se pudo cargar el historial del cliente. Cierra y vuelve a abrir la solicitud para aprobarla.')
+    }
   }
 
   async function handleApprove() {
-    if (!detail || !user) return
+    if (!detail || !user || working) return
     if (!canAccessRoute(user, detail.routeId)) { toast.error('No tienes permiso sobre la ruta de esta solicitud.'); return }
     setWorking(true)
     try {
@@ -157,8 +148,8 @@ export default function SaleAuthorizationsPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-xl font-bold text-gray-900">Autorizaciones de ventas</h1>
           <p className="text-sm text-gray-500 mt-0.5">Solicitudes de venta enviadas por los cobradores</p>
         </div>
@@ -168,7 +159,7 @@ export default function SaleAuthorizationsPage() {
             { value: 'approved', label: 'Aprobadas' },
             { value: 'disbursed', label: 'Desembolsadas' },
             { value: 'rejected', label: 'Rechazadas' },
-          ]} placeholder="Todas" className="w-44" />
+          ]} placeholder="Todas" aria-label="Estado de la solicitud" containerClassName="w-40 sm:w-44 flex-shrink-0" />
       </div>
 
       {loading ? (
@@ -213,11 +204,11 @@ export default function SaleAuthorizationsPage() {
                       <td className="px-4 py-3 text-sm text-gray-500">{formatDate(r.requestedAt)}</td>
                       <td className="px-4 py-3" onMouseMove={e => { e.stopPropagation(); setTipPos(null) }}>
                         {r.status === 'pending' ? (
-                          <div className="flex justify-end gap-1.5">
-                            <Button variant="success" size="sm" loading={rowWorkingId === r.id} disabled={!!rowWorkingId}
-                              onClick={(e) => { e.stopPropagation(); handleApproveRow(r) }} icon={<CheckCircle className="w-3.5 h-3.5" />}>Aprobar</Button>
-                            <Button variant="danger" size="sm" disabled={!!rowWorkingId}
-                              onClick={(e) => { e.stopPropagation(); openRejectRow(r) }} icon={<XCircle className="w-3.5 h-3.5" />}>Rechazar</Button>
+                          // Ronda 48 (H-03): sin aprobar ni rechazar desde la fila. «Revisar»
+                          // abre el detalle con condiciones e historial; la decisión va allí.
+                          <div className="flex justify-end">
+                            <Button variant="primary" size="sm" onClick={(e) => { e.stopPropagation(); openDetail(r) }}
+                              icon={<Eye className="w-3.5 h-3.5" />} data-testid="authorization-review">Revisar</Button>
                           </div>
                         ) : (
                           <div className="flex justify-end">
@@ -255,8 +246,11 @@ export default function SaleAuthorizationsPage() {
             </>
           ) : (
             <>
-              <Button variant="danger" onClick={() => setRejecting(true)} icon={<XCircle className="w-4 h-4" />}>Rechazar</Button>
-              <Button onClick={handleApprove} loading={working} icon={<CheckCircle className="w-4 h-4" />}>Aprobar</Button>
+              <Button variant="danger" onClick={() => setRejecting(true)} disabled={working} icon={<XCircle className="w-4 h-4" />}>Rechazar</Button>
+              <Button onClick={handleApprove} loading={working} disabled={historyLoading} icon={<CheckCircle className="w-4 h-4" />}
+                data-testid="authorization-approve">
+                {detail ? `Aprobar ${formatCurrency(detail.amount, currency)}` : 'Aprobar'}
+              </Button>
             </>
           )
         ) : (

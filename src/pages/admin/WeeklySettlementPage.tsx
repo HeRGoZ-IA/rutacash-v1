@@ -55,7 +55,7 @@ import { CapitalFlowDetail } from '@/components/capital/CapitalFlowDetail'
  *    archivado, nunca de un recálculo.
  */
 export default function WeeklySettlementPage() {
-  const { tenantId, currency } = useTenant()
+  const { tenant, tenantId, currency } = useTenant()
   const { user } = useAuth()
   const [routes, setRoutes] = useState<Route[]>([])
   const [routeId, setRouteId] = useState('')
@@ -102,6 +102,10 @@ export default function WeeklySettlementPage() {
   const [generatedRoute, setGeneratedRoute] = useState<Route | null>(null)
   const [loading, setLoading] = useState(false)
   const [closing, setClosing] = useState(false)
+  // Ronda 48 (H-04): el cierre pasa por un resumen. `confirmCierre` es la vista previa
+  // recién calculada por el servicio para EXACTAMENTE la ruta y el rango a cerrar.
+  const [confirmCierre, setConfirmCierre] = useState<WeeklySettlement | null>(null)
+  const [preparandoCierre, setPreparandoCierre] = useState(false)
 
   /** Liquidaciones ARCHIVADAS de la ruta seleccionada (historial y protección). */
   const [archivadas, setArchivadas] = useState<WeeklySettlement[]>([])
@@ -234,11 +238,32 @@ export default function WeeklySettlementPage() {
    * CIERRE. El servicio vuelve a calcular con el motor financiero y archiva: esta
    * pantalla no le entrega importes, solo la ruta y el rango.
    */
+  /**
+   * Paso 1 del cierre (Ronda 48): calcula la vista previa con el MISMO servicio de
+   * «Generar» para la ruta y el rango elegidos y abre el resumen. No archiva nada.
+   */
+  async function pedirCierre() {
+    if (!routeId) { toast.error('Selecciona la ruta que deseas cerrar.'); return }
+    if (!canAccessRoute(user, routeId)) { toast.error('No tienes acceso a esa ruta.'); return }
+    if (preparandoCierre || closing) return
+    setPreparandoCierre(true)
+    try {
+      const data = await generateWeeklySettlementForUser({ user, tenantId, routeId, semanaInicio, semanaFin })
+      if (!data) { toast.error('No tienes acceso a esa ruta.'); return }
+      setSettlement(data)
+      setPreviewKey({ routeId, semanaInicio, semanaFin })
+      setGeneratedRoute(routes.find(r => r.id === routeId) ?? null)
+      setConfirmCierre(data)
+    } catch { toast.error('No se pudo preparar el resumen del cierre.') } finally { setPreparandoCierre(false) }
+  }
+
   async function cerrarSemana() {
     if (!routeId) { toast.error('Selecciona la ruta que deseas cerrar.'); return }
+    if (closing) return
     setClosing(true)
     try {
       const doc = await closeSettlement({ actor: user, tenantId, routeId, semanaInicio, semanaFin })
+      setConfirmCierre(null)
       toast.success(`Semana cerrada (versión ${doc.version ?? 1}). Las cifras quedan congeladas.`)
       setSettlement(doc)
       setPreviewKey(null)  // se muestra el documento archivado: ya no se recalcula
@@ -337,9 +362,9 @@ export default function WeeklySettlementPage() {
           <Button onClick={generate} loading={loading} disabled={!routeId} icon={<RefreshCw className="w-4 h-4" />}>Generar</Button>
           {puedeCerrar && (
             <Button
-              onClick={cerrarSemana}
-              loading={closing}
-              disabled={!routeId || Boolean(bloqueoCierre)}
+              onClick={pedirCierre}
+              loading={preparandoCierre}
+              disabled={!routeId || Boolean(bloqueoCierre) || closing}
               title={bloqueoCierre ?? 'Archiva la semana y congela sus cifras'}
               icon={<Lock className="w-4 h-4" />}
             >
@@ -365,8 +390,8 @@ export default function WeeklySettlementPage() {
           <PendingShortagesNotice />
           <div className="flex flex-wrap gap-3 items-end">
             <OfficeSelector offices={offices} value={officeId} onChange={changeOffice}
-              includeUnassigned={hasUnassigned} className="w-56" />
-            <RouteSelector routes={routesInOffice} value={routeId} onChange={setRouteId} className="w-64" />
+              includeUnassigned={hasUnassigned} className="w-full sm:w-56" />
+            <RouteSelector routes={routesInOffice} value={routeId} onChange={setRouteId} className="w-full sm:w-64" />
           </div>
           {routeId
             ? <WorkerCashSettlementPanel routeId={routeId}
@@ -380,8 +405,8 @@ export default function WeeklySettlementPage() {
       <div className="flex flex-wrap gap-3 items-end">
         {/* Ruta OBLIGATORIA: sin "Todas las rutas". */}
         <OfficeSelector offices={offices} value={officeId} onChange={changeOffice}
-          includeUnassigned={hasUnassigned} className="w-56" />
-        <RouteSelector routes={routesInOffice} value={routeId} onChange={setRouteId} className="w-64" />
+          includeUnassigned={hasUnassigned} className="w-full sm:w-56" />
+        <RouteSelector routes={routesInOffice} value={routeId} onChange={setRouteId} className="w-full sm:w-64" />
         <div>
           <label className="block text-xs text-gray-500 mb-1.5">Inicio semana</label>
           <input type="date" value={semanaInicio} onChange={e => setSemanaInicio(e.target.value)}
@@ -545,6 +570,73 @@ export default function WeeklySettlementPage() {
       )}
 
       </>)}
+
+      {/* ---------------- CONFIRMACIÓN DEL CIERRE (Ronda 48 · H-04) ---------------- */}
+      <Modal
+        open={Boolean(confirmCierre)}
+        onClose={() => { if (!closing) setConfirmCierre(null) }}
+        title="Cerrar semana"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setConfirmCierre(null)} disabled={closing} autoFocus>Cancelar</Button>
+            <Button onClick={cerrarSemana} loading={closing} icon={<Lock className="w-4 h-4" />} data-testid="settlement-close-confirm">
+              Cerrar y congelar semana
+            </Button>
+          </div>
+        }
+      >
+        {confirmCierre && (() => {
+          const ruta = routes.find(r => r.id === confirmCierre.routeId)
+          const oficina = ruta?.officeId ? allOffices.find(o => o.id === ruta.officeId)?.nombre ?? '—' : 'Sin Oficina'
+          const previos = archivadas.filter(s => s.routeId === confirmCierre.routeId
+            && s.semanaInicio === confirmCierre.semanaInicio && s.semanaFin === confirmCierre.semanaFin).length
+          const faltantes = puedeVerCuadres
+            ? cuadresRuta.filter(c => c.status === 'cerrada' && c.closedAt.slice(0, 10) >= confirmCierre.semanaInicio
+                && c.closedAt.slice(0, 10) <= confirmCierre.semanaFin).reduce((n, c) => n + c.faltante, 0)
+            : 0
+          const fila = (label: string, value: number, tone = 'text-gray-800') => (
+            <div className="flex items-center justify-between gap-3 py-1.5">
+              <span className="text-gray-600">{label}</span>
+              <span className={`font-semibold tabular-nums ${tone}`}>{formatCurrency(value, currency)}</span>
+            </div>
+          )
+          return (
+            <div className="space-y-4 text-sm" data-testid="settlement-close-dialog">
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl bg-gray-50 p-3">
+                <div><dt className="text-xs text-gray-500">Empresa</dt><dd className="font-medium text-gray-900">{tenant?.nombre ?? '—'}</dd></div>
+                <div><dt className="text-xs text-gray-500">Oficina · Ruta</dt><dd className="font-medium text-gray-900">{oficina} · {ruta?.nombre ?? confirmCierre.routeId}</dd></div>
+                <div><dt className="text-xs text-gray-500">Período</dt><dd className="font-medium text-gray-900">{formatDate(confirmCierre.semanaInicio)} – {formatDate(confirmCierre.semanaFin)}</dd></div>
+                <div><dt className="text-xs text-gray-500">Estado</dt><dd className="font-medium text-gray-900">{previos > 0 ? `Reabierto (ya tuvo ${previos} cierre${previos > 1 ? 's' : ''})` : 'Abierto, sin cierre previo'}</dd></div>
+              </dl>
+              <div className="divide-y divide-gray-100">
+                {fila('Saldo anterior', confirmCierre.saldoAnterior)}
+                {fila('(+) Cobros', confirmCierre.cobros, 'text-emerald-700')}
+                {fila('(+) Ingreso de capital y transferencias entrantes', confirmCierre.ingresoCapital + confirmCierre.transferenciasEntradas, 'text-emerald-700')}
+                {fila('(−) Préstamos entregados', confirmCierre.prestamosEntregados, 'text-blue-700')}
+                {fila('(−) Gastos', confirmCierre.gastos, 'text-red-600')}
+                {fila('(−) Transferencias salientes y retiros', confirmCierre.transferenciasSalidas + confirmCierre.retiros, 'text-red-600')}
+                <div className="flex items-center justify-between gap-3 py-2">
+                  <span className="font-semibold text-gray-800">Saldo final</span>
+                  <span className={`text-base font-bold tabular-nums ${confirmCierre.saldoFinal >= 0 ? 'text-primary-700' : 'text-red-600'}`}>{formatCurrency(confirmCierre.saldoFinal, currency)}</span>
+                </div>
+              </div>
+              {faltantes > 0 && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Hay faltantes en cuadres de trabajadores de este rango por {formatCurrency(faltantes, currency)} (informativo: no forma parte de la liquidación).
+                </p>
+              )}
+              <div className="flex items-start gap-2 rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600">
+                <Lock className="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-400" />
+                <p>
+                  Al cerrar, la semana se archiva{previos > 0 ? ' como una versión nueva' : ''} y <span className="font-medium text-gray-800">sus cifras quedan congeladas</span>.
+                  Los pagos de esas fechas dejarán de ser corregibles directamente: pasarán por Solicitud de ajuste o por una reapertura con motivo.
+                  El sistema vuelve a calcular al cerrar; si entra un movimiento mientras tanto, vale el documento archivado.
+                </p>
+              </div>
+            </div>
+          )
+        })()}
+      </Modal>
 
       {/* ---------------- REAPERTURA CONTROLADA ---------------- */}
       <Modal
