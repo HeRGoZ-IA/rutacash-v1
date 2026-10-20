@@ -103,14 +103,17 @@ update adex.capital_operations set counterpart_membership_id = null
 delete from adex.capital_accounts where kind = 'partner';
 
 -- Transferencias Ruta↔Socio del modelo importado y Caja socios.
-delete from adex.transfers where partner_origin_membership_id is not null or partner_destination_membership_id is not null;
+-- Primero Caja socios (sus filas referencian las transferencias), después las transferencias con socio.
 drop table adex.partner_cash_movements;
+delete from adex.transfers where partner_origin_membership_id is not null or partner_destination_membership_id is not null;
 
 -- Membresías Socio (y sus rutas). La historia que podía colgar de ellas ya se trató arriba.
 alter table adex.memberships disable trigger memberships_protected_delete;
 delete from adex.membership_routes where membership_id in (select id from adex.memberships where role = 'socio');
 delete from adex.memberships where role = 'socio';
 alter table adex.memberships enable trigger memberships_protected_delete;
+-- Las restricciones diferidas de lo borrado se comprueban AQUÍ (un ALTER TABLE no admite eventos pendientes).
+set constraints all immediate;
 
 alter table adex.capital_accounts   enable trigger capital_accounts_guard;
 alter table adex.capital_accounts   enable trigger capital_accounts_no_delete;
