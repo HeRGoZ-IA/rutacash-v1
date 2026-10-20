@@ -86,8 +86,10 @@ async function findUser(email: string): Promise<{ id: string } | null> {
   return null;
 }
 
+// Conexión administrativa: TLS verificado SIEMPRE con la CA de Supabase (ADEX_PG_SSL_CA).
+if (!env['ADEX_PG_SSL_CA'] || !existsSync(env['ADEX_PG_SSL_CA'])) fail('falta ADEX_PG_SSL_CA (certificado raíz de Supabase) en saas/.env.staging');
 const db = new pg.Client({ connectionString: `postgres://postgres.${STAGING_REF}:${encodeURIComponent(env['SUPABASE_DB_PASSWORD']!)}@${env['SUPABASE_POOLER_HOST']}:5432/postgres`,
-  ssl: { rejectUnauthorized: false } });
+  ssl: { ca: readFileSync(env['ADEX_PG_SSL_CA']!, 'utf8'), rejectUnauthorized: true } });
 
 const deactivate = process.argv.includes('--deactivate');
 const sendLink = process.argv.includes('--send-link');
@@ -102,6 +104,8 @@ try {
     const u = await findUser(email);
     const r = u ? await db.query(`update adex_control.platform_operators set status = 'inactivo', updated_at = now() where identity_id = $1`, [u.id]) : null;
     console.log(r?.rowCount ? 'Rol Owner retirado. La identidad sigue existiendo, sin acceso al panel Owner.' : 'Ese correo no era Owner.');
+    // Cerrar la conexión ANTES de salir: process.exit con el socket abierto aborta Node en Windows.
+    await db.end();
     process.exit(0);
   }
   const displayName = (await line('Nombre visible en el panel (p. ej. su nombre): ')) || 'Owner ADEX';
