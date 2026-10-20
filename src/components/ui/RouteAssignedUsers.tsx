@@ -35,7 +35,7 @@ export function RouteAssignedUsers({ users, routeId, tenantId, responsibleCobrad
   if (!hasAnyAssignment(a)) {
     return (
       <div className="space-y-1">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-gray-500">
           <Users className="w-3.5 h-3.5" /> Sin usuarios asignados
         </div>
         <p className="text-xs font-medium text-amber-600">{ROUTE_NO_COBRADOR_LABEL} · pendiente de asignación</p>

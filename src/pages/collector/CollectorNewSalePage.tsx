@@ -264,7 +264,7 @@ export default function CollectorNewSalePage() {
 
         {/* Acción según autorización */}
         {allowDirect && hasEffectiveLimit && (
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-500">
             Límite venta directa · Ruta: {routeLimit === Infinity ? 'sin límite' : formatCurrency(routeLimit, currency)} · Cobrador: {collectorLimit === Infinity ? 'sin límite' : formatCurrency(collectorLimit, currency)} · Efectivo aplicado: {formatCurrency(effectiveLimit, currency)}
           </p>
         )}

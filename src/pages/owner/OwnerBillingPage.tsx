@@ -81,7 +81,7 @@ export default function OwnerBillingPage() {
           <div className="px-6 py-14 text-center">
             <Receipt className="w-8 h-8 text-gray-300 mx-auto" />
             <p className="text-sm text-gray-500 mt-3">Sin cobros registrados.</p>
-            <p className="text-xs text-gray-400 mt-1">Los cobros se registran desde la ficha de cada empresa.</p>
+            <p className="text-xs text-gray-500 mt-1">Los cobros se registran desde la ficha de cada empresa.</p>
             <Button className="mt-4" variant="secondary" onClick={() => navigate('/owner/empresas')}>Ir a Empresas</Button>
           </div>
         ) : (

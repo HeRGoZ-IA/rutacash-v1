@@ -126,7 +126,7 @@ export function SetupChecklist() {
               <p className={`text-sm font-medium ${step.done ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
                 {step.label}
               </p>
-              <p className="text-xs text-gray-400 truncate">{step.description}</p>
+              <p className="text-xs text-gray-500 truncate">{step.description}</p>
             </div>
             {/* Botón de acción real: navega a la pantalla exacta (no instrucción genérica). */}
             {!step.done && (

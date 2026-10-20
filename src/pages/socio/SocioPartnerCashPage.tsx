@@ -44,15 +44,15 @@ export default function SocioPartnerCashPage() {
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3">
           <p className="text-[11px] text-gray-500">Ingresos</p>
-          <p className="text-base font-bold text-emerald-600 tabular-nums truncate">{formatCurrency(ingresos, currency)}</p>
+          <p className="text-base font-bold text-emerald-600 tabular-nums tabular-nums">{formatCurrency(ingresos, currency)}</p>
         </div>
         <div className="rounded-2xl border border-red-100 bg-red-50 p-3">
           <p className="text-[11px] text-gray-500">Salidas</p>
-          <p className="text-base font-bold text-red-500 tabular-nums truncate">{formatCurrency(salidas, currency)}</p>
+          <p className="text-base font-bold text-red-500 tabular-nums tabular-nums">{formatCurrency(salidas, currency)}</p>
         </div>
         <div className="rounded-2xl border border-primary-100 bg-primary-50 p-3">
           <p className="text-[11px] text-gray-500">Saldo</p>
-          <p className="text-base font-bold text-primary-700 tabular-nums truncate">{formatCurrency(saldo, currency)}</p>
+          <p className="text-base font-bold text-primary-700 tabular-nums tabular-nums">{formatCurrency(saldo, currency)}</p>
         </div>
       </div>
 
@@ -69,7 +69,7 @@ export default function SocioPartnerCashPage() {
                 : <ArrowUpCircle className="w-5 h-5 text-red-400 flex-shrink-0" />}
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-gray-900 truncate flex items-center gap-1.5">{m.description ?? m.category}{m.reversalId && <AnnulledBadge />}</p>
-                <p className="text-xs text-gray-400">{formatDate(m.fecha)} · <Badge variant="gray" size="sm">{m.category}</Badge></p>
+                <p className="text-xs text-gray-500">{formatDate(m.fecha)} · <Badge variant="gray" size="sm">{m.category}</Badge></p>
               </div>
               <p className={`text-sm font-semibold flex-shrink-0 ${m.reversalId ? 'text-gray-400 line-through' : (m.type === 'ingreso' ? 1 : -1) * m.amount >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
                 {signedMoney((m.type === 'ingreso' ? 1 : -1) * m.amount, currency)}

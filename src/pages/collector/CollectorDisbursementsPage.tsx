@@ -69,21 +69,21 @@ export default function CollectorDisbursementsPage() {
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <p className="font-semibold text-gray-900 text-sm">{client?.nombre ?? 'Cliente'}</p>
-                    <p className="text-xs text-gray-400">{client?.documento} · Inicio {formatDate(s.fechaInicio)}</p>
+                    <p className="text-xs text-gray-500">{client?.documento} · Inicio {formatDate(s.fechaInicio)}</p>
                   </div>
                   <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Por desembolsar</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 mb-3">
                   <div className="bg-gray-50 rounded-xl p-2 text-center">
-                    <p className="text-xs text-gray-400">Valor</p>
+                    <p className="text-xs text-gray-500">Valor</p>
                     <p className="text-sm font-bold text-gray-800">{formatCurrency(s.valorVenta, currency)}</p>
                   </div>
                   <div className="bg-gray-50 rounded-xl p-2 text-center">
-                    <p className="text-xs text-gray-400">Parcela</p>
+                    <p className="text-xs text-gray-500">Parcela</p>
                     <p className="text-sm font-bold text-primary-600">{formatCurrency(s.valorCuota, currency)}</p>
                   </div>
                   <div className="bg-gray-50 rounded-xl p-2 text-center">
-                    <p className="text-xs text-gray-400">Parcelas</p>
+                    <p className="text-xs text-gray-500">Parcelas</p>
                     <p className="text-sm font-bold text-gray-700">{s.numeroCuotas}</p>
                   </div>
                 </div>

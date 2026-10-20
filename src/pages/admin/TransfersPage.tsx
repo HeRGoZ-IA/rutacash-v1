@@ -383,7 +383,7 @@ export default function TransfersPage() {
                     </div>
                   </div>
                   {central.bloqueos[r.id] && <p className="text-[11px] font-medium text-amber-700" data-testid="route-blocked">Bloqueada para capital nuevo hasta que el SuperAdmin la revise.</p>}
-                  <p className="text-[11px] text-gray-400">Neto de transferencias: {money(neto)} (entrante − saliente). No es el efectivo en caja.</p>
+                  <p className="text-[11px] text-gray-500">Neto de transferencias: {money(neto)} (entrante − saliente). No es el efectivo en caja.</p>
                   {ops.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {ops.map(k => (
@@ -398,7 +398,7 @@ export default function TransfersPage() {
             })}
           </div>
         )}
-        {saldosAt && <p className="text-[11px] text-gray-400">Saldos calculados {formatDateTime(saldosAt)}. Cada operación los vuelve a comprobar al registrar.</p>}
+        {saldosAt && <p className="text-[11px] text-gray-500">Saldos calculados {formatDateTime(saldosAt)}. Cada operación los vuelve a comprobar al registrar.</p>}
       </section>
 
       {/* ---------- OPERACIONES CON SOCIOS (existentes; sin nuevos accesos) ---------- */}
@@ -445,7 +445,7 @@ export default function TransfersPage() {
               ))}
             </div>
           )}
-          {user?.rol === 'admin' && <p className="text-[11px] text-gray-400">Colocaciones y retiros de capital: en <Link className="text-primary-700 hover:underline" to="/admin/capital">Caja principal</Link> → Movimientos de la bolsa.</p>}
+          {user?.rol === 'admin' && <p className="text-[11px] text-gray-500">Colocaciones y retiros de capital: en <Link className="text-primary-700 hover:underline" to="/admin/capital">Caja principal</Link> → Movimientos de la bolsa.</p>}
         </div>
 
         <DateRangeFilter desde={desde} hasta={hasta} onDesde={setDesde} onHasta={setHasta} onClear={() => { setDesde(''); setHasta('') }}>
@@ -484,18 +484,18 @@ export default function TransfersPage() {
                       <Badge variant={g.type === 'route' ? 'info' : 'purple'} size="sm">{g.type === 'route' ? 'Ruta' : 'Socio'}</Badge>
                     </div>
                   </div>
-                  <span className="text-xs text-gray-400">{g.cantidad} mov.</span>
+                  <span className="text-xs text-gray-500">{g.cantidad} mov.</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 mt-3">
-                  <div className="bg-emerald-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Entrante</p><p className="text-sm font-bold text-emerald-600">{money(g.entrante)}</p></div>
-                  <div className="bg-amber-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Saliente</p><p className="text-sm font-bold text-amber-600">{money(g.saliente)}</p></div>
+                  <div className="bg-emerald-50 rounded-xl p-2.5"><p className="text-xs text-gray-500">Entrante</p><p className="text-sm font-bold text-emerald-600">{money(g.entrante)}</p></div>
+                  <div className="bg-amber-50 rounded-xl p-2.5"><p className="text-xs text-gray-500">Saliente</p><p className="text-sm font-bold text-amber-600">{money(g.saliente)}</p></div>
                 </div>
                 <div className="mt-2 bg-gray-50 rounded-xl p-2.5 flex items-center justify-between gap-2">
-                  <div className="min-w-0"><p className="text-xs text-gray-500">Neto de transferencias</p><p className="text-[11px] text-gray-400">Entrante − saliente. No es el efectivo en caja.</p></div>
+                  <div className="min-w-0"><p className="text-xs text-gray-500">Neto de transferencias</p><p className="text-[11px] text-gray-500">Entrante − saliente. No es el efectivo en caja.</p></div>
                   <p className={`text-sm font-bold ${g.neto >= 0 ? 'text-gray-800' : 'text-red-600'}`}>{money(g.neto)}</p>
                 </div>
                 <div className="flex items-center justify-between mt-3">
-                  <p className="text-xs text-gray-400">{g.ultimoMovimiento ? `Último: ${formatDate(g.ultimoMovimiento)}` : 'Sin movimientos'}</p>
+                  <p className="text-xs text-gray-500">{g.ultimoMovimiento ? `Último: ${formatDate(g.ultimoMovimiento)}` : 'Sin movimientos'}</p>
                   <Button variant="secondary" size="sm" disabled={g.cantidad === 0} onClick={() => setDetailKey(g.key)} icon={<ChevronRight className="w-3.5 h-3.5" />}>Ver movimientos</Button>
                 </div>
               </div>
@@ -553,9 +553,9 @@ export default function TransfersPage() {
         {detailGroup && (
           <div className="space-y-3">
             <div className="grid grid-cols-3 gap-2">
-              <div className="bg-emerald-50 rounded-xl p-3"><p className="text-xs text-gray-400">Entrante</p><p className="font-bold text-emerald-600">{money(detailGroup.entrante)}</p></div>
-              <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs text-gray-400">Saliente</p><p className="font-bold text-amber-600">{money(detailGroup.saliente)}</p></div>
-              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400">Neto</p><p className="font-bold text-gray-800">{money(detailGroup.neto)}</p></div>
+              <div className="bg-emerald-50 rounded-xl p-3"><p className="text-xs text-gray-500">Entrante</p><p className="font-bold text-emerald-600">{money(detailGroup.entrante)}</p></div>
+              <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs text-gray-500">Saliente</p><p className="font-bold text-amber-600">{money(detailGroup.saliente)}</p></div>
+              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-500">Neto</p><p className="font-bold text-gray-800">{money(detailGroup.neto)}</p></div>
             </div>
             {detailGroup.transfers.length === 0 ? (
               <div className="flex justify-center py-8 text-gray-400 text-sm">Sin movimientos</div>
@@ -575,7 +575,7 @@ export default function TransfersPage() {
                               {estado === 'reversion' ? 'Reversión · ' : ''}{originLabel(t)} → {destinoLabel(t)}
                               {estado === 'anulado' && <AnnulledBadge />}
                             </p>
-                            <p className="text-xs text-gray-400">{formatDate(t.fecha)}{userName(t.userId) ? ` · ${userName(t.userId)}` : ''}{t.descripcion ? ` · ${t.descripcion}` : ''} · Ref. {t.id.slice(0, 8).toUpperCase()}</p>
+                            <p className="text-xs text-gray-500">{formatDate(t.fecha)}{userName(t.userId) ? ` · ${userName(t.userId)}` : ''}{t.descripcion ? ` · ${t.descripcion}` : ''} · Ref. {t.id.slice(0, 8).toUpperCase()}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">

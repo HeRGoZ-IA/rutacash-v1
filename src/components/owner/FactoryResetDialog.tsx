@@ -106,7 +106,7 @@ export function FactoryResetDialog({ open, onClose }: { open: boolean; onClose: 
             autoComplete="off"
             className="w-full h-11 rounded-xl border border-gray-300 px-4 text-sm font-mono tracking-wide focus:outline-none focus:ring-2 focus:ring-red-500 disabled:bg-gray-50"
           />
-          <p className="text-xs text-gray-400 mt-1.5">
+          <p className="text-xs text-gray-500 mt-1.5">
             Solo afecta a este dispositivo. No se borran datos de otros equipos.
           </p>
         </div>

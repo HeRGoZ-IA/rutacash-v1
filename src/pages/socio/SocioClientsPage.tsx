@@ -66,7 +66,7 @@ export default function SocioClientsPage() {
           <h1 className="text-xl font-bold text-gray-900">Clientes</h1>
           <p className="text-sm text-gray-500 mt-0.5">{filtered.length} cliente(s) · solo consulta</p>
         </div>
-        <span className="inline-flex items-center gap-1 text-xs text-gray-400"><Lock className="w-3 h-3" /> Solo lectura</span>
+        <span className="inline-flex items-center gap-1 text-xs text-gray-500"><Lock className="w-3 h-3" /> Solo lectura</span>
       </div>
 
       {/* FILTRO OFICINA → RUTA y buscador (Ronda 48). Solo estrecha lo ya autorizado. */}
@@ -98,7 +98,7 @@ export default function SocioClientsPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-gray-900 truncate">{c.nombre}</p>
-                  <p className="text-xs text-gray-400 truncate">{c.documento} · {routeName(c.routeId)}</p>
+                  <p className="text-xs text-gray-500 truncate">{c.documento} · {routeName(c.routeId)}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
                   {saldo > 0

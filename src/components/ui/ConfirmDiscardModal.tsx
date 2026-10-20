@@ -25,7 +25,7 @@ export function ConfirmDiscardModal({
         <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
         <div className="space-y-2">
           <p className="text-sm text-gray-700">Hay cambios sin guardar. ¿Deseas descartarlos?</p>
-          {note && <p className="text-xs text-gray-400">{note}</p>}
+          {note && <p className="text-xs text-gray-500">{note}</p>}
         </div>
       </div>
     </Modal>

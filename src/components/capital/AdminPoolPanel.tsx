@@ -28,7 +28,7 @@ function Cifra({ label, value, tone = 'text-gray-900', bg = 'bg-gray-50', testId
   return (
     <div className={`${bg} rounded-xl p-3`} data-testid={testId}>
       <p className={`text-xs ${tone} opacity-75`}>{label}</p>
-      {hint && <p className="text-[11px] text-gray-400">{hint}</p>}
+      {hint && <p className="text-[11px] text-gray-500">{hint}</p>}
       <p className={`text-base font-bold ${tone}`}>{value}</p>
     </div>
   )
@@ -86,7 +86,7 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0" data-testid="my-available">
             <p className="text-sm text-gray-600 flex items-center gap-1.5"><Wallet className="w-4 h-4 text-primary-600" />Disponible en caja{titular ? ` · ${titular}` : ''}</p>
-            <p className="text-xs text-gray-400">{central ? 'Para entregar capital a tus trabajadores o pagar gastos.' : 'Para distribuir a tus rutas o pagar gastos administrativos.'}</p>
+            <p className="text-xs text-gray-500">{central ? 'Para entregar capital a tus trabajadores o pagar gastos.' : 'Para distribuir a tus rutas o pagar gastos administrativos.'}</p>
             <p className={`text-3xl font-bold tracking-tight ${negativo ? 'text-red-700' : 'text-gray-900'}`}>{money(c.disponible)}</p>
           </div>
           {(onRegistrarGasto || onDistribuir) && (
@@ -137,7 +137,7 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
           <Linea label="(+) Gastos administrativos netos (acumulado)" value={money(c.gastos)} />
           <Linea label="= Capital explicado" value={money(k.explicado)} strong />
         </div>
-        <p className="px-4 py-2 text-[11px] text-gray-400">
+        <p className="px-4 py-2 text-[11px] text-gray-500">
           Lo retirado de una ruta vuelve al disponible y reduce el capital neto en rutas (puede incluir utilidades de la ruta). Los gastos históricos sin bolsa no entran.
         </p>
       </section>
@@ -150,7 +150,7 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
           <Cifra label={gDesde || gHasta ? 'Gasto neto del período' : 'Gasto neto (todo el historial)'} value={money(periodo.neto)} tone="text-red-700" bg="bg-red-50" testId="pool-period-total" />
           <Cifra label="Gastos registrados" value={String(periodo.registros)} />
         </div>
-        <p className="text-[11px] text-gray-400">Resumen por fecha contable (incluye anulaciones y reintegros del período). La conciliación usa siempre el acumulado.</p>
+        <p className="text-[11px] text-gray-500">Resumen por fecha contable (incluye anulaciones y reintegros del período). La conciliación usa siempre el acumulado.</p>
       </section>
 
       {/* DEVOLUCIONES DESDE RUTAS */}
@@ -162,7 +162,7 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
               <div key={m.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 py-2">
                 <div className="min-w-0">
                   <p className="text-sm text-gray-900 flex items-center gap-1.5"><ArrowDownLeft className="w-4 h-4 text-emerald-600" />{ruta(m.routeId)}{m.kind !== 'retiroRuta' ? ` · ${POOL_MOVEMENT_LABEL[m.kind]}` : ''}{m.estado !== 'vigente' ? ` · ${m.estado === 'anulado' ? 'anulado' : 'reversión'}` : ''}</p>
-                  <p className="text-xs text-gray-400 break-words">{formatDate(m.fecha)} · registró {nombre(m.actorId)} · Ref. {m.id.slice(0, 8).toUpperCase()}</p>
+                  <p className="text-xs text-gray-500 break-words">{formatDate(m.fecha)} · registró {nombre(m.actorId)} · Ref. {m.id.slice(0, 8).toUpperCase()}</p>
                 </div>
                 <span className={`text-sm font-semibold ${m.estado === 'anulado' ? 'text-gray-400 line-through' : m.monto >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>{signed(m.monto)}</span>
               </div>
@@ -175,7 +175,7 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
       <section className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-3" data-testid="pool-movements">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-gray-900">Movimientos de la bolsa</h2>
-          <span className="flex items-center gap-3 text-xs text-gray-400">
+          <span className="flex items-center gap-3 text-xs text-gray-500">
             {visibles.length} de {movimientos.length}
             <Link to={`/admin/movements?adminId=${encodeURIComponent(statement.adminId)}`} className="text-primary-700 hover:underline" data-testid="go-history">Historial completo y comprobantes</Link>
           </span>
@@ -201,7 +201,7 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
                     {m.estado === 'reversion' && m.kind !== 'anulacionGasto' && <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-emerald-50 text-emerald-700">Reversión</span>}
                     {m.afecta === 'enRutas' && <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-indigo-50 text-indigo-700">Afecta capital en rutas</span>}
                   </p>
-                  <p className="text-xs text-gray-400 break-words">
+                  <p className="text-xs text-gray-500 break-words">
                     {formatDateTime(m.createdAt)}{m.fecha !== m.createdAt.slice(0, 10) ? ` · fecha contable ${formatDate(m.fecha)}` : ''} · registró {nombre(m.actorId)}
                     {m.relatedAdminId ? ` · ${m.kind === 'rutaRecibida' ? 'de' : 'a'} ${nombre(m.relatedAdminId)}` : ''}
                     {m.descripcion ? ` · ${m.descripcion}` : ''} · Ref. {m.id.slice(0, 8).toUpperCase()}
@@ -214,7 +214,7 @@ export function AdminPoolPanel({ statement, routes, users, categories, currency,
             ))}
           </div>
         )}
-        <p className="text-[11px] text-gray-400">Registros reales de la bolsa (sin saldo acumulado por fila). Los traslados entre tus rutas no cambian la bolsa y no aparecen aquí.</p>
+        <p className="text-[11px] text-gray-500">Registros reales de la bolsa (sin saldo acumulado por fila). Los traslados entre tus rutas no cambian la bolsa y no aparecen aquí.</p>
       </section>
     </div>
   )

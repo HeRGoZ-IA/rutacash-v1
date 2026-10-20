@@ -137,7 +137,7 @@ export default function CollectorSyncPage() {
                     <p className={`text-sm font-medium ${fuera ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
                       Pago {formatCurrency(r.payment.valor, currency)}
                     </p>
-                    <p className="text-xs text-gray-400">{formatDateTime(r.payment.createdAt)}</p>
+                    <p className="text-xs text-gray-500">{formatDateTime(r.payment.createdAt)}</p>
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
                     <PaymentStateBadge state={estado} />

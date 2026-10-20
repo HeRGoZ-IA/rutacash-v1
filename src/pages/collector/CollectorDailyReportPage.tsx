@@ -117,7 +117,7 @@ export default function CollectorDailyReportPage() {
                 <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dot(m.tipo)}`} />
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-800 truncate">{m.cliente}</p>
-                  <p className="text-xs text-gray-400">{m.hora} · {m.concepto}</p>
+                  <p className="text-xs text-gray-500">{m.hora} · {m.concepto}</p>
                 </div>
               </div>
               <span className={`text-sm font-bold ${color(m.tipo)}`}>{sign(m.tipo)}{formatCurrency(m.valor, currency)}</span>

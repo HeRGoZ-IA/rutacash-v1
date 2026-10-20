@@ -39,7 +39,7 @@ export function ChangePasswordCard() {
         </div>
         <div>
           <h3 className="font-semibold text-gray-900 text-sm">Cambiar mi contraseña</h3>
-          <p className="text-xs text-gray-400">Actualiza tu clave de acceso</p>
+          <p className="text-xs text-gray-500">Actualiza tu clave de acceso</p>
         </div>
       </div>
       <div>

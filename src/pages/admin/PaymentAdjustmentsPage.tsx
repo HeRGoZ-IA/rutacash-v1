@@ -93,11 +93,11 @@ export default function PaymentAdjustmentsPage() {
             <div key={r.id} className="flex items-center gap-3 px-4 py-3 flex-wrap">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-gray-900 truncate">{clientName(r.clientId)}</p>
-                <p className="text-xs text-gray-400 truncate">{routeMap.get(r.routeId)?.nombre} · {formatDate(r.requestedAt)}</p>
+                <p className="text-xs text-gray-500 truncate">{routeMap.get(r.routeId)?.nombre} · {formatDate(r.requestedAt)}</p>
                 <p className="text-xs text-gray-500 mt-0.5">Motivo: {r.reason}</p>
               </div>
               <div className="text-right">
-                <p className="text-xs text-gray-400">De {formatCurrency(r.originalValor, currency)}</p>
+                <p className="text-xs text-gray-500">De {formatCurrency(r.originalValor, currency)}</p>
                 <p className="text-sm font-semibold text-primary-700">A {formatCurrency(r.newValor, currency)}</p>
               </div>
               {r.status === 'pending' ? (

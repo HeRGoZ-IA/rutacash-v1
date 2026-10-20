@@ -212,7 +212,7 @@ export default function OfficeDetailPage() {
     <div className="p-4 md:p-6 space-y-6">
       {/* Breadcrumbs: orientación, no una dependencia funcional. Las rutas siguen
           abriéndose igual desde /admin/routes. */}
-      <nav className="flex items-center gap-1.5 text-xs text-gray-400">
+      <nav className="flex items-center gap-1.5 text-xs text-gray-500">
         <Link to="/admin/dashboard" className="hover:text-gray-600">Empresa</Link>
         <ChevronRight className="w-3 h-3" />
         <Link to="/admin/offices" className="hover:text-gray-600">Oficinas</Link>
@@ -264,33 +264,33 @@ export default function OfficeDetailPage() {
 
       {/* Indicadores — calculados SOLO sobre las rutas accesibles de esta Oficina. */}
       <div>
-        <p className="text-xs text-gray-400 mb-2">
+        <p className="text-xs text-gray-500 mb-2">
           Indicadores calculados sobre tus rutas autorizadas en esta oficina.
         </p>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           <Card className="text-center py-3">
             <p className="text-lg font-bold text-primary-600">{kpis.rutasVisibles}</p>
-            <p className="text-xs text-gray-400">Rutas visibles</p>
+            <p className="text-xs text-gray-500">Rutas visibles</p>
           </Card>
           <Card className="text-center py-3">
             <p className="text-lg font-bold text-emerald-600">{kpis.rutasOperativas}</p>
-            <p className="text-xs text-gray-400">Operativas</p>
+            <p className="text-xs text-gray-500">Operativas</p>
           </Card>
           <Card className="text-center py-3">
             <p className={`text-lg font-bold ${kpis.rutasSinCobrador > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{kpis.rutasSinCobrador}</p>
-            <p className="text-xs text-gray-400">Sin Cobrador</p>
+            <p className="text-xs text-gray-500">Sin Cobrador</p>
           </Card>
           <Card className="text-center py-3">
             <p className="text-lg font-bold text-gray-700">{kpis.clientesActivos}</p>
-            <p className="text-xs text-gray-400">Clientes activos</p>
+            <p className="text-xs text-gray-500">Clientes activos</p>
           </Card>
           <Card className="text-center py-3">
             <p className="text-lg font-bold text-gray-700">{kpis.ventasActivas}</p>
-            <p className="text-xs text-gray-400">Ventas activas</p>
+            <p className="text-xs text-gray-500">Ventas activas</p>
           </Card>
           <Card className="text-center py-3">
             <p className={`text-lg font-bold ${kpis.desembolsosPendientes > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{kpis.desembolsosPendientes}</p>
-            <p className="text-xs text-gray-400">Desembolsos pend.</p>
+            <p className="text-xs text-gray-500">Desembolsos pend.</p>
           </Card>
         </div>
         {kpis.carteraEnCalle > 0 && (
@@ -305,25 +305,25 @@ export default function OfficeDetailPage() {
       <div className="space-y-2">
         <div className="flex items-baseline justify-between">
           <h2 className="text-sm font-semibold text-gray-700">Cobranza de hoy</h2>
-          <span className="text-xs text-gray-400">{fecha}</span>
+          <span className="text-xs text-gray-500">{fecha}</span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Card className="py-3">
-            <p className="text-xs text-gray-400">A cobrar hoy</p>
-            <p className="text-base font-bold text-gray-800 truncate">{formatCurrency(ops.aCobrarHoy, currency)}</p>
+            <p className="text-xs text-gray-500">A cobrar hoy</p>
+            <p className="text-base font-bold text-gray-800 tabular-nums">{formatCurrency(ops.aCobrarHoy, currency)}</p>
           </Card>
           <Card className="py-3">
-            <p className="text-xs text-gray-400">Recaudado hoy</p>
-            <p className="text-base font-bold text-emerald-600 truncate">{formatCurrency(ops.recaudadoHoy, currency)}</p>
+            <p className="text-xs text-gray-500">Recaudado hoy</p>
+            <p className="text-base font-bold text-emerald-600 tabular-nums">{formatCurrency(ops.recaudadoHoy, currency)}</p>
           </Card>
           <Card className="py-3">
-            <p className="text-xs text-gray-400">Pendiente hoy</p>
+            <p className="text-xs text-gray-500">Pendiente hoy</p>
             <p className={`text-base font-bold truncate ${ops.pendienteHoy > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
               {formatCurrency(ops.pendienteHoy, currency)}
             </p>
           </Card>
           <Card className="py-3">
-            <p className="text-xs text-gray-400">Cumplimiento</p>
+            <p className="text-xs text-gray-500">Cumplimiento</p>
             <p className={`text-base font-bold ${ops.cumplimiento >= 80 ? 'text-emerald-600' : ops.cumplimiento >= 50 ? 'text-amber-600' : 'text-red-500'}`}>
               {ops.cumplimiento}%
             </p>
@@ -336,26 +336,26 @@ export default function OfficeDetailPage() {
         <h2 className="text-sm font-semibold text-gray-700">Cartera</h2>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <Card className="py-3">
-            <p className="text-xs text-gray-400">Cartera activa</p>
-            <p className="text-base font-bold text-indigo-600 truncate">{formatCurrency(ops.carteraActiva, currency)}</p>
+            <p className="text-xs text-gray-500">Cartera activa</p>
+            <p className="text-base font-bold text-indigo-600 tabular-nums">{formatCurrency(ops.carteraActiva, currency)}</p>
           </Card>
           <Card className="py-3">
-            <p className="text-xs text-gray-400">Cartera vencida</p>
+            <p className="text-xs text-gray-500">Cartera vencida</p>
             <p className={`text-base font-bold truncate ${ops.carteraVencida > 0 ? 'text-red-500' : 'text-gray-400'}`}>
               {formatCurrency(ops.carteraVencida, currency)}
             </p>
           </Card>
           <Card className="py-3 text-center">
             <p className={`text-base font-bold ${ops.clientesConAtraso > 0 ? 'text-red-500' : 'text-gray-400'}`}>{ops.clientesConAtraso}</p>
-            <p className="text-xs text-gray-400">Clientes con atraso</p>
+            <p className="text-xs text-gray-500">Clientes con atraso</p>
           </Card>
           <Card className="py-3 text-center">
             <p className="text-base font-bold text-gray-700">{ops.ventasActivas}</p>
-            <p className="text-xs text-gray-400">Ventas activas</p>
+            <p className="text-xs text-gray-500">Ventas activas</p>
           </Card>
           <Card className="py-3 text-center">
             <p className="text-base font-bold text-gray-700">{ops.parcelasPendientes}</p>
-            <p className="text-xs text-gray-400">Parcelas pendientes</p>
+            <p className="text-xs text-gray-500">Parcelas pendientes</p>
           </Card>
         </div>
       </div>
@@ -367,31 +367,31 @@ export default function OfficeDetailPage() {
           <h2 className="text-sm font-semibold text-gray-700">Resumen financiero</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
             <Card className="py-3">
-              <p className="text-xs text-gray-400">Base total</p>
-              <p className="text-sm font-bold text-primary-700 truncate">{formatCurrency(finance.baseActual, currency)}</p>
+              <p className="text-xs text-gray-500">Base total</p>
+              <p className="text-sm font-bold text-primary-700 tabular-nums">{formatCurrency(finance.baseActual, currency)}</p>
             </Card>
             <Card className="py-3">
-              <p className="text-xs text-gray-400">Total controlado</p>
-              <p className="text-sm font-bold text-gray-800 truncate">{formatCurrency(finance.totalControlado, currency)}</p>
+              <p className="text-xs text-gray-500">Total controlado</p>
+              <p className="text-sm font-bold text-gray-800 tabular-nums">{formatCurrency(finance.totalControlado, currency)}</p>
             </Card>
             <Card className="py-3">
-              <p className="text-xs text-gray-400">Cobros</p>
-              <p className="text-sm font-bold text-emerald-600 truncate">{formatCurrency(finance.cobros, currency)}</p>
+              <p className="text-xs text-gray-500">Cobros</p>
+              <p className="text-sm font-bold text-emerald-600 tabular-nums">{formatCurrency(finance.cobros, currency)}</p>
             </Card>
             <Card className="py-3">
-              <p className="text-xs text-gray-400">Desembolsos</p>
-              <p className="text-sm font-bold text-gray-700 truncate">{formatCurrency(finance.prestamosEntregados, currency)}</p>
+              <p className="text-xs text-gray-500">Desembolsos</p>
+              <p className="text-sm font-bold text-gray-700 tabular-nums">{formatCurrency(finance.prestamosEntregados, currency)}</p>
             </Card>
             <Card className="py-3">
-              <p className="text-xs text-gray-400">Gastos</p>
-              <p className="text-sm font-bold text-amber-600 truncate">{formatCurrency(finance.gastos, currency)}</p>
+              <p className="text-xs text-gray-500">Gastos</p>
+              <p className="text-sm font-bold text-amber-600 tabular-nums">{formatCurrency(finance.gastos, currency)}</p>
             </Card>
             <Card className="py-3">
-              <p className="text-xs text-gray-400">Retiros</p>
-              <p className="text-sm font-bold text-gray-700 truncate">{formatCurrency(finance.retiros, currency)}</p>
+              <p className="text-xs text-gray-500">Retiros</p>
+              <p className="text-sm font-bold text-gray-700 tabular-nums">{formatCurrency(finance.retiros, currency)}</p>
             </Card>
             <Card className="py-3">
-              <p className="text-xs text-gray-400">Transferencias</p>
+              <p className="text-xs text-gray-500">Transferencias</p>
               <p className="text-sm font-bold text-gray-700 truncate">
                 +{formatCurrency(finance.transferenciasEntradas, currency)} / −{formatCurrency(finance.transferenciasSalidas, currency)}
               </p>
@@ -446,7 +446,7 @@ export default function OfficeDetailPage() {
                       <td className="px-4 py-2.5">{fila.routeName}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         {fila.settlement.semanaInicio} – {fila.settlement.semanaFin}
-                        <span className="ml-2 text-xs text-gray-400">v{fila.version}</span>
+                        <span className="ml-2 text-xs text-gray-500">v{fila.version}</span>
                       </td>
                       <td className="px-4 py-2.5">{fila.officeLabel}</td>
                       <td className="px-4 py-2.5">
@@ -492,7 +492,7 @@ export default function OfficeDetailPage() {
                         <MapPin className="w-4 h-4 text-primary-500 flex-shrink-0" />
                         <h3 className="font-semibold text-gray-900 text-sm truncate">{route.nombre}</h3>
                       </div>
-                      <p className="text-xs text-gray-400 ml-6">{route.codigo}{route.ciudad ? ` · ${route.ciudad}` : ''}</p>
+                      <p className="text-xs text-gray-500 ml-6">{route.codigo}{route.ciudad ? ` · ${route.ciudad}` : ''}</p>
                     </div>
                     {f && (
                       <Badge variant={f.state === 'operativa' ? 'success' : f.state === 'inactiva' ? 'gray' : 'warning'}>
@@ -504,15 +504,15 @@ export default function OfficeDetailPage() {
                   <div className="grid grid-cols-3 gap-2">
                     <div className="bg-gray-50 rounded-xl p-2 text-center">
                       <p className="text-sm font-bold text-gray-700">{f?.clientesActivos ?? 0}</p>
-                      <p className="text-xs text-gray-400">Clientes</p>
+                      <p className="text-xs text-gray-500">Clientes</p>
                     </div>
                     <div className="bg-gray-50 rounded-xl p-2 text-center">
                       <p className="text-sm font-bold text-gray-700">{f?.ventasActivas ?? 0}</p>
-                      <p className="text-xs text-gray-400">Ventas</p>
+                      <p className="text-xs text-gray-500">Ventas</p>
                     </div>
                     <div className="bg-gray-50 rounded-xl p-2 text-center">
                       <p className={`text-sm font-bold ${(f?.desembolsosPendientes ?? 0) > 0 ? 'text-amber-600' : 'text-gray-700'}`}>{f?.desembolsosPendientes ?? 0}</p>
-                      <p className="text-xs text-gray-400">Desemb.</p>
+                      <p className="text-xs text-gray-500">Desemb.</p>
                     </div>
                   </div>
 
@@ -546,7 +546,7 @@ export default function OfficeDetailPage() {
                   <div className="border-t border-gray-50 pt-2">
                     {(() => {
                       const enRuta = relatedUsers.filter(u => u.routes.some(r => r.id === route.id))
-                      if (enRuta.length === 0) return <p className="text-xs text-gray-400">Sin usuarios asignados</p>
+                      if (enRuta.length === 0) return <p className="text-xs text-gray-500">Sin usuarios asignados</p>
                       return (
                         <p className="text-xs text-gray-600 leading-snug">
                           <span className="font-medium text-gray-500">Equipo: </span>
@@ -583,7 +583,7 @@ export default function OfficeDetailPage() {
           )}
         </div>
         {relatedUsers.length === 0 ? (
-          <Card><p className="text-xs text-gray-400">Ningún usuario tiene rutas asignadas en esta oficina todavía.</p></Card>
+          <Card><p className="text-xs text-gray-500">Ningún usuario tiene rutas asignadas en esta oficina todavía.</p></Card>
         ) : (
           /* Lista COMPACTA: una fila por usuario. Ocupa poca altura y se escanea de
               un vistazo, sin restar protagonismo a indicadores y rutas. */
@@ -619,11 +619,11 @@ export default function OfficeDetailPage() {
               <div key={a.id} className="flex items-start justify-between gap-3 px-4 py-2">
                 <div className="min-w-0">
                   <p className="text-sm text-gray-700 truncate">{a.descripcion}</p>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-500">
                     {a.routeNombre ?? '—'}{a.actorNombre ? ` · ${a.actorNombre}` : ''}
                   </p>
                 </div>
-                <span className="text-xs text-gray-400 flex-shrink-0">{formatDateTime(a.createdAt)}</span>
+                <span className="text-xs text-gray-500 flex-shrink-0">{formatDateTime(a.createdAt)}</span>
               </div>
             ))}
           </div>
@@ -675,7 +675,7 @@ export default function OfficeDetailPage() {
               value: o.id, label: o.status === 'inactiva' ? `${o.nombre} (inactiva)` : o.nombre,
             }))}
             placeholder={`${NO_OFFICE_LABEL} (quitar de la oficina)`} />
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-500">
             Solo cambia la oficina de la ruta. Sus clientes, ventas, pagos y los usuarios
             asignados no se modifican.
           </p>
@@ -694,7 +694,7 @@ export default function OfficeDetailPage() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Rutas de {office.nombre}</label>
             {accessibleOfficeRoutes.length === 0 ? (
-              <p className="text-xs text-gray-400">No hay rutas que puedas asignar en esta oficina.</p>
+              <p className="text-xs text-gray-500">No hay rutas que puedas asignar en esta oficina.</p>
             ) : (
               <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
                 {accessibleOfficeRoutes.map(r => {
@@ -704,7 +704,7 @@ export default function OfficeDetailPage() {
                       className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-left transition-colors ${marcada ? 'bg-primary-50 border-primary-200' : 'bg-white border-gray-200 hover:bg-gray-50'}`}>
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-gray-800 truncate">{r.nombre}</p>
-                        <p className="text-xs text-gray-400">{r.codigo}</p>
+                        <p className="text-xs text-gray-500">{r.codigo}</p>
                       </div>
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${marcada ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
                         {marcada ? 'Asignada' : 'Asignar'}

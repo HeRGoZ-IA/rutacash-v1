@@ -114,7 +114,7 @@ export default function CollectorSelectRoutePage() {
                     </div>
                     <div className="min-w-0">
                       <p className="font-semibold text-gray-900 text-sm truncate">{route.nombre}</p>
-                      <p className="text-xs text-gray-400">{route.codigo}{route.ciudad ? ` · ${route.ciudad}` : ''}</p>
+                      <p className="text-xs text-gray-500">{route.codigo}{route.ciudad ? ` · ${route.ciudad}` : ''}</p>
                     </div>
                   </div>
                   {isActive && <span className="text-[10px] font-semibold text-primary-600 bg-primary-50 rounded-full px-2 py-0.5">Activa</span>}
@@ -129,16 +129,16 @@ export default function CollectorSelectRoutePage() {
                 <div className="grid grid-cols-3 gap-2 mt-3">
                   <div className="bg-gray-50 rounded-xl p-2 text-center">
                     <p className="text-sm font-bold text-gray-700">{clientes}</p>
-                    <p className="text-xs text-gray-400">Clientes</p>
+                    <p className="text-xs text-gray-500">Clientes</p>
                   </div>
                   <div className="bg-gray-50 rounded-xl p-2 text-center">
                     <p className="text-sm font-bold text-primary-600">{ventasActivas}</p>
-                    <p className="text-xs text-gray-400">Ventas</p>
+                    <p className="text-xs text-gray-500">Ventas</p>
                   </div>
                   {base === undefined ? (
                     <div className="bg-gray-50 rounded-xl p-2 text-center">
                       <p className="text-[clamp(11px,3.4vw,14px)] font-bold text-amber-600 leading-tight break-all">{formatCurrency(cartera, currency)}</p>
-                      <p className="text-xs text-gray-400">Cartera</p>
+                      <p className="text-xs text-gray-500">Cartera</p>
                     </div>
                   ) : (
                     <div className="bg-primary-50 rounded-xl p-2 text-center">
@@ -150,7 +150,7 @@ export default function CollectorSelectRoutePage() {
 
                 {base !== undefined && (
                   <div className="mt-2 flex items-center justify-between rounded-xl bg-gray-50 px-3 py-1.5">
-                    <span className="text-xs text-gray-400">Cartera</span>
+                    <span className="text-xs text-gray-500">Cartera</span>
                     <span className="text-xs font-semibold text-amber-600">{formatCurrency(cartera, currency)}</span>
                   </div>
                 )}

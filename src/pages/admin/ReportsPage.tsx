@@ -251,7 +251,7 @@ export default function ReportsPage() {
                 ))}
               </tbody>
             </table>
-            {rows.length > 100 && <p className="text-xs text-gray-400 mt-2">Mostrando los primeros 100 de {rows.length}. Exporta CSV para ver todos.</p>}
+            {rows.length > 100 && <p className="text-xs text-gray-500 mt-2">Mostrando los primeros 100 de {rows.length}. Exporta CSV para ver todos.</p>}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-12 text-gray-400">

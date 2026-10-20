@@ -254,7 +254,7 @@ export default function CollectorNewClientPage() {
             <input type="checkbox" checked={addSale} onChange={e => setAddSale(e.target.checked)}
               className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
             <span className="text-sm font-medium text-gray-800">Crear venta ahora</span>
-            <span className="text-xs text-gray-400">Registra la venta junto al cliente</span>
+            <span className="text-xs text-gray-500">Registra la venta junto al cliente</span>
           </label>
 
           {addSale && (

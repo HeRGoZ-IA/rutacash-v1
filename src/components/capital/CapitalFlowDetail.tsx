@@ -31,7 +31,7 @@ export function CapitalFlowDetail({ breakdown, currency }: { breakdown: CapitalF
           ))}
         </div>
       ))}
-      <p className="px-4 py-2 text-[11px] text-gray-400">Capital centralizado: los retornos de cuadre, las devoluciones y los cobros no en efectivo vuelven a la bolsa del Administrador responsable; no son retiros voluntarios.</p>
+      <p className="px-4 py-2 text-[11px] text-gray-500">Capital centralizado: los retornos de cuadre, las devoluciones y los cobros no en efectivo vuelven a la bolsa del Administrador responsable; no son retiros voluntarios.</p>
     </div>
   )
 }

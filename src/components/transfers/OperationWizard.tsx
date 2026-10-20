@@ -321,7 +321,7 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial,
             </div>
           )}
           {kind === 'entregar-base' && !modo?.central && (
-            <p className="text-[11px] text-gray-400">
+            <p className="text-[11px] text-gray-500">
               También puedes entregar Base desde Liquidación → Cuadre por trabajador (botón «Entregar Base»). Es la misma operación y no exige cerrar ningún cuadre.
               {routeId && trabajadorId && <> <Link className="text-primary-700 hover:underline" to={`/admin/weekly-settlement?vista=trabajadores&routeId=${encodeURIComponent(routeId)}&userId=${encodeURIComponent(trabajadorId)}&accion=entregar-base`}>Ver su cuadre</Link></>}
             </p>

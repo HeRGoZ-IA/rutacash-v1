@@ -12,7 +12,7 @@ export default function SecretarioAccountPage() {
         <p className="text-sm text-gray-500 mt-0.5">{user?.nombre} · {user ? ROLE_LABELS[user.rol] : ''}</p>
       </div>
       <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4 max-w-md">
-        <p className="text-xs text-gray-400">Correo</p>
+        <p className="text-xs text-gray-500">Correo</p>
         <p className="text-sm font-medium text-gray-800">{user?.email}</p>
       </div>
       <ChangePasswordCard />

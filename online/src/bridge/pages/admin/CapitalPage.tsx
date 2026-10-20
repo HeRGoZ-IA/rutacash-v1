@@ -387,7 +387,7 @@ export default function CapitalPage() {
           <section className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-3" data-testid="admins-capital">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold text-gray-900">Administradores</h2>
-              <span className="text-xs text-gray-400">{adminRows.length + sinBolsa.length} administrador(es)</span>
+              <span className="text-xs text-gray-500">{adminRows.length + sinBolsa.length} administrador(es)</span>
             </div>
             <div className="overflow-x-auto -mx-4 px-4">
               <table className="w-full min-w-[620px] text-sm">
@@ -458,11 +458,11 @@ export default function CapitalPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-right">
-                        <p className="text-xs text-gray-400">Capital colocado</p>
+                        <p className="text-xs text-gray-500">Capital colocado</p>
                         <p className="text-sm font-semibold text-gray-800">{money(capitalColocado(r.id))}</p>
                       </div>
                       <div className="text-right hidden sm:block">
-                        <p className="text-xs text-gray-400">Base de la ruta</p>
+                        <p className="text-xs text-gray-500">Base de la ruta</p>
                         <p className="text-sm font-semibold text-primary-700">{money(summaryByRoute[r.id]?.baseActual ?? 0)}</p>
                       </div>
                       <Button size="sm" variant="secondary" disabled={validRouteAdmins(users, r).filter(a => a.id !== r.capitalControllerAdminId).length === 0}
@@ -501,7 +501,7 @@ export default function CapitalPage() {
                   <div key={r.id} className="bg-white rounded-2xl shadow-card border border-gray-100 p-4" data-testid={`my-route-${r.id}`}>
                     <div className="flex items-center gap-2">
                       <div className="w-9 h-9 bg-primary-100 rounded-xl flex items-center justify-center flex-shrink-0"><MapPin className="w-4 h-4 text-primary-600" /></div>
-                      <div className="min-w-0"><p className="text-sm font-semibold text-gray-900 truncate">{r.nombre}</p><p className="text-xs text-gray-400">{r.codigo}</p></div>
+                      <div className="min-w-0"><p className="text-sm font-semibold text-gray-900 truncate">{r.nombre}</p><p className="text-xs text-gray-500">{r.codigo}</p></div>
                     </div>
                     {central.bloqueos[r.id] && (
                       <p className="mt-2 text-xs font-medium text-amber-700" data-testid={`route-blocked-${r.id}`}>Bloqueada para capital nuevo desde la activación ({central.bloqueos[r.id].estado}). El SuperAdmin debe revisarla y liberarla.</p>
@@ -565,7 +565,7 @@ export default function CapitalPage() {
               <div key={e.id} className="flex items-center justify-between gap-2 py-2">
                 <div className="min-w-0">
                   <p className="text-sm text-gray-900">{LEDGER_LABEL[e.tipo]}{e.routeId ? ` · ${routeName(e.routeId)}` : ''}</p>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-500">
                     {formatDateTime(e.createdAt)} · {e.fromAdminId ? `de ${nombre(e.fromAdminId)}` : e.tipo === 'ADMIN_ALLOCATION' || e.tipo === 'COMPANY_WITHDRAWAL' ? 'de la empresa' : e.tipo === 'COMPANY_DEPOSIT' ? 'externo' : 'sin responsable'}
                     {' → '}{e.toAdminId ? nombre(e.toAdminId) : e.tipo === 'ADMIN_RETURN' || e.tipo === 'COMPANY_DEPOSIT' ? 'empresa' : e.tipo === 'COMPANY_WITHDRAWAL' ? 'externo' : 'sin responsable'}
                     {' · '}registró {e.actorUserId.startsWith('system:') ? 'migración' : nombre(e.actorUserId)}{e.descripcion ? ` · ${e.descripcion}` : ''}
@@ -684,13 +684,13 @@ export default function CapitalPage() {
               <div className="divide-y divide-gray-50 max-h-60 overflow-y-auto">
                 {ledger.filter(e => e.fromAdminId === detailAdmin.adminId || e.toAdminId === detailAdmin.adminId).map(e => (
                   <div key={e.id} className="flex items-center justify-between gap-2 py-1.5 text-sm">
-                    <span className="min-w-0 truncate">{LEDGER_LABEL[e.tipo]}{e.routeId ? ` · ${routeName(e.routeId)}` : ''} <span className="text-xs text-gray-400">{formatDate(e.fecha)}</span></span>
+                    <span className="min-w-0 truncate">{LEDGER_LABEL[e.tipo]}{e.routeId ? ` · ${routeName(e.routeId)}` : ''} <span className="text-xs text-gray-500">{formatDate(e.fecha)}</span></span>
                     <span className={`font-semibold ${e.toAdminId === detailAdmin.adminId ? 'text-emerald-600' : 'text-amber-600'}`}>{signedMoney(e.toAdminId === detailAdmin.adminId ? e.amount : -e.amount, currency)}</span>
                   </div>
                 ))}
                 {movements.filter(m => m.adminId === detailAdmin.adminId).map(m => (
                   <div key={m.id} className="flex items-center justify-between gap-2 py-1.5 text-sm">
-                    <span className="min-w-0 truncate">{m.centralLink ? m.descripcion ?? 'Capital' : 'Capital colocado'} · {routeName(m.routeId)} <span className="text-xs text-gray-400">{formatDate(m.fecha)}</span></span>
+                    <span className="min-w-0 truncate">{m.centralLink ? m.descripcion ?? 'Capital' : 'Capital colocado'} · {routeName(m.routeId)} <span className="text-xs text-gray-500">{formatDate(m.fecha)}</span></span>
                     <span className="font-semibold text-amber-600">{signedMoney(-m.valor, currency)}</span>
                   </div>
                 ))}
@@ -707,7 +707,7 @@ export default function CapitalPage() {
           {events.filter(e => e.routeId === historyRouteId).map(e => (
             <div key={e.id} className="py-2">
               <p className="text-sm text-gray-900 flex items-center gap-1.5"><UserCog className="w-4 h-4 text-gray-400" />{EVENT_LABEL[e.kind]}: {e.fromAdminId ? nombre(e.fromAdminId) : 'ninguno'} → {e.toAdminId ? nombre(e.toAdminId) : 'ninguno'}</p>
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-gray-500">
                 {formatDateTime(e.createdAt)} · registró {e.actorUserId.startsWith('system:') ? 'migración' : nombre(e.actorUserId)} · capital traspasado {money(e.capitalTransferido)}
                 {e.baseAlCambio !== undefined ? ` · Base al cambio ${money(e.baseAlCambio)}` : ''}{e.motivo ? ` · ${e.motivo}` : ''}
               </p>
@@ -735,7 +735,7 @@ export default function CapitalPage() {
                           {estado === 'reversion' ? 'Reversión de capital' : m.descripcion || 'Capital colocado'}
                           {estado === 'anulado' && <AnnulledBadge />}
                         </p>
-                        <p className="text-xs text-gray-400">{formatDate(m.fecha)} · {m.adminId ? `bolsa de ${nombre(m.adminId)}` : 'anterior a la asignación por Administrador'}{estado === 'reversion' && m.reversalReason ? ` · Motivo: ${m.reversalReason}` : ''}</p>
+                        <p className="text-xs text-gray-500">{formatDate(m.fecha)} · {m.adminId ? `bolsa de ${nombre(m.adminId)}` : 'anterior a la asignación por Administrador'}{estado === 'reversion' && m.reversalReason ? ` · Motivo: ${m.reversalReason}` : ''}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">

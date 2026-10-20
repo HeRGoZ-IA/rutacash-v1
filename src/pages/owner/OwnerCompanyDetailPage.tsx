@@ -145,7 +145,7 @@ export default function OwnerCompanyDetailPage() {
   const statusVariant = record.status === 'active' ? 'success' : record.status === 'suspended' ? 'danger' : 'warning'
   const dato = (label: string, value: string) => (
     <div>
-      <p className="text-xs text-gray-400">{label}</p>
+      <p className="text-xs text-gray-500">{label}</p>
       <p className="text-sm text-gray-900 font-medium">{value}</p>
     </div>
   )
@@ -188,7 +188,7 @@ export default function OwnerCompanyDetailPage() {
         {dato('Cobro esperado', formatCurrency(expectedPeriodAmount(record)))}
         {dato('Próximo cobro', record.nextBillingDate ? formatDate(record.nextBillingDate) : '—')}
         <div>
-          <p className="text-xs text-gray-400">Estado de pago</p>
+          <p className="text-xs text-gray-500">Estado de pago</p>
           <Badge variant={record.paymentStatus === 'paid' ? 'success' : record.paymentStatus === 'overdue' ? 'danger' : 'warning'} size="sm">
             {SAAS_PAYMENT_STATUS_LABEL[record.paymentStatus]}
           </Badge>
@@ -206,10 +206,10 @@ export default function OwnerCompanyDetailPage() {
                 <div key={p.id} className="px-5 py-3 flex items-center gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900">{p.periodo}</p>
-                    <p className="text-xs text-gray-400">
+                    <p className="text-xs text-gray-500">
                       Esperado {formatDate(p.fechaEsperada)}{p.fechaPagada ? ` · Pagado ${formatDate(p.fechaPagada)}` : ''}
                     </p>
-                    {p.nota && <p className="text-xs text-gray-400 mt-0.5">{p.nota}</p>}
+                    {p.nota && <p className="text-xs text-gray-500 mt-0.5">{p.nota}</p>}
                   </div>
                   <span className="text-sm tabular-nums text-gray-700">{formatCurrency(p.valor)}</span>
                   <Badge variant={p.status === 'paid' ? 'success' : p.status === 'overdue' ? 'danger' : 'warning'} size="sm">
@@ -231,10 +231,10 @@ export default function OwnerCompanyDetailPage() {
             <div className="divide-y divide-gray-50 max-h-[420px] overflow-y-auto">
               {events.map(e => (
                 <div key={e.id} className="px-5 py-2.5 flex items-start gap-3">
-                  <span className="text-xs text-gray-400 tabular-nums w-32 flex-shrink-0">{formatDateTime(e.at)}</span>
+                  <span className="text-xs text-gray-500 tabular-nums w-32 flex-shrink-0">{formatDateTime(e.at)}</span>
                   <div className="min-w-0">
                     <p className="text-sm text-gray-800">{CONTROL_EVENT_LABEL[e.type]}</p>
-                    {e.detail && <p className="text-xs text-gray-400">{e.detail}</p>}
+                    {e.detail && <p className="text-xs text-gray-500">{e.detail}</p>}
                   </div>
                 </div>
               ))}

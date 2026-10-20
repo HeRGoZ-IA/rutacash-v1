@@ -97,7 +97,7 @@ export default function MovementReceiptPage() {
           Este comprobante acredita que el movimiento quedó registrado en ADEX Soluciones con la referencia indicada.
           No acredita la entrega ni la recepción física del efectivo, y no incluye firmas ni autorizaciones distintas de las registradas.
         </p>
-        <p className="mt-1 text-[11px] text-gray-400">Generado el {formatDateTime(new Date().toISOString())} por {user?.nombre ?? ''}.</p>
+        <p className="mt-1 text-[11px] text-gray-500">Generado el {formatDateTime(new Date().toISOString())} por {user?.nombre ?? ''}.</p>
         <div className="mt-6 flex flex-wrap gap-2 print:hidden">
           <button type="button" onClick={() => window.print()}
             className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-lg bg-primary-600 hover:bg-primary-700 text-white shadow-sm">

@@ -186,7 +186,7 @@ function ClientCard({ item, currency, onPayment, onNoPayment, onView }: {
             <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${st.dot}`} />
             <div className="min-w-0">
               <p className="font-semibold text-gray-900 text-sm truncate">{client.nombre}</p>
-              <p className="text-xs text-gray-400">{client.documento}</p>
+              <p className="text-xs text-gray-500">{client.documento}</p>
             </div>
           </div>
           <div className="flex flex-col items-end gap-1">
@@ -196,27 +196,27 @@ function ClientCard({ item, currency, onPayment, onNoPayment, onView }: {
         </div>
 
         {notScheduled && atrasadas === 0 && (
-          <div className="flex items-center flex-wrap gap-1.5 text-xs text-gray-400 mb-2">
+          <div className="flex items-center flex-wrap gap-1.5 text-xs text-gray-500 mb-2">
             <span>Días de cobro:</span> <PaymentDaysBadges days={sale.paymentDays} size="sm" />
           </div>
         )}
 
         <div className="grid grid-cols-3 gap-2 mb-2">
           <div className="bg-gray-50 rounded-xl p-2 text-center">
-            <p className="text-xs text-gray-400">Saldo</p>
+            <p className="text-xs text-gray-500">Saldo</p>
             <p className="text-sm font-bold text-amber-600">{formatCurrency(sale.saldo, currency)}</p>
           </div>
           <div className="bg-gray-50 rounded-xl p-2 text-center">
-            <p className="text-xs text-gray-400">Parcela</p>
+            <p className="text-xs text-gray-500">Parcela</p>
             <p className="text-sm font-bold text-primary-600">{formatCurrency(currentInstallment?.valor ?? sale.valorCuota, currency)}</p>
           </div>
           <div className="bg-gray-50 rounded-xl p-2 text-center">
-            <p className="text-xs text-gray-400">Parcelas</p>
+            <p className="text-xs text-gray-500">Parcelas</p>
             <p className="text-sm font-bold text-gray-700">{lastPaidNumber}/{sale.numeroCuotas}</p>
           </div>
         </div>
 
-        <div className="flex items-center justify-between text-xs text-gray-400 mb-3">
+        <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
           <span>Último abono: {ultimoAbono ? formatDate(ultimoAbono) : '—'}</span>
           {atrasadas > 0 && <span className="text-red-500 font-medium">{atrasadas} parcela(s) atrasada(s) · {diasAtraso}d</span>}
         </div>

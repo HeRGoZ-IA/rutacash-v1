@@ -92,7 +92,7 @@ export default function OwnerDashboardPage() {
                 className="w-full flex items-center gap-4 px-5 py-3 hover:bg-gray-50 text-left transition-colors">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">{c.nombre}</p>
-                  <p className="text-xs text-gray-400">Alta {formatDate(c.createdAt)}</p>
+                  <p className="text-xs text-gray-500">Alta {formatDate(c.createdAt)}</p>
                 </div>
                 <span className="text-xs text-gray-500 tabular-nums">{c.billableRouteCount} rutas fact.</span>
                 <span className="text-xs font-medium text-gray-600">{COMMERCIAL_STATUS_LABEL[c.status]}</span>

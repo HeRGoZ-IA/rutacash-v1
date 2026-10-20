@@ -177,11 +177,11 @@ export default function SecretarioAuthorizationsPage() {
               <button key={r.id} onClick={() => openDetail(r)} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-primary-50/40 transition-colors">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-gray-900 truncate">{c?.nombre ?? 'Cliente'}</p>
-                  <p className="text-xs text-gray-400 truncate">{routeMap.get(r.routeId)?.nombre} · {formatDate(r.requestedAt)}</p>
+                  <p className="text-xs text-gray-500 truncate">{routeMap.get(r.routeId)?.nombre} · {formatDate(r.requestedAt)}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className="text-sm font-semibold text-gray-900">{formatCurrency(r.amount, currency)}</p>
-                  <p className="text-xs text-gray-400">{r.installmentsCount} parcelas</p>
+                  <p className="text-xs text-gray-500">{r.installmentsCount} parcelas</p>
                 </div>
                 <Badge variant="warning" size="sm">Pendiente</Badge>
               </button>

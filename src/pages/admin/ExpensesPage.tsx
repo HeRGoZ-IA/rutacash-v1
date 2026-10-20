@@ -258,8 +258,8 @@ export default function ExpensesPage() {
                           </span>
                         )}
                       </p>
-                      <p className="text-xs text-gray-400">{bolsa ?? atribucionDe(e)} · {formatDate(e.fecha)}{e.userId ? ` · registró ${getUserName(e.userId)}` : ''}</p>
-                      {e.descripcion && <p className="text-xs text-gray-400 break-words">{e.descripcion}{e.referencia ? ` · Ref. ${e.referencia}` : ''}</p>}
+                      <p className="text-xs text-gray-500">{bolsa ?? atribucionDe(e)} · {formatDate(e.fecha)}{e.userId ? ` · registró ${getUserName(e.userId)}` : ''}</p>
+                      {e.descripcion && <p className="text-xs text-gray-500 break-words">{e.descripcion}{e.referencia ? ` · Ref. ${e.referencia}` : ''}</p>}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0 ml-auto">

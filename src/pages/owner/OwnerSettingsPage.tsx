@@ -85,9 +85,9 @@ export default function OwnerSettingsPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">
                     {o.nombre}
-                    {o.id === owner?.id && <span className="text-xs text-gray-400 font-normal"> · tú</span>}
+                    {o.id === owner?.id && <span className="text-xs text-gray-500 font-normal"> · tú</span>}
                   </p>
-                  <p className="text-xs text-gray-400 truncate">{o.email}</p>
+                  <p className="text-xs text-gray-500 truncate">{o.email}</p>
                 </div>
                 <span className="text-xs text-gray-500">
                   {o.lastLoginAt ? `Último acceso ${formatDateTime(o.lastLoginAt)}` : 'Sin acceder todavía'}
@@ -97,7 +97,7 @@ export default function OwnerSettingsPage() {
             ))}
           </div>
         )}
-        <p className="px-5 py-3 text-xs text-gray-400 border-t border-gray-50">
+        <p className="px-5 py-3 text-xs text-gray-500 border-t border-gray-50">
           Los Owners se crean únicamente desde aquí. La pantalla de acceso solo permite
           crear el primero, cuando la instalación aún no tiene ninguno.
         </p>

@@ -216,14 +216,14 @@ export default function SettingsPage() {
                     value={form.fechaVencimiento}
                     onChange={e => setForm(f => ({ ...f, fechaVencimiento: e.target.value }))} required />
                 )}
-                <p className="text-xs text-gray-400">El plan comercial queda pendiente de definición; no se edita aquí.</p>
+                <p className="text-xs text-gray-500">El plan comercial queda pendiente de definición; no se edita aquí.</p>
                 {/* ADEX Online */}
-                <p className="text-xs text-gray-400">En ADEX Online el estado y la vigencia los gestiona el proveedor del servicio.</p>
+                <p className="text-xs text-gray-500">En ADEX Online el estado y la vigencia los gestiona el proveedor del servicio.</p>
               </div>
             )}
 
             <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-gray-500">
                 {form.pais && form.ciudad && form.nombre && form.nombre !== 'Mi Empresa'
                   ? 'Empresa configurada correctamente'
                   : 'Completa nombre, país y ciudad para marcar este paso como hecho'}
@@ -262,7 +262,7 @@ export default function SettingsPage() {
             <p><span className="font-medium">Estado:</span> Zustand</p>
           </div>
           <div className="pt-2 border-t border-gray-100">
-            <p className="text-xs text-gray-400">V2 incluirá backend Supabase, app Android nativa y más. Ver docs/future-roadmap.md</p>
+            <p className="text-xs text-gray-500">V2 incluirá backend Supabase, app Android nativa y más. Ver docs/future-roadmap.md</p>
           </div>
         </div>
 

@@ -152,7 +152,7 @@ export default function MovementHistoryPage() {
                       {e.estado !== 'vigente' && <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${TONO_ESTADO[e.estado]}`}>{HISTORY_STATE_LABEL[e.estado]}</span>}
                     </p>
                     <p className="text-xs text-gray-600 break-words">{accountLabel(e.origen, nombres)} → {accountLabel(e.destino, nombres)}</p>
-                    <p className="text-xs text-gray-400 break-words">{formatDateTime(e.createdAt)} · registró {userName(e.registradoPor)} · Ref. {e.id.slice(0, 8).toUpperCase()}</p>
+                    <p className="text-xs text-gray-500 break-words">{formatDateTime(e.createdAt)} · registró {userName(e.registradoPor)} · Ref. {e.id.slice(0, 8).toUpperCase()}</p>
                   </div>
                   <span className={`text-sm font-bold whitespace-nowrap ${e.estado === 'anulado' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{money(e.importe)}</span>
                 </div>
@@ -209,7 +209,7 @@ export default function MovementHistoryPage() {
             )}
             {detalle.corrigeA && <p className="text-xs">Corrige a: <button type="button" className="text-primary-700 hover:underline" data-testid="link-original" onClick={() => setAbierta(detalle.corrigeA!)}>Ref. {detalle.corrigeA.split(':')[1].slice(0, 8).toUpperCase()}</button></p>}
             {detalle.corregidoPor.length > 0 && <p className="text-xs">Corregido por: {detalle.corregidoPor.map(c => <button key={c} type="button" className="text-primary-700 hover:underline mr-2" data-testid="link-correction" onClick={() => setAbierta(c)}>Ref. {c.split(':')[1].slice(0, 8).toUpperCase()}</button>)}</p>}
-            <p className="text-[11px] text-gray-400">El registro acredita que la operación quedó anotada en ADEX. No acredita la entrega o recepción física del efectivo.</p>
+            <p className="text-[11px] text-gray-500">El registro acredita que la operación quedó anotada en ADEX. No acredita la entrega o recepción física del efectivo.</p>
           </div>
         )}
       </Modal>

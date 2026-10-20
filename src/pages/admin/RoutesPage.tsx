@@ -489,7 +489,7 @@ export default function RoutesPage() {
                     <MapPin className="w-4 h-4 text-primary-500" />
                     <h3 className="font-semibold text-gray-900 text-sm">{route.nombre}</h3>
                   </div>
-                  <p className="text-xs text-gray-400 ml-6">{route.codigo}{route.ciudad ? ` · ${route.ciudad}` : ''}</p>
+                  <p className="text-xs text-gray-500 ml-6">{route.codigo}{route.ciudad ? ` · ${route.ciudad}` : ''}</p>
                   <p className={`text-xs ml-6 mt-0.5 font-medium ${route.officeId ? 'text-gray-500' : 'text-gray-400'}`}>
                     <Building2 className="w-3 h-3 inline-block mr-1 -mt-0.5" />{officeNameOf(route)}
                   </p>
@@ -516,33 +516,33 @@ export default function RoutesPage() {
               <div className="grid grid-cols-2 gap-2">
                 <div className="bg-primary-50 rounded-xl p-3">
                   <p className="text-sm font-bold text-primary-700 truncate">{summaryByRoute[route.id] ? formatCurrency(summaryByRoute[route.id].baseActual, currency) : '—'}</p>
-                  <p className="text-xs text-gray-400">Base de la ruta</p>
+                  <p className="text-xs text-gray-500">Base de la ruta</p>
                 </div>
                 <div className="bg-indigo-50 rounded-xl p-3">
-                  <p className="text-sm font-bold text-indigo-600 truncate">{formatCurrency(summaryByRoute[route.id]?.carteraEnCalle ?? 0, currency)}</p>
-                  <p className="text-xs text-gray-400">Cartera Activa</p>
+                  <p className="text-sm font-bold text-indigo-600 tabular-nums">{formatCurrency(summaryByRoute[route.id]?.carteraEnCalle ?? 0, currency)}</p>
+                  <p className="text-xs text-gray-500">Cartera Activa</p>
                 </div>
                 {central.bloqueos[route.id] && (
                   <p className="col-span-2 text-xs font-medium text-amber-700" data-testid={`routes-blocked-${route.id}`}>Bloqueada para capital nuevo desde la activación del capital centralizado.</p>
                 )}
               </div>
               <div className="bg-gray-50 rounded-xl p-2.5 flex items-center justify-between">
-                <p className="text-xs text-gray-400">Total controlado</p>
+                <p className="text-xs text-gray-500">Total controlado</p>
                 <p className="text-sm font-bold text-gray-800">{formatCurrency(summaryByRoute[route.id]?.totalControlado ?? 0, currency)}</p>
               </div>
 
               <div className="grid grid-cols-3 gap-2">
                 <div className="bg-gray-50 rounded-xl p-2.5 text-center">
                   <p className="text-base font-bold text-primary-600">{summaryByRoute[route.id]?.ventasActivas ?? 0}</p>
-                  <p className="text-xs text-gray-400">Ventas</p>
+                  <p className="text-xs text-gray-500">Ventas</p>
                 </div>
                 <div className="bg-gray-50 rounded-xl p-2.5 text-center">
                   <p className="text-base font-bold text-emerald-600">{summaryByRoute[route.id]?.clientesActivos ?? 0}</p>
-                  <p className="text-xs text-gray-400">Clientes</p>
+                  <p className="text-xs text-gray-500">Clientes</p>
                 </div>
                 <div className="bg-gray-50 rounded-xl p-2.5 text-center">
                   <p className="text-base font-bold text-gray-700">{route.tasaInteres}%</p>
-                  <p className="text-xs text-gray-400">Tasa</p>
+                  <p className="text-xs text-gray-500">Tasa</p>
                 </div>
               </div>
 
@@ -575,14 +575,14 @@ export default function RoutesPage() {
 
       {/* Create / Edit modal. X y Cancelar NO guardan (confirman descarte si hay
           cambios). Actualizar/Crear persiste y cierra solo tras el éxito. */}
-      <Modal open={modalOpen} onClose={tryCloseModal} title={editing ? 'Editar ruta' : 'Nueva ruta'}
+      <Modal open={modalOpen} onClose={tryCloseModal} guarded title={editing ? 'Editar ruta' : 'Nueva ruta'}
         footer={<><Button variant="secondary" onClick={tryCloseModal} disabled={saving}>Cancelar</Button><Button onClick={() => handleSave()} loading={saving}>{editing ? 'Actualizar' : 'Crear'}</Button></>}>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Input label="Nombre de la ruta" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required />
             <Input label="Ciudad" value={form.ciudad} onChange={e => setForm(f => ({ ...f, ciudad: e.target.value }))} placeholder="Ej: Barranquilla" />
           </div>
-          {editing && <p className="text-xs text-gray-400">Código de ruta: <span className="font-medium text-gray-600">{editing.codigo}</span></p>}
+          {editing && <p className="text-xs text-gray-500">Código de ruta: <span className="font-medium text-gray-600">{editing.codigo}</span></p>}
 
           {/* OFICINA: OPCIONAL, tanto al crear como al editar. Cambiarla aquí MUEVE la
               ruta de Oficina: una sola escritura sobre la ruta, sin tocar clientes,
@@ -670,7 +670,7 @@ export default function RoutesPage() {
                 <label className="text-sm font-medium text-gray-700">Usuarios asignados a esta ruta</label>
               </div>
               {assignableGroups.length === 0 ? (
-                <p className="text-xs text-gray-400">No hay usuarios que puedas asignar.</p>
+                <p className="text-xs text-gray-500">No hay usuarios que puedas asignar.</p>
               ) : (
                 <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                   {assignableGroups.map(g => (
@@ -686,7 +686,7 @@ export default function RoutesPage() {
                             className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-left transition-colors ${member ? 'bg-primary-50 border-primary-200' : 'bg-white border-gray-200 hover:bg-gray-50'}`}>
                             <div className="min-w-0">
                               <p className="text-sm font-medium text-gray-800 truncate">{u.nombre}</p>
-                              <p className="text-xs text-gray-400">{ROLE_LABELS[u.rol]}{g.rol === 'cobrador' && member ? ` · ${isResp ? 'Responsable' : 'Asignado'}` : ''}{u.status !== 'activo' ? ' · inactivo' : ''}</p>
+                              <p className="text-xs text-gray-500">{ROLE_LABELS[u.rol]}{g.rol === 'cobrador' && member ? ` · ${isResp ? 'Responsable' : 'Asignado'}` : ''}{u.status !== 'activo' ? ' · inactivo' : ''}</p>
                             </div>
                             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${isResp ? 'bg-amber-500 text-white' : member ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
                               {tag}

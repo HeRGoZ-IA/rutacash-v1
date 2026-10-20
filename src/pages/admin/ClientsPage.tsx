@@ -340,7 +340,7 @@ export default function ClientsPage() {
                     <td className="px-4 py-3">
                       <div>
                         <p className="text-sm font-medium text-gray-900">{c.nombre}</p>
-                        {c.negocio && <p className="text-xs text-gray-400 truncate max-w-xs">{c.negocio}</p>}
+                        {c.negocio && <p className="text-xs text-gray-500 truncate max-w-xs">{c.negocio}</p>}
                       </div>
                     </td>
                     <td className="px-4 py-3 hidden sm:table-cell">
@@ -382,7 +382,7 @@ export default function ClientsPage() {
       )}
 
       {/* Create/Edit Modal */}
-      <Modal open={modalOpen} onClose={tryCloseModal} title={editing ? 'Editar cliente' : 'Nuevo cliente'} size="mdPlus"
+      <Modal open={modalOpen} onClose={tryCloseModal} guarded title={editing ? 'Editar cliente' : 'Nuevo cliente'} size="mdPlus"
         footer={<><Button variant="secondary" onClick={tryCloseModal} disabled={saving}>Cancelar</Button><Button onClick={handleSave} loading={saving} disabled={!!dupClient || capExcedido}>{editing ? 'Actualizar' : addSale ? 'Crear cliente y crédito' : 'Crear cliente'}</Button></>}>
         <div className="space-y-4">
           {/* Documento primero (Paquete 2.5) con validación de duplicado global */}
@@ -439,7 +439,7 @@ export default function ClientsPage() {
                   className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                 />
                 <span className="text-sm font-medium text-gray-800">Crear crédito ahora</span>
-                <span className="text-xs text-gray-400">Agrega una venta al guardar el cliente</span>
+                <span className="text-xs text-gray-500">Agrega una venta al guardar el cliente</span>
               </label>
 
               {addSale && (
@@ -447,12 +447,12 @@ export default function ClientsPage() {
                   <p className="text-xs text-gray-500">
                     El crédito se crea en la ruta del cliente: <span className="font-medium text-gray-700">{routes.find(r => r.id === form.routeId)?.nombre ?? 'sin ruta'}</span>
                   </p>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <MoneyInput label="Valor del préstamo" currency={currency} value={saleForm.valorVenta} onValueChange={v => setSaleForm(f => ({ ...f, valorVenta: v }))} required />
                     <Select label="Tasa interés" value={String(saleForm.tasaInteres)} onChange={e => setSaleForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={TASA_OPTIONS} />
                     <Input label="N° de parcelas" type="number" min={1} required value={saleForm.numeroCuotas || ''} onChange={e => { const v = e.target.value; setSaleForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Select label="Frecuencia de pago" value={saleForm.frecuenciaPago} onChange={e => setSaleForm(f => ({ ...f, frecuenciaPago: e.target.value as Sale['frecuenciaPago'] }))} options={FREQ_OPTIONS} />
                     <Input label="Fecha inicio de cobro" type="date" min={today()} value={saleForm.fechaInicio} onChange={e => setSaleForm(f => ({ ...f, fechaInicio: e.target.value }))} hint="No puede ser anterior a hoy" />
                   </div>
@@ -475,7 +475,7 @@ export default function ClientsPage() {
                         )
                       })}
                     </div>
-                    <p className="mt-1 text-xs text-gray-400">Selecciona los días en que se cobrará. Para frecuencia semanal puedes dejar un solo día.</p>
+                    <p className="mt-1 text-xs text-gray-500">Selecciona los días en que se cobrará. Para frecuencia semanal puedes dejar un solo día.</p>
                   </div>
                   {capDisponible != null && (
                     <div className={`rounded-xl p-3 text-sm border ${capExcedido ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>
@@ -523,8 +523,8 @@ export default function ClientsPage() {
                 </div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Ruta</p><p className="text-sm font-medium text-gray-800">{getRouteName(selected.routeId)}</p></div>
-                <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Registro</p><p className="text-sm font-medium text-gray-800">{selected.createdAt ? formatDate(selected.createdAt) : 'Sin fecha'}</p></div>
+                <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-500">Ruta</p><p className="text-sm font-medium text-gray-800">{getRouteName(selected.routeId)}</p></div>
+                <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-500">Registro</p><p className="text-sm font-medium text-gray-800">{selected.createdAt ? formatDate(selected.createdAt) : 'Sin fecha'}</p></div>
               </div>
 
               {/* B. Información de contacto */}
@@ -553,7 +553,7 @@ export default function ClientsPage() {
               <div>
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Resumen financiero</p>
                 {detailLoading ? (
-                  <p className="text-xs text-gray-400">Cargando…</p>
+                  <p className="text-xs text-gray-500">Cargando…</p>
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <MiniStat label="Ventas" value={String(detailSales.length)} />
@@ -576,7 +576,7 @@ export default function ClientsPage() {
               <div>
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Abonos recientes</p>
                 {detailPayments.length === 0 ? (
-                  <p className="text-xs text-gray-400">Sin abonos registrados.</p>
+                  <p className="text-xs text-gray-500">Sin abonos registrados.</p>
                 ) : (
                   <div className="space-y-1.5 max-h-44 overflow-y-auto">
                     {/* Sin asientos técnicos de reversión: el anulado se muestra tachado con su motivo. */}
@@ -588,7 +588,7 @@ export default function ClientsPage() {
                           <div className="flex items-center justify-between">
                             <div className="min-w-0">
                               <p className="text-sm font-medium text-gray-800">{formatDate(p.fecha)}</p>
-                              <p className="text-xs text-gray-400 truncate">Venta {sale ? formatCurrency(sale.valorVenta, currency) : '—'}{p.observacion ? ` · ${p.observacion}` : ''}</p>
+                              <p className="text-xs text-gray-500 truncate">Venta {sale ? formatCurrency(sale.valorVenta, currency) : '—'}{p.observacion ? ` · ${p.observacion}` : ''}</p>
                             </div>
                             <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                               <PaymentStateBadge state={estado} />
@@ -629,7 +629,7 @@ function ContactRow({ icon, label, value }: { icon: React.ReactNode; label: stri
     <div className="flex items-start gap-3 px-3 py-2.5">
       <div className="mt-0.5 flex-shrink-0">{icon}</div>
       <div className="min-w-0">
-        <p className="text-xs text-gray-400">{label}</p>
+        <p className="text-xs text-gray-500">{label}</p>
         <p className="text-sm text-gray-800 break-words">{value}</p>
       </div>
     </div>
@@ -650,7 +650,7 @@ function PhotoCard({ label, url }: { label: string; url?: string }) {
       <p className="text-xs text-gray-500 mb-1">{label}</p>
       <div className="w-full h-28 rounded-xl border border-dashed border-gray-200 bg-gray-50 flex flex-col items-center justify-center text-gray-300 gap-1">
         <ImageOff className="w-5 h-5" />
-        <span className="text-[11px] text-gray-400">Sin foto</span>
+        <span className="text-[11px] text-gray-500">Sin foto</span>
       </div>
     </div>
   )
@@ -660,7 +660,7 @@ function MiniStat({ label, value, color = 'text-gray-800' }: { label: string; va
   return (
     <div className="bg-gray-50 rounded-xl p-2.5 text-center">
       <p className={`text-sm font-bold leading-tight truncate ${color}`}>{value}</p>
-      <p className="text-[11px] text-gray-400 mt-0.5">{label}</p>
+      <p className="text-[11px] text-gray-500 mt-0.5">{label}</p>
     </div>
   )
 }

@@ -101,7 +101,7 @@ export default function SocioDashboardPage() {
               <div key={r.id} className="bg-white rounded-2xl border border-gray-100 shadow-card p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="font-semibold text-gray-900 text-sm">{r.nombre}</p>
-                  <span className="text-xs text-gray-400">{r.codigo}</span>
+                  <span className="text-xs text-gray-500">{r.codigo}</span>
                 </div>
                 {s ? (
                   <div className="grid grid-cols-2 gap-2 text-sm">
@@ -112,7 +112,7 @@ export default function SocioDashboardPage() {
                     <Line label="Ventas activas" value={String(s.ventasActivas)} />
                     <Line label="Clientes activos" value={String(s.clientesActivos)} />
                   </div>
-                ) : <p className="text-xs text-gray-400">Calculando…</p>}
+                ) : <p className="text-xs text-gray-500">Calculando…</p>}
               </div>
             )
           })}
@@ -128,7 +128,7 @@ export default function SocioDashboardPage() {
 function Line({ label, value }: { label: string; value: string }) {
   return (
     <div className="bg-gray-50 rounded-lg px-2.5 py-1.5">
-      <p className="text-[11px] text-gray-400 leading-tight">{label}</p>
+      <p className="text-[11px] text-gray-500 leading-tight">{label}</p>
       <p className="font-semibold text-gray-800 text-xs">{value}</p>
     </div>
   )

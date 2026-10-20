@@ -524,7 +524,8 @@ try {
   await click('Abonar', { within: [CARLOS, '1.200.000'] })
   await page.waitForFunction(() => location.pathname.includes('/payment/'), { timeout: TIMEOUT })
   await escribirEn(await hasta(() => page.$('input[inputmode=numeric]'), 'campo del abono'), 300000)
-  await click('Registrar abono')
+  // Ronda 48: el botón muestra el importe («Registrar $ 300.000»).
+  await click('Registrar')
   await esperarTexto('Volver a la ruta')
   paso('gasto de Juan (100.000)')
   await ir('/collector/expenses')

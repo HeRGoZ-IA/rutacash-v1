@@ -151,7 +151,7 @@ export default function CentralCapitalTransitionPage() {
       <section className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-3" data-testid="central-diagnosis">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-gray-900">1. Diagnóstico por ruta</h2>
-          <span className="text-xs text-gray-400">Solo lectura: no mueve ni corrige dinero</span>
+          <span className="text-xs text-gray-500">Solo lectura: no mueve ni corrige dinero</span>
         </div>
         {!diag ? <p className="text-sm text-gray-400">Calculando…</p> : diag.rutas.length === 0 ? <p className="text-sm text-gray-400">No hay rutas en tu alcance.</p> : (
           <div className="space-y-3">

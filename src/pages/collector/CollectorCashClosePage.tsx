@@ -232,11 +232,11 @@ export default function CollectorCashClosePage() {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4">
-              <div className="flex items-center gap-1.5 text-xs text-gray-400"><Wallet className="w-3.5 h-3.5" /> Base de la ruta</div>
+              <div className="flex items-center gap-1.5 text-xs text-gray-500"><Wallet className="w-3.5 h-3.5" /> Base de la ruta</div>
               <p className="text-lg font-bold text-primary-700 mt-1">{formatCurrency(route.baseActual, currency)}</p>
             </div>
             <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4">
-              <div className="flex items-center gap-1.5 text-xs text-gray-400"><MapPin className="w-3.5 h-3.5" /> Cartera activa</div>
+              <div className="flex items-center gap-1.5 text-xs text-gray-500"><MapPin className="w-3.5 h-3.5" /> Cartera activa</div>
               <p className="text-lg font-bold text-indigo-600 mt-1">{formatCurrency(route.carteraEnCalle, currency)}</p>
             </div>
           </div>

@@ -352,7 +352,7 @@ export default function PaymentPage() {
           <div className="bg-white rounded-2xl border border-gray-200 p-4">
             <label htmlFor="payment-note" className="block text-sm font-medium text-gray-700 mb-2">Observación (opcional)</label>
             <textarea id="payment-note" value={observacion} onChange={e => setObservacion(e.target.value)} rows={2}
-              className="w-full rounded-xl border border-gray-200 p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary-500" />
+              className="w-full rounded-xl border border-gray-200 p-3 text-base sm:text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary-500" />
           </div>
 
           {/* Resumen antes de confirmar (Ronda 48 · H-05): qué se registra y cómo queda. */}

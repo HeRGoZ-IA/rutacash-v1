@@ -143,7 +143,7 @@ export default function SecretarioClientsPage() {
                 <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center text-primary-700 font-bold text-sm flex-shrink-0">{c.nombre.charAt(0)}</div>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-gray-900 truncate">{c.nombre}</p>
-                  <p className="text-xs text-gray-400 truncate">{c.documento} · {c.telefonoPrincipal} · {routeName(c.routeId)}</p>
+                  <p className="text-xs text-gray-500 truncate">{c.documento} · {c.telefonoPrincipal} · {routeName(c.routeId)}</p>
                 </div>
               </button>
               {/* CONSULTA DE HISTORIAL: créditos que ha tenido el cliente, con valor,

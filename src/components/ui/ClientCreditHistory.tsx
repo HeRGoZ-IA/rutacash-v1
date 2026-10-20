@@ -62,7 +62,7 @@ export function ClientCreditHistory({ client, title = 'Historial de créditos' }
     )
   }
 
-  if (loading) return <p className="text-xs text-gray-400">Cargando historial…</p>
+  if (loading) return <p className="text-xs text-gray-500">Cargando historial…</p>
 
   if (!history || history.total === 0) {
     return (
@@ -76,7 +76,7 @@ export function ClientCreditHistory({ client, title = 'Historial de créditos' }
     <div className="space-y-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{title}</p>
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-gray-500">
           {history.total} crédito(s) · {history.activos} activo(s) · {history.finalizados} finalizado(s)
           {history.perdidos > 0 ? ` · ${history.perdidos} perdido(s)` : ''}
           {history.refinanciados > 0 ? ` · ${history.refinanciados} refinanciado(s)` : ''}
@@ -143,7 +143,7 @@ function estadoTone(status: string): string {
 function Mini({ label, value, tone = 'text-gray-800' }: { label: string; value: string; tone?: string }) {
   return (
     <div className="bg-gray-50 rounded-xl p-2.5">
-      <p className="text-xs text-gray-400">{label}</p>
+      <p className="text-xs text-gray-500">{label}</p>
       <p className={`text-sm font-semibold ${tone}`}>{value}</p>
     </div>
   )

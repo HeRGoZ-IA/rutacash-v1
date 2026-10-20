@@ -158,7 +158,7 @@ export default function CollectorPaymentHistoryPage() {
                       <span className={`text-sm font-bold ${anulado ? 'text-gray-400 line-through' : 'text-emerald-600'}`}>+{formatCurrency(p.valor, currency)}</span>
                     </div>
                   </div>
-                  {p.observacion && <p className="text-xs text-gray-400 mt-0.5">{p.observacion}</p>}
+                  {p.observacion && <p className="text-xs text-gray-500 mt-0.5">{p.observacion}</p>}
                   {anulado && <PaymentAnnulmentDetail original={p} reversal={reversal} currency={currency} />}
                 </div>
               )

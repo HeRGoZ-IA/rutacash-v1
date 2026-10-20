@@ -26,7 +26,8 @@ export const useToastStore = create<ToastStore>((set) => ({
     set((s) => ({ toasts: [...s.toasts, { ...toast, id }] }))
     setTimeout(() => {
       set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
-    }, toast.duration ?? 4000)
+    // Ronda 49: un error se lee con calma (7 s); el resto, 4 s.
+    }, toast.duration ?? (toast.type === 'error' ? 7000 : 4000))
   },
   remove: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 }))
@@ -55,10 +56,14 @@ const styles: Record<ToastType, string> = {
 export function Toaster() {
   const { toasts, remove } = useToastStore()
   return (
-    <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 w-full max-w-sm">
+    // Ronda 49: región anunciada (lectores de pantalla). Los errores interrumpen (`alert`);
+    // éxito y avisos se leen cuando hay pausa (`status`). En móvil no desborda el ancho.
+    <div role="region" aria-label="Notificaciones" className="fixed top-4 left-4 right-4 sm:left-auto z-[100] flex flex-col gap-2 sm:w-full sm:max-w-sm">
       {toasts.map((t) => (
         <div
           key={t.id}
+          role={t.type === 'error' ? 'alert' : 'status'}
+          aria-live={t.type === 'error' ? 'assertive' : 'polite'}
           className={cn(
             'flex items-start gap-3 px-4 py-3 rounded-xl border shadow-lg text-sm text-gray-800 animate-slide-in',
             styles[t.type]
@@ -66,7 +71,7 @@ export function Toaster() {
         >
           {icons[t.type]}
           <span className="flex-1">{t.message}</span>
-          <button onClick={() => remove(t.id)} className="text-gray-400 hover:text-gray-600">
+          <button type="button" onClick={() => remove(t.id)} aria-label="Cerrar aviso" className="-m-1 p-1 text-gray-500 hover:text-gray-700">
             <X className="w-4 h-4" />
           </button>
         </div>

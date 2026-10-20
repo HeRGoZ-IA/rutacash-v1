@@ -76,7 +76,7 @@ export default function UnassignedRoutesPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-6">
-      <nav className="flex items-center gap-1.5 text-xs text-gray-400">
+      <nav className="flex items-center gap-1.5 text-xs text-gray-500">
         <Link to="/admin/dashboard" className="hover:text-gray-600">Empresa</Link>
         <ChevronRight className="w-3 h-3" />
         <Link to="/admin/offices" className="hover:text-gray-600">Oficinas</Link>
@@ -152,7 +152,7 @@ export default function UnassignedRoutesPage() {
                         <MapPin className="w-4 h-4 text-primary-500 flex-shrink-0" />
                         <h3 className="font-semibold text-gray-900 text-sm truncate">{route.nombre}</h3>
                       </div>
-                      <p className="text-xs text-gray-400 ml-6">{route.codigo}{route.ciudad ? ` · ${route.ciudad}` : ''}</p>
+                      <p className="text-xs text-gray-500 ml-6">{route.codigo}{route.ciudad ? ` · ${route.ciudad}` : ''}</p>
                     </div>
                     <div className="flex flex-col items-end gap-1">
                       <Badge variant={route.status === 'activa' ? 'success' : 'gray'}>

@@ -20,7 +20,7 @@ export function AdminNoRoutes() {
           Un Administrador solo opera sobre las rutas que tenga asignadas. Mientras no
           tengas ninguna, no se muestran clientes, ventas, caja ni reportes.
         </p>
-        <p className="text-xs text-gray-400 mt-3">Sesión: {user?.nombre} · {user?.email}</p>
+        <p className="text-xs text-gray-500 mt-3">Sesión: {user?.nombre} · {user?.email}</p>
       </div>
 
       {/* Camino de salida explícito: sin esto el usuario no sabe qué falta. */}
@@ -33,7 +33,7 @@ export function AdminNoRoutes() {
           <li>Te <span className="font-medium text-gray-800">asigna a esa Ruta</span>, desde el editor de la ruta o desde Gestión de usuarios.</li>
           <li>Al guardar, esta pantalla desaparece y tu operación queda habilitada.</li>
         </ol>
-        <p className="text-xs text-gray-400 mt-3">
+        <p className="text-xs text-gray-500 mt-3">
           Es una medida de seguridad deliberada: sin ruta asignada no hay acceso a datos financieros.
         </p>
       </div>

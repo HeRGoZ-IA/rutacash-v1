@@ -192,7 +192,7 @@ export default function CollectorExpensesPage() {
               </div>
               <div>
                 <p className="text-sm font-medium text-gray-700">{getCatName(e.categoryId)}</p>
-                <p className="text-xs text-gray-400">{formatDate(e.fecha)}{e.descripcion ? ` · ${e.descripcion}` : ''}</p>
+                <p className="text-xs text-gray-500">{formatDate(e.fecha)}{e.descripcion ? ` · ${e.descripcion}` : ''}</p>
                 {veGastosDeRuta && <p className="text-[11px] font-medium text-gray-500">{etiqueta(e)}</p>}
               </div>
             </div>

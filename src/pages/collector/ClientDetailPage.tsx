@@ -149,15 +149,15 @@ export default function ClientDetailPage() {
             </p>
             <div className="grid grid-cols-3 gap-2">
               <div className="bg-amber-50 rounded-xl p-2.5 text-center">
-                <p className="text-xs text-gray-400">Saldo</p>
+                <p className="text-xs text-gray-500">Saldo</p>
                 <p className="text-sm font-bold text-amber-600">{formatCurrency(selectedSale.saldo, currency)}</p>
               </div>
               <div className="bg-primary-50 rounded-xl p-2.5 text-center">
-                <p className="text-xs text-gray-400">Parcela</p>
+                <p className="text-xs text-gray-500">Parcela</p>
                 <p className="text-sm font-bold text-primary-600">{formatCurrency(selectedSale.valorCuota, currency)}</p>
               </div>
               <div className="bg-gray-50 rounded-xl p-2.5 text-center">
-                <p className="text-xs text-gray-400">Parcelas</p>
+                <p className="text-xs text-gray-500">Parcelas</p>
                 <p className="text-sm font-bold text-gray-700">{lastPaidNumber}/{selectedSale.numeroCuotas}</p>
               </div>
             </div>

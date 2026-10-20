@@ -385,7 +385,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
                   <textarea value={motivo} onChange={e => setMotivo(e.target.value)} rows={2}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                     placeholder="Ej.: faltaron billetes, se descontará en la próxima entrega." />
-                  <p className="mt-1 text-xs text-gray-400">Mínimo {MIN_CASH_REASON} caracteres.</p>
+                  <p className="mt-1 text-xs text-gray-500">Mínimo {MIN_CASH_REASON} caracteres.</p>
                 </div>
               )}
               <Button onClick={() => setConfirmando(true)} disabled={!motivoValido} icon={<Lock className="w-4 h-4" />}>
@@ -603,7 +603,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
             <textarea value={motivoReabrir} onChange={e => setMotivoReabrir(e.target.value)} rows={3}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
               placeholder="Motivo de la reapertura (obligatorio)" />
-            <p className="text-xs text-gray-400">Mínimo {MIN_CASH_REASON} caracteres.</p>
+            <p className="text-xs text-gray-500">Mínimo {MIN_CASH_REASON} caracteres.</p>
           </div>
         )}
       </Modal>

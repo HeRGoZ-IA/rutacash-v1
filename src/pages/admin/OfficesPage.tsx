@@ -211,7 +211,7 @@ export default function OfficesPage() {
                       <Building2 className="w-4 h-4 text-primary-500 flex-shrink-0" />
                       <h3 className="font-semibold text-gray-900 text-sm truncate">{office.nombre}</h3>
                     </div>
-                    {office.codigo && <p className="text-xs text-gray-400 ml-6">{office.codigo}</p>}
+                    {office.codigo && <p className="text-xs text-gray-500 ml-6">{office.codigo}</p>}
                   </div>
                   <Badge variant={office.status === 'activa' ? 'success' : 'danger'}>
                     {office.status === 'activa' ? 'Activa' : 'Inactiva'}
@@ -221,17 +221,17 @@ export default function OfficesPage() {
                 <div className="grid grid-cols-2 gap-2">
                   <div className="bg-primary-50 rounded-xl p-3 text-center">
                     <p className="text-base font-bold text-primary-700">{suyas.length}</p>
-                    <p className="text-xs text-gray-400">Rutas</p>
+                    <p className="text-xs text-gray-500">Rutas</p>
                   </div>
                   <div className="bg-emerald-50 rounded-xl p-3 text-center">
                     <p className="text-base font-bold text-emerald-600">{activas}</p>
-                    <p className="text-xs text-gray-400">Rutas activas</p>
+                    <p className="text-xs text-gray-500">Rutas activas</p>
                   </div>
                 </div>
 
                 <div className="border-t border-gray-50 pt-2">
                   {suyas.length === 0 ? (
-                    <p className="text-xs text-gray-400 flex items-center gap-1.5">
+                    <p className="text-xs text-gray-500 flex items-center gap-1.5">
                       <MapPin className="w-3.5 h-3.5" /> Sin rutas asignadas todavía
                     </p>
                   ) : (
@@ -282,7 +282,7 @@ export default function OfficesPage() {
       )}
 
       {/* Crear / editar */}
-      <Modal open={modalOpen} onClose={tryCloseModal} title={editing ? 'Editar oficina' : 'Nueva oficina'} size="sm"
+      <Modal open={modalOpen} onClose={tryCloseModal} guarded title={editing ? 'Editar oficina' : 'Nueva oficina'} size="sm"
         footer={<><Button variant="secondary" onClick={tryCloseModal} disabled={saving}>Cancelar</Button><Button onClick={handleSave} loading={saving}>{editing ? 'Actualizar' : 'Crear'}</Button></>}>
         <div className="space-y-4">
           <Input label="Nombre de la oficina" value={form.nombre} required
@@ -292,7 +292,7 @@ export default function OfficesPage() {
             onChange={e => setForm(f => ({ ...f, codigo: e.target.value }))}
             placeholder="Opcional. Ej: LET"
             hint="Opcional. Si lo usas, no puede repetirse dentro de la empresa." />
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-gray-500">
             Una oficina puede crearse vacía: las rutas se le asignan después desde cada ruta.
           </p>
         </div>

@@ -155,7 +155,7 @@ export default function OwnerCompaniesPage() {
                       className="font-medium text-gray-900 hover:text-primary-600 hover:underline">
                       {r.nombre}
                     </button>
-                    <p className="text-xs text-gray-400">{r.contactoEmail ?? '—'}</p>
+                    <p className="text-xs text-gray-500">{r.contactoEmail ?? '—'}</p>
                   </td>
                   <td className="px-4 py-3 text-gray-600">{formatDate(r.createdAt)}</td>
                   <td className="px-4 py-3"><Badge variant={statusVariant(r.status)} size="sm">{COMMERCIAL_STATUS_LABEL[r.status]}</Badge></td>
@@ -167,11 +167,11 @@ export default function OwnerCompaniesPage() {
                   </td>
                   <td className="px-4 py-3 text-gray-600">
                     {formatCurrency(r.billingRate)}
-                    <span className="text-xs text-gray-400"> · {BILLING_MODE_LABEL[r.billingMode]}</span>
+                    <span className="text-xs text-gray-500"> · {BILLING_MODE_LABEL[r.billingMode]}</span>
                   </td>
                   <td className="px-4 py-3 text-gray-600">
                     {r.nextBillingDate ? formatDate(r.nextBillingDate) : '—'}
-                    <p className="text-xs text-gray-400">Esperado {formatCurrency(expectedPeriodAmount(r))}</p>
+                    <p className="text-xs text-gray-500">Esperado {formatCurrency(expectedPeriodAmount(r))}</p>
                   </td>
                   <td className="px-4 py-3"><Badge variant={payVariant(r.paymentStatus)} size="sm">{SAAS_PAYMENT_STATUS_LABEL[r.paymentStatus]}</Badge></td>
                   <td className="px-4 py-3 text-right">

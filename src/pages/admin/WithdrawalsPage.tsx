@@ -224,26 +224,26 @@ export default function WithdrawalsPage() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-900 truncate">{g.nombre}</p>
-                    <p className="text-xs text-gray-400">{g.codigo}</p>
+                    <p className="text-xs text-gray-500">{g.codigo}</p>
                     {g.routeId !== '__none__' && <CapitalControllerBadge route={routes.find(r => r.id === g.routeId)} users={users} currentUserId={user?.id} />}
                   </div>
                 </div>
-                <span className="text-xs text-gray-400">{g.cantidad} retiro(s)</span>
+                <span className="text-xs text-gray-500">{g.cantidad} retiro(s)</span>
               </div>
 
               <div className="grid grid-cols-2 gap-2 mt-3">
                 <div className="bg-amber-50 rounded-xl p-2.5">
-                  <p className="text-xs text-gray-400">Total retirado</p>
+                  <p className="text-xs text-gray-500">Total retirado</p>
                   <p className="text-sm font-bold text-amber-600">{formatCurrency(g.totalRetirado, currency)}</p>
                 </div>
                 <div className="bg-primary-50 rounded-xl p-2.5">
-                  <p className="text-xs text-gray-400">Base de la ruta</p>
+                  <p className="text-xs text-gray-500">Base de la ruta</p>
                   <p className="text-sm font-bold text-primary-700">{g.routeId === '__none__' ? '—' : formatCurrency(g.baseActual, currency)}</p>
                 </div>
               </div>
 
               <div className="flex items-center justify-between mt-3">
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-gray-500">
                   {g.ultimoRetiro ? `Último: ${formatDate(g.ultimoRetiro)}` : 'Sin retiros'}
                 </p>
                 <Button variant="secondary" size="sm" disabled={g.cantidad === 0} onClick={() => setDetailRouteId(g.routeId)} icon={<ChevronRight className="w-3.5 h-3.5" />}>
@@ -281,8 +281,8 @@ export default function WithdrawalsPage() {
         {detailGroup && (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
-              <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs text-gray-400">Total retirado</p><p className="font-bold text-amber-600">{formatCurrency(detailGroup.totalRetirado, currency)}</p></div>
-              <div className="bg-primary-50 rounded-xl p-3"><p className="text-xs text-gray-400">Base de la ruta</p><p className="font-bold text-primary-700">{detailGroup.routeId === '__none__' ? '—' : formatCurrency(detailGroup.baseActual, currency)}</p></div>
+              <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs text-gray-500">Total retirado</p><p className="font-bold text-amber-600">{formatCurrency(detailGroup.totalRetirado, currency)}</p></div>
+              <div className="bg-primary-50 rounded-xl p-3"><p className="text-xs text-gray-500">Base de la ruta</p><p className="font-bold text-primary-700">{detailGroup.routeId === '__none__' ? '—' : formatCurrency(detailGroup.baseActual, currency)}</p></div>
             </div>
             {detailGroup.withdrawals.length === 0 ? (
               <div className="flex justify-center py-8 text-gray-400 text-sm">Esta ruta no tiene retiros</div>
@@ -302,7 +302,7 @@ export default function WithdrawalsPage() {
                               {estado === 'reversion' ? 'Reversión de retiro' : w.descripcion || 'Retiro'}
                               {estado === 'anulado' && <AnnulledBadge />}
                             </p>
-                            <p className="text-xs text-gray-400">{formatDate(w.fecha)}{getUserName(w.userId) ? ` · ${getUserName(w.userId)}` : ''}{estado === 'reversion' && w.reversalReason ? ` · Motivo: ${w.reversalReason}` : ''}</p>
+                            <p className="text-xs text-gray-500">{formatDate(w.fecha)}{getUserName(w.userId) ? ` · ${getUserName(w.userId)}` : ''}{estado === 'reversion' && w.reversalReason ? ` · Motivo: ${w.reversalReason}` : ''}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">

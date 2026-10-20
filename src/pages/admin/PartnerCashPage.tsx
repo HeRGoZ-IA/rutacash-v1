@@ -148,26 +148,26 @@ export default function PartnerCashPage() {
                     <Badge variant="purple" size="sm">Socio</Badge>
                   </div>
                 </div>
-                <span className="text-xs text-gray-400">{g.cantidad} mov.</span>
+                <span className="text-xs text-gray-500">{g.cantidad} mov.</span>
               </div>
 
               <div className="grid grid-cols-2 gap-2 mt-3">
                 <div className="bg-emerald-50 rounded-xl p-2.5">
-                  <p className="text-xs text-gray-400">Ingresos</p>
+                  <p className="text-xs text-gray-500">Ingresos</p>
                   <p className="text-sm font-bold text-emerald-600">{formatCurrency(g.totalIngresos, currency)}</p>
                 </div>
                 <div className="bg-red-50 rounded-xl p-2.5">
-                  <p className="text-xs text-gray-400">Salidas</p>
+                  <p className="text-xs text-gray-500">Salidas</p>
                   <p className="text-sm font-bold text-red-600">{formatCurrency(g.totalSalidas, currency)}</p>
                 </div>
               </div>
               <div className="mt-2 bg-gray-50 rounded-xl p-2.5 flex items-center justify-between">
-                <p className="text-xs text-gray-400">Saldo socio</p>
+                <p className="text-xs text-gray-500">Saldo socio</p>
                 <p className={`text-sm font-bold ${g.saldo >= 0 ? 'text-gray-800' : 'text-red-600'}`}>{formatCurrency(g.saldo, currency)}</p>
               </div>
 
               <div className="flex items-center justify-between mt-3">
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-gray-500">
                   {g.ultimoMovimiento ? `Último: ${formatDate(g.ultimoMovimiento)}` : 'Sin movimientos'}
                 </p>
                 <Button variant="secondary" size="sm" disabled={g.cantidad === 0} onClick={() => setDetailGroup(g)} icon={<ChevronRight className="w-3.5 h-3.5" />}>
@@ -205,9 +205,9 @@ export default function PartnerCashPage() {
         {detailGroup && (
           <div className="space-y-3">
             <div className="grid grid-cols-3 gap-2">
-              <div className="bg-emerald-50 rounded-xl p-3"><p className="text-xs text-gray-400">Ingresos</p><p className="font-bold text-emerald-600">{formatCurrency(detailGroup.totalIngresos, currency)}</p></div>
-              <div className="bg-red-50 rounded-xl p-3"><p className="text-xs text-gray-400">Salidas</p><p className="font-bold text-red-600">{formatCurrency(detailGroup.totalSalidas, currency)}</p></div>
-              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400">Saldo</p><p className="font-bold text-gray-800">{formatCurrency(detailGroup.saldo, currency)}</p></div>
+              <div className="bg-emerald-50 rounded-xl p-3"><p className="text-xs text-gray-500">Ingresos</p><p className="font-bold text-emerald-600">{formatCurrency(detailGroup.totalIngresos, currency)}</p></div>
+              <div className="bg-red-50 rounded-xl p-3"><p className="text-xs text-gray-500">Salidas</p><p className="font-bold text-red-600">{formatCurrency(detailGroup.totalSalidas, currency)}</p></div>
+              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-500">Saldo</p><p className="font-bold text-gray-800">{formatCurrency(detailGroup.saldo, currency)}</p></div>
             </div>
             {detailGroup.movements.length === 0 ? (
               <div className="flex justify-center py-8 text-gray-400 text-sm">Este socio no tiene movimientos</div>
@@ -225,7 +225,7 @@ export default function PartnerCashPage() {
                           {m.relatedTransferId && <Link2 className="w-3 h-3 text-gray-400" aria-label="Origen: transferencia" />}
                           {m.reversalId && <AnnulledBadge />}
                         </p>
-                        <p className="text-xs text-gray-400">{formatDate(m.fecha)}{m.description ? ` · ${m.description}` : ''}{m.relatedTransferId ? ' · desde Transferencias' : ''}</p>
+                        <p className="text-xs text-gray-500">{formatDate(m.fecha)}{m.description ? ` · ${m.description}` : ''}{m.relatedTransferId ? ' · desde Transferencias' : ''}</p>
                       </div>
                     </div>
                     {/* Patas anuladas (storno): importe negado; se muestra el efecto con su signo. */}

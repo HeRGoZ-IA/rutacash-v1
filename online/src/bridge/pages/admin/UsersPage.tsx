@@ -409,7 +409,7 @@ export default function UsersPage() {
                     <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center text-primary-700 font-bold text-sm flex-shrink-0">{initials(u.nombre)}</div>
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{u.nombre}</p>
-                      <p className="text-xs text-gray-400 truncate">{u.email}</p>
+                      <p className="text-xs text-gray-500 truncate">{u.email}</p>
                     </div>
                   </div>
                   <div className="flex-1 min-w-0 flex flex-wrap gap-1.5">
@@ -434,7 +434,7 @@ export default function UsersPage() {
       )}
 
       {/* Create/Edit modal. X/Cancelar no guardan (confirman descarte si hay cambios). */}
-      <Modal open={modalOpen} onClose={tryCloseModal} title={editing ? 'Editar usuario' : 'Nuevo usuario'}
+      <Modal open={modalOpen} onClose={tryCloseModal} guarded title={editing ? 'Editar usuario' : 'Nuevo usuario'}
         footer={<><Button variant="secondary" onClick={tryCloseModal} disabled={saving}>Cancelar</Button><Button onClick={handleSave} loading={saving}>{editing ? 'Actualizar' : 'Crear'}</Button></>}>
         <div className="space-y-4">
           <Input label="Nombre completo" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required />
@@ -478,7 +478,7 @@ export default function UsersPage() {
                 </div>
               )}
               {form.rol === 'admin' && form.authorizedRouteIds.length === 0 && (
-                <p className="mt-1 text-xs text-gray-400">Sin selección: el administrador verá todas las rutas de la empresa. Selecciona rutas para limitarlo.</p>
+                <p className="mt-1 text-xs text-gray-500">Sin selección: el administrador verá todas las rutas de la empresa. Selecciona rutas para limitarlo.</p>
               )}
               {ROLE_NEEDS_ROUTES_TO_OPERATE[form.rol] && form.authorizedRouteIds.length === 0 && (
                 <p className="mt-1 text-xs text-gray-500">
@@ -491,7 +491,7 @@ export default function UsersPage() {
 
           {/* #7 Sin "Permisos adicionales": el acceso depende solo de rol + rutas. */}
           {form.rol !== 'superadmin' && (
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-gray-500">
               Los permisos de este usuario dependen únicamente de su <span className="font-medium text-gray-500">rol</span> y de sus <span className="font-medium text-gray-500">rutas autorizadas</span>.
             </p>
           )}

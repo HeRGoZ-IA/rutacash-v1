@@ -22,8 +22,9 @@ const variants: Record<ButtonVariant, string> = {
 }
 
 const sizes: Record<ButtonSize, string> = {
-  sm: 'h-8 px-3 text-xs rounded-lg',
-  md: 'h-9 px-4 text-sm rounded-lg',
+  // Ronda 49: en móvil, objetivos táctiles más cómodos; el escritorio no cambia.
+  sm: 'h-9 sm:h-8 px-3 text-xs rounded-lg',
+  md: 'h-10 sm:h-9 px-4 text-sm rounded-lg',
   lg: 'h-10 px-5 text-sm rounded-xl',
   xl: 'h-12 px-6 text-base rounded-xl',
 }

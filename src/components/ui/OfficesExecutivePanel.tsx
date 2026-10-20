@@ -55,7 +55,7 @@ export function OfficesExecutivePanel() {
         <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
           <Building2 className="w-4 h-4 text-gray-400" /> Oficinas
         </h2>
-        <span className="text-xs text-gray-400">
+        <span className="text-xs text-gray-500">
           {company.oficinasVisibles} oficina(s) · {company.rutasVisibles} ruta(s)
           {company.rutasSinOficina > 0 ? ` · ${company.rutasSinOficina} sin oficina` : ''}
         </span>
@@ -90,15 +90,15 @@ export function OfficesExecutivePanel() {
             <div className="grid grid-cols-3 gap-2">
               <div className="bg-gray-50 rounded-xl p-2 text-center">
                 <p className="text-sm font-bold text-gray-700">{row.totals.clientesActivos}</p>
-                <p className="text-xs text-gray-400">Clientes</p>
+                <p className="text-xs text-gray-500">Clientes</p>
               </div>
               <div className="bg-indigo-50 rounded-xl p-2 text-center">
-                <p className="text-sm font-bold text-indigo-600 truncate">{formatCurrency(row.totals.carteraActiva, currency)}</p>
-                <p className="text-xs text-gray-400">Cartera</p>
+                <p className="text-sm font-bold text-indigo-600 tabular-nums">{formatCurrency(row.totals.carteraActiva, currency)}</p>
+                <p className="text-xs text-gray-500">Cartera</p>
               </div>
               <div className="bg-emerald-50 rounded-xl p-2 text-center">
-                <p className="text-sm font-bold text-emerald-600 truncate">{formatCurrency(row.totals.recaudadoHoy, currency)}</p>
-                <p className="text-xs text-gray-400">Hoy</p>
+                <p className="text-sm font-bold text-emerald-600 tabular-nums">{formatCurrency(row.totals.recaudadoHoy, currency)}</p>
+                <p className="text-xs text-gray-500">Hoy</p>
               </div>
             </div>
 

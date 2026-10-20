@@ -130,7 +130,7 @@ export default function ExpenseCategoriesPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">{cat.nombre}</p>
-                  <p className="text-xs text-gray-400">{counts[cat.id] ?? 0} gasto(s) asociado(s)</p>
+                  <p className="text-xs text-gray-500">{counts[cat.id] ?? 0} gasto(s) asociado(s)</p>
                 </div>
                 <Badge variant={cat.activa ? 'success' : 'gray'} size="sm">{cat.activa ? 'Activa' : 'Inactiva'}</Badge>
                 <div className="flex gap-1 flex-shrink-0">

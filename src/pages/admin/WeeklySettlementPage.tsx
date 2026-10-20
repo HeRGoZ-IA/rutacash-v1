@@ -532,7 +532,7 @@ export default function WeeklySettlementPage() {
                   <tr key={fila.settlement.id} className={fila.superseded ? 'text-gray-400' : ''}>
                     <td className="px-4 py-2.5 whitespace-nowrap">
                       {formatDate(fila.settlement.semanaInicio)} – {formatDate(fila.settlement.semanaFin)}
-                      <span className="ml-2 text-xs text-gray-400">v{fila.version}</span>
+                      <span className="ml-2 text-xs text-gray-500">v{fila.version}</span>
                     </td>
                     {/* Oficina HISTÓRICA del documento, no la actual de la ruta. */}
                     <td className="px-4 py-2.5">{fila.officeLabel}</td>
@@ -672,7 +672,7 @@ export default function WeeklySettlementPage() {
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                 placeholder="Ej.: pago mal registrado el jueves, se corrige y se vuelve a cerrar."
               />
-              <p className="mt-1 text-xs text-gray-400">
+              <p className="mt-1 text-xs text-gray-500">
                 Mínimo {MIN_REOPEN_REASON} caracteres. Queda guardado de forma permanente.
               </p>
             </div>

@@ -30,7 +30,7 @@ export function KpiCard({ value, label, color = 'primary' }: KpiCardProps) {
   return (
     <div className={cn('rounded-2xl shadow-card border h-16 px-1.5 py-2 flex flex-col items-center', s.bg, s.border)}>
       <div className="flex-1 flex items-center justify-center min-h-0 w-full">
-        <p className={cn('text-sm font-bold leading-none tabular-nums truncate max-w-full text-center', s.value)}>
+        <p className={cn('text-sm font-bold leading-tight tabular-nums max-w-full text-center', s.value)}>
           {value}
         </p>
       </div>

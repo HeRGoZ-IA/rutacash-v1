@@ -111,7 +111,7 @@ export default function SecretarioPaymentCorrectionPage() {
             <div key={p.id} className="flex items-center gap-3 px-4 py-3">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-gray-900 truncate">{clientName(p.clientId)}</p>
-                <p className="text-xs text-gray-400">{formatDate(p.fecha)} · {p.tipo}</p>
+                <p className="text-xs text-gray-500">{formatDate(p.fecha)} · {p.tipo}</p>
               </div>
               <p className="text-sm font-semibold text-emerald-600 flex-shrink-0">{formatCurrency(p.valor, currency)}</p>
               <Button variant="secondary" size="sm" onClick={() => openCorrect(p)} icon={<RotateCcw className="w-3.5 h-3.5" />}>Corregir</Button>
