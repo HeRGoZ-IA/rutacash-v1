@@ -19,6 +19,7 @@ import { audit } from '../db/audit.ts';
 import { loadMembers, need } from '../structure/common.ts';
 import { oneOf, optId, optText, PAGE_ORDER, pageFilters, pathId, reqId, reqText } from '../structure/input.ts';
 import { requireAuthority, requireCustodian, requireOperationId, routeOf } from '../capital/service.ts';
+import { parseOffline, requireOfflineActor, storeOfflineCapture } from '../offline/capture.ts';
 
 interface ExpenseRow {
   id: string; route_id: string | null; scope: ExpenseScope | null; category_id: string; amount_minor: string; description: string | null;
@@ -73,7 +74,8 @@ async function visibleEntries(client: pg.PoolClient, ctx: ActiveContext, opId: s
     amountMinor: Number(x.amount_minor), balanceAfterMinor: Number(x.balance_after_minor) }));
 }
 
-export const EXPENSE_FIELDS = ['scope', 'routeId', 'workerId', 'categoryId', 'amountMinor', 'description', 'reference', 'fundingSource', 'fundingAdminId'] as const;
+/** `offline` (Ronda 62): gasto propio del Cobrador capturado sin conexión (ver offline/capture.ts). */
+export const EXPENSE_FIELDS = ['scope', 'routeId', 'workerId', 'categoryId', 'amountMinor', 'description', 'reference', 'fundingSource', 'fundingAdminId', 'offline'] as const;
 
 export async function createExpense(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
   const opId = requireOperationId(operationId);
@@ -86,6 +88,12 @@ export async function createExpense(client: pg.PoolClient, ctx: ActiveContext, b
   const amount = amountOf(body);
   const description = optText(body, 'description', 300);
   const reference = optText(body, 'reference', 120);
+  // Ronda 62: sin conexión solo el Cobrador, y solo su propio gasto (lo paga su custodia, sin tope).
+  const offline = parseOffline(body['offline']);
+  if (offline) {
+    requireOfflineActor(ctx);
+    if (scope !== 'trabajador' || workerId !== ctx.membershipId) throw new ApiError(400, 'INVALID_INPUT', 'offline expenses are your own worker expenses', { field: 'offline' });
+  }
   if (scope !== 'empresa' && (body['fundingSource'] !== undefined || body['fundingAdminId'] !== undefined)) {
     throw new ApiError(400, 'INVALID_INPUT', 'only company expenses choose a pool: route and worker expenses are paid by their own account');
   }
@@ -131,14 +139,19 @@ export async function createExpense(client: pg.PoolClient, ctx: ActiveContext, b
   const r = (await client.query<{ r: Record<string, unknown> }>('select adex.expense_post($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) r',
     [opId, scope, routeId, workerId, categoryId, amount, description, reference, funding, fundingAdmin])).rows[0]!.r;
   const expense = await loadExpense(client, ctx, r['expenseId'] as string);
+  const offlineStatus = offline
+    ? await storeOfflineCapture(client, ctx, { operationId: opId, kind: 'expense', entityId: expense.id, routeId: routeId!, capture: offline })
+    : null;
   await audit(client, ctx, {
     action: 'CREATE_EXPENSE', entityType: 'expense', entityId: expense.id, routeId,
     description: `Gasto de ${scope}${workerName ? ` a cargo de ${workerName}` : ''}${routeName ? ` en ${routeName}` : ''}`
       + `${funding === 'empresa' ? ' pagado con la bolsa de la empresa' : funding === 'admin' ? ' pagado con la bolsa del Administrador' : ''}: ${amount}.`,
     after: { scope, routeId, workerId, amountMinor: amount, categoryId, expenseDate: ymd(expense.expense_date), funding, fundingAdminId: fundingAdmin },
-    metadata: { operationId: opId, ledgerOperationId: r['operationId'], kind: r['kind'] },
+    metadata: { operationId: opId, ledgerOperationId: r['operationId'], kind: r['kind'],
+      ...(offline ? { offline: { deviceCapturedAt: offline.deviceCapturedAt, stored: offlineStatus } } : {}) },
   });
-  return { expense: expenseView(expense), entries: await visibleEntries(client, ctx, r['operationId'] as string) };
+  return { expense: expenseView(expense), entries: await visibleEntries(client, ctx, r['operationId'] as string),
+    offline: offline ? { deviceCapturedAt: offline.deviceCapturedAt } : null };
 }
 
 /**

@@ -415,6 +415,15 @@ describe('Fase 5 · gastos', () => {
         assert.doesNotMatch(text, /sessionStorage|openDatabase|indexedDB|balance|saldo/i, 'solo el registro del abono en vuelo');
         continue;
       }
+      // Ronda 62: única otra excepción, el almacén CIFRADO del modo sin conexión del Cobrador: llave
+      // AES-GCM NO extraíble de la membresía, copia de consulta y operaciones pendientes. Nada de
+      // saldos ni cálculos: lo que decide es siempre el servidor al sincronizar.
+      if (rel === 'offline/vault.ts') {
+        assert.match(text, /importKey\('raw', raw, \{ name: 'AES-GCM' \}, false, \['encrypt', 'decrypt'\]\)/, 'llave importada como no extraíble');
+        assert.match(text, /crypto\.subtle\.encrypt\(\{ name: 'AES-GCM', iv \}/, 'lo guardado va cifrado');
+        assert.doesNotMatch(text, /localStorage|sessionStorage|openDatabase|balance|saldo/i, 'sin saldos ni otros almacenes');
+        continue;
+      }
       if (/localStorage|sessionStorage|openDatabase/.test(text)) hits.push(f);
       // Ronda 24/25: el puente (`bridge/`) SUSTITUYE la base local de CLEAN y por eso lleva sus
       // nombres (`RutaCashDB`, el sustituto bloqueante de `dexie`); fuera del puente siguen prohibidos.

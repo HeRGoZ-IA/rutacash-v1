@@ -52,6 +52,7 @@ import {
 } from '../credits/service.ts';
 import { COLLECTION_FIELDS, getCollection, listCollections, registerCollection, reverseCollection } from '../collections/service.ts';
 import { VISIT_FIELDS, listVisits, registerVisit } from '../collections/visits.ts';
+import { offlineKey } from '../offline/capture.ts';
 import { ADJUSTMENT_FIELDS, CORRECTION_FIELDS, approveAdjustment, correctCollection, createAdjustment, listAdjustments, rejectAdjustment } from '../collections/adjustments.ts';
 import { EXPENSE_FIELDS, createExpense, getExpense, listExpenses, refundExpense, reverseExpense } from '../expenses/service.ts';
 import {
@@ -248,7 +249,7 @@ const ENDPOINTS: readonly Endpoint[] = [
   // Visitas sin pago (ADEX Online, 0015): no mueven dinero; idempotentes como cualquier alta.
   { method: 'GET', pattern: /^\/v1\/no-payment-visits$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ visits: await listVisits(c, ctx, q) }) },
   { method: 'POST', pattern: /^\/v1\/no-payment-visits$/, fields: VISIT_FIELDS, idempotent: 'no_payment_visits.register', requiresOperation: true,
-    handler: () => async (c, ctx, b) => created(await registerVisit(c, ctx, b)) },
+    handler: () => async (c, ctx, b, _q, op) => created(await registerVisit(c, ctx, b, op)) },
   { method: 'GET', pattern: /^\/v1\/expenses$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ expenses: await listExpenses(c, ctx, q) }) },
   { method: 'POST', pattern: /^\/v1\/expenses$/, fields: EXPENSE_FIELDS, idempotent: 'expenses.create', requiresOperation: true,
     handler: () => async (c, ctx, b, _q, op) => created(await createExpense(c, ctx, b, op)) },
@@ -279,6 +280,10 @@ const ENDPOINTS: readonly Endpoint[] = [
   // `X-Adex-Operation-Id` ANTES de repetirlo. 404 = el comando no llegó a confirmarse
   // (su transacción se revirtió entera): repetirlo con el mismo id es seguro.
   { method: 'GET', pattern: new RegExp(`^/v1/operations/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getOperationOutcome(c, ctx, id!)) },
+  // ---------- Modo sin conexión del Cobrador (Ronda 62, 0026) ----------
+  // Llave con la que el dispositivo cifra su copia de consulta y sus pendientes. Solo la
+  // membresía del contexto (Cobrador activo) la obtiene; no se guarda en `operations`.
+  { method: 'POST', pattern: /^\/v1\/offline\/key$/, fields: [], handler: () => async (c, ctx) => ok(await offlineKey(c, ctx)) },
 ];
 
 async function getOperationOutcome(c: pg.PoolClient, ctx: ActiveContext, operationId: string) {

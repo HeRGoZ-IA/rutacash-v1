@@ -23,6 +23,7 @@ import { loadMembers, need } from '../structure/common.ts';
 import { optId, optText, PAGE_ORDER, pageFilters, pathId, reqId, reqText } from '../structure/input.ts';
 import { requireOperationId, routeOf } from '../capital/service.ts';
 import { parseLocation, storePaymentLocation } from './location.ts';
+import { assertOfflineFits, parseOffline, requireOfflineActor, requireRouteNotHeldByCollector, storeOfflineCapture } from '../offline/capture.ts';
 
 interface PaymentRow {
   id: string; sale_id: string; client_id: string; route_id: string; collector_membership_id: string; created_by_membership_id: string | null;
@@ -96,8 +97,11 @@ async function loadPayment(client: pg.PoolClient, ctx: ActiveContext, id: string
   return r.rows[0];
 }
 
-/** `location` (Ronda 48, 0022): lectura del dispositivo con su estado; ver collections/location.ts. */
-export const COLLECTION_FIELDS = ['saleId', 'amountMinor', 'collectorId', 'note', 'location'] as const;
+/**
+ * `location` (Ronda 48, 0022): lectura del dispositivo con su estado; ver collections/location.ts.
+ * `offline` (Ronda 62, 0026): abono capturado sin conexión por el Cobrador; ver offline/capture.ts.
+ */
+export const COLLECTION_FIELDS = ['saleId', 'amountMinor', 'collectorId', 'note', 'location', 'offline'] as const;
 
 /**
  * Registro de un abono (`registerPayment`). El importe pedido puede superar el saldo: se
@@ -110,16 +114,23 @@ export async function registerCollection(client: pg.PoolClient, ctx: ActiveConte
   if (!sale) throw new ApiError(404, 'NOT_FOUND');
   const route = await routeOf(client, ctx, sale.route_id);
   need(ctx, 'payment.register', { routeId: route.id });
+  // Ronda 62: con un Cobrador activo en la ruta, solo él cobra a sus clientes.
+  await requireRouteNotHeldByCollector(client, ctx, route.id);
   const amount = amountOf(body);
   const note = optText(body, 'note', 500);
+  // Ronda 62: capturado sin conexión → solo Cobrador, y debe caber en el saldo vigente (sin tope).
+  const offline = parseOffline(body['offline']);
+  if (offline) requireOfflineActor(ctx);
   // Ubicación (Ronda 48): se normaliza ANTES del comando, pero nunca lo condiciona: una
-  // lectura malformada queda como `invalid` y el abono sigue su curso.
-  const location = parseLocation(body['location']);
+  // lectura malformada queda como `invalid` y el abono sigue su curso. Sin conexión, la lectura
+  // se tomó al capturar: su hora se compara con la de la captura, no con la de llegada.
+  const location = parseLocation(body['location'], offline?.deviceCapturedAt ? new Date(offline.deviceCapturedAt) : new Date());
   // Quién responde por el dinero, con la regla de CLEAN y las personas REALES de la ruta.
   const members = await loadMembers(client, ctx);
   const routeCollectors = [...members.values()].filter((m) => hasPersonalCashbox(m.role) && m.routeIds.includes(route.id)).map(toCleanUser);
   const who = resolveResponsibleCollector({ actor: toCleanUser(ctx), requested: optId(body, 'collectorId') ?? undefined, routeCollectors });
   if (!who.ok) throw new ApiError(400, who.code === 'ambiguous' ? 'COLLECTOR_REQUIRED' : 'COLLECTOR_INVALID', who.message);
+  const balanceAtSync = offline ? await assertOfflineFits(client, saleId, amount) : null;
 
   const r = (await client.query<{ r: Record<string, unknown> }>('select adex.collection_post($1, $2, $3, $4, $5) r',
     [opId, saleId, amount, who.collectorId, note])).rows[0]!.r;
@@ -134,6 +145,9 @@ export async function registerCollection(client: pg.PoolClient, ctx: ActiveConte
   const locationStatus = location
     ? await storePaymentLocation(client, ctx, { paymentId: outcome.paymentId, routeId: route.id, location })
     : null;
+  const offlineStatus = offline
+    ? await storeOfflineCapture(client, ctx, { operationId: opId, kind: 'payment', entityId: outcome.paymentId, routeId: route.id, capture: offline })
+    : null;
   const state = await creditState(client, ctx, saleId);
   await audit(client, ctx, {
     action: 'REGISTER_PAYMENT', entityType: 'Payment', entityId: outcome.paymentId, routeId: route.id,
@@ -145,11 +159,13 @@ export async function registerCollection(client: pg.PoolClient, ctx: ActiveConte
       receiver: outcome.receiver, requestedAmount: outcome.requestedMinor, appliedAmount: outcome.appliedMinor, capped: outcome.capped,
       principalMinor: Number(r['principalMinor']), interestMinor: Number(r['interestMinor']),
       // Solo el ESTADO de ubicación: las coordenadas no se copian a la auditoría.
-      locationStatus },
+      locationStatus,
+      ...(offline ? { offline: { deviceCapturedAt: offline.deviceCapturedAt, knownBalanceMinor: offline.knownBalanceMinor, balanceAtSync, stored: offlineStatus } } : {}) },
   });
   return { ...outcome, payment: paymentView(await loadPayment(client, ctx, outcome.paymentId)), ...state,
     entries: await visibleEntries(client, ctx, outcome.operationId),
-    location: locationStatus ? { status: locationStatus } : null };
+    location: locationStatus ? { status: locationStatus } : null,
+    offline: offline ? { deviceCapturedAt: offline.deviceCapturedAt } : null };
 }
 
 /**

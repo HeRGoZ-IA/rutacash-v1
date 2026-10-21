@@ -252,7 +252,8 @@ describe('Fase 5 · recaudos', () => {
   test('COL-010 · historial y consultas por rol: cuotas y deuda actualizadas desde el servidor', async () => {
     const s = await credit(r1, 30_000, 6);
     assert.equal((await collect(carlos.money, s, 6_000)).status, 201);
-    assert.equal((await collect(dora.money, s, 3_000)).status, 201);
+    // Ronda 62 (exclusividad): con Carlos activo, el segundo cobro lo registra la oficina a su nombre.
+    assert.equal((await $ana('/v1/collections', { saleId: s, amountMinor: 3_000, collectorId: carlos.membershipId })).status, 201);
     const mine = (await carlos.call('GET', `/v1/collections?saleId=${s}`)).body['collections'] as Body[];
     assert.equal(mine.length, 2, 'el Cobrador ve el historial del crédito de su ruta (payment.viewHistory)');
     assert.deepEqual(mine.map((p) => p['amountMinor']).sort(), [3_000, 6_000]);

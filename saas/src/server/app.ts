@@ -24,7 +24,7 @@ type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => Promise<
  * (`online/scripts/deploy-gate.mjs`): así un push nunca adelanta el frontend a la API.
  */
 export const API_FEATURES: readonly string[] = ['collections-v1', 'settlements-v1', 'clean-online-v1', 'changes-v1', 'access-links-v1', 'payment-location-v1',
-  'admin-transfers-v1', 'capital-requests-v1'];
+  'admin-transfers-v1', 'capital-requests-v1', 'offline-collector-v1'];
 
 /** Módulos del servicio Owner (servicio aparte, ver controlStart.ts). */
 // Ronda 54: `owner-email-v1` (cambio del correo del SuperAdmin) solo si 0024 está aplicada (controlStart.ts).

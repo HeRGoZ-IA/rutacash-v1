@@ -33,6 +33,8 @@ export const EXPECTED_API_WRITES: Record<string, string[]> = {
   'adex.memberships': ['DELETE', 'INSERT', 'UPDATE'],
   'adex.no_payment_visits': ['INSERT'],
   'adex.offices': ['DELETE', 'INSERT', 'UPDATE'],
+  // Ronda 62 (0026): evidencia de captura sin conexión (append-only; la llave no tiene privilegios).
+  'adex.offline_captures': ['INSERT'],
   'adex.payment_adjustment_requests': ['INSERT', 'UPDATE'],
   'adex.operations': ['INSERT', 'UPDATE'],
   // Ronda 48 (0022): ubicación del cobro, solo alta (sin lectura ni cambios).

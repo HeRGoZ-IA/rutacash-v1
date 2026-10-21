@@ -27,14 +27,15 @@ describe('Fase 5 · concurrencia de recaudos y gastos', () => {
   let bruno: Caller;
   let $bruno: Money, $ana: Money;
   let carlos: Person, dora: Person, olga: Person;
+  let rs = '';
   let today = '';
 
   const custody = (m: string) => balance(db.admin, c1, 'custody', m, r1);
   const pool = (m: string) => balance(db.admin, c1, 'admin', m);
-  const credit = async (amountMinor = 50_000, installmentsCount = 10) => {
-    const client = (await bruno('POST', '/v1/clients', { routeId: r1, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF',
+  const credit = async (amountMinor = 50_000, installmentsCount = 10, route = r1) => {
+    const client = (await bruno('POST', '/v1/clients', { routeId: route, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF',
       document: String(randomInt(10_000_000_000, 99_999_999_999)), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' })).body['id'];
-    const r = await $ana('/v1/credits/direct', { routeId: r1, clientId: client, amountMinor, interestRate: 20, installmentsCount, frequency: 'diaria',
+    const r = await $ana('/v1/credits/direct', { routeId: route, clientId: client, amountMinor, interestRate: 20, installmentsCount, frequency: 'diaria',
       startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] });
     if (r.status !== 201) throw new Error(JSON.stringify(r.body));
     return (r.body['credit'] as Body)['id'] as string;
@@ -53,7 +54,10 @@ describe('Fase 5 · concurrencia de recaudos y gastos', () => {
     today = (await db.admin.query(`select (now() at time zone 'America/Sao_Paulo')::date::text d`)).rows[0].d;
     const mk = (email: string, role: string, displayName: string, routeIds: string[]) => newPerson(api, issuer, provider.ids, bruno, { email, role, displayName, routeIds });
     carlos = await mk('carlos-cc5@example.test', 'cobrador', 'Carlos', [r1]);
-    dora = await mk('dora-cc5@example.test', 'supervisor', 'Dora', [r1]);
+    // Ronda 62 (exclusividad): con Carlos activo en r1, la Supervisora solo cobra en una ruta SIN
+    // Cobrador activo (rs). En r1, el segundo cobro concurrente lo registra la oficina a nombre de Carlos.
+    rs = (await bruno('POST', '/v1/routes', { name: 'Ruta Supervisora CC5', interestRate: 20, freeRate: false, maxLoanMinor: 0, adminIds: [M.anaAdmin] })).body['id'] as string;
+    dora = await mk('dora-cc5@example.test', 'supervisor', 'Dora', [r1, rs]);
     olga = await mk('olga-cc5@example.test', 'admin', 'Olga', []);
     for (const [path, body] of [
       ['/v1/capital/company/deposits', { amountMinor: 9_000_000, reason: 'Capital sintético' }],
@@ -66,7 +70,7 @@ describe('Fase 5 · concurrencia de recaudos y gastos', () => {
   test('CC5-001 · dos recaudos simultáneos sobre el mismo saldo: el segundo se topa; nunca se cobra de más', async () => {
     for (let round = 0; round < 4; round++) {
       const s = await credit(50_000, 10);   // total 60.000
-      const [a, b] = await Promise.all([collect(carlos.money, s, 40_000), collect(dora.money, s, 40_000)]);
+      const [a, b] = await Promise.all([collect(carlos.money, s, 40_000), $ana('/v1/collections', { saleId: s, amountMinor: 40_000, collectorId: carlos.membershipId })]);
       assert.deepEqual([a.status, b.status], [201, 201], JSON.stringify([a.body, b.body]));
       assert.deepEqual([a.body['appliedMinor'], b.body['appliedMinor']].sort(), [20_000, 40_000], 'el que llega segundo ve el saldo nuevo');
       assert.equal([a, b].filter((x) => x.body['capped'] === true).length, 1);
@@ -181,8 +185,8 @@ describe('Fase 5 · concurrencia de recaudos y gastos', () => {
   });
 
   test('CC5-008 · revocación (desactivar al Cobrador) mientras cobra: espera; después ya no opera', async () => {
-    const eva = await newPerson(api, issuer, provider.ids, bruno, { email: 'eva-cc5@example.test', role: 'supervisor', displayName: 'Eva', routeIds: [r1] });
-    const s = await credit();
+    const eva = await newPerson(api, issuer, provider.ids, bruno, { email: 'eva-cc5@example.test', role: 'supervisor', displayName: 'Eva', routeIds: [rs] });
+    const s = await credit(50_000, 10, rs);
     let release!: () => void;
     let arrived!: () => void;
     let pausedOnce = false;
@@ -203,7 +207,7 @@ describe('Fase 5 · concurrencia de recaudos y gastos', () => {
     } finally { await paused.close(); }
     const after = await collect(eva.money, s, 5_000);
     assert.deepEqual([after.status, after.body['error']], [403, 'MEMBERSHIP_INACTIVE']);
-    const exp = await eva.money('/v1/expenses', { scope: 'trabajador', routeId: r1, workerId: eva.membershipId, categoryId: cat, amountMinor: 100 });
+    const exp = await eva.money('/v1/expenses', { scope: 'trabajador', routeId: rs, workerId: eva.membershipId, categoryId: cat, amountMinor: 100 });
     assert.equal(exp.status, 403);
     assert.equal(await count(db.admin, 'select 1 from adex.payments where sale_id = $1', [s]), 1);
   });
@@ -211,16 +215,16 @@ describe('Fase 5 · concurrencia de recaudos y gastos', () => {
   test('CC5-009 · anulación de un cobro contra devolución simultánea del mismo efectivo: nunca ambas', async () => {
     for (let round = 0; round < 4; round++) {
       // Dora queda con exactamente el efectivo de un cobro.
-      const left = await balance(db.admin, c1, 'custody', dora.membershipId, r1);
-      if (left > 0) assert.equal((await $ana('/v1/capital/returns', { routeId: r1, workerId: dora.membershipId, amountMinor: left, reason: 'Vacía' })).status, 201);
-      const s = await credit();
+      const left = await balance(db.admin, c1, 'custody', dora.membershipId, rs);
+      if (left > 0) assert.equal((await $ana('/v1/capital/returns', { routeId: rs, workerId: dora.membershipId, amountMinor: left, reason: 'Vacía' })).status, 201);
+      const s = await credit(50_000, 10, rs);
       const pay = ((await collect(dora.money, s, 6_000)).body['payment'] as Body)['id'] as string;
       const [rev, ret] = await Promise.all([
         $ana(`/v1/collections/${pay}/reverse`, { reason: 'Anulación concurrente' }),
-        $ana('/v1/capital/returns', { routeId: r1, workerId: dora.membershipId, amountMinor: 6_000, reason: 'Devolución concurrente' }),
+        $ana('/v1/capital/returns', { routeId: rs, workerId: dora.membershipId, amountMinor: 6_000, reason: 'Devolución concurrente' }),
       ]);
       assert.deepEqual([rev.status, ret.status].sort(), [201, 409], JSON.stringify([rev.body, ret.body]));
-      assert.equal(await balance(db.admin, c1, 'custody', dora.membershipId, r1), 0, 'el mismo dinero no sale dos veces');
+      assert.equal(await balance(db.admin, c1, 'custody', dora.membershipId, rs), 0, 'el mismo dinero no sale dos veces');
     }
   });
 
@@ -235,23 +239,24 @@ describe('Fase 5 · concurrencia de recaudos y gastos', () => {
 
   test('CC5-011 · ráfaga mixta (cobros, gastos, entregas, devoluciones, anulaciones): 0 interbloqueos y conciliación exacta', async () => {
     const sales = await Promise.all([1, 2, 3].map(() => credit(60_000, 12)));
+    const supSales = await Promise.all([1, 2, 3].map(() => credit(60_000, 12, rs)));
     const deadlocks = async () => Number((await db.admin.query('select deadlocks::text d from pg_stat_database where datname = current_database()')).rows[0].d);
     const d0 = await deadlocks();
     const jobs = Array.from({ length: 36 }, (_, i) => async () => {
       const s = sales[i % 3]!;
       switch (i % 6) {
         case 0: return collect(carlos.money, s, 3_000);
-        case 1: return collect(dora.money, s, 2_000);
+        case 1: return collect(dora.money, supSales[i % 3]!, 2_000);
         case 2: return carlos.money('/v1/expenses', { scope: 'trabajador', routeId: r1, workerId: carlos.membershipId, categoryId: cat, amountMinor: 700 });
         case 3: return $ana('/v1/capital/deliveries', { routeId: r1, workerId: carlos.membershipId, amountMinor: 1_500, reason: 'Base' });
-        case 4: return $ana('/v1/capital/returns', { routeId: r1, workerId: dora.membershipId, amountMinor: 500, reason: 'Devolución' });
+        case 4: return $ana('/v1/capital/returns', { routeId: rs, workerId: dora.membershipId, amountMinor: 500, reason: 'Devolución' });
         default: return $ana('/v1/expenses', { scope: 'ruta', routeId: r1, categoryId: cat, amountMinor: 300, description: 'Ruta' });
       }
     });
     const res = await Promise.all(jobs.map((j) => j()));
     assert.ok(res.every((r) => r.status === 201 || (r.status === 409 && ['INSUFFICIENT_FUNDS', 'CREDIT_NOT_ACTIVE'].includes(r.body['error'] as string))),
       JSON.stringify(res.filter((r) => r.status !== 201).map((r) => r.body)));
-    const pays = (await db.admin.query(`select id from adex.payments where sale_id = any($1) and state = 'active' order by created_at limit 4`, [sales])).rows.map((x) => x.id);
+    const pays = (await db.admin.query(`select id from adex.payments where sale_id = any($1) and state = 'active' order by created_at limit 4`, [[...sales, ...supSales]])).rows.map((x) => x.id);
     const revs = await Promise.all(pays.map((p) => $ana(`/v1/collections/${p}/reverse`, { reason: 'Ráfaga' })));
     assert.ok(revs.every((r) => r.status === 201 || r.body['error'] === 'FUNDS_ALREADY_USED'), JSON.stringify(revs.map((r) => r.body['error'] ?? r.status)));
     // Las estadísticas de PostgreSQL se publican con retraso (hasta ~10 s).

@@ -118,6 +118,11 @@ export async function capitalRequestsReady(pool: pg.Pool): Promise<boolean> {
   return relationExists(pool, 'adex.capital_requests');
 }
 
+/** Ronda 62 (0026): modo sin conexión del Cobrador (capturas, llave del dispositivo, saldo bajo bloqueo). */
+export async function offlineCollectorReady(pool: pg.Pool): Promise<boolean> {
+  return relationExists(pool, 'adex.offline_captures');
+}
+
 /**
  * ¿Existe la relación? Con REINTENTOS (Ronda 59): la primera conexión de un proceso recién
  * arrancado en Render suele fallar (base en frío). Antes, ese fallo dejaba sin anunciar la

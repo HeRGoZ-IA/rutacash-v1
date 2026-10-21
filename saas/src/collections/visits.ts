@@ -13,9 +13,11 @@ import { audit } from '../db/audit.ts';
 import { need } from '../structure/common.ts';
 import { optText, pathId, reqId } from '../structure/input.ts';
 import { routeOf } from '../capital/service.ts';
+import { parseOffline, requireOfflineActor, requireRouteNotHeldByCollector, storeOfflineCapture } from '../offline/capture.ts';
 
 export const VISIT_REASONS = ['no_estaba', 'sin_dinero', 'negocio_cerrado', 'promesa_pago', 'otro'] as const;
-export const VISIT_FIELDS = ['saleId', 'reason', 'promisedPaymentDate', 'note'] as const;
+/** `offline` (Ronda 62): visita capturada sin conexión por el Cobrador (ver offline/capture.ts). */
+export const VISIT_FIELDS = ['saleId', 'reason', 'promisedPaymentDate', 'note', 'offline'] as const;
 
 interface VisitRow {
   id: string; sale_id: string; client_id: string; route_id: string; collector_membership_id: string; reason: string;
@@ -33,13 +35,17 @@ function visitView(v: VisitRow) {
   };
 }
 
-export async function registerVisit(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>) {
+export async function registerVisit(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null = null) {
   const saleId = reqId(body, 'saleId');
   const sale = (await client.query<{ route_id: string; client_id: string }>('select route_id, client_id from adex.sales where company_id = $1 and id = $2',
     [ctx.companyId, saleId])).rows[0];
   if (!sale) throw new ApiError(404, 'NOT_FOUND');
   const route = await routeOf(client, ctx, sale.route_id);
   need(ctx, 'payment.register', { routeId: route.id });
+  // Ronda 62: con un Cobrador activo en la ruta, solo él registra las visitas a sus clientes.
+  await requireRouteNotHeldByCollector(client, ctx, route.id);
+  const offline = parseOffline(body['offline']);
+  if (offline) requireOfflineActor(ctx);
   const reason = body['reason'];
   if (typeof reason !== 'string' || !(VISIT_REASONS as readonly string[]).includes(reason)) {
     throw new ApiError(400, 'INVALID_INPUT', 'reason is invalid', { field: 'reason' });
@@ -54,9 +60,13 @@ export async function registerVisit(client: pg.PoolClient, ctx: ActiveContext, b
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, adex.company_today($10), 'synced', now())`,
     [id, ctx.companyId, saleId, sale.client_id, route.id, ctx.membershipId, reason, promised, note, ctx.companyId]);
   const row = (await client.query<VisitRow>('select * from adex.no_payment_visits where company_id = $1 and id = $2', [ctx.companyId, id])).rows[0]!;
+  const offlineStatus = offline && operationId
+    ? await storeOfflineCapture(client, ctx, { operationId, kind: 'visit', entityId: id, routeId: route.id, capture: offline })
+    : null;
   await audit(client, ctx, { action: 'REGISTER_NO_PAYMENT_VISIT', entityType: 'NoPaymentVisit', entityId: id, routeId: route.id,
-    description: `Visita sin pago (${reason})`, after: { saleId, reason, promisedPaymentDate: promised } });
-  return visitView(row);
+    description: `Visita sin pago (${reason})`, after: { saleId, reason, promisedPaymentDate: promised },
+    ...(offline ? { metadata: { operationId, offline: { deviceCapturedAt: offline.deviceCapturedAt, stored: offlineStatus } } } : {}) });
+  return { ...visitView(row), offline: offline ? { deviceCapturedAt: offline.deviceCapturedAt } : null };
 }
 
 /** Visitas visibles (RLS por ruta). Filtros: routeId, saleId, collectorId, date. */
