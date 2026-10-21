@@ -124,14 +124,14 @@ export async function capitalRequestsReady(pool: pg.Pool): Promise<boolean> {
  * primera función comprobada (`payment-location-v1`) hasta otro reinicio, y la puerta de Vercel
  * bloqueaba el frontend. Una respuesta negativa real (la tabla no existe) no se reintenta.
  */
-async function relationExists(pool: pg.Pool, name: string, attempts = 5): Promise<boolean> {
+async function relationExists(pool: pg.Pool, name: string, attempts = 3): Promise<boolean> {
   for (let i = 1; i <= attempts; i++) {
     try {
       const r = await pool.query<{ ok: boolean }>('select to_regclass($1) is not null as ok', [name]);
       return r.rows[0]?.ok === true;
     } catch {
       if (i === attempts) return false;
-      await new Promise((resolve) => setTimeout(resolve, 1_500 * i));
+      await new Promise((resolve) => setTimeout(resolve, 1_000 * i));
     }
   }
   return false;
