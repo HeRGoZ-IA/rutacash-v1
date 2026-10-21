@@ -1,5 +1,6 @@
-// RONDA 53 · traspasos entre Administradores (D2) contra PostgreSQL real y la API HTTP.
-// Directo (lo registra el origen y confirma el destino) y por Secretario (confirman ambos).
+// RONDA 53/59 · traspasos entre Administradores contra PostgreSQL real y la API HTTP.
+// Directo (R59: lo entrega quien tiene el capital y se aplica en el acto) y por Secretario
+// (R53, sin cambios: confirman ambos Administradores).
 // Cada paso se verifica con SQL propio: bolsas, tránsito, patas, conservación.
 
 import assert from 'node:assert/strict';
@@ -14,7 +15,7 @@ import { CLEAN, balance, money, newPerson, reconcile, type Money, type Person } 
 type Body = Record<string, unknown>;
 const T = (r: { body: Body }) => r.body['transfer'] as Body;
 
-describe('Ronda 53 · traspasos entre Administradores', () => {
+describe('Ronda 53/59 · traspasos entre Administradores', () => {
   let db: TestDb;
   let issuer: LocalIssuer;
   let api: TestServer;
@@ -52,70 +53,57 @@ describe('Ronda 53 · traspasos entre Administradores', () => {
   });
   after(async () => { await api.close(); await db.close(); });
 
-  test('AT-001 · directo: compromete al registrar, se aplica con la confirmación del destino; idempotente', async () => {
+  test('AT-001 · directo (R59): quien tiene el capital lo entrega; se aplica al registrarlo, sin confirmación del destino; idempotente', async () => {
     const op = randomUUID();
     const body = { destinationAdminId: xavier.membershipId, amountMinor: 300_000, reason: 'Refuerzo para Xavier' };
     const r = await register($ana, body, op);
     assert.equal(r.status, 201, JSON.stringify(r.body));
     const t = T(r);
     assert.deepEqual([t['mode'], t['state'], (t['origin'] as Body)['decision'], (t['destination'] as Body)['decision'], t['canCancel'], t['canConfirm']],
-      ['direct', 'pending', 'confirmed', 'pending', true, false]);
-    assert.equal(await pool(M.anaAdmin), 700_000, 'el capital comprometido sale del disponible');
-    assert.equal(await transit(), 300_000);
-    assert.equal(await pool(xavier.membershipId), 200_000, 'el destino aún no lo tiene');
+      ['direct', 'applied', 'confirmed', 'not_required', false, false]);
+    assert.equal(await pool(M.anaAdmin), 700_000, 'sale de la bolsa de origen');
+    assert.equal(await pool(xavier.membershipId), 500_000, 'llega a la bolsa destino en el acto');
+    assert.equal(await transit(), 0, 'nada queda en tránsito');
     const own = ((await ana('GET', '/v1/capital/summary')).body['admins'] as Body[])[0]!;
-    assert.deepEqual([own['availableMinor'], own['pendingTransfersOutMinor']], [700_000, 300_000]);
+    assert.deepEqual([own['availableMinor'], own['pendingTransfersOutMinor'], own['adminTransfersNetMinor']], [700_000, 0, -300_000]);
+    const dest = ((await xavier.call('GET', '/v1/capital/summary')).body['admins'] as Body[])[0]!;
+    assert.equal(dest['adminTransfersNetMinor'], 300_000);
     // Reintento con el mismo id: el mismo traspaso, nada se repite. Con otro cuerpo: rechazado.
     const again = await register($ana, body, op);
     assert.deepEqual([again.status, T(again)['id']], [201, t['id']]);
     assert.equal(await pool(M.anaAdmin), 700_000);
+    assert.equal(await pool(xavier.membershipId), 500_000, 'el reintento no aplica dos veces');
     assert.equal((await register($ana, { ...body, amountMinor: 1 }, op)).body['error'], 'OPERATION_ID_REUSED');
-    // El origen ya confirmó; el Secretario no ve los directos ni decide; otro Administrador tampoco.
-    assert.equal((await decide($ana, t['id'], 'confirm')).body['error'], 'DECISION_ALREADY_REGISTERED');
+    // Ya aplicado: nadie lo confirma, rechaza ni cancela; el Secretario no ve los directos.
+    assert.equal((await decide($ana, t['id'], 'confirm')).body['error'], 'TRANSFER_NOT_PENDING');
+    assert.equal((await decide(xavier.money, t['id'], 'reject', { reason: 'Tarde' })).body['error'], 'TRANSFER_NOT_PENDING');
+    assert.equal((await decide($ana, t['id'], 'cancel', { reason: 'Me arrepentí' })).body['error'], 'TRANSFER_NOT_PENDING');
     assert.equal(((await gabi('GET', '/v1/capital/admin-transfers')).body['transfers'] as Body[]).length, 0);
     assert.equal((await decide($gabi, t['id'], 'confirm')).status, 403);
     const view = await xavier.call('GET', '/v1/capital/admin-transfers');
     const mine = (view.body['transfers'] as Body[]).find((x) => x['id'] === t['id'])!;
-    assert.deepEqual([mine['mySide'], mine['canConfirm'], mine['canReject'], mine['canCancel']], ['destination', true, true, false]);
-    // Confirmación del destino: se aplica. Reintento idempotente; otra decisión, rechazada.
-    const cop = randomUUID();
-    const ok = await decide(xavier.money, t['id'], 'confirm', {}, cop);
-    assert.equal(ok.status, 200, JSON.stringify(ok.body));
-    assert.equal(T(ok)['state'], 'applied');
-    assert.equal(await pool(xavier.membershipId), 500_000);
-    assert.equal(await transit(), 0);
-    assert.equal(T(await decide(xavier.money, t['id'], 'confirm', {}, cop))['state'], 'applied');
-    assert.equal(await pool(xavier.membershipId), 500_000, 'el reintento no aplica dos veces');
-    assert.equal((await decide(xavier.money, t['id'], 'reject', { reason: 'Tarde' })).body['error'], 'TRANSFER_NOT_PENDING');
+    assert.deepEqual([mine['mySide'], mine['state'], mine['canConfirm'], mine['canReject'], mine['canCancel']], ['destination', 'applied', false, false, false]);
+    // Dos asientos (salida y llegada), auditado como aplicado por quien lo entregó.
     assert.equal(await count(db.admin, `select 1 from adex.capital_operations where company_id = $1 and kind like 'ADMIN_TRANSFER_%'`, [c1]), 2);
+    assert.equal(await count(db.admin, `select 1 from adex.audit_log where company_id = $1 and action = 'ADMIN_TRANSFER_APPLIED' and entity_id = $2 and actor_membership_id = $3`,
+      [c1, t['id'], M.anaAdmin]), 1);
     assert.deepEqual(await reconcile(db.admin, c1), CLEAN);
   });
 
-  test('AT-002 · sin saldos ficticios: no se compromete más que el disponible ni dos veces lo mismo; cancelación', async () => {
+  test('AT-002 · sin saldos ficticios: no se entrega más que el disponible ni dos veces lo mismo', async () => {
     const big = await register($ana, { destinationAdminId: xavier.membershipId, amountMinor: 700_001, reason: 'Más que la bolsa' });
     assert.deepEqual([big.status, big.body], [409, { error: 'INSUFFICIENT_FUNDS' }]);
-    const first = await register($ana, { destinationAdminId: xavier.membershipId, amountMinor: 400_000, reason: 'Primer compromiso' });
+    const first = await register($ana, { destinationAdminId: xavier.membershipId, amountMinor: 400_000, reason: 'Primera entrega' });
     assert.equal(first.status, 201);
-    const second = await register($ana, { destinationAdminId: xavier.membershipId, amountMinor: 400_000, reason: 'Segundo con el mismo dinero' });
-    assert.deepEqual([second.status, second.body['error']], [409, 'INSUFFICIENT_FUNDS'], 'lo comprometido no se usa dos veces');
-    const deliver = await $ana('/v1/capital/deliveries', { routeId: routeId('c1', 1), workerId: M.anaCob, amountMinor: 300_001, reason: 'Gastar lo comprometido' });
+    const second = await register($ana, { destinationAdminId: xavier.membershipId, amountMinor: 400_000, reason: 'Segunda con el mismo dinero' });
+    assert.deepEqual([second.status, second.body['error']], [409, 'INSUFFICIENT_FUNDS'], 'lo entregado no se usa dos veces');
+    const deliver = await $ana('/v1/capital/deliveries', { routeId: routeId('c1', 1), workerId: M.anaCob, amountMinor: 300_001, reason: 'Gastar lo entregado' });
     assert.equal(deliver.body['error'], 'INSUFFICIENT_FUNDS', 'ni para entregar a un trabajador');
-    assert.equal((await decide($ana, T(first)['id'], 'cancel', {})).body['error'], 'INVALID_INPUT', 'motivo obligatorio');
-    assert.equal((await decide(xavier.money, T(first)['id'], 'cancel', { reason: 'No es mío' })).status, 403, 'solo quien registró cancela');
-    const c = await decide($ana, T(first)['id'], 'cancel', { reason: 'Me equivoqué de importe' });
-    assert.deepEqual([c.status, T(c)['state'], T(c)['closeReason']], [200, 'cancelled', 'Me equivoqué de importe']);
-    assert.equal(await pool(M.anaAdmin), 700_000);
-    assert.equal(await transit(), 0);
-    assert.equal((await decide(xavier.money, T(first)['id'], 'confirm')).body['error'], 'TRANSFER_NOT_PENDING');
-    assert.equal(await pool(xavier.membershipId), 500_000);
-  });
-
-  test('AT-003 · rechazo del destino: motivo obligatorio y el capital vuelve al origen', async () => {
-    const r = await register($ana, { destinationAdminId: xavier.membershipId, amountMinor: 100_000, reason: 'Para rechazar' });
-    assert.equal((await decide(xavier.money, T(r)['id'], 'reject', {})).body['error'], 'INVALID_INPUT');
-    const no = await decide(xavier.money, T(r)['id'], 'reject', { reason: 'No recibí la transferencia' });
-    assert.deepEqual([no.status, T(no)['state'], (T(no)['destination'] as Body)['decision'], (T(no)['destination'] as Body)['reason']],
-      [200, 'rejected', 'rejected', 'No recibí la transferencia']);
+    assert.equal(await pool(M.anaAdmin), 300_000);
+    assert.equal(await pool(xavier.membershipId), 900_000);
+    // El destino ya puede usarlo: lo devuelve por el mismo camino (otra entrega voluntaria).
+    const back = await register(xavier.money, { destinationAdminId: M.anaAdmin, amountMinor: 400_000, reason: 'Devuelvo a Ana' });
+    assert.deepEqual([back.status, T(back)['state']], [201, 'applied']);
     assert.equal(await pool(M.anaAdmin), 700_000);
     assert.equal(await pool(xavier.membershipId), 500_000);
     assert.deepEqual(await reconcile(db.admin, c1), CLEAN);
@@ -170,11 +158,12 @@ describe('Ronda 53 · traspasos entre Administradores', () => {
     assert.equal(await pool(M.anaAdmin), 750_000);
   });
 
-  test('AT-007 · concurrencia: dos compromisos sobre el mismo dinero, dos confirmaciones simultáneas, doble toque', async () => {
+  test('AT-007 · concurrencia: dos entregas sobre el mismo dinero, dos confirmaciones simultáneas de Secretario, doble toque', async () => {
     const both = await Promise.all([1, 2].map((i) => register($ana, { destinationAdminId: xavier.membershipId, amountMinor: 400_000, reason: `Simultáneo ${i}` })));
-    assert.deepEqual(both.map((r) => r.status).sort(), [201, 409], 'solo uno compromete 400.000 de 750.000');
-    const won = both.find((r) => r.status === 201)!;
-    await decide($ana, T(won)['id'], 'cancel', { reason: 'Limpieza de la prueba' });
+    assert.deepEqual(both.map((r) => r.status).sort(), [201, 409], 'solo una entrega 400.000 de 750.000');
+    assert.equal(await pool(M.anaAdmin), 350_000);
+    assert.equal(await pool(xavier.membershipId), 850_000);
+    assert.equal((await register(xavier.money, { destinationAdminId: M.anaAdmin, amountMinor: 400_000, reason: 'Limpieza de la prueba' })).status, 201);
     const s = await register($gabi, { originAdminId: M.anaAdmin, destinationAdminId: xavier.membershipId, amountMinor: 20_000, reason: 'Dos confirmaciones a la vez' });
     const pair = await Promise.all([decide($ana, T(s)['id'], 'confirm'), decide(xavier.money, T(s)['id'], 'confirm')]);
     assert.deepEqual(pair.map((r) => r.status), [200, 200]);
@@ -182,10 +171,13 @@ describe('Ronda 53 · traspasos entre Administradores', () => {
     assert.equal(final.state, 'applied');
     assert.equal(await count(db.admin, `select 1 from adex.capital_operations where company_id = $1 and kind = 'ADMIN_TRANSFER_APPLY' and id = $2`, [c1, final.settle_operation_id]), 1);
     assert.equal(await pool(xavier.membershipId), 470_000, 'aplicado una sola vez');
-    const t = await register($ana, { destinationAdminId: xavier.membershipId, amountMinor: 5_000, reason: 'Doble toque del destino' });
-    const taps = await Promise.all([decide(xavier.money, T(t)['id'], 'confirm'), decide(xavier.money, T(t)['id'], 'confirm')]);
-    assert.deepEqual(taps.map((r) => r.status).sort(), [200, 409]);
+    // Doble toque: la MISMA entrega enviada dos veces a la vez (mismo id) se registra una vez.
+    const op = randomUUID();
+    const taps = await Promise.all([1, 2].map(() => register($ana, { destinationAdminId: xavier.membershipId, amountMinor: 5_000, reason: 'Doble toque' }, op)));
+    assert.deepEqual(taps.map((r) => r.status), [201, 201]);
+    assert.equal(T(taps[0]!)['id'], T(taps[1]!)['id']);
     assert.equal(await pool(xavier.membershipId), 475_000);
+    assert.equal(await pool(M.anaAdmin), 725_000);
     assert.deepEqual(await reconcile(db.admin, c1), CLEAN);
   });
 

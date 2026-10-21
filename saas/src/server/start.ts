@@ -27,7 +27,7 @@ import { createCompanyExecutor, createCompanyHandler } from '../http/companyApi.
 import { createDemoHandler } from '../http/demoApi.ts';
 import { createDemoService } from '../demo/service.ts';
 import { API_FEATURES, createOnlineServer } from './app.ts';
-import { adminTransfersReady, paymentLocationsReady } from '../collections/location.ts';
+import { adminTransfersReady, capitalRequestsReady, paymentLocationsReady } from '../collections/location.ts';
 
 /** Configuración común a los dos servicios (empresa y Owner): TLS, CORS, proveedor, límites. */
 export function readCommonConfig(env: NodeJS.ProcessEnv) {
@@ -95,6 +95,8 @@ export async function start(env: NodeJS.ProcessEnv = process.env) {
   const missing = new Set<string>();
   if (!(await paymentLocationsReady(apiPool))) missing.add('payment-location-v1');
   if (!(await adminTransfersReady(apiPool))) missing.add('admin-transfers-v1');
+  // Ronda 59: entregas voluntarias y solicitudes solo con 0025 aplicada.
+  if (!(await capitalRequestsReady(apiPool))) missing.add('capital-requests-v1');
   const features = API_FEATURES.filter((f) => !missing.has(f));
   const server = createOnlineServer({
     company: createCompanyHandler(companyOpts), demo, readinessPool: apiPool, allowedOrigins: cfg.origins, trustProxy: cfg.trustProxy, rateLimit: cfg.rateLimit,

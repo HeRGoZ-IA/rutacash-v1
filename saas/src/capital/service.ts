@@ -31,7 +31,8 @@ import type { ActiveContext } from '../authz/context.ts';
 import { allowed, routeUnrestricted, toCleanUser, type MembershipFacts } from '../authz/cleanRules.ts';
 import { audit } from '../db/audit.ts';
 import { loadMembers, need } from '../structure/common.ts';
-import { optId, pathId, reqId, reqText } from '../structure/input.ts';
+import { oneOf, optId, optText, pathId, reqId, reqText } from '../structure/input.ts';
+import { claimRequest, fulfillRequest } from './requests.ts';
 
 export type CapitalKind =
   | 'COMPANY_DEPOSIT' | 'COMPANY_WITHDRAWAL' | 'ADMIN_ALLOCATION' | 'ADMIN_RETURN' | 'PARTNER_CONTRIBUTION'
@@ -212,22 +213,71 @@ async function requireAdmin(client: pg.PoolClient, ctx: ActiveContext, adminId: 
   return a;
 }
 
-/** Empresa → bolsa del Administrador. SuperAdmin; no supera el disponible de la empresa. */
+/**
+ * Ronda 59: un comando de capital que ATIENDE una solicitud (`requestId`). La solicitud se bloquea
+ * antes de escribir y se enlaza después, en la misma transacción: si algo falla no queda nada.
+ */
+async function attending<T extends { operation: { id: string } }>(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>,
+  kind: Parameters<typeof claimRequest>[3], run: () => Promise<T>): Promise<T & { request?: unknown }> {
+  const requestId = optId(body, 'requestId');
+  if (requestId) await claimRequest(client, ctx, requestId, kind);
+  const out = await run();
+  return requestId ? { ...out, request: await fulfillRequest(client, ctx, requestId, { operation: out.operation.id }) } : out;
+}
+
+/** Empresa → bolsa del Administrador. SuperAdmin; no supera el disponible de la empresa. Puede atender una solicitud de capital. */
 export async function allocateToAdmin(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
   need(ctx, 'capital.allocateAdmins');
   const admin = await requireAdmin(client, ctx, reqId(body, 'adminId'), true);
   const amount = amountOf(body);
-  return execute(client, ctx, operationId, { kind: 'ADMIN_ALLOCATION', amount, reason: reasonOf(body), admin: admin.membershipId },
-    `Capital ${amount} asignado a la bolsa de ${admin.displayName}.`);
+  return attending(client, ctx, body, 'admin_allocation', () => execute(client, ctx, operationId,
+    { kind: 'ADMIN_ALLOCATION', amount, reason: reasonOf(body), admin: admin.membershipId },
+    `Capital ${amount} asignado a la bolsa de ${admin.displayName}.`));
 }
 
-/** Bolsa del Administrador → empresa. SuperAdmin; solo lo disponible (no lo que está en custodia). */
+/**
+ * Bolsa del Administrador → empresa; solo lo disponible (no lo que está en custodia).
+ *   · SuperAdmin: recoge capital de un Administrador.
+ *   · Administrador (Ronda 59): DEVUELVE capital de SU bolsa, sin aprobación del SuperAdmin
+ *     (entrega voluntaria); puede atender una solicitud de devolución.
+ */
 export async function returnFromAdmin(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
-  need(ctx, 'capital.allocateAdmins');
-  const admin = await requireAdmin(client, ctx, reqId(body, 'adminId'), false);
+  const sa = allowed(ctx, 'capital.allocateAdmins');
+  if (!sa) {
+    need(ctx, 'capital.manage');
+    if (ctx.role !== 'admin') throw new ApiError(403, 'PERMISSION_DENIED');
+    const own = optId(body, 'adminId') ?? ctx.membershipId;
+    if (own !== ctx.membershipId) throw new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED', 'an administrator only returns capital from their own pool');
+  } else if (optId(body, 'requestId')) {
+    throw new ApiError(409, 'REQUEST_MISMATCH', 'a return request is attended by the administrator who holds the capital');
+  }
+  const admin = await requireAdmin(client, ctx, sa ? reqId(body, 'adminId') : ctx.membershipId, false);
   const amount = amountOf(body);
-  return execute(client, ctx, operationId, { kind: 'ADMIN_RETURN', amount, reason: reasonOf(body), admin: admin.membershipId },
-    `Capital ${amount} devuelto por ${admin.displayName} a la empresa.`);
+  return attending(client, ctx, body, 'admin_return', () => execute(client, ctx, operationId,
+    { kind: 'ADMIN_RETURN', amount, reason: reasonOf(body), admin: admin.membershipId },
+    sa ? `Capital ${amount} recogido de la bolsa de ${admin.displayName}.` : `Capital ${amount} devuelto por ${admin.displayName} a la empresa (entrega voluntaria).`));
+}
+
+export const OWN_RETURN_FIELDS = ['routeId', 'amountMinor', 'concept', 'note', 'requestId'] as const;
+const CONCEPT_TEXT = { recaudo: 'Entrega de recaudo', base: 'Devolución de base' } as const;
+
+/**
+ * Ronda 59 · ENTREGA VOLUNTARIA del Cobrador: efectivo de SU custodia en una ruta suya → bolsa del
+ * responsable de capital de la ruta. Sin aprobación del Administrador (queda avisado y puede anularla
+ * si no la recibió). Recaudo y devolución de Base se distinguen por su concepto (motivo y auditoría);
+ * el asiento es el mismo `WORKER_RETURN` que registra el Administrador. Nunca supera el efectivo que
+ * tiene (ni baja de su arrastre). Puede atender una solicitud de entrega.
+ */
+export async function returnOwnCash(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
+  if (ctx.role !== 'cobrador') throw new ApiError(403, 'PERMISSION_DENIED');
+  const route = await routeOf(client, ctx, reqId(body, 'routeId'));
+  const concept = oneOf(body, 'concept', ['recaudo', 'base'] as const);
+  const note = optText(body, 'note', 200);
+  const amount = amountOf(body);
+  const reason = note ? `${CONCEPT_TEXT[concept]}: ${note}` : CONCEPT_TEXT[concept];
+  return attending(client, ctx, body, 'worker_return', () => execute(client, ctx, operationId,
+    { kind: 'WORKER_RETURN', amount, reason, route: route.id, worker: ctx.membershipId },
+    `${CONCEPT_TEXT[concept]} ${amount} de ${ctx.displayName} (${route.name}) a la bolsa del responsable (entrega voluntaria).`));
 }
 
 /**

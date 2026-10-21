@@ -113,6 +113,11 @@ export async function adminTransfersReady(pool: pg.Pool): Promise<boolean> {
   return relationExists(pool, 'adex.admin_transfers');
 }
 
+/** Ronda 59 (0025): solicitudes de capital y entregas voluntarias. */
+export async function capitalRequestsReady(pool: pg.Pool): Promise<boolean> {
+  return relationExists(pool, 'adex.capital_requests');
+}
+
 async function relationExists(pool: pg.Pool, name: string): Promise<boolean> {
   try {
     const r = await pool.query<{ ok: boolean }>('select to_regclass($1) is not null as ok', [name]);

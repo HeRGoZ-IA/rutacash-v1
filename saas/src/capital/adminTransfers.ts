@@ -1,13 +1,15 @@
-// TRASPASOS ENTRE ADMINISTRADORES (Ronda 53, decisión D2). Contrato completo en
-// docs/ADEX_RONDA_53_TRANSFERENCIAS_SIN_SOCIO.md §2 y en la migración 0023.
+// TRASPASOS ENTRE ADMINISTRADORES (Ronda 53, decisión D2; Ronda 59, entrega voluntaria).
+// Contratos en docs/ADEX_RONDA_53_TRANSFERENCIAS_SIN_SOCIO.md §2, docs/ADEX_RONDA_59_DINERO.md y
+// las migraciones 0023 y 0025.
 //
-//   Directo     Administrador origen registra → su parte queda confirmada → confirma el destino.
-//   Secretario  el Secretario registra un traspaso ya hecho o comunicado → confirman AMBOS.
+//   Directo     el Administrador que TIENE el capital lo entrega: se aplica al registrarlo (R59);
+//               el destino queda avisado y no confirma (`destination.decision = not_required`).
+//   Secretario  el Secretario registra un traspaso ya hecho o comunicado → confirman AMBOS
+//               Administradores; el capital queda comprometido en tránsito hasta entonces; un
+//               rechazo o una cancelación lo devuelven al origen. Nadie decide por otro.
 //
-// Al registrar, el importe sale del disponible de la bolsa de origen hacia la cuenta de
-// tránsito de la empresa (no puede usarse dos veces). Con todas las confirmaciones pasa a la
-// bolsa destino; un rechazo o una cancelación lo devuelven al origen. Nada se aplica sin la
-// validación de quien recibe y nadie decide por otro.
+// Los directos registrados antes de la Ronda 59 que quedaron pendientes se siguen confirmando o
+// rechazando con los mismos comandos.
 //
 // Dos barreras, como el resto del capital: aquí el rol y la forma de la entrada (errores
 // claros); en PostgreSQL (`adex.admin_transfer_*`, SECURITY DEFINER) partes, estados, fondos y
@@ -19,11 +21,12 @@ import type { ActiveContext } from '../authz/context.ts';
 import { audit } from '../db/audit.ts';
 import { optId, pathId, reqId, reqText } from '../structure/input.ts';
 import { requireOperationId } from './service.ts';
+import { claimRequest, fulfillRequest } from './requests.ts';
 
-export const REGISTER_FIELDS = ['originAdminId', 'destinationAdminId', 'amountMinor', 'reason'] as const;
+export const REGISTER_FIELDS = ['originAdminId', 'destinationAdminId', 'amountMinor', 'reason', 'requestId'] as const;
 
 type State = 'pending' | 'applied' | 'rejected' | 'cancelled';
-type Decision = 'pending' | 'confirmed' | 'rejected';
+type Decision = 'pending' | 'confirmed' | 'rejected' | 'not_required';
 
 interface Row {
   id: string; operation_id: string; mode: 'direct' | 'secretary'; origin_admin_membership_id: string; destination_admin_membership_id: string;
@@ -104,8 +107,9 @@ async function auditTransfer(client: pg.PoolClient, ctx: ActiveContext, row: Row
 
 /**
  * Registrar. Administrador: traspaso DIRECTO desde su propia bolsa (no envía origen, o envía el
- * suyo). Secretario: origen y destino, por cuenta de dos Administradores. El SuperAdmin y el resto
- * de roles no registran traspasos entre bolsas (el SuperAdmin asigna y retira capital).
+ * suyo), aplicado en el acto; puede atender una solicitud de capital de otro Administrador
+ * (`requestId`). Secretario: origen y destino, por cuenta de dos Administradores. El SuperAdmin y
+ * el resto de roles no registran traspasos entre bolsas (el SuperAdmin asigna y retira capital).
  */
 export async function registerAdminTransfer(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
   requireRole(ctx, ['admin', 'secretario']);
@@ -116,12 +120,17 @@ export async function registerAdminTransfer(client: pg.PoolClient, ctx: ActiveCo
   if (origin === destination) throw new ApiError(400, 'INVALID_INPUT', 'origin and destination must differ', { field: 'destinationAdminId' });
   const amount = amountOf(body);
   const reason = reasonOf(body);
+  const requestId = optId(body, 'requestId');
+  if (requestId && ctx.role !== 'admin') throw new ApiError(409, 'REQUEST_MISMATCH', 'a capital request is attended by the administrator who holds the capital');
+  if (requestId) await claimRequest(client, ctx, requestId, 'admin_transfer');
   const r = await client.query<Row>('select * from adex.admin_transfer_register($1, $2, $3, $4, $5)',
     [op, ctx.role === 'admin' ? null : origin, destination, amount, reason]);
   const row = r.rows[0]!;
-  await auditTransfer(client, ctx, row, 'ADMIN_TRANSFER_REGISTERED',
-    `Traspaso ${amount} entre Administradores registrado (${row.mode === 'direct' ? 'directo' : 'por Secretario'}); pendiente de confirmación.`, reason);
-  return respond(client, ctx, row);
+  await auditTransfer(client, ctx, row, row.state === 'applied' ? 'ADMIN_TRANSFER_APPLIED' : 'ADMIN_TRANSFER_REGISTERED',
+    row.state === 'applied' ? `Traspaso ${amount} entregado por el Administrador de origen y aplicado a la bolsa destino (entrega voluntaria).`
+      : `Traspaso ${amount} entre Administradores registrado por Secretario; pendiente de la confirmación de ambos.`, reason);
+  const out = await respond(client, ctx, row);
+  return requestId ? { ...out, request: await fulfillRequest(client, ctx, requestId, { transfer: row.id }) } : out;
 }
 
 /** Confirmar o rechazar la PROPIA parte (solo el Administrador origen o destino). */

@@ -36,8 +36,13 @@ import {
 } from '../structure/clients.ts';
 import {
   allocateToAdmin, capitalReconciliation, capitalSummary, companyDeposit, companyWithdrawal, deliverToWorker, getOperation, listControllerEvents, listCustody,
-  listOperations, reassignBetweenRoutes, returnFromAdmin, returnFromWorker, reverseOperation, transferBetweenWorkers,
+  listOperations, OWN_RETURN_FIELDS, reassignBetweenRoutes, returnFromAdmin, returnFromWorker, returnOwnCash, reverseOperation, transferBetweenWorkers,
 } from '../capital/service.ts';
+import {
+  REQUEST_FIELDS, closeRequest as closeCapitalRequest, createRequest as createCapitalRequest, getRequest as getCapitalRequest,
+  listRequests as listCapitalRequests,
+} from '../capital/requests.ts';
+import { notificationCount, notifications } from '../capital/notifications.ts';
 import {
   REGISTER_FIELDS, adminDirectory, cancelAdminTransfer, decideAdminTransfer, getAdminTransfer, listAdminTransfers, registerAdminTransfer,
 } from '../capital/adminTransfers.ts';
@@ -169,10 +174,14 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: () => async (c, ctx, b, _q, op) => created(await companyDeposit(c, ctx, b, op)) },
   { method: 'POST', pattern: /^\/v1\/capital\/company\/withdrawals$/, fields: ['amountMinor', 'reason'], idempotent: 'capital.company_withdrawal', requiresOperation: true,
     handler: () => async (c, ctx, b, _q, op) => created(await companyWithdrawal(c, ctx, b, op)) },
-  { method: 'POST', pattern: /^\/v1\/capital\/allocations$/, fields: ['adminId', 'amountMinor', 'reason'], idempotent: 'capital.admin_allocation', requiresOperation: true,
+  { method: 'POST', pattern: /^\/v1\/capital\/allocations$/, fields: ['adminId', 'amountMinor', 'reason', 'requestId'], idempotent: 'capital.admin_allocation', requiresOperation: true,
     handler: () => async (c, ctx, b, _q, op) => created(await allocateToAdmin(c, ctx, b, op)) },
-  { method: 'POST', pattern: /^\/v1\/capital\/admin-returns$/, fields: ['adminId', 'amountMinor', 'reason'], idempotent: 'capital.admin_return', requiresOperation: true,
+  // SuperAdmin: recoge de un Administrador. Administrador (Ronda 59): devuelve de SU bolsa, sin aprobación.
+  { method: 'POST', pattern: /^\/v1\/capital\/admin-returns$/, fields: ['adminId', 'amountMinor', 'reason', 'requestId'], idempotent: 'capital.admin_return', requiresOperation: true,
     handler: () => async (c, ctx, b, _q, op) => created(await returnFromAdmin(c, ctx, b, op)) },
+  // Ronda 59: el Cobrador entrega SU efectivo al responsable de la ruta, sin aprobación.
+  { method: 'POST', pattern: /^\/v1\/capital\/own-returns$/, fields: OWN_RETURN_FIELDS, idempotent: 'capital.own_return', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await returnOwnCash(c, ctx, b, op)) },
   { method: 'POST', pattern: /^\/v1\/capital\/deliveries$/, fields: ['routeId', 'workerId', 'amountMinor', 'reason', 'saleRequestId'],
     idempotent: 'capital.worker_delivery', requiresOperation: true, handler: () => async (c, ctx, b, _q, op) => created(await deliverToWorker(c, ctx, b, op)) },
   { method: 'POST', pattern: /^\/v1\/capital\/returns$/, fields: ['routeId', 'workerId', 'amountMinor', 'reason'], idempotent: 'capital.worker_return', requiresOperation: true,
@@ -195,6 +204,15 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: ([id]) => async (c, ctx, b, _q, op) => ok(await decideAdminTransfer(c, ctx, id!, 'reject', b, op)) },
   { method: 'POST', pattern: new RegExp(`^/v1/capital/admin-transfers/${ID}/cancel$`), fields: ['reason'], idempotent: 'capital.admin_transfer_cancel', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => ok(await cancelAdminTransfer(c, ctx, id!, b, op)) },
+  // ---------- Solicitudes de capital y notificaciones (Ronda 59): pedir no mueve dinero ----------
+  { method: 'GET', pattern: /^\/v1\/capital\/requests$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ requests: await listCapitalRequests(c, ctx, q) }) },
+  { method: 'POST', pattern: /^\/v1\/capital\/requests$/, fields: REQUEST_FIELDS, idempotent: 'capital.request_create', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await createCapitalRequest(c, ctx, b, op)) },
+  { method: 'GET', pattern: new RegExp(`^/v1/capital/requests/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getCapitalRequest(c, ctx, id!)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/capital/requests/${ID}/(reject|cancel)$`), fields: ['reason'], idempotent: 'capital.request_close', requiresOperation: true,
+    handler: ([id, action]) => async (c, ctx, b, _q, op) => ok(await closeCapitalRequest(c, ctx, id!, action as 'reject' | 'cancel', b, op)) },
+  { method: 'GET', pattern: /^\/v1\/notifications$/, fields: null, handler: () => async (c, ctx) => ok(await notifications(c, ctx)) },
+  { method: 'GET', pattern: /^\/v1\/notifications\/count$/, fields: null, handler: () => async (c, ctx) => ok(await notificationCount(c, ctx)) },
   // ---------- Créditos: solicitud, autorización y desembolso (Fase 4, solo en línea) ----------
   { method: 'GET', pattern: new RegExp(`^/v1/credit-requests$`), fields: null, handler: () => async (c, ctx, _b, q) => ok({ requests: await listRequests(c, ctx, q) }) },
   { method: 'POST', pattern: new RegExp(`^/v1/credit-requests$`), fields: CREATE_REQUEST_FIELDS, idempotent: 'credit_requests.create',

@@ -54,6 +54,9 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX414': return new ApiError(409, 'TRANSFER_NOT_PENDING');
     case 'AX415': return new ApiError(409, 'DECISION_ALREADY_REGISTERED');
     case 'AX416': return new ApiError(403, 'REGISTRANT_CANNOT_BE_PARTY');
+    // Ronda 59 · solicitudes de capital (no mueven dinero; se atienden con el comando ordinario).
+    case 'AX417': return new ApiError(409, 'REQUEST_NOT_PENDING');
+    case 'AX418': return new ApiError(409, 'REQUEST_MISMATCH');
     // Fase 4 · solicitudes y desembolsos.
     case 'AX501': return new ApiError(409, 'REQUEST_STATE_INVALID');
     case 'AX502': return new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED');
