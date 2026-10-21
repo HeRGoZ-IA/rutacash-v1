@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import tailwindcss from 'tailwindcss';
 import autoprefixer from 'autoprefixer';
 import tailwindConfig from './tailwind.config.js';
@@ -73,9 +74,73 @@ function cleanBridge(): Plugin {
   };
 }
 
+/**
+ * Ronda 62 · SERVICE WORKER del panel de empresas (modo sin conexión del Cobrador): sin él, una
+ * recarga sin internet no podría abrir la aplicación. Se genera en cada build con la lista EXACTA
+ * de archivos del panel (nunca los del plano Owner). Navegación: red primero (siempre la versión
+ * publicada) y, sin red, la copia de `index.html`. Recursos con hash: copia primero (inmutables).
+ * Las peticiones a la API (otro origen) y todo lo que no sea GET no pasan por aquí: los datos
+ * nunca se guardan en esta caché. Cada build cambia `sw.js`, y el navegador instala la nueva
+ * versión y borra la caché anterior.
+ */
+function shellServiceWorker(): Plugin {
+  return {
+    name: 'adex-shell-sw',
+    apply: 'build',
+    generateBundle(_opts, bundle) {
+      const files = Object.values(bundle)
+        .filter((f) => f.fileName !== 'owner.html' && !f.fileName.startsWith('assets/owner-'))
+        .map((f) => `/${f.fileName}`)
+        .filter((f) => f !== '/index.html' && !f.endsWith('.map'));
+      const precache = ['/index.html', ...files.sort(), '/favicon-32x32.png', '/favicon-16x16.png', '/favicon.ico', '/apple-touch-icon.png'];
+      const version = createHash('sha256').update(JSON.stringify(precache)).digest('hex').slice(0, 16);
+      const source = `// Generado en el build (vite.config.ts · shellServiceWorker). No editar.
+const SHELL = 'adex-shell-${version}';
+const PRECACHE = ${JSON.stringify(precache)};
+self.addEventListener('install', (e) => {
+  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting()));
+});
+self.addEventListener('activate', (e) => {
+  e.waitUntil(caches.keys()
+    .then((keys) => Promise.all(keys.filter((k) => k.startsWith('adex-shell-') && k !== SHELL).map((k) => caches.delete(k))))
+    .then(() => self.clients.claim()));
+});
+const isOwner = (p) => p === '/owner' || p.startsWith('/owner/') || p === '/owner.html' || p.startsWith('/assets/owner-');
+self.addEventListener('fetch', (e) => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin || isOwner(url.pathname) || url.pathname === '/sw.js') return;
+  if (req.mode === 'navigate') {
+    e.respondWith((async () => {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 6000);
+      try {
+        return await fetch(req, { signal: ctl.signal });
+      } catch {
+        return (await caches.match('/index.html', { cacheName: SHELL })) || (await caches.match('/index.html')) || Response.error();
+      } finally {
+        clearTimeout(timer);
+      }
+    })());
+    return;
+  }
+  if (url.pathname.startsWith('/assets/') || PRECACHE.includes(url.pathname)) {
+    e.respondWith(caches.match(req).then((hit) => hit || fetch(req).then((res) => {
+      if (res.ok && url.pathname.startsWith('/assets/')) { const copy = res.clone(); void caches.open(SHELL).then((c) => c.put(req, copy)); }
+      return res;
+    })));
+  }
+});
+`;
+      this.emitFile({ type: 'asset', fileName: 'sw.js', source });
+    },
+  };
+}
+
 export default defineConfig({
   root: __dirname,
-  plugins: [cleanBridge(), react()],
+  plugins: [cleanBridge(), react(), shellServiceWorker()],
   // Los iconos y favicons son los de CLEAN.
   publicDir: path.resolve(__dirname, '../public'),
   // Las dependencias se resuelven SIEMPRE desde online/ (en Vercel solo se instala

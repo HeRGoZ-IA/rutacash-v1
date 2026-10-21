@@ -127,6 +127,20 @@ export class PaymentGuard {
     return this.once(saleId, body, () => this.registerNow(saleId, body));
   }
 
+  /** Abonos sin confirmar de la membresía ACTIVA (Ronda 62: pasan a la cola del modo sin conexión). */
+  pendingOfActive(): PendingPayment[] {
+    const m = this.client.activeMembershipId;
+    return m ? this.live().filter((p) => p.membershipId === m) : [];
+  }
+
+  /**
+   * Ronda 62: el abono ya está guardado (mismo id, mismo cuerpo) en la cola cifrada del modo sin
+   * conexión, que lo comprobará y lo reenviará igual que aquí. Deja de vigilarse en este almacén.
+   */
+  handOver(operationId: string): void {
+    this.remove(operationId);
+  }
+
   /** «Comprobar ahora»: resuelve el abono sin confirmar de ese crédito (nunca crea otro). */
   check(saleId: string): Promise<PaymentOutcome | null> {
     const p = this.pendingFor(saleId);

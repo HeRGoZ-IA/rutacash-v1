@@ -7,6 +7,9 @@
 //   3. «Cambiar empresa o rol» (DS-05) junto a «Mi cuenta», solo con varias membresías.
 //   4. Ronda 59: el Cobrador tiene «Avisos» (Notificaciones: solicitudes de entrega y avisos, con
 //      globo de pendientes) y desde allí registra sus entregas de efectivo.
+//   5. Ronda 62: MODO SIN CONEXIÓN del Cobrador. Indicador (En línea / Sin conexión / Sincronizando /
+//      Pendientes / Revisar) que abre «Pendientes», avisos de 12 y 24 h, hora de los datos guardados
+//      y confirmación al cerrar sesión con operaciones sin sincronizar. El Supervisor no cambia.
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation, Navigate } from 'react-router-dom'
 import { Home, MapPin, DollarSign, Banknote, Calculator, LogOut, WifiOff, Wifi, ShieldAlert, ChevronDown, UserCog, Bell } from 'lucide-react'
@@ -25,6 +28,10 @@ import { BrandLogo } from '@/components/ui/BrandLogo'
 import { Repeat, Loader2 } from 'lucide-react'
 import { leaveContext, useRuntime } from '../../../runtime/session.ts'
 import { useNotificationCount } from '../../../runtime/capitalRequests.ts'
+import { Modal } from '@/components/ui/Modal';
+import { Button } from '@/components/ui/Button';
+import { OfflineBanners, OfflineIndicator } from '../../../offline/ui.tsx';
+import { summary, useOffline } from '../../../offline/state.ts';
 
 /**
  * Layout OPERATIVO compartido (App Cobrador y App Supervisor).
@@ -48,6 +55,12 @@ export function CollectorLayout() {
   const isDemo = useRuntime((s) => s.ctx?.company.isDemo === true)
   const multiMembership = useRuntime((s) => s.membershipCount > 1)
   const pendingNotices = useNotificationCount()
+  // ADEX Online (Ronda 62): modo sin conexión (solo Cobrador).
+  const openOps = useOffline((s) => summary(s.ops).open)
+  const [confirmLogout, setConfirmLogout] = useState(false)
+  const isCollector = user?.rol === 'cobrador'
+  const doLogout = () => { logout(); navigate('/login') }
+  const requestLogout = () => { if (isCollector && openOps > 0) setConfirmLogout(true); else doLogout() }
 
   useEffect(() => { loadRoutes() }, [user])
 
@@ -143,10 +156,15 @@ export function CollectorLayout() {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          {/* ADEX Online (Ronda 62): el Cobrador ve el estado de sincronización y abre sus pendientes. */}
+          {isCollector ? (
+            <OfflineIndicator onOpen={() => navigate(`${base}/sync`)} />
+          ) : (
           <div className={cn('flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-full', isOnline ? 'bg-emerald-500/25 text-emerald-100' : 'bg-red-500/25 text-red-100')}>
             {isOnline ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
             {isOnline ? 'Online' : 'Offline'}
           </div>
+          )}
           {/* ADEX Online: cambiar de empresa o rol (DS-05), solo con varias membresías. */}
           {multiMembership && (
             <button onClick={() => { void leaveContext().then(() => navigate('/contexto')) }} className="p-2 rounded-lg hover:bg-primary-600 transition-colors" aria-label="Cambiar empresa o rol" title="Cambiar empresa o rol">
@@ -156,7 +174,7 @@ export function CollectorLayout() {
           <button onClick={() => navigate(`${base}/account`)} className="p-2 rounded-lg hover:bg-primary-600 transition-colors" aria-label="Mi cuenta">
             <UserCog className="w-4 h-4" />
           </button>
-          <button onClick={() => { logout(); navigate('/login') }} className="p-2 rounded-lg hover:bg-primary-600 transition-colors" aria-label="Cerrar sesión">
+          <button onClick={requestLogout} className="p-2 rounded-lg hover:bg-primary-600 transition-colors" aria-label="Cerrar sesión">
             <LogOut className="w-4 h-4" />
           </button>
         </div>
@@ -170,8 +188,11 @@ export function CollectorLayout() {
         </div>
       )}
 
+      {/* ADEX Online (Ronda 62): avisos del modo sin conexión del Cobrador. */}
+      {isCollector && <OfflineBanners onOpen={() => navigate(`${base}/sync`)} />}
+
       {/* Offline banner */}
-      {!isOnline && (
+      {!isOnline && !isCollector && (
         <div className="bg-amber-500 text-white text-xs text-center py-1.5 font-medium">
           {/* ADEX Online: nada se guarda en el dispositivo (CLEAN: «guardando localmente»). */}
           Sin conexión con el servidor — nada se guarda en este dispositivo
@@ -191,6 +212,18 @@ export function CollectorLayout() {
       <main className={cn('flex-1 overflow-y-auto', onSelectPage ? '' : 'pb-16')}>
         <Outlet />
       </main>
+
+      {/* ADEX Online (Ronda 62): cerrar sesión con operaciones sin sincronizar. */}
+      <Modal open={confirmLogout} onClose={() => setConfirmLogout(false)} title="Operaciones sin sincronizar" size="sm"
+        footer={<>
+          <Button variant="secondary" onClick={() => setConfirmLogout(false)} autoFocus>Seguir en la sesión</Button>
+          <Button variant="danger" onClick={() => { setConfirmLogout(false); doLogout() }} data-testid="logout-anyway">Cerrar sesión</Button>
+        </>}>
+        <div className="space-y-2 text-sm text-gray-700">
+          <p>Tienes {openOps} operación{openOps === 1 ? '' : 'es'} que el servidor todavía no ha confirmado.</p>
+          <p>Si cierras sesión quedarán guardadas y protegidas en este dispositivo, pero solo se enviarán cuando vuelvas a entrar con tu usuario y con internet.</p>
+        </div>
+      </Modal>
 
       {/* Bottom nav (oculto en selección de ruta) */}
       {!onSelectPage && (

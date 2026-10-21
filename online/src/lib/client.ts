@@ -7,7 +7,7 @@
 //   · Comandos de dinero y altas: `X-Adex-Operation-Id` nuevo por intención. Si la
 //     respuesta se pierde, se CONSULTA el resultado por ese id antes de repetir nada.
 
-import { createSupabaseAuthClient, type AuthClient } from '../../../saas/src/client/serverSession.ts';
+import { AuthError, createSupabaseAuthClient, type AuthClient } from '../../../saas/src/client/serverSession.ts';
 import { decideContext, type SelectableMembership, type SelectorDecision } from '../../../saas/src/client/contextSelector.ts';
 import { IndexedDbSessionStore, MemorySessionStore, type SessionStore, type StoredSession } from '../../../saas/src/client/sessionStore.ts';
 
@@ -340,7 +340,14 @@ export class OnlineClient {
         const t = await this.auth.refresh(s.refreshToken);
         this.session = { ...t, activeMembershipId: s.activeMembershipId };
         await this.store.save(this.session);
-      } catch {
+      } catch (e) {
+        // Ronda 62: SIN RED (o el proveedor caído) la sesión NO se borra: es «sin conexión», no
+        // «sesión terminada». Antes, un Cobrador sin internet con el token caducado perdía la
+        // sesión y no podía abrir su ruta guardada. Solo un rechazo del proveedor la termina.
+        if (!(e instanceof AuthError) || e.code === 'AUTH_UNAVAILABLE') {
+          this.emit('network', false);
+          throw new NetworkFailure('NETWORK');
+        }
         this.session = null;
         await this.store.clear();
         this.emit('session');

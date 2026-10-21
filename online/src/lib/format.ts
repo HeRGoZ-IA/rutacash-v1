@@ -91,6 +91,11 @@ const ERRORS: Record<string, string> = {
   CAPITAL_CONTROLLER_INVALID: 'El responsable de capital debe ser un Administrador activo asignado a la ruta.',
   ALREADY_CONTROLLER: 'Esa persona ya es la responsable de capital de la ruta.',
   UNKNOWN_FIELD: 'El servidor rechazó un dato no admitido.',
+  // Ronda 62: modo sin conexión del Cobrador y exclusividad de ruta.
+  OFFLINE_AMOUNT_EXCEEDS_BALANCE: 'El abono ya no cabe en el saldo actual del crédito (la oficina registró otro movimiento). No se registró: revíselo con la oficina.',
+  OFFLINE_NOT_ALLOWED: 'Solo el Cobrador puede registrar operaciones sin conexión.',
+  ROUTE_HAS_ACTIVE_COLLECTOR: 'La ruta tiene un Cobrador activo: solo él registra abonos y visitas. Para sustituirlo, la oficina debe bloquearlo antes.',
+  OFFLINE_KEY_UNAVAILABLE: 'No se pudo preparar el modo sin conexión en este dispositivo.',
 };
 
 const FIELD: Record<string, string> = {

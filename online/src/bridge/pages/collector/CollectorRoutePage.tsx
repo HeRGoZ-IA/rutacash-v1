@@ -3,7 +3,11 @@
 // así que (1) los contadores muestran «—» mientras no hay datos (nunca un 0 provisional),
 // (2) un fallo de consulta se dice y se puede reintentar (antes quedaba cargando sin aviso) y
 // (3) una respuesta de una carga anterior no pisa a la más reciente. Lista y reglas, originales.
-import { useState, useEffect, useRef } from 'react'
+// Ronda 62: (4) las visitas sin pago del día (del servidor) se ven en la tarjeta («Visitado hoy»):
+// antes se registraban pero ninguna pantalla las mostraba; (5) MODO SIN CONEXIÓN: los clientes con
+// abonos o visitas guardados en el dispositivo llevan «Pendiente de sincronizar»; los saldos NO se
+// alteran (son los últimos del servidor) y esas operaciones no cuentan como «Abonados».
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { Search, CheckCircle, XCircle, Eye } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useOpBase } from '@/hooks/useOpBase'
@@ -24,6 +28,9 @@ import {
   type CollectionStatus,
 } from '@/services/installmentEngine'
 import type { Sale, Client, Installment } from '@/models/types'
+// ADEX Online (Ronda 62).
+import { isOpen, useOffline, type PendingOp } from '../../../offline/state.ts'
+import { toMajor } from '../../../runtime/mappers.ts'
 
 interface RouteItem {
   sale: Sale
@@ -32,6 +39,8 @@ interface RouteItem {
   /** Número de la última parcela pagada (avance para el listado). */
   lastPaidNumber: number
   paidToday: boolean
+  /** ADEX Online (Ronda 62): visita sin pago registrada hoy en el servidor. */
+  visitedToday: boolean
   dueToday: boolean
   estado: CollectionStatus
   atrasadas: number
@@ -58,6 +67,13 @@ export default function CollectorRoutePage() {
   // ADEX Online: error de consulta y orden de cargas (solo se aplica la última).
   const [failed, setFailed] = useState(false)
   const loadSeq = useRef(0)
+  // ADEX Online (Ronda 62): operaciones guardadas en el dispositivo, por crédito.
+  const offlineOps = useOffline((st) => st.ops)
+  const pendingBySale = useMemo(() => {
+    const m = new Map<string, PendingOp[]>()
+    for (const o of offlineOps) if (o.ref.saleId && isOpen(o)) m.set(o.ref.saleId, [...(m.get(o.ref.saleId) ?? []), o])
+    return m
+  }, [offlineOps])
 
   const routeId = activeRouteId ?? user?.routeId ?? null
 
@@ -81,6 +97,9 @@ export default function CollectorRoutePage() {
     const routePayments = effectivePayments(await db.payments.where('routeId').equals(routeId).toArray())
     const todayStr = today()
     const paidToday = new Set(routePayments.filter(p => p.fecha === todayStr).map(p => p.saleId))
+    // ADEX Online (Ronda 62): visitas sin pago de hoy (servidor). Sin permiso de historial, ninguna.
+    const visitedToday = new Set((await db.noPaymentVisits.where('routeId').equals(routeId).toArray().catch(() => []))
+      .filter(v => v.fecha === todayStr).map(v => v.saleId))
     // Último abono VIGENTE por venta (orden createdAt + id; antes se comparaba el
     // createdAt de un pago con la `fecha` guardada del anterior).
     const lastPaymentBySale = new Map<string, string>()
@@ -97,6 +116,7 @@ export default function CollectorRoutePage() {
         currentInstallment: calculateCurrentInstallment(insts),
         lastPaidNumber: getLastPaidInstallmentNumber(insts),
         paidToday: paidToday.has(sale.id),
+        visitedToday: visitedToday.has(sale.id),
         dueToday: isSaleDueToday(sale.paymentDays, insts, now, todayStr),
         estado: getCollectionStatus(insts, now),
         atrasadas: countOverdueInstallments(insts, todayStr),
@@ -131,6 +151,8 @@ export default function CollectorRoutePage() {
   const pendientes = filtered.filter(i => !i.paidToday && i.dueToday).length
   const cobrados = filtered.filter(i => i.paidToday).length
   const noProgramados = filtered.filter(i => !i.paidToday && !i.dueToday).length
+  // ADEX Online (Ronda 62): clientes con operaciones aún sin confirmar en este dispositivo.
+  const enDispositivo = filtered.filter(i => pendingBySale.has(i.sale.id)).length
 
   if (!routeId) {
     return <div className="p-4"><EmptyState title="Selecciona una ruta" description="Vuelve al inicio y elige una ruta para trabajar." /></div>
@@ -149,6 +171,15 @@ export default function CollectorRoutePage() {
           <p className="text-emerald-300 font-bold text-lg">{sinDatos ? '—' : cobrados}</p>
           <p className="text-primary-200 text-xs">Abonados</p>
         </div>
+        {!sinDatos && enDispositivo > 0 && (
+          <>
+            <div className="w-px bg-primary-600" />
+            <div className="text-center" data-testid="route-pending-count">
+              <p className="text-amber-300 font-bold text-lg">{enDispositivo}</p>
+              <p className="text-primary-200 text-xs">Sin sincronizar</p>
+            </div>
+          </>
+        )}
         {!sinDatos && noProgramados > 0 && (
           <>
             <div className="w-px bg-primary-600" />
@@ -179,7 +210,7 @@ export default function CollectorRoutePage() {
       ) : (
         <div className="px-4 space-y-2.5">
           {filtered.map(item => (
-            <ClientCard key={item.sale.id} item={item} currency={currency}
+            <ClientCard key={item.sale.id} item={item} currency={currency} pending={pendingBySale.get(item.sale.id) ?? []}
               onPayment={() => navigate(`${base}/payment/${item.sale.id}`)}
               onNoPayment={() => navigate(`${base}/no-payment/${item.sale.id}`)}
               onView={() => navigate(`${base}/client/${item.client.id}?saleId=${item.sale.id}`)} />
@@ -190,14 +221,18 @@ export default function CollectorRoutePage() {
   )
 }
 
-function ClientCard({ item, currency, onPayment, onNoPayment, onView }: {
+function ClientCard({ item, currency, pending, onPayment, onNoPayment, onView }: {
   item: RouteItem
   currency: string
+  /** ADEX Online (Ronda 62): operaciones de este crédito guardadas en el dispositivo. */
+  pending: PendingOp[]
   onPayment: () => void
   onNoPayment: () => void
   onView: () => void
 }) {
-  const { sale, client, currentInstallment, lastPaidNumber, paidToday, dueToday, estado, atrasadas, diasAtraso, ultimoAbono } = item
+  const { sale, client, currentInstallment, lastPaidNumber, paidToday, visitedToday, dueToday, estado, atrasadas, diasAtraso, ultimoAbono } = item
+  const pendingPay = pending.filter(o => o.kind === 'payment').reduce((t, o) => t + (o.ref.amountMinor ?? 0), 0)
+  const pendingVisit = pending.some(o => o.kind === 'visit')
   const notScheduled = !paidToday && !dueToday
   const st = ESTADO_STYLE[estado]
 
@@ -215,6 +250,13 @@ function ClientCard({ item, currency, onPayment, onNoPayment, onView }: {
           <div className="flex flex-col items-end gap-1">
             {paidToday ? <Badge variant="success" size="sm">Abonado</Badge> : <Badge variant={st.badge} size="sm">{st.label}</Badge>}
             {notScheduled && !paidToday && <span className="text-[10px] text-gray-400">Hoy no programado</span>}
+            {/* ADEX Online (Ronda 62) */}
+            {visitedToday && !paidToday && <span className="text-[10px] font-medium text-red-500" data-testid="visited-today">Visitado hoy · no pagó</span>}
+            {pending.length > 0 && (
+              <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5 py-0.5" data-testid="pending-sync">
+                {pendingPay > 0 ? `Abono ${formatCurrency(toMajor(pendingPay), currency)} sin sincronizar` : pendingVisit ? 'Visita sin sincronizar' : 'Sin sincronizar'}
+              </span>
+            )}
           </div>
         </div>
 

@@ -28,6 +28,7 @@ import {
 } from './mappers.ts';
 import type { Installment, SaleRequest } from '@clean/models/types';
 import { updateInstallmentStatuses } from '@clean/services/installmentEngine';
+import { resetFreshness, withOfflineCopy } from '../offline/cache.ts';
 
 /** Una escritura local que CLEAN haría sobre IndexedDB y que ADEX Online no permite. */
 export class OnlineWriteBlocked extends Error {
@@ -311,11 +312,14 @@ const cache = new Map<string, Entry>();
 /** Momento del último cambio de pantalla (ver `refreshIfChanged`). */
 let navigatedAt = 0;
 
-function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
+function cached<T>(key: string, rawLoad: () => Promise<T>): Promise<T> {
   const now = Date.now();
   const hit = cache.get(key);
   if (hit && hit.rev === revision) { hit.used = now; return hit.promise as Promise<T>; }
   const gen = generation;
+  // Ronda 62: para el Cobrador, lo leído se guarda cifrado y, SIN CONEXIÓN, se responde con esa
+  // copia (offline/cache.ts). Para los demás roles es la lectura de siempre.
+  const load = () => withOfflineCopy(key, rawLoad);
   const promise = load().then((v) => { if (gen !== generation) throw new StaleContext(); return v; });
   const entry: Entry = { rev: revision, promise, load, used: now };
   cache.set(key, entry);
@@ -354,6 +358,7 @@ export function reset(): void {
   generation++;
   cache.clear();
   truncated.clear();
+  resetFreshness();
   invalidate();
 }
 
@@ -362,7 +367,11 @@ export function markNavigation(): void { navigatedAt = Date.now(); }
 
 /** Precarga en paralelo de las tablas que casi todas las pantallas leen (latencia del servidor). */
 export function prefetch(): void {
-  for (const t of ['routes', 'users', 'offices', 'clients', 'sales', 'saleRequests', 'expenseCategories', 'tenants']) table(t).catch(() => { /* la pantalla lo reintentará */ });
+  const base = ['routes', 'users', 'offices', 'clients', 'sales', 'saleRequests', 'expenseCategories', 'tenants'];
+  // Ronda 62: el Cobrador precarga TODO lo que necesita para cobrar sin conexión (así queda en la
+  // copia de consulta aunque no haya abierto cada pantalla), y la vista del calendario.
+  const collector = useRuntime.getState().ctx?.role === 'cobrador' ? ['installments', 'payments', 'noPaymentVisits', 'expenses'] : [];
+  for (const t of [...base, ...collector]) table(t).catch(() => { /* la pantalla lo reintentará */ });
 }
 
 /**
@@ -435,6 +444,8 @@ function primeMarker(): void {
 
 export async function pollOnce(): Promise<void> {
   if (refreshing) return;
+  // Ronda 62: sin red no hay nada que sondear (la copia de consulta ya responde las lecturas).
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
   refreshing = true;
   try {
     const gen = generation;

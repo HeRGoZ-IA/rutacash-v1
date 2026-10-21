@@ -3,6 +3,8 @@
 // puede anunciarlo; y (Ronda 40) «¿Olvidaste tu contraseña?», que pide al proveedor de
 // identidad el enlace de recuperación (llega a /activar). La autenticación la hace el
 // puente de `useAuth` (proveedor de identidad + contexto del servidor).
+// Ronda 62: si este dispositivo guarda operaciones sin sincronizar de otra sesión (cifradas), se
+// avisa —solo el número— para que esa persona vuelva a entrar con internet y se envíen.
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, Loader2, TrendingUp, Shield, Smartphone } from 'lucide-react'
@@ -14,6 +16,7 @@ import type { UserRole } from '@/models/types'
 import { BrandLogo } from '@/components/ui/BrandLogo'
 // ADEX Online: recuperación de acceso por el proveedor de identidad.
 import { api } from '../../../runtime/session.ts'
+import { foreignPendingCount } from '../../../offline/vault.ts'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -27,6 +30,9 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   // ADEX Online: recuperación de acceso.
   const [recoverNote, setRecoverNote] = useState('')
+  // ADEX Online (Ronda 62): pendientes de otra sesión guardados en este dispositivo.
+  const [foreign, setForeign] = useState(0)
+  useEffect(() => { void foreignPendingCount(null, ['local', 'sending', 'review', 'rejected']).then(setForeign) }, [])
 
   async function handleRecover() {
     if (!email) { setError('Escribe tu correo para recuperar el acceso'); return }
@@ -118,6 +124,12 @@ export default function LoginPage() {
 
           <h2 className="text-2xl font-bold text-gray-900 mb-1">Iniciar sesión</h2>
           <p className="text-gray-500 text-sm mb-6">Ingresa a tu cuenta para continuar</p>
+          {foreign > 0 && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="login-foreign-pending">
+              Este dispositivo guarda {foreign} operación{foreign === 1 ? '' : 'es'} sin sincronizar de una sesión anterior, protegida{foreign === 1 ? '' : 's'}.
+              Para enviarla{foreign === 1 ? '' : 's'}, esa persona debe iniciar sesión aquí con internet.
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>

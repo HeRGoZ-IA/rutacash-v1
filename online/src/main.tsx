@@ -7,6 +7,7 @@ import { wireClient } from './runtime/session.ts';
 // Lista blanca de escrituras de las pantallas de CLEAN traducidas a comandos de la API.
 import './runtime/writeAdapters.ts';
 import { startPolling } from './runtime/projection.ts';
+import { startOfflineSync } from './offline/sync.ts';
 import { CleanOnlineApp } from './runtime/CleanOnlineApp.tsx';
 
 // ADEX Online: el frontend de CLEAN conectado a la API SaaS. Configuración pública de
@@ -28,6 +29,11 @@ if (!apiBase || !supabaseUrl || !publishableKey) {
 } else {
   wireClient(new OnlineClient({ apiBase, supabaseUrl, publishableKey }));
   startPolling();
+  // Ronda 62: sincronización de lo capturado sin conexión (Cobrador) y app disponible sin internet.
+  startOfflineSync();
+  if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+    window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => { /* sin modo sin conexión de la app */ }); });
+  }
   root.render(
     <React.StrictMode>
       <CleanOnlineApp />

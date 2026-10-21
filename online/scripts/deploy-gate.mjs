@@ -18,7 +18,8 @@ const API = process.env.ADEX_DEPLOY_GATE_API ?? 'https://adex-online-api.onrende
 // así que el orden obligatorio es: aplicar 0022 → desplegar la API → desplegar el frontend.
 // Ronda 53: sin Socio y con traspasos entre Administradores (0023 → API → frontend).
 // Ronda 59: entregas voluntarias, solicitudes y notificaciones (0025 → API → frontend).
-const REQUIRED = ['settlements-v1', 'clean-online-v1', 'access-links-v1', 'payment-location-v1', 'admin-transfers-v1', 'capital-requests-v1'];
+// Ronda 62: modo sin conexión del Cobrador (campo `offline`, llave del dispositivo; 0026 → API → frontend).
+const REQUIRED = ['settlements-v1', 'clean-online-v1', 'access-links-v1', 'payment-location-v1', 'admin-transfers-v1', 'capital-requests-v1', 'offline-collector-v1'];
 // Ronda 40: si este despliegue activa la Plataforma Owner (VITE_ADEX_CONTROL_URL), el
 // servicio Owner publicado tiene que servir la versión que usan las pantallas originales.
 const CONTROL = (process.env.VITE_ADEX_CONTROL_URL ?? '').replace(/\/$/, '');

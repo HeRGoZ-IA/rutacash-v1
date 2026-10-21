@@ -1,7 +1,11 @@
-// ADEX Online: COPIA de CollectorSyncPage (CLEAN). Único cambio, marcado: el aviso de límite
-// decía que los datos se guardan en este dispositivo; en ADEX Online cada registro se
-// confirma en el servidor al hacerlo, y así se dice. La lista de abonos es la original.
-import { useState, useEffect } from 'react'
+// ADEX Online: COPIA de CollectorSyncPage (CLEAN). Cambios, marcados:
+//   · el aviso de límite decía que los datos se guardan en este dispositivo; para el Supervisor,
+//     cada registro se confirma en el servidor al hacerlo, y así se dice;
+//   · Ronda 62: para el COBRADOR esta pantalla es «Pendientes» del modo sin conexión: qué está
+//     guardado solo en este dispositivo, qué se está enviando, qué confirmó el servidor y qué
+//     necesita revisión (con su motivo), con «Sincronizar ahora», «Reintentar» y «Ya lo revisé».
+//     Nada se borra desde aquí: lo revisado deja de avisar, pero queda en el dispositivo.
+import { useState, useEffect, useMemo } from 'react'
 import { RefreshCw, CheckCircle, Clock, Wifi, WifiOff, Info } from 'lucide-react'
 import { SyncStatusBadge } from '@/components/ui/Badge'
 import { PaymentStateBadge } from '@/components/ui/PaymentAnnulment'
@@ -16,6 +20,10 @@ import { paymentDisplayStateOf, paymentHistoryRows, pendingPaymentSyncCount } fr
 import { syncPendingItems } from '@/services/syncService'
 import { formatCurrency, formatDateTime } from '@/lib/formatters'
 import type { Payment, SyncStatus } from '@/models/types'
+// ADEX Online (Ronda 62).
+import { markReviewed, retry, summary, useOffline } from '../../../offline/state.ts'
+import { syncNow } from '../../../offline/sync.ts'
+import { PendingOpRow, useReachable } from '../../../offline/ui.tsx'
 
 /**
  * Estado de sincronización de la RUTA ACTIVA.
@@ -33,6 +41,129 @@ import type { Payment, SyncStatus } from '@/models/types'
  * lista se relee sola cuando otra pestaña anula o confirma (`useDataRevision`).
  */
 export default function CollectorSyncPage() {
+  const { user } = useAuth()
+  // ADEX Online (Ronda 62): el Cobrador ve sus operaciones del modo sin conexión.
+  return user?.rol === 'cobrador' ? <OfflinePendingPage /> : <SupervisorSyncPage />
+}
+
+/** ADEX Online (Ronda 62): «Pendientes» del Cobrador. */
+function OfflinePendingPage() {
+  const reachable = useReachable()
+  const enabled = useOffline((st) => st.enabled)
+  const unavailable = useOffline((st) => st.unavailable)
+  const ops = useOffline((st) => st.ops)
+  const unreadable = useOffline((st) => st.unreadable)
+  const syncing = useOffline((st) => st.syncing)
+  const lastSyncAt = useOffline((st) => st.lastSyncAt)
+  const savedAt = useOffline((st) => st.dataSavedAt)
+  const { pending, attention } = summary(ops)
+  const [showReviewed, setShowReviewed] = useState(false)
+  // Nombres de cliente con la copia de consulta (los abonos enviados en línea sin respuesta no lo traen).
+  const [names, setNames] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    let alive = true
+    db.clients.toArray().then(cs => { if (alive) setNames(new Map(cs.map(c => [c.id, c.nombre]))) }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+  const groups = useMemo(() => {
+    const byNewest = [...ops].sort((a, b) => b.capturedAt.localeCompare(a.capturedAt))
+    return {
+      attention: byNewest.filter(o => (o.status === 'review' || o.status === 'rejected') && !o.reviewedAt),
+      pending: byNewest.filter(o => o.status === 'local' || o.status === 'sending'),
+      confirmed: byNewest.filter(o => o.status === 'confirmed').slice(0, 30),
+      reviewed: byNewest.filter(o => o.reviewedAt && o.status !== 'confirmed'),
+    }
+  }, [ops])
+  const nameOf = (o: (typeof ops)[number]) => o.ref.clientName ?? (o.ref.clientId ? names.get(o.ref.clientId) : undefined)
+
+  async function handleSync() {
+    if (!reachable) { toast.warning('Sin conexión: se enviará solo cuando vuelva internet.'); return }
+    await syncNow()
+    const after = summary(useOffline.getState().ops)
+    if (after.pending > 0) toast.warning('No se pudo enviar todo todavía. Se seguirá intentando.')
+    else if (after.attention > 0) toast.warning('Hay operaciones que requieren revisión.')
+    else toast.success('Todo está confirmado por el servidor.')
+  }
+
+  return (
+    <div className="p-4 space-y-4" data-testid="offline-pending-page">
+      <div className={`rounded-2xl p-4 text-white ${reachable ? 'bg-emerald-600' : 'bg-gray-600'}`}>
+        <div className="flex items-center gap-2 mb-2">
+          {reachable ? <Wifi className="w-5 h-5" /> : <WifiOff className="w-5 h-5" />}
+          <p className="font-bold">{reachable ? 'En línea' : 'Sin conexión'}</p>
+        </div>
+        <p className="text-sm opacity-90" data-testid="offline-pending-summary">
+          {pending === 0 && attention === 0 ? 'No hay operaciones pendientes en este dispositivo.'
+            : `${pending} por sincronizar${attention > 0 ? ` · ${attention} requiere${attention === 1 ? '' : 'n'} revisión` : ''}`}
+        </p>
+        {lastSyncAt && <p className="text-xs opacity-75 mt-1">Última sincronización: {formatDateTime(lastSyncAt)}</p>}
+        {savedAt && <p className="text-xs opacity-75">Datos de la ruta guardados el {formatDateTime(savedAt)}</p>}
+      </div>
+
+      {!enabled && (
+        <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-100 px-3 py-2">
+          <Info className="w-3.5 h-3.5 text-amber-600 mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-amber-800">{unavailable ?? 'El modo sin conexión no está disponible en este dispositivo.'}</p>
+        </div>
+      )}
+
+      <div className="flex items-start gap-2 rounded-xl bg-primary-50 border border-primary-100 px-3 py-2">
+        <Info className="w-3.5 h-3.5 text-primary-600 mt-0.5 flex-shrink-0" />
+        <p className="text-xs text-primary-900">
+          Lo guardado sin conexión está solo en este dispositivo hasta que el servidor lo confirme. Si se borran los datos de la aplicación o el
+          dispositivo falla antes de sincronizar, puede perderse. Con internet se envía solo.
+        </p>
+      </div>
+
+      {unreadable > 0 && (
+        <p className="text-xs text-red-700">Hay {unreadable} registro(s) que este dispositivo no puede leer. Se conservan; avise a la oficina.</p>
+      )}
+
+      <button onClick={() => void handleSync()} disabled={syncing || !enabled} data-testid="offline-sync-now"
+        className="w-full h-14 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white rounded-2xl text-base font-bold flex items-center justify-center gap-2">
+        <RefreshCw className={`w-5 h-5 ${syncing ? 'animate-spin' : ''}`} />
+        {syncing ? 'Sincronizando…' : 'Sincronizar ahora'}
+      </button>
+
+      {groups.attention.length > 0 && (
+        <section className="space-y-2">
+          <p className="text-xs font-semibold text-orange-700 uppercase tracking-wide">Requieren revisión</p>
+          {groups.attention.map(o => (
+            <PendingOpRow key={o.id} op={o} name={nameOf(o)}
+              onRetry={o.status === 'review' ? () => { void retry(o.id).then(() => syncNow()) } : undefined}
+              onReviewed={() => { void markReviewed(o.id).then(() => syncNow()) }} />
+          ))}
+        </section>
+      )}
+
+      <section className="space-y-2">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Por sincronizar</p>
+        {groups.pending.length === 0
+          ? <p className="text-sm text-gray-400 text-center py-4">Nada pendiente.</p>
+          : groups.pending.map(o => <PendingOpRow key={o.id} op={o} name={nameOf(o)} />)}
+      </section>
+
+      {groups.confirmed.length > 0 && (
+        <section className="space-y-2">
+          <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">Confirmadas por el servidor</p>
+          {groups.confirmed.map(o => <PendingOpRow key={o.id} op={o} name={nameOf(o)} />)}
+        </section>
+      )}
+
+      {groups.reviewed.length > 0 && (
+        <section className="space-y-2">
+          <button type="button" onClick={() => setShowReviewed(v => !v)} className="text-xs font-medium text-gray-500 underline">
+            {showReviewed ? 'Ocultar' : 'Ver'} revisadas ({groups.reviewed.length})
+          </button>
+          {showReviewed && groups.reviewed.map(o => <PendingOpRow key={o.id} op={o} name={nameOf(o)} />)}
+        </section>
+      )}
+    </div>
+  )
+}
+
+/** Vista original (Supervisor): historial de abonos de la ruta activa. */
+function SupervisorSyncPage() {
   const { user } = useAuth()
   const { tenantId, currency } = useTenant()
   const { activeRouteId } = useCollectorRoute()

@@ -6,11 +6,13 @@
 import type { User } from '@clean/models/types';
 import type { GeoCapture, GeoRecordStatus } from '@clean/lib/geolocation';
 import { formatCurrency } from '@/lib/formatters';
-import { api } from '../../runtime/session.ts';
-import { invalidate } from '../../runtime/projection.ts';
+import { invalidate, table } from '../../runtime/projection.ts';
 import { toMajor, toMinor } from '../../runtime/mappers.ts';
 import { PaymentGuard, type PaymentOutcome, type PendingPayment } from '../../runtime/unconfirmedPayments.ts';
+import { api, useRuntime } from '../../runtime/session.ts';
 import { errorText } from '../../lib/format.ts';
+import { capture, onActivated, useOffline, type PendingOp } from '../../offline/state.ts';
+import { syncNow } from '../../offline/sync.ts';
 
 export * from '@clean/services/paymentService';
 import * as Clean from '@clean/services/paymentService';
@@ -90,7 +92,56 @@ async function registerPaymentOnline(input: { saleId: string; requestedAmount: n
   const outcome = await payments().register(input.saleId, body);
   // Tras una respuesta definitiva, todas las pantallas releen del servidor (saldo real).
   if (outcome.kind !== 'uncertain') invalidate();
+  // Ronda 62: un abono del Cobrador sin respuesta pasa a la cola del dispositivo (mismo id y cuerpo):
+  // se comprobará y confirmará solo al volver la conexión, sin duplicarse.
+  if (outcome.kind === 'uncertain') {
+    const op = await adopt(outcome.pending).catch(() => null);
+    if (op) return { ok: false, code: 'PAYMENT_UNCONFIRMED', message: UNCONFIRMED_TEXT, unconfirmed: view(outcome.pending), queuedId: op.id } as Clean.RegisterPaymentResult;
+  }
   return toResult(outcome);
+}
+
+/** Abono sin respuesta (Ronda 48.1) → cola cifrada del modo sin conexión, con su MISMO id y cuerpo. */
+async function adopt(p: PendingPayment): Promise<PendingOp | null> {
+  const st = useOffline.getState();
+  if (!st.enabled) return null;
+  // Ruta y cliente solo para mostrar (de la copia de consulta, si está).
+  const sale = ((await table('sales').catch(() => [])) as Record<string, unknown>[]).find((x) => x['id'] === p.saleId);
+  const op = await capture({
+    id: p.operationId, kind: 'payment', path: '/v1/collections', body: p.body, capturedAt: p.startedAt, origin: 'uncertain', status: 'sending',
+    routeId: String(sale?.['routeId'] ?? (useRuntime.getState().ctx?.routeIds ?? [])[0] ?? ''),
+    ref: { saleId: p.saleId, clientId: sale?.['clientId'] as string | undefined, amountMinor: Number(p.body['amountMinor']) },
+  });
+  payments().handOver(p.operationId);
+  void syncNow();
+  return op;
+}
+
+// Al activarse el modo sin conexión, los abonos sin confirmar que dejó una sesión anterior en este
+// dispositivo (Ronda 48.1, misma membresía) pasan a la cola: un solo lugar, cifrado y vigilado.
+onActivated(() => {
+  for (const p of payments().pendingOfActive()) void adopt(p).catch(() => undefined);
+});
+
+/**
+ * Ronda 62 · ABONO SIN CONEXIÓN del Cobrador. No es un pago: es la intención guardada (cifrada) en
+ * el dispositivo con su id de operación, la hora de captura, la ubicación tomada AHORA (o su causa)
+ * y el saldo que el dispositivo mostraba. El servidor la aplicará solo si sigue cabiendo en el saldo
+ * vigente; si no, queda para revisión (nunca se topa ni se reescribe el importe).
+ */
+export async function captureOfflinePayment(input: { saleId: string; routeId: string; clientId: string; clientName: string; amount: number;
+  knownBalance: number; observacion?: string; location?: GeoCapture; capturedAt: string }): Promise<PendingOp> {
+  const body: Record<string, unknown> = { saleId: input.saleId, amountMinor: toMinor(input.amount) };
+  if (input.observacion) body['note'] = input.observacion;
+  const location = locationBody(input.location);
+  if (location) body['location'] = location;
+  body['offline'] = { capturedAt: input.capturedAt, knownBalanceMinor: Math.max(0, toMinor(input.knownBalance)) };
+  const op = await capture({
+    id: crypto.randomUUID(), kind: 'payment', path: '/v1/collections', body, capturedAt: input.capturedAt, routeId: input.routeId,
+    ref: { saleId: input.saleId, clientId: input.clientId, clientName: input.clientName, amountMinor: toMinor(input.amount), location: input.location?.status },
+  });
+  void syncNow();
+  return op;
 }
 
 function getUnconfirmedPaymentOnline(saleId: string): Clean.UnconfirmedPayment | null {
