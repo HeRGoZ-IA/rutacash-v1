@@ -106,3 +106,11 @@ Fecha: 2026-10-21. Base: `05d82ca` (= origin/main al empezar).
 ## 6. Publicación
 
 Orden obligatorio: aplicar 0026 en staging (propietario: `cd saas; npm run staging:migrate`) → desplegar `adex-online-api` en Render → `/healthz` con `offline-collector-v1` → frontend en Vercel (la puerta lo exige) → verificación HTTPS de solo lectura. El estado final se registra en el informe de la ronda.
+
+### Estado final verificado (2026-10-21, solo lectura sobre HTTPS)
+
+- ADEX-Staging: migraciones 0001–0026 (0026 aplicada por el propietario con `staging:migrate`).
+- `adex-online-api` (Render, despliegue manual del propietario): `/healthz` incluye `offline-collector-v1`; `POST /v1/offline/key` sin token → 401.
+- `adex-online.vercel.app`: la puerta canceló el despliegue del push (API aún sin la función) y se volvió a desplegar el mismo commit; sirve `index-ktbVB77B.js` con el modo sin conexión y `/sw.js` (JavaScript, `no-store`) sin ningún recurso del plano Owner en su lista; `/owner` responde 200.
+- Pruebas finales: SaaS 380 OK / 1 omitida (`collections.test.ts` se cortó una vez en la corrida larga; 15/15 dos veces aislado); OFF-001…013 13/13; E2E `tmp/r62/e2e-offline.mjs` 54/54.
+- BlueLine y las dos cuentas Owner: huellas idénticas antes y después (`tmp/r62/snapshot-antes.json` = `snapshot-final.json`).
