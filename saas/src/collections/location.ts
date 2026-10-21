@@ -118,11 +118,21 @@ export async function capitalRequestsReady(pool: pg.Pool): Promise<boolean> {
   return relationExists(pool, 'adex.capital_requests');
 }
 
-async function relationExists(pool: pg.Pool, name: string): Promise<boolean> {
-  try {
-    const r = await pool.query<{ ok: boolean }>('select to_regclass($1) is not null as ok', [name]);
-    return r.rows[0]?.ok === true;
-  } catch {
-    return false;
+/**
+ * ¿Existe la relación? Con REINTENTOS (Ronda 59): la primera conexión de un proceso recién
+ * arrancado en Render suele fallar (base en frío). Antes, ese fallo dejaba sin anunciar la
+ * primera función comprobada (`payment-location-v1`) hasta otro reinicio, y la puerta de Vercel
+ * bloqueaba el frontend. Una respuesta negativa real (la tabla no existe) no se reintenta.
+ */
+async function relationExists(pool: pg.Pool, name: string, attempts = 5): Promise<boolean> {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      const r = await pool.query<{ ok: boolean }>('select to_regclass($1) is not null as ok', [name]);
+      return r.rows[0]?.ok === true;
+    } catch {
+      if (i === attempts) return false;
+      await new Promise((resolve) => setTimeout(resolve, 1_500 * i));
+    }
   }
+  return false;
 }
