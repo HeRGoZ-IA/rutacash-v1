@@ -6,10 +6,10 @@
 //      membresía ya no vale, no se envía nada y el cliente vuelve al selector).
 //   2. ORDEN: por hora de captura. Un abono espera si OTRO abono anterior del MISMO crédito
 //      necesita revisión (nunca se salta uno para aplicar el siguiente sobre un saldo distinto).
-//      Visitas y gastos no dependen de nada. Ronda 65: la solicitud de un cliente nuevo espera a
-//      que el servidor confirme el alta de ese cliente; entonces fija su id (UNA vez, antes del
-//      primer envío) y desde ahí el cuerpo ya no cambia. Si el alta se rechaza, la solicitud queda
-//      retenida con su motivo: nunca se envía con un cliente inexistente ni se crea huérfana.
+//      Visitas, gastos y desembolsos (Ronda 65) no dependen de nada.
+//      65-C1: clientes y ventas NO se registran sin conexión. Un alta o solicitud que una versión
+//      anterior hubiera dejado en la cola NUNCA se envía: se marca «Rechazado» con la explicación y
+//      se conserva (si ya se había enviado sin respuesta, solo se CONSULTA su resultado por el id).
 //   3. EXACTAMENTE UNA VEZ: cada operación se envía con su MISMO id y su MISMO cuerpo. Si la
 //      respuesta se pierde, se consulta `/v1/operations/:id` antes de repetir (`OnlineClient.command`);
 //      el servidor serializa los intentos y devuelve el resultado guardado. Una sola sincronización
@@ -31,7 +31,6 @@ function summarize(op: PendingOp, r: Record<string, unknown>): PendingOp['result
     return { entityId: r['paymentId'] as string, appliedMinor: Number(r['appliedMinor']), newBalanceMinor: Number(r['newBalanceMinor']), date: r['paymentDate'] as string };
   }
   if (op.kind === 'visit') return { entityId: r['id'] as string, date: r['visitDate'] as string };
-  if (op.kind === 'client' || op.kind === 'credit_request') return { entityId: r['id'] as string };
   if (op.kind === 'disbursement') {
     const c = (r['credit'] ?? {}) as Record<string, unknown>;
     return { entityId: c['id'] as string, date: c['disbursementDate'] as string };
@@ -70,22 +69,12 @@ export function syncNow(): Promise<void> {
 const held = (o: PendingOp) => o.status === 'review' && o.error?.code === DEPENDENCY && !o.reviewedAt;
 const sendable = (o: PendingOp) => o.status === 'local' || o.status === 'sending' || held(o);
 
-const placeholder = (id: string) => `local:${id}`;
-
-/**
- * Ronda 65 · dependencia de un cliente nuevo. `ready`: se puede enviar (con el cuerpo ya fijado);
- * `wait`: el alta aún no se confirmó; `held`: el alta no se aceptó (queda retenida con motivo).
- */
-function dependency(op: PendingOp, live: Map<string, PendingOp>): { state: 'ready'; body: Record<string, unknown> } | { state: 'wait' } | { state: 'held'; message: string } {
-  if (!op.dependsOn || op.body['clientId'] !== placeholder(op.dependsOn)) return { state: 'ready', body: op.body };
-  const dep = live.get(op.dependsOn);
-  if (!dep) return { state: 'held', message: 'El cliente nuevo de esta solicitud ya no está en este dispositivo.' };
-  if (dep.status === 'confirmed' && dep.result?.entityId) return { state: 'ready', body: { ...op.body, clientId: dep.result.entityId } };
-  if (dep.status === 'review' || dep.status === 'rejected') {
-    return { state: 'held', message: `Espera al cliente nuevo${dep.ref.clientName ? ` ${dep.ref.clientName}` : ''}: ${dep.error?.message ?? 'no fue aceptado por el servidor.'}` };
-  }
-  return { state: 'wait' };
-}
+/** 65-C1: alta de cliente o solicitud que una versión anterior dejó en la cola (ya no se envían). */
+export const LEGACY_CODE = 'OFFLINE_SALES_NOT_ALLOWED';
+const LEGACY_TEXT = 'Registrado sin conexión con una versión anterior de la aplicación. Los clientes y las ventas ya no se registran sin internet: '
+  + 'esto NO se envió al servidor. Comuníquese con la oficina para que lo registren.';
+const legacy = (o: PendingOp) => (o.kind === 'client' || o.kind === 'credit_request')
+  && (o.status === 'local' || o.status === 'sending' || o.status === 'review') && !o.reviewedAt;
 
 /** Abono ANTERIOR del mismo crédito que espera revisión (y que nadie dio por revisado). */
 function blockerOf(op: PendingOp, live: Map<string, PendingOp>): PendingOp | undefined {
@@ -97,7 +86,7 @@ function blockerOf(op: PendingOp, live: Map<string, PendingOp>): PendingOp | und
 
 async function run(): Promise<void> {
   if (!useOffline.getState().enabled) return;
-  if (!useOffline.getState().ops.some(sendable)) return;
+  if (!useOffline.getState().ops.some((o) => sendable(o) || legacy(o))) return;
   useOffline.setState({ syncing: true });
   try {
     await withLock(async () => {
@@ -116,24 +105,30 @@ async function run(): Promise<void> {
       let confirmed = 0;
       for (const { id } of ops) {
         const op = live.get(id)!;
+        if (legacy(op)) {
+          // Nunca se envía. Si una versión anterior ya lo había enviado sin respuesta, solo se consulta.
+          if (op.status === 'sending') {
+            try {
+              const o = await api().get<{ result?: Record<string, unknown> }>(`/v1/operations/${op.id}`);
+              await save({ ...op, status: 'confirmed', confirmedAt: now(), result: { entityId: o.result?.['id'] as string | undefined }, error: undefined });
+              continue;
+            } catch (e) {
+              if (!(e instanceof ApiFailure && e.status === 404)) break;
+            }
+          }
+          await save({ ...op, status: 'rejected', error: { code: LEGACY_CODE, message: LEGACY_TEXT, at: now() } });
+          continue;
+        }
         if (!sendable(op)) continue;
         // 2. Dependencia real: abono posterior de un crédito con otro abono en revisión.
         if (blockerOf(op, live)) {
           if (!held(op)) await save({ ...op, status: 'review', error: { code: DEPENDENCY, message: 'Espera a que se revise un abono anterior de este mismo crédito.', at: now() } });
           continue;
         }
-        // Ronda 65: solicitud de un cliente nuevo → primero el cliente.
-        const dep = dependency(op, live);
-        if (dep.state === 'wait') continue;
-        if (dep.state === 'held') {
-          if (!held(op) || op.error?.message !== dep.message) await save({ ...op, status: 'review', error: { code: DEPENDENCY, message: dep.message, at: now() } });
-          continue;
-        }
         const prev = held(op) ? 'local' : op.status;
         const at = now();
-        const sending: PendingOp = { ...op, body: dep.body, status: 'sending', attempts: op.attempts + 1, firstSentAt: op.firstSentAt ?? at, lastAttemptAt: at,
+        const sending: PendingOp = { ...op, status: 'sending', attempts: op.attempts + 1, firstSentAt: op.firstSentAt ?? at, lastAttemptAt: at,
           error: op.status === 'sending' ? op.error : undefined };
-        // El cuerpo (con el id del cliente ya fijado) se guarda en disco ANTES de enviarlo.
         await save(sending);
         try {
           const r = await api().command<Record<string, unknown>>('POST', sending.path, sending.body, op.id);

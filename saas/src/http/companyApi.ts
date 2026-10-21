@@ -32,7 +32,7 @@ import {
 } from '../structure/routes.ts';
 import { createCategory, deleteCategory, listCategories, updateCategory } from '../structure/categories.ts';
 import {
-  CLIENT_FIELDS, CREATE_CLIENT_FIELDS, createClient, deleteClient, documentTypes, getClient, listClients, setClientStatus, updateClient,
+  CLIENT_FIELDS, createClient, deleteClient, documentTypes, getClient, listClients, setClientStatus, updateClient,
 } from '../structure/clients.ts';
 import {
   allocateToAdmin, capitalReconciliation, capitalSummary, companyDeposit, companyWithdrawal, deliverToWorker, getOperation, listControllerEvents, listCustody,
@@ -158,8 +158,8 @@ const ENDPOINTS: readonly Endpoint[] = [
   // ---------- Clientes ----------
   { method: 'GET', pattern: /^\/v1\/document-types$/, fields: null, handler: () => async (c, ctx) => ok({ documentTypes: await documentTypes(c, ctx) }) },
   { method: 'GET', pattern: /^\/v1\/clients$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ clients: await listClients(c, ctx, q) }) },
-  { method: 'POST', pattern: /^\/v1\/clients$/, fields: CREATE_CLIENT_FIELDS, idempotent: 'clients.create',
-    handler: () => async (c, ctx, b, _q, op) => created(await createClient(c, ctx, b, op)) },
+  { method: 'POST', pattern: /^\/v1\/clients$/, fields: CLIENT_FIELDS, idempotent: 'clients.create',
+    handler: () => async (c, ctx, b) => created(await createClient(c, ctx, b)) },
   { method: 'GET', pattern: new RegExp(`^/v1/clients/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getClient(c, ctx, id!)) },
   { method: 'PATCH', pattern: new RegExp(`^/v1/clients/${ID}$`), fields: CLIENT_FIELDS, handler: ([id]) => async (c, ctx, b) => ok(await updateClient(c, ctx, id!, b)) },
   { method: 'POST', pattern: new RegExp(`^/v1/clients/${ID}/status$`), fields: ['status'], handler: ([id]) => async (c, ctx, b) => ok(await setClientStatus(c, ctx, id!, b)) },
@@ -217,7 +217,7 @@ const ENDPOINTS: readonly Endpoint[] = [
   // ---------- Créditos: solicitud, autorización y desembolso (Fase 4, solo en línea) ----------
   { method: 'GET', pattern: new RegExp(`^/v1/credit-requests$`), fields: null, handler: () => async (c, ctx, _b, q) => ok({ requests: await listRequests(c, ctx, q) }) },
   { method: 'POST', pattern: new RegExp(`^/v1/credit-requests$`), fields: CREATE_REQUEST_FIELDS, idempotent: 'credit_requests.create',
-    handler: () => async (c, ctx, b, _q, op) => created(await createRequest(c, ctx, b, op)) },
+    handler: () => async (c, ctx, b) => created(await createRequest(c, ctx, b)) },
   { method: 'GET', pattern: new RegExp(`^/v1/credit-requests/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getRequest(c, ctx, id!)) },
   { method: 'POST', pattern: new RegExp(`^/v1/credit-requests/${ID}/approve$`), fields: APPROVE_FIELDS,
     handler: ([id]) => async (c, ctx, b) => ok(await approveRequest(c, ctx, id!, b)) },

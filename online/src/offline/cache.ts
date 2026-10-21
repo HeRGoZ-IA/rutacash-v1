@@ -20,8 +20,6 @@ const CACHEABLE = new Set([
   'table:tenants', 'table:users', 'table:routes', 'table:offices', 'table:clients', 'table:sales', 'table:saleRequests',
   'table:installments', 'table:payments', 'table:noPaymentVisits', 'table:expenseCategories', 'table:expenses',
   'view:/v1/periods/calendar',
-  // Ronda 65: tipos de documento del país (alta de clientes sin conexión).
-  'view:/v1/document-types',
 ]);
 
 /** ¿El fallo es de CONEXIÓN (no hay respuesta útil del servidor)? Solo entonces se usa la copia. */

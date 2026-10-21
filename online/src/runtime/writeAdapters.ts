@@ -74,8 +74,7 @@ const CLIENT_MAP: Record<string, string> = {
 const clientAliases = new Map<string, string>();
 export const clientId = (id: string) => clientAliases.get(id) ?? id;
 
-/** Cuerpo del alta de cliente (también el del alta sin conexión de la Ronda 65: el MISMO comando). */
-export function clientBodyOf(row: Changes): Changes {
+export async function createClientOnline(row: Changes): Promise<string> {
   const documentType = row['documentType'];
   if (!documentType) reject('Indique el tipo de documento del cliente.');
   if ((row['fotoDocumentoUrl'] && !/^https:\/\//.test(row['fotoDocumentoUrl'])) || (row['fotoNegocioUrl'] && !/^https:\/\//.test(row['fotoNegocioUrl']))) {
@@ -87,11 +86,6 @@ export function clientBodyOf(row: Changes): Changes {
     const v = row[k];
     if (typeof v === 'string' && v.trim() !== '') body[f] = v.trim();
   }
-  return body;
-}
-
-export async function createClientOnline(row: Changes): Promise<string> {
-  const body = clientBodyOf(row);
   const created = await money<{ id: string }>('POST', '/v1/clients', body, row['id']);
   if (row['id']) clientAliases.set(String(row['id']), created.id);
   return created.id;

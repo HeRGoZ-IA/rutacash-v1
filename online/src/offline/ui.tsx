@@ -3,12 +3,14 @@
 // necesita atención. Nunca «confirmado» para algo que solo está en el dispositivo.
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle, Clock, Loader2, RefreshCw, Smartphone, Wifi, WifiOff, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ChevronLeft, Clock, Loader2, PhoneCall, RefreshCw, Smartphone, Wifi, WifiOff, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatCurrency, formatDateTime } from '@/lib/formatters';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { toMajor } from '../runtime/mappers.ts';
 import { ALERT_12H, ALERT_24H, alertLevel, isOpen, summary, useOffline, type OpStatus, type PendingOp } from './state.ts';
+import { useRuntime } from '../runtime/session.ts';
+import { OFFLINE_BLOCK_TEXT, OFFLINE_BLOCK_TITLE } from './sales.ts';
 
 /** Vuelve a dibujar cada minuto (los avisos de 12 y 24 h dependen de la hora). */
 export function useMinuteTick(): number {
@@ -92,7 +94,7 @@ export function OfflineBanners({ onOpen }: { onOpen: () => void }) {
       {!reachable && (
         <div className="bg-amber-500 text-white text-xs text-center px-3 py-1.5 font-medium" data-testid="offline-banner">
           {enabled
-            ? <>Sin conexión. Lo que registres se guarda en este dispositivo y se envía al volver internet.{savedAt ? <> Datos de la ruta del {formatDateTime(savedAt)}.</> : null}</>
+            ? <>Sin conexión. Los abonos, visitas, gastos y desembolsos aprobados se guardan en este dispositivo y se envían al volver internet.{savedAt ? <> Datos de la ruta del {formatDateTime(savedAt)}.</> : null}</>
             : <>Sin conexión con el servidor{unavailable ? ` — ${unavailable}` : ''}</>}
         </div>
       )}
@@ -112,17 +114,47 @@ export function OfflineBanners({ onOpen }: { onOpen: () => void }) {
 }
 
 const KIND_LABEL: Record<PendingOp['kind'], string> = {
-  payment: 'Abono', visit: 'Visita sin pago', expense: 'Gasto',
-  // Ronda 65.
-  client: 'Cliente nuevo', credit_request: 'Solicitud de venta', disbursement: 'Desembolso',
+  payment: 'Abono', visit: 'Visita sin pago', expense: 'Gasto', disbursement: 'Desembolso',
+  // Solo registros de una versión anterior (65-C1).
+  client: 'Cliente nuevo', credit_request: 'Solicitud de venta',
 };
 
-/** Ronda 65: lo que significa «confirmado» en cada tipo (una solicitud recibida NO está aprobada). */
+/** Ronda 65: lo que significa «confirmado» en un desembolso. */
 const CONFIRMED_NOTE: Partial<Record<PendingOp['kind'], string>> = {
-  client: 'Cliente registrado en la empresa.',
-  credit_request: 'Solicitud recibida: la oficina debe aprobarla antes de entregar el dinero.',
   disbursement: 'Crédito activo para recaudo.',
 };
+
+/**
+ * 65-C1: el Cobrador sin servidor al alcance no registra clientes ni ventas (llama a la oficina).
+ * Reactivo: con la conexión de vuelta, la pantalla muestra otra vez el formulario.
+ */
+export function useNewClientsAndSalesBlocked(): boolean {
+  const reachable = useReachable();
+  const role = useRuntime((s) => s.ctx?.role);
+  const fromCache = useOffline((s) => s.ctxFromCache);
+  return role === 'cobrador' && (!reachable || fromCache);
+}
+
+/** Aviso en lugar del formulario de cliente nuevo o de venta (sin campos que no se podrían guardar). */
+export function OfflineOperationBlocked({ onBack }: { onBack: () => void }) {
+  return (
+    <div className="pb-6" data-testid="offline-blocked">
+      <div className="bg-primary-700 px-4 py-4">
+        <button onClick={onBack} className="flex items-center gap-1 text-primary-200 text-sm">
+          <ChevronLeft className="w-4 h-4" /> Volver
+        </button>
+      </div>
+      <div className="p-4">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-center space-y-3">
+          <WifiOff className="w-8 h-8 text-amber-600 mx-auto" />
+          <p className="font-bold text-gray-900">{OFFLINE_BLOCK_TITLE}</p>
+          <p className="text-sm text-gray-700">{OFFLINE_BLOCK_TEXT}</p>
+          <p className="text-xs text-gray-500 flex items-center justify-center gap-1"><PhoneCall className="w-3.5 h-3.5" /> La oficina lo registrará en tu ruta.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** Una operación en la lista de pendientes. */
 export function PendingOpRow({ op, name, onRetry, onReviewed }: { op: PendingOp; name?: string; onRetry?: () => void; onReviewed?: () => void }) {
@@ -142,9 +174,6 @@ export function PendingOpRow({ op, name, onRetry, onReviewed }: { op: PendingOp;
         {op.status === 'confirmed' && op.result?.date && <span className="text-[11px] text-gray-500">Registrado con fecha {op.result.date}</span>}
       </div>
       {op.status === 'confirmed' && CONFIRMED_NOTE[op.kind] && <p className="text-xs text-gray-600" data-testid="pending-op-note">{CONFIRMED_NOTE[op.kind]}</p>}
-      {op.kind === 'credit_request' && op.status !== 'confirmed' && op.status !== 'rejected' && (
-        <p className="text-xs text-gray-500" data-testid="pending-op-note">Aún no está aprobada: no entregues dinero por esta solicitud.</p>
-      )}
       {op.error && op.status !== 'confirmed' && (
         <p className={cn('text-xs', op.status === 'sending' || op.status === 'local' ? 'text-gray-500' : 'text-orange-700')} data-testid="pending-op-reason">{op.error.message}</p>
       )}

@@ -8,8 +8,6 @@ import { wireClient } from './runtime/session.ts';
 import './runtime/writeAdapters.ts';
 import { startPolling } from './runtime/projection.ts';
 import { startOfflineSync } from './offline/sync.ts';
-// Ronda 65: clientes nuevos sin sincronizar en la proyección del Cobrador (registro al cargar).
-import './offline/sales.ts';
 import { CleanOnlineApp } from './runtime/CleanOnlineApp.tsx';
 
 // ADEX Online: el frontend de CLEAN conectado a la API SaaS. Configuración pública de

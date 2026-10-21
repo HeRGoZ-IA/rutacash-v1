@@ -11,9 +11,9 @@
 // Los errores se lanzan como `SaleRuleError` para que las pantallas originales muestren
 // el motivo exacto (solo muestran el texto de ese tipo de error).
 //
-// Ronda 65 · COBRADOR SIN CONEXIÓN (offline/sales.ts): su solicitud se guarda en el dispositivo
-// (también la de un cliente nuevo aún sin sincronizar, que espera a su alta) y la devuelve marcada
-// `pendingSync`; el desembolso de una solicitud aprobada va por `disburseAsCollector`.
+// Ronda 65-C1 · COBRADOR SIN CONEXIÓN (offline/sales.ts): NO registra clientes ni ventas (llama a la
+// oficina; aquí se vuelve a comprobar aunque la pantalla ya lo impida) y nada se deja en cola. El
+// desembolso de una solicitud aprobada que el dispositivo conoce va por `disburseAsCollector`.
 
 import type { Client, Sale, SaleRequest, User } from '@clean/models/types';
 import { SaleRuleError, type SaleInputs } from '@clean/services/saleRequestService';
@@ -22,11 +22,8 @@ import { saleFrom, saleRequestFrom, toMinor } from '../../runtime/mappers.ts';
 import { clientId, createClientOnline } from '../../runtime/writeAdapters.ts';
 import { generateId } from '@/lib/utils';
 import { useRuntime } from '../../runtime/session.ts';
-import { table } from '../../runtime/projection.ts';
 import { useOffline } from '../../offline/state.ts';
-import {
-  adoptUncertainRequest, captureOffline, captureOfflineRequest, disburseAsCollector, isLocalClientId, requestBody,
-} from '../../offline/sales.ts';
+import { OFFLINE_BLOCK_TEXT, OFFLINE_BLOCK_TITLE, disburseAsCollector, newClientsAndSalesBlocked } from '../../offline/sales.ts';
 
 export * from '@clean/services/saleRequestService';
 import * as Clean from '@clean/services/saleRequestService';
@@ -76,6 +73,7 @@ function afterClient(e: unknown, created: boolean, what: string): never {
 
 async function createDirectSaleOnline(input: Conditions, _actor: User, opts: { newClient?: Client } = {}): Promise<Sale> {
   return asSaleError(async () => {
+    refuseWithoutServer();
     const client = await clientFor(input, opts.newClient);
     try {
       const r = await money<Record<string, unknown>>('POST', '/v1/credits/direct', conditions(input, client), generateId());
@@ -88,33 +86,19 @@ async function createDirectSaleOnline(input: Conditions, _actor: User, opts: { n
 
 const collectorOffline = () => useRuntime.getState().ctx?.role === 'cobrador' && useOffline.getState().enabled;
 
-/** Ronda 65: solicitud del Cobrador guardada en el dispositivo (la pantalla lo dice así; nada se aprueba). */
-function savedRequest(input: Conditions, client: string): SaleRequest {
-  return { id: '', tenantId: input.routeId, routeId: input.routeId, clientId: client, amount: input.valorVenta, status: 'pending', pendingSync: true } as unknown as SaleRequest;
+/** 65-C1: sin servidor al alcance, el Cobrador no registra clientes ni ventas. */
+function refuseWithoutServer(): void {
+  if (newClientsAndSalesBlocked()) throw new SaleRuleError(`${OFFLINE_BLOCK_TITLE}. ${OFFLINE_BLOCK_TEXT}`);
 }
 
 async function createSaleRequestOnline(input: Conditions, _actor: User, opts: { newClient?: Client } = {}): Promise<SaleRequest> {
   return asSaleError(async () => {
-    // Ronda 65: sin servidor al alcance, o con un cliente nuevo aún sin sincronizar, queda en el dispositivo.
-    if (collectorOffline() && !opts.newClient && (captureOffline() || isLocalClientId(input.clientId))) {
-      const clients = (await table('clients').catch(() => [])) as Record<string, unknown>[];
-      const name = String(clients.find((c) => c['id'] === input.clientId)?.['nombre'] ?? '');
-      await captureOfflineRequest({ ...conditions(input, input.clientId) } as Parameters<typeof captureOfflineRequest>[0], name);
-      return savedRequest(input, input.clientId);
-    }
+    refuseWithoutServer();
     const client = await clientFor(input, opts.newClient);
-    const opId = generateId();
-    const body = conditions(input, client);
     try {
-      const r = await money<Record<string, unknown>>('POST', '/v1/credit-requests', body, opId);
+      const r = await money<Record<string, unknown>>('POST', '/v1/credit-requests', conditions(input, client), generateId());
       return saleRequestFrom((r['request'] as Record<string, unknown>) ?? r);
     } catch (e) {
-      // Ronda 65: el Cobrador envió en línea y la respuesta se perdió → cola con el MISMO id y cuerpo.
-      const code = (e as { code?: string }).code;
-      if (collectorOffline() && (code === 'UNCERTAIN_OPERATION' || code === 'NETWORK')) {
-        const op = await adoptUncertainRequest(requestBody(body as Parameters<typeof requestBody>[0]), opId, new Date().toISOString(), '').catch(() => null);
-        if (op) return savedRequest(input, client);
-      }
       return afterClient(e, Boolean(opts.newClient), 'la solicitud');
     }
   });

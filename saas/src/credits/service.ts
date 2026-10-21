@@ -151,13 +151,13 @@ async function samePerson(client: pg.PoolClient, ctx: ActiveContext, a: string, 
 // Solicitudes
 // ============================================================
 
-const CONDITION_FIELDS = ['routeId', 'clientId', 'amountMinor', 'interestRate', 'installmentsCount', 'frequency', 'startDate', 'paymentDays'] as const;
-/** `offline` (Ronda 65): solicitud registrada sin conexión por el Cobrador (ver offline/capture.ts). */
-export const CREATE_REQUEST_FIELDS = [...CONDITION_FIELDS, 'offline'] as const;
+// Ronda 65-C1 (decisión del propietario): clientes y solicitudes NO se registran sin conexión;
+// estos comandos no admiten `offline` (UNKNOWN_FIELD). Sin conexión, el Cobrador llama a la oficina.
+export const CREATE_REQUEST_FIELDS = ['routeId', 'clientId', 'amountMinor', 'interestRate', 'installmentsCount', 'frequency', 'startDate', 'paymentDays'] as const;
 
 /**
- * Ronda 65: captura sin conexión (solo el Cobrador) con id de operación, que identifica la
- * evidencia de la captura. Las reglas del comando son las mismas que en línea.
+ * Ronda 65: desembolso capturado sin conexión (solo el Cobrador) con id de operación, que identifica
+ * la evidencia de la captura. Las reglas del comando son las mismas que en línea.
  */
 function offlineOf(ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null): OfflineCapture | null {
   const offline = parseOffline(body['offline']);
@@ -171,11 +171,9 @@ function offlineOf(ctx: ActiveContext, body: Record<string, unknown>, operationI
  * Solicitud de crédito (`createSaleRequest`). Tener efectivo en custodia NO autoriza
  * a prestar: el Cobrador siempre solicita. Una sola pendiente por cliente (índice único).
  */
-export async function createRequest(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null = null) {
+export async function createRequest(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>) {
   const route = await routeOf(client, ctx, reqId(body, 'routeId'));
   need(ctx, 'sale.createRequest', { routeId: route.id });
-  // Sin conexión, la solicitud queda PENDIENTE igual que en línea: la aprueba otra persona.
-  const offline = offlineOf(ctx, body, operationId);
   const cond: Conditions = { amount: amountOf(body), rate: rateOf(body), count: countOf(body), frequency: frequencyOf(body), start: startOf(body), days: daysOf(body) };
   const rateError = originationRateError(ctx.role, cond.rate);
   if (rateError) throw new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED', rateError);
@@ -200,13 +198,9 @@ export async function createRequest(client: pg.PoolClient, ctx: ActiveContext, b
     [ctx.companyId, cl.id, route.id, ctx.membershipId, cond.amount, cond.rate, total, cond.count, value, cond.frequency, cond.start, cond.days,
       active.sales, reason]);
   const row = r.rows[0]!;
-  const offlineStatus = offline
-    ? await storeOfflineCapture(client, ctx, { operationId: operationId!, kind: 'credit_request', entityId: row.id, routeId: route.id, capture: offline })
-    : null;
   await audit(client, ctx, { action: 'CREATE_SALE_REQUEST', entityType: 'sale_request', entityId: row.id, routeId: route.id,
-    description: `Solicitud de crédito ${cond.amount} para ${cl.name}`, after: requestView(row),
-    ...(offline ? { metadata: { operationId, offline: { deviceCapturedAt: offline.deviceCapturedAt, stored: offlineStatus } } } : {}) });
-  return offline ? { ...requestView(row), offline: { deviceCapturedAt: offline.deviceCapturedAt } } : requestView(row);
+    description: `Solicitud de crédito ${cond.amount} para ${cl.name}`, after: requestView(row) });
+  return requestView(row);
 }
 
 export const APPROVE_FIELDS = ['notes', 'interestRate', 'frequency', 'paymentDays', 'phoneConfirmed', 'phoneConfirmationNote'] as const;
@@ -340,7 +334,7 @@ export async function disburseRequest(client: pg.PoolClient, ctx: ActiveContext,
   return offline ? { ...credit, offline: { deviceCapturedAt: offline.deviceCapturedAt } } : credit;
 }
 
-export const DIRECT_FIELDS = CONDITION_FIELDS;
+export const DIRECT_FIELDS = CREATE_REQUEST_FIELDS;
 
 /**
  * Venta directa (`createDirectSale`): solo `sale.createDirect` (SuperAdmin,

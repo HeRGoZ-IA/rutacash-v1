@@ -332,21 +332,11 @@ const listeners = new Set<Listener>();
 
 export function currentRevision(): number { return revision; }
 
-/**
- * Ronda 65: filas que existen SOLO en el dispositivo (clientes nuevos del Cobrador sin sincronizar),
- * marcadas `pendingSync`. Se añaden al leer, nunca a la copia del servidor ni a su caché.
- */
-type LocalRows = (serverRows: Row[]) => Row[];
-const LOCAL_ROWS: Record<string, LocalRows> = {};
-export function registerLocalRows(name: string, fn: LocalRows): void { LOCAL_ROWS[name] = fn; }
-
 /** Filas de una tabla (cargadas una vez por revisión). */
 export function table(name: string): Promise<Row[]> {
   const loader = LOADERS[name];
   if (!loader) return Promise.reject(new ServerGap(name));
-  const rows = cached(`table:${name}`, loader);
-  const local = LOCAL_ROWS[name];
-  return local ? rows.then((r) => { const extra = local(r); return extra.length ? [...r, ...extra] : r; }) : rows;
+  return cached(`table:${name}`, loader);
 }
 
 export function subscribe(fn: Listener): () => void {
@@ -382,8 +372,6 @@ export function prefetch(): void {
   // copia de consulta aunque no haya abierto cada pantalla), y la vista del calendario.
   const collector = useRuntime.getState().ctx?.role === 'cobrador' ? ['installments', 'payments', 'noPaymentVisits', 'expenses'] : [];
   for (const t of [...base, ...collector]) table(t).catch(() => { /* la pantalla lo reintentará */ });
-  // Ronda 65: catálogo de tipos de documento (alta de clientes sin conexión).
-  if (collector.length) serverView('/v1/document-types').catch(() => undefined);
 }
 
 /**

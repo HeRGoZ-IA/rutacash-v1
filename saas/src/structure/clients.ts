@@ -22,7 +22,6 @@ import { allowed, routeUnrestricted } from '../authz/cleanRules.ts';
 import { audit } from '../db/audit.ts';
 import { need } from './common.ts';
 import { has, oneOf, optText, pathId, reqId, reqText } from './input.ts';
-import { parseOffline, requireOfflineActor, storeOfflineCapture } from '../offline/capture.ts';
 
 interface Row {
   id: string; route_id: string; name: string; document: string; document_type: string | null; document_normalized: string | null;
@@ -56,8 +55,6 @@ const TEXT_FIELDS: Record<string, { col: keyof Row; required: boolean; max: numb
 };
 const LIMITED = new Set(['name', 'phonePrimary', 'phoneSecondary', 'addressPrimary', 'addressSecondary', 'business', 'notes']);
 export const CLIENT_FIELDS = ['routeId', 'documentType', 'document', ...Object.keys(TEXT_FIELDS)];
-/** Alta: además `offline` (Ronda 65): cliente registrado sin conexión por el Cobrador (ver offline/capture.ts). */
-export const CREATE_CLIENT_FIELDS = [...CLIENT_FIELDS, 'offline'];
 
 /** Fotos: referencia a almacenamiento (https). Subir archivos no es de esta fase. */
 function photo(v: string | null): string | null {
@@ -111,16 +108,9 @@ export async function getClient(client: pg.PoolClient, ctx: ActiveContext, id: s
   return view(await load(client, ctx, id));
 }
 
-export async function createClient(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null = null) {
+export async function createClient(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>) {
   const routeId = reqId(body, 'routeId');
   need(ctx, 'client.create', { routeId });
-  // Ronda 65: alta sin conexión. Mismas reglas y la misma unicidad del documento que en línea; un
-  // documento ya registrado es un 409 (nunca se fusiona ni se sobrescribe el cliente existente).
-  const offline = parseOffline(body['offline']);
-  if (offline) {
-    requireOfflineActor(ctx);
-    if (!operationId) throw new ApiError(400, 'OPERATION_ID_REQUIRED');
-  }
   const values: Record<string, string | null> = {};
   for (const [field, f] of Object.entries(TEXT_FIELDS)) values[f.col] = f.required ? reqText(body, field, f.max) : optText(body, field, f.max);
   values['document_photo_url'] = photo(values['document_photo_url']!);
@@ -136,13 +126,9 @@ export async function createClient(client: pg.PoolClient, ctx: ActiveContext, bo
     [id, ctx.companyId, routeId, values['name'], document, documentType, values['phone_primary'], values['phone_secondary'], values['address_primary'],
       values['address_secondary'], values['business'], values['document_photo_url'], values['business_photo_url'], values['notes']]);
   const row = await load(client, ctx, id);
-  const offlineStatus = offline
-    ? await storeOfflineCapture(client, ctx, { operationId: operationId!, kind: 'client', entityId: id, routeId, capture: offline })
-    : null;
   await audit(client, ctx, { action: 'CREATE_CLIENT', entityType: 'client', entityId: id, routeId, description: `Cliente creado: ${row.name}`,
-    after: { routeId, documentType, documentNormalized: row.document_normalized },
-    ...(offline ? { metadata: { operationId, offline: { deviceCapturedAt: offline.deviceCapturedAt, stored: offlineStatus } } } : {}) });
-  return offline ? { ...view(row), offline: { deviceCapturedAt: offline.deviceCapturedAt } } : view(row);
+    after: { routeId, documentType, documentNormalized: row.document_normalized } });
+  return view(row);
 }
 
 export async function updateClient(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Record<string, unknown>) {

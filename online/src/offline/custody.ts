@@ -7,11 +7,12 @@
 // todavía no tiene en esa cifra:
 //
 //   − desembolsos y gastos propios capturados en el dispositivo y aún no confirmados, cualquiera
-//     que sea su estado (el dinero ya salió de la mano del Cobrador aunque el servidor lo rechace),
+//     que sea su estado salvo que se haya dado por revisado (el dinero ya salió de la mano del
+//     Cobrador aunque el servidor lo rechace),
 //     y los confirmados DESPUÉS de empezar a leer la cifra (aún no incluidos);
-//   + abonos capturados que siguen pendientes de enviar (local) o enviados por primera vez después
-//     de empezar a leer la cifra (el efectivo está en su mano y el servidor lo sumará a su
-//     custodia). Un abono rechazado o en revisión NO suma.
+//   + abonos capturados que nunca se enviaron, o enviados por primera vez DESPUÉS de TERMINAR de
+//     leer la cifra (el efectivo está en su mano y el servidor aún no lo sumó). Uno enviado durante
+//     la lectura podría estar ya incluido: no suma (65-C1). Un abono rechazado o en revisión NO suma.
 //
 // Ante la duda, la regla es conservadora: puede contar de menos, nunca dos veces el mismo dinero.
 // Es una barrera del dispositivo; la decisión final es SIEMPRE del servidor al sincronizar (si ya
@@ -26,6 +27,8 @@ interface Position { routeId: string; workerId: string; balanceMinor: number; ca
 export interface CustodySnapshot {
   /** Hora del dispositivo al EMPEZAR la lectura: lo confirmado después puede no estar incluido. */
   startedAt: string;
+  /** Hora al TERMINAR la lectura: un abono enviado antes pudo quedar incluido (65-C1). */
+  endedAt?: string;
   positions: Position[];
 }
 
@@ -44,7 +47,7 @@ export function refreshCustody(): Promise<void> {
       const r = await api().get<{ positions: Position[] }>('/v1/capital/custody');
       const mine = (r.positions ?? []).filter((p) => p.workerId === c.scope.membershipId)
         .map((p) => ({ routeId: p.routeId, workerId: p.workerId, balanceMinor: Number(p.balanceMinor), carriedMinor: Number(p.carriedMinor) }));
-      const next: CustodySnapshot = { startedAt, positions: mine };
+      const next: CustodySnapshot = { startedAt, endedAt: new Date().toISOString(), positions: mine };
       if (currentScope()?.scope !== c.scope) return;
       snapshot = next;
       loadedFor = c.scope.membershipId;
@@ -78,18 +81,24 @@ export function forgetCustody(): void {
 
 const after = (t: string | undefined, since: string) => t !== undefined && t >= since;
 
-/** Efecto en el efectivo del Cobrador que el servidor aún no tiene en la cifra leída en `since`. */
-export function pendingEffect(op: PendingOp, since: string): number {
+/**
+ * Efecto en el efectivo del Cobrador que el servidor aún no tiene en la cifra leída entre `since` y
+ * `until`. Resta con `since` (ante la duda, resta) y suma con `until` (ante la duda, no suma).
+ */
+export function pendingEffect(op: PendingOp, since: string, until: string = since): number {
   const amount = Number(op.ref.amountMinor ?? 0);
   if (!(amount > 0)) return 0;
   if (op.kind === 'disbursement' || (op.kind === 'expense' && op.body['scope'] === 'trabajador')) {
+    // Rechazado o en revisión que la persona ya dio por revisado («Ya lo revisé», resuelto con la
+    // oficina): deja de descontarse. Mientras no se revise, el dinero se considera entregado.
+    if ((op.status === 'review' || op.status === 'rejected') && op.reviewedAt) return 0;
     return op.status !== 'confirmed' || after(op.confirmedAt, since) ? -amount : 0;
   }
   if (op.kind === 'payment') {
     // Confirmado: lo que el servidor aplicó de verdad (en línea puede haberse topado al saldo).
     const got = op.status === 'confirmed' && op.result?.appliedMinor != null ? Math.min(amount, Number(op.result.appliedMinor)) : amount;
     if (op.status === 'local' && op.attempts === 0) return got;
-    if ((op.status === 'local' || op.status === 'sending' || op.status === 'confirmed') && after(op.firstSentAt, since)) return got;
+    if ((op.status === 'local' || op.status === 'sending' || op.status === 'confirmed') && op.firstSentAt !== undefined && op.firstSentAt > until) return got;
   }
   return 0;
 }
@@ -113,7 +122,7 @@ export async function availableCash(routeId: string): Promise<Availability> {
   const server = pos ? pos.balanceMinor - pos.carriedMinor : 0;
   let out = 0, inc = 0;
   for (const o of ops) {
-    const e = pendingEffect(o, snap.startedAt);
+    const e = pendingEffect(o, snap.startedAt, snap.endedAt ?? new Date(8.64e15).toISOString());
     if (e < 0) out += -e; else inc += e;
   }
   return { availableMinor: server - out + inc, serverMinor: server, pendingOutMinor: out, pendingInMinor: inc, savedAt: snap.startedAt };

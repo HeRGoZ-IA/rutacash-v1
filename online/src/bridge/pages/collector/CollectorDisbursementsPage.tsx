@@ -1,7 +1,7 @@
 // ADEX Online: COPIA de src/pages/collector/CollectorDisbursementsPage.tsx (CLEAN). Pantalla y textos originales.
 // Ronda 65, marcado con «ADEX Online (Ronda 65)»: el Cobrador entrega el dinero de una venta aprobada
 // también SIN CONEXIÓN, con el efectivo que tiene en custodia (cifra del servidor menos lo que ya
-// entregó o gastó después). Lo entregado sin conexión se muestra «Guardado solo en este
+// entregó o gastó después). Solo lo aprobado que el dispositivo conoce desde su última sincronización. Lo entregado sin conexión se muestra «Guardado solo en este
 // dispositivo» hasta que el servidor lo confirme, y no se puede volver a confirmar.
 import { useState, useEffect } from 'react'
 import { Banknote, CheckCircle, Smartphone } from 'lucide-react'
@@ -90,6 +90,12 @@ export default function CollectorDisbursementsPage() {
         <p className="text-xs text-gray-500">Ventas aprobadas pendientes por desembolsar</p>
       </div>
 
+      {/* ADEX Online (Ronda 65-C1): sin conexión solo se ve lo aprobado que el dispositivo ya conocía. */}
+      {offlineMode && !reachable && (
+        <p className="text-xs text-gray-600 rounded-xl bg-gray-50 border border-gray-200 px-3 py-2" data-testid="offline-approvals-note">
+          Sin conexión solo aparecen las ventas aprobadas que este dispositivo conocía en su última sincronización. Si la oficina aprobó otra mientras estabas sin internet, conéctate para actualizarla.
+        </p>
+      )}
       {/* ADEX Online (Ronda 65): efectivo con el que puede entregar, según el dispositivo. */}
       {offlineMode && cash && (
         <div className="rounded-2xl border border-gray-200 bg-white p-3" data-testid="offline-cash">

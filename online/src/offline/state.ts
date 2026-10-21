@@ -1,8 +1,9 @@
 // MODO SIN CONEXIÓN DEL COBRADOR (Ronda 62): estado, llave, cola y avisos.
 //
 // Reglas que no se negocian (ver también vault.ts y sync.ts):
-//   · Solo el COBRADOR: abonos, visitas sin pago, sus propios gastos y (Ronda 65) clientes nuevos,
-//     solicitudes de venta y la entrega del dinero de una solicitud YA APROBADA (sales.ts).
+//   · Solo el COBRADOR: abonos, visitas sin pago, sus propios gastos y (Ronda 65) la entrega del
+//     dinero de una solicitud YA APROBADA que el dispositivo conoce (sales.ts). Clientes nuevos y
+//     ventas NO se registran sin conexión (65-C1): se llama a la oficina.
 //   · Una operación capturada sin conexión es una INTENCIÓN guardada en el dispositivo: no es
 //     un pago, no cambia saldos y nunca se presenta como confirmada. La confirma (o la rechaza)
 //     el servidor al sincronizar, con el MISMO id de operación y el MISMO cuerpo para siempre.
@@ -19,7 +20,9 @@ import {
   type Scope,
 } from './vault.ts';
 
-export type OpKind = 'payment' | 'visit' | 'expense' | 'client' | 'credit_request' | 'disbursement';
+// `client` y `credit_request`: SOLO para leer registros que dejó una versión anterior (65-C1);
+// ya no se crean y nunca se envían (sync.ts los marca «Rechazado» con la explicación).
+export type OpKind = 'payment' | 'visit' | 'expense' | 'disbursement' | 'client' | 'credit_request';
 /**
  *   local      — guardada SOLO en este dispositivo, aún no enviada.
  *   sending    — enviada al menos una vez sin respuesta definitiva (se comprueba con su mismo id).
@@ -41,18 +44,14 @@ export interface PendingOp {
   membershipId: string;
   companyId: string;
   routeId: string;
-  /** Comando de siempre: `/v1/collections`, `/v1/no-payment-visits`, `/v1/expenses`, `/v1/clients`,
-   *  `/v1/credit-requests` o `/v1/credit-requests/:id/disburse`. */
+  /** Comando de siempre: `/v1/collections`, `/v1/no-payment-visits`, `/v1/expenses` o
+   *  `/v1/credit-requests/:id/disburse`. */
   path: string;
   /** Cuerpo EXACTO que se envía: el servidor compara su huella, un reintento debe ser idéntico. */
   body: Record<string, unknown>;
   /** Hora de captura del DISPOSITIVO (ISO). */
   capturedAt: string;
-  /**
-   * Ronda 65: operación de la que depende (alta del cliente de una solicitud). Hasta que el
-   * servidor la confirme, el cuerpo lleva `clientId: "local:<id>"`; al confirmarse se fija el id
-   * del servidor UNA vez (antes del primer envío) y el cuerpo ya no cambia.
-   */
+  /** Solo en registros de una versión anterior (65-C1): ya no se usa. */
   dependsOn?: string;
   /** Datos solo para mostrar (cliente, importe, categoría…). */
   ref: { saleId?: string; clientId?: string; clientName?: string; amountMinor?: number; label?: string; reason?: string; location?: string;
@@ -220,7 +219,7 @@ export async function persist(op: PendingOp): Promise<void> {
   channel?.postMessage({ t: 'changed', id: op.id });
 }
 
-type Capture = Pick<PendingOp, 'kind' | 'path' | 'body' | 'routeId' | 'ref' | 'dependsOn'> & { id: string; capturedAt: string; origin?: PendingOp['origin']; status?: OpStatus };
+type Capture = Pick<PendingOp, 'kind' | 'path' | 'body' | 'routeId' | 'ref'> & { id: string; capturedAt: string; origin?: PendingOp['origin']; status?: OpStatus };
 
 /** Nueva operación capturada. Se guarda en disco ANTES de devolverla: si la app se cierra, sigue ahí. */
 export async function capture(c: Capture): Promise<PendingOp> {
@@ -231,7 +230,6 @@ export async function capture(c: Capture): Promise<PendingOp> {
   const op: PendingOp = {
     v: 1, id: c.id, kind: c.kind, origin: c.origin ?? 'offline', identityId: s.identityId, membershipId: s.membershipId, companyId: s.companyId,
     routeId: c.routeId, path: c.path, body: c.body, capturedAt: c.capturedAt, ref: c.ref, status: c.status ?? 'local', attempts: 0,
-    ...(c.dependsOn ? { dependsOn: c.dependsOn } : {}),
   };
   await persist(op);
   return op;

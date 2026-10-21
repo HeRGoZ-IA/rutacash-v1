@@ -1,7 +1,7 @@
 // MODO SIN CONEXIÓN DEL COBRADOR (Ronda 62 · 0026; Ronda 65 · 0027).
 //
 // Una operación capturada sin internet llega por el MISMO comando (abono, visita, gasto y, desde
-// la Ronda 65, alta de cliente, solicitud de crédito y desembolso de una solicitud aprobada) con
+// la Ronda 65, desembolso de una solicitud aprobada; clientes y ventas NO, ver 65-C1) con
 // un campo `offline` que describe la captura: `{ capturedAt, knownBalanceMinor? }`. El servidor:
 //   · la acepta SOLO de un Cobrador (el modo sin conexión es suyo en esta versión);
 //   · decide con el estado VIGENTE: membresía, rol, ruta asignada y operativa, crédito,
@@ -26,7 +26,7 @@ export interface OfflineCapture {
   note: string | null;
 }
 
-export type OfflineKind = 'payment' | 'visit' | 'expense' | 'client' | 'credit_request' | 'disbursement';
+export type OfflineKind = 'payment' | 'visit' | 'expense' | 'disbursement';
 
 /** Antigüedad máxima admitida para la hora del dispositivo (más allá, se guarda sin hora). */
 const MAX_AGE_MS = 45 * 24 * 3_600_000;

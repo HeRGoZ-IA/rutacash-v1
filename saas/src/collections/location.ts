@@ -124,10 +124,10 @@ export async function offlineCollectorReady(pool: pg.Pool): Promise<boolean> {
 }
 
 /**
- * Ronda 65 (0027): clientes, solicitudes y desembolsos sin conexión. La migración amplía la
- * restricción de tipos de `adex.offline_captures`; se anuncia solo si ya admite 'disbursement'.
+ * Ronda 65 (0027): desembolsos sin conexión. La migración amplía la restricción de tipos de
+ * `adex.offline_captures`; se anuncia solo si ya admite 'disbursement'.
  */
-export async function offlineSalesReady(pool: pg.Pool, attempts = 3): Promise<boolean> {
+export async function offlineDisbursementsReady(pool: pg.Pool, attempts = 3): Promise<boolean> {
   for (let i = 1; i <= attempts; i++) {
     try {
       const r = await pool.query<{ ok: boolean }>(

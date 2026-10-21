@@ -1,4 +1,48 @@
-# ADEX Online · Ronda 65 · Cobrador sin conexión: clientes, solicitudes de venta y desembolsos
+# ADEX Online · Ronda 65 (corregida en 65-C1) · Cobrador sin conexión: desembolsos de ventas aprobadas
+
+> **65-C1 (2026-10-21), decisión del propietario que prevalece sobre lo descrito más abajo:** SIN
+> INTERNET EL COBRADOR NO REGISTRA CLIENTES NUEVOS NI VENTAS (ni solicitudes ni ventas directas). Llama a la
+> oficina, que los registra con las reglas de siempre en la ruta que corresponde (la cartera es de la ruta).
+> Las secciones 1–8 describen la implementación original de R65; donde hablan de clientes o solicitudes sin
+> conexión, quedan SUSTITUIDAS por la sección 0.
+
+## 0. Corrección 65-C1
+
+**Qué hace ahora el Cobrador sin internet:** cobra, registra visitas sin pago, registra sus gastos y entrega
+el dinero de ventas ya aprobadas que su dispositivo conoce desde la última sincronización, con el efectivo en
+custodia. Para un cliente nuevo o una venta ve «**Operación no disponible sin internet** — Para registrar un
+cliente nuevo o una venta, comuníquese telefónicamente con la oficina para que realicen la gestión», en lugar
+del formulario (también entrando por «Nuevo cliente» desde «Nueva venta»). Con conexión, todo sigue igual.
+
+**Cambios:**
+- Servidor: `POST /v1/clients` y `POST /v1/credit-requests` ya no admiten `offline` (400 `UNKNOWN_FIELD`,
+  ningún rol); solo `/disburse` lo admite (Cobrador, con id de operación).
+- 0027 reducida a desembolsos (`kind` + 'disbursement'; guardián del desembolso) y renombrada
+  `0027_offline_disbursements.sql`. Nunca se había aplicado en un entorno compartido (staging en 0026).
+  Capacidad de `/healthz` renombrada a `offline-disbursements-v1` (la puerta de Vercel la exige).
+- Dispositivo: retirada toda captura local de clientes y solicitudes (clientes «sin sincronizar», dependencia
+  cliente → solicitud, adopción de altas sin respuesta). El puente del servicio de ventas rechaza además la
+  operación si el Cobrador no tiene servidor al alcance.
+- **Registros heredados** (cliente o solicitud que dejó en la cola el build anterior de R65, nunca publicado):
+  no se envían nunca; se marcan «Rechazado» con la explicación y se conservan (si ya se habían enviado sin
+  respuesta, solo se consulta su resultado por el id).
+- **Efectivo disponible:** un abono enviado mientras se leía la cifra del servidor ya no suma (podría estar
+  incluido); solo suman los abonos nunca enviados o enviados después de terminar la lectura. Un desembolso
+  rechazado que la persona marcó «Ya lo revisé» deja de descontarse.
+- «Desembolsos» sin conexión avisa que solo aparecen las aprobaciones conocidas en la última sincronización.
+- **Ubicación GPS de ventas:** el contrato actual solo guarda la del abono (`payment_locations`). Guardar la del
+  dispositivo al vender y la de referencia del cliente exige tabla, captura y permisos nuevos: queda para la
+  ronda del mapa.
+- **SuperAdmin → Clientes solo lectura:** sigue pendiente como trabajo independiente.
+
+**Pruebas 65-C1:** `offline-disbursements.test.ts` (OFS-001…014, rechazo de `offline` en clientes y
+solicitudes); E2E `tmp/r65c1/e2e-c1.mjs` 35/35 (heredados, avisos, rutas alternativas, desembolso, aprobación
+desconocida, abono sin doble conteo, respuesta perdida, conflictos, bloqueo); regresión R62 54/54.
+
+**Publicación:** igual que en §8 con la capacidad `offline-disbursements-v1`.
+
+---
+
 
 Fecha: 2026-10-21. Base: `147a8e4` (= origin/main al empezar).
 
@@ -37,7 +81,7 @@ Cada registro se muestra «Guardado solo en este dispositivo» hasta que el serv
   - siempre con id de operación (`OPERATION_ID_REQUIRED`);
   - las reglas del comando son las mismas que en línea, evaluadas con el estado **vigente** al sincronizar.
 - La hora del dispositivo se guarda como evidencia en `adex.offline_captures`. Se amplió la restricción de tipos: `client`, `credit_request`, `disbursement`. El guardián comprueba que la entidad la registró esa misma membresía en esa misma operación. La fecha contable es la de la empresa al confirmarse.
-- `/healthz` anuncia `offline-sales-v1` solo con 0027 aplicada. La puerta de Vercel la exige.
+- `/healthz` anuncia `offline-disbursements-v1` (antes `offline-sales-v1`) solo con 0027 aplicada. La puerta de Vercel la exige.
 - Un desembolso que ya no cabe (sin efectivo, solicitud cancelada, ruta inactiva, periodo cerrado, Cobrador bloqueado) responde 4xx **sin escribir nada** y **sin consumir el id**. El mismo registro puede entrar después, cuando la oficina resuelva la causa.
 
 ### Dispositivo (`online/src/offline/`)
@@ -141,7 +185,7 @@ Orden obligatorio:
 
 1. Aplicar 0027 en staging (lo ejecuta el propietario: `cd saas; npm run staging:migrate`).
 2. Desplegar `adex-online-api` en Render.
-3. Comprobar que `/healthz` incluye `offline-sales-v1`.
+3. Comprobar que `/healthz` incluye `offline-disbursements-v1` (antes `offline-sales-v1`).
 4. Desplegar el frontend en Vercel. La puerta lo exige; si canceló el despliegue del push, se vuelve a desplegar el mismo commit.
 5. Verificación de solo lectura.
 
