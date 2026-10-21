@@ -111,3 +111,21 @@ Errores nuevos: `AX417 REQUEST_NOT_PENDING`, `AX418 REQUEST_MISMATCH`.
 | Traspasos (`admin-transfers.test.ts`, reescrita) | directo aplicado en el acto, idempotencia, doble consumo, concurrencia; Secretario sin cambios |
 | Online en Chrome real (`tmp/r59/visual.mjs`, Online compilado + API local) | 61/61: menús por rol, Caja principal, Transferencias, operación sin capital, solicitudes atendidas, Cobrador móvil, Secretario, Consultas y redirecciones, anulación, móvil/tableta sin desbordes, Gastos sin cambios, sin errores JS |
 | Huella de staging (solo lectura) antes de publicar | 0001–0024; solo BlueLine (1 ruta, 6 miembros, 0 operaciones de capital, 0 directos pendientes); 2 Owners reales activos |
+
+## 5. Publicación (2026-10-21)
+
+| Paso | Evidencia |
+|---|---|
+| Git | 896d806 → de8203c (saas) · bb1b494 (online) · f22a1cc (`staging:migrate` admite usuarios reales que son identidades de ADEX; semillas y pruebas siguen solo sintéticas) · 4689981 + 3b931e1 (reintentos de las comprobaciones de arranque) |
+| Staging | 0025 aplicada por el propietario (`staging:migrate`); 0001–0025 |
+| API `adex-online-api` | `/healthz`: collections, settlements, clean-online, changes, access-links, payment-location, admin-transfers, **capital-requests** |
+| Frontend `adex-online` | Vercel sirve `index-CcMcoY51.js` con «Realizar movimientos», «Nueva operación», Notificaciones, Consultas y «Entregar efectivo»; sin «Conciliación de la bolsa» ni textos de saldo heredado |
+| CLEAN | Proyecto Vercel `rutacash-clean` eliminado: `rutacash-clean.vercel.app` → 404. ADEX Online, `/owner`, `adex-online-api` y `adex-owner-api` → 200. El código de CLEAN sigue en Git (Online lo compila). |
+| BlueLine y Owners | Huella de solo lectura antes / después de 0025 / final: BlueLine idéntica (12 tablas), conservación 0; las 2 cuentas Owner reales activas y sin cambios |
+
+**Incidente resuelto:** `/healthz` perdía `payment-location-v1` porque la primera conexión de un proceso recién arrancado
+en Render fallaba; las comprobaciones de arranque ahora reintentan (≤ 3 s cada una, dentro del límite de 30 s).
+
+**Pendientes no bloqueantes:** `scripts/prod-smoke.mjs` y `verify:deploy` de CLEAN apuntan aún a la URL retirada
+(herramientas internas, sin efecto en Online); la anulación de una entrega del Cobrador no recibida es el remedio previsto
+(sin estado «en disputa», como en R53).
