@@ -101,7 +101,11 @@ const list = ((await users.json()) as { users?: { id?: string; email?: string }[
 // .env.staging local; la añade scripts/owner-register.ts. Nunca usuarios de empresa reales.
 const realOwners = new Set((env['ADEX_STAGING_REAL_OWNER_IDS'] ?? '').split(',').map((x) => x.trim()).filter(Boolean));
 const foreign = list.filter((u) => !(u.email ?? '').endsWith('@example.test') && !realOwners.has(u.id ?? ''));
-if (foreign.length) blocked(`Auth tiene ${foreign.length} usuario(s) no sintético(s)`);
+// Ronda 59: staging ya aloja empresas REALES (BlueLine). Solo `--migrate` sin `--seed` las admite, y solo
+// si cada usuario real es una identidad de ADEX (se comprueba abajo, ya conectados). Las semillas y las
+// pruebas contra staging siguen exigiendo Auth 100 % sintético.
+const realDataMigration = mode === '--migrate' && !process.argv.includes('--seed');
+if (foreign.length && !realDataMigration) blocked(`Auth tiene ${foreign.length} usuario(s) no sintético(s)`);
 
 const ssl = env['ADEX_PG_SSL_CA'] ? { ca: readFileSync(env['ADEX_PG_SSL_CA'], 'utf8'), rejectUnauthorized: true } : { rejectUnauthorized: false };
 const host = need('SUPABASE_POOLER_HOST');
@@ -109,6 +113,11 @@ const adminUrl = `postgres://postgres.${ref}:${encodeURIComponent(need('SUPABASE
 const admin = new pg.Client({ connectionString: adminUrl, ssl });
 await admin.connect();
 try {
+  if (foreign.length) {
+    const known = await admin.query<{ id: string }>('select id::text id from adex.identities where id = any($1::uuid[])', [foreign.map((u) => u.id)]);
+    if (known.rowCount !== foreign.length) blocked(`Auth tiene ${foreign.length - (known.rowCount ?? 0)} usuario(s) ajeno(s) a ADEX`);
+    console.log(`Auth: ${foreign.length} usuario(s) reales de empresas de ADEX (solo se migra; sin semillas ni pruebas)`);
+  }
   const tables = await admin.query(`select count(*)::int n from pg_tables where schemaname = 'public'`);
   if (tables.rows[0].n > 0) blocked('el esquema public tiene tablas: el proyecto no está vacío');
   if (!token) {
