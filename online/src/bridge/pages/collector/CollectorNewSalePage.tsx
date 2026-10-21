@@ -1,0 +1,335 @@
+// ADEX Online: COPIA de src/pages/collector/CollectorNewSalePage.tsx (CLEAN). Pantalla, campos, validaciones y textos originales.
+// Ronda 65, marcado con «ADEX Online (Ronda 65)»: el Cobrador sin conexión guarda la SOLICITUD en el
+// dispositivo (también para un cliente nuevo aún sin sincronizar, que se marca así en la lista) y el
+// aviso lo dice; nada se aprueba ni se entrega por estar sin internet.
+import { useState, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useOpBase } from '@/hooks/useOpBase'
+import { ChevronLeft, UserPlus, FileText, Send, AlertTriangle } from 'lucide-react'
+import { Input, Select } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
+import { toast } from '@/components/ui/Toast'
+import { db } from '@/lib/db'
+import { useAuth } from '@/hooks/useAuth'
+import { useTenant } from '@/hooks/useTenant'
+import { useCollectorRoute } from '@/hooks/useCollectorRoute'
+import { getAuthorizedRouteIds } from '@/lib/roles'
+import { can } from '@/lib/permissions'
+import { ALLOWED_INTEREST_RATES, originationRateError, originationRatesFor } from '@/lib/interestRatePolicy'
+import { formatCurrency, formatDate, today } from '@/lib/formatters'
+import { computeSaleFinancials, createDirectSale, createSaleRequest, findActiveSaleForClient, directSaleLimit, type SaleInputs } from '@/services/saleRequestService'
+import { useCapitalGuard } from '@/hooks/useCapitalGuard'
+import { decideSaleOrigination } from '@/lib/activeCredit'
+import type { Client, Sale, Route } from '@/models/types'
+// ADEX Online (Ronda 65).
+import { isLocalClientId } from '../../../offline/sales.ts'
+
+const FREQ_OPTIONS = [
+  { value: 'diaria', label: 'Diaria' }, { value: 'semanal', label: 'Semanal' },
+  { value: 'quincenal', label: 'Quincenal' }, { value: 'mensual', label: 'Mensual' },
+]
+const WEEK_DAYS = [
+  { value: 1, label: 'Lun' }, { value: 2, label: 'Mar' }, { value: 3, label: 'Mié' },
+  { value: 4, label: 'Jue' }, { value: 5, label: 'Vie' }, { value: 6, label: 'Sáb' }, { value: 0, label: 'Dom' },
+]
+
+export default function CollectorNewSalePage() {
+  const navigate = useNavigate()
+  const base = useOpBase()
+  const [params] = useSearchParams()
+  const { user } = useAuth()
+  // Tasas que ESTE usuario puede originar (Cobrador: solo 20%; el 10% se aplica al autorizar).
+  const tasas = user ? originationRatesFor(user.rol) : ALLOWED_INTEREST_RATES
+  const { currency } = useTenant()
+  const { activeRouteId } = useCollectorRoute()
+  const [clients, setClients] = useState<Client[]>([])
+  const [routes, setRoutes] = useState<Route[]>([])
+  const [routeIds, setRouteIds] = useState<string[]>([])
+  const [saving, setSaving] = useState(false)
+  // Revisión socio 25-jun — alerta de segunda venta activa del mismo cliente.
+  const [activeSale, setActiveSale] = useState<Sale | null>(null)
+  const [confirmKind, setConfirmKind] = useState<'direct' | 'request' | null>(null)
+  const [form, setForm] = useState({
+    clientId: params.get('clientId') ?? '',
+    valorVenta: 0, tasaInteres: 20, numeroCuotas: 30,
+    frecuenciaPago: 'diaria' as Sale['frecuenciaPago'], fechaInicio: today(),
+    paymentDays: [1, 2, 3, 4, 5, 6] as number[],
+  })
+
+  useEffect(() => { load() }, [user])
+
+  async function load() {
+    if (!user) return
+    const ids = getAuthorizedRouteIds(user)
+    setRouteIds(ids)
+    const [all, rts] = await Promise.all([
+      db.clients.where('tenantId').equals(user.tenantId).toArray(),
+      db.routes.where('tenantId').equals(user.tenantId).toArray(),
+    ])
+    // Solo clientes de las rutas del cobrador
+    setClients(all.filter(c => ids.includes(c.routeId)))
+    setRoutes(rts)
+  }
+
+  // Al seleccionar un cliente, detectar si ya tiene una venta activa (para advertir).
+  useEffect(() => {
+    let alive = true
+    if (!form.clientId) { setActiveSale(null); return }
+    findActiveSaleForClient(form.clientId).then(s => { if (alive) setActiveSale(s) })
+    return () => { alive = false }
+  }, [form.clientId])
+
+  function togglePaymentDay(day: number) {
+    setForm(f => ({
+      ...f,
+      paymentDays: f.paymentDays.includes(day) ? f.paymentDays.filter(d => d !== day) : [...f.paymentDays, day].sort((a, b) => a - b),
+    }))
+  }
+
+  // Base de la ruta del cliente seleccionado.
+  const selectedClient = clients.find(c => c.id === form.clientId)
+
+  // ---- Límite efectivo de venta directa (Ajustes post-Revisión 2) ----
+  // El monto máximo para venta directa es el MENOR límite aplicable entre el
+  // límite de la ruta (montoMaximoPrestamo) y el límite del cobrador
+  // (maxDirectSaleAmount). 0/vacío significa "sin límite" en ese lado.
+  const selectedRoute = routes.find(r => r.id === selectedClient?.routeId)
+  const routeLimit = selectedRoute && selectedRoute.montoMaximoPrestamo > 0 ? selectedRoute.montoMaximoPrestamo : Infinity
+  const collectorLimit = user?.maxDirectSaleAmount && user.maxDirectSaleAmount > 0 ? user.maxDirectSaleAmount : Infinity
+  // Fuente única compartida con el servicio, que revalida el mismo límite.
+  const effectiveLimit = directSaleLimit(selectedRoute, user) // Infinity si ambos sin límite
+  const hasEffectiveLimit = Number.isFinite(effectiveLimit)
+  // Venta directa: se resuelve por CAPACIDAD central (no por el flag legacy del cobrador).
+  // El Cobrador NO tiene `sale.createDirect` → siempre enviará solicitud. El
+  // Supervisor SÍ (autoridad comercial, 2026-09-24): otorga el crédito sin solicitud,
+  // salvo que supere el límite de venta directa, en cuyo caso también solicita.
+  const canDirect = can(user, 'sale.createDirect', { routeId: selectedClient?.routeId })
+  const withinLimit = !hasEffectiveLimit || form.valorVenta <= effectiveLimit
+  // Regla central de crédito activo (la misma que aplica el servicio): un Cobrador
+  // con cliente con crédito activo SOLO puede solicitar, aunque tuviera venta directa.
+  const origen = user ? decideSaleOrigination({
+    actor: user, canCreateDirect: canDirect, activeCredits: activeSale ? 1 : 0,
+    canCreateRequest: can(user, 'sale.createRequest', { routeId: selectedClient?.routeId }),
+  }) : { kind: 'forbidden' as const }
+  const requiereAutorizacionPorCredito = origen.kind === 'authorization' && origen.reason === 'active-credit'
+  const allowDirect = origen.kind === 'direct' && withinLimit
+
+  // La validación de capital se mantiene para todos los roles; el MONTO solo se
+  // revela a quien puede ver la caja de la ruta (el Cobrador no lo necesita).
+  const { exceeded: capExcedido, available: capDisponible, canSeeAmount: verCapital, recheck: recheckCapital } =
+    useCapitalGuard(selectedClient?.routeId, form.valorVenta)
+
+  const calc = form.valorVenta > 0 && form.numeroCuotas > 0
+    ? computeSaleFinancials({ valorVenta: form.valorVenta, tasaInteres: form.tasaInteres, numeroCuotas: form.numeroCuotas, frecuenciaPago: form.frecuenciaPago, fechaInicio: form.fechaInicio, paymentDays: form.paymentDays })
+    : null
+
+  function validate(): boolean {
+    if (!form.clientId) { toast.error('Selecciona un cliente'); return false }
+    if (form.valorVenta <= 0) { toast.error('El valor debe ser mayor a 0'); return false }
+    if (form.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return false }
+    const errorTasa = user ? originationRateError(user.rol, form.tasaInteres) : null
+    if (errorTasa) { toast.error(errorTasa); return false }
+    if (form.fechaInicio < today()) { toast.error('La fecha de inicio no puede ser anterior a hoy'); return false }
+    if (form.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return false }
+    return true
+  }
+
+  function buildInputs(): SaleInputs | null {
+    const client = clients.find(c => c.id === form.clientId)
+    if (!client || !user) return null
+    return {
+      tenantId: user.tenantId, routeId: client.routeId,
+      clientId: client.id, createdByUserId: user.id,
+      valorVenta: form.valorVenta, tasaInteres: form.tasaInteres, numeroCuotas: form.numeroCuotas,
+      frecuenciaPago: form.frecuenciaPago, fechaInicio: form.fechaInicio, paymentDays: form.paymentDays,
+    }
+  }
+
+  async function handleDirectSale() {
+    if (!validate()) return
+    // Base VIGENTE, no la cifra pintada: pudo cambiar mientras se llenaba el formulario.
+    const capital = await recheckCapital(form.valorVenta)
+    if (capital.exceeded) {
+      const motivo = verCapital
+        ? `La venta supera la Base de la ruta (${formatCurrency(capital.available ?? 0, currency)})`
+        : 'La venta supera la Base de la ruta. Reduce el monto o solicita una inyección de capital.'
+      toast.error(capExcedido ? motivo : `La Base de la ruta cambió mientras completabas la venta. ${motivo}`)
+      return
+    }
+    // Si el cliente ya tiene venta activa, pedir confirmación antes de crear otra.
+    if (activeSale && confirmKind !== 'direct') { setConfirmKind('direct'); return }
+    const inputs = buildInputs(); if (!inputs || !user) return
+    setConfirmKind(null)
+    setSaving(true)
+    try {
+      await createDirectSale(inputs, user)
+      toast.success('Venta creada y activa para recaudo')
+      navigate(`${base}/route`)
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error al crear la venta') } finally { setSaving(false) }
+  }
+
+  async function handleRequest() {
+    if (!validate()) return
+    if (activeSale && confirmKind !== 'request') { setConfirmKind('request'); return }
+    const inputs = buildInputs(); if (!inputs || !user) return
+    setConfirmKind(null)
+    setSaving(true)
+    try {
+      // ADEX Online (Ronda 65): sin conexión (o con un cliente aún sin sincronizar) queda en el dispositivo.
+      const saved = await createSaleRequest(inputs, user) as unknown as { pendingSync?: boolean } | undefined
+      if (saved?.pendingSync) toast.success('Solicitud de venta guardada en este dispositivo. Se enviará al recuperar internet y la aprueba la oficina: todavía no entregues dinero.')
+      else toast.success('Solicitud de venta enviada al administrador')
+      navigate(`${base}/home`)
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error al enviar la solicitud') } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="pb-6">
+      <div className="bg-primary-700 px-4 py-4">
+        <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-primary-200 text-sm mb-2">
+          <ChevronLeft className="w-4 h-4" /> Volver
+        </button>
+        <h1 className="text-white font-bold text-lg">Nueva venta</h1>
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* Cliente */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="block text-sm font-medium text-gray-700">Cliente</label>
+            <button onClick={() => navigate(`${base}/clients/new?returnTo=new-sale`)} className="text-xs font-semibold text-primary-600 flex items-center gap-1">
+              <UserPlus className="w-3.5 h-3.5" /> Nuevo cliente
+            </button>
+          </div>
+          <Select value={form.clientId} onChange={e => setForm(f => ({ ...f, clientId: e.target.value }))}
+            options={clients.map(c => ({ value: c.id, label: `${c.nombre} - ${c.documento}${isLocalClientId(c.id) ? ' (sin sincronizar)' : ''}` }))} placeholder="Seleccionar cliente" required />
+          {routeIds.length === 0 && <p className="mt-1 text-xs text-amber-600">No tienes rutas asignadas.</p>}
+          {activeSale && (
+            <div className="mt-2 flex items-start gap-2 p-3 bg-amber-50 rounded-xl border border-amber-200">
+              <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div className="text-xs text-amber-700">
+                <p className="font-semibold">Este cliente ya tiene una venta activa.</p>
+                <p className="mt-0.5">Venta {formatCurrency(activeSale.valorVenta, currency)} · Saldo {formatCurrency(activeSale.saldo, currency)} · Inicio {formatDate(activeSale.fechaInicio)}</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <MoneyInput label="Valor de la venta" currency={currency} value={form.valorVenta} onValueChange={v => setForm(f => ({ ...f, valorVenta: v }))} required />
+
+        <div className="grid grid-cols-2 gap-3">
+          {/* Una sola tasa posible → campo fijo; si no, selector (Supervisor: 10/20). */}
+          {tasas.length === 1
+            ? <Input label="Tasa de interés" value={`${tasas[0]}%`} readOnly tabIndex={-1} className="bg-gray-50" />
+            : <Select label="Tasa interés" value={String(form.tasaInteres)} onChange={e => setForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={tasas.map(t => ({ value: String(t), label: `${t}%` }))} />}
+          <Select label="Forma de pago" value={form.frecuenciaPago} onChange={e => setForm(f => ({ ...f, frecuenciaPago: e.target.value as Sale['frecuenciaPago'] }))} options={FREQ_OPTIONS} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Input label="N° de parcelas" type="number" min={1} required value={form.numeroCuotas || ''} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
+          <Input label="Fecha de inicio" type="date" min={today()} value={form.fechaInicio} onChange={e => setForm(f => ({ ...f, fechaInicio: e.target.value }))} />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1.5">Días de pago</label>
+          <div className="flex flex-wrap gap-2">
+            {WEEK_DAYS.map(d => {
+              const active = form.paymentDays.includes(d.value)
+              return (
+                <button key={d.value} type="button" onClick={() => togglePaymentDay(d.value)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${active ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+                  {d.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Preview */}
+        {calc && (
+          <div className="bg-primary-50 rounded-xl p-4 grid grid-cols-2 gap-3">
+            <div><p className="text-xs text-gray-500">Total a pagar</p><p className="font-bold text-primary-700">{formatCurrency(calc.valorTotal, currency)}</p></div>
+            <div><p className="text-xs text-gray-500">Valor parcela</p><p className="font-bold text-primary-700">{formatCurrency(calc.valorCuota, currency)}</p></div>
+            <div><p className="text-xs text-gray-500">Interés</p><p className="font-bold text-primary-700">{formatCurrency(calc.valorInteres, currency)}</p></div>
+            <div><p className="text-xs text-gray-500">Fecha estimada fin</p><p className="font-bold text-primary-700">{formatDate(calc.fechaFinalEstimada)}</p></div>
+          </div>
+        )}
+
+        {/* CAPITAL DE LA RUTA: la cifra solo se muestra a quien puede verla
+            (`cashbox.viewRoute`). Al Cobrador se le informa el LÍMITE sin revelar el
+            capital financiero, y solo cuando lo supera: la regla sigue vigente. */}
+        {selectedClient && verCapital && capDisponible != null && (
+          <div className={`rounded-xl p-3 text-sm border ${capExcedido ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>
+            Base de la ruta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
+            {capExcedido && <p className="text-xs mt-1 font-medium">El valor supera la Base de la ruta. Reduce el monto o inyecta capital a la ruta.</p>}
+          </div>
+        )}
+        {selectedClient && !verCapital && capExcedido && (
+          <div className="rounded-xl p-3 text-sm border bg-red-50 border-red-200 text-red-700">
+            La venta supera la Base de la ruta. Reduce el monto o solicita una inyección de capital al administrador.
+          </div>
+        )}
+
+        {/* Acción según autorización */}
+        {allowDirect && hasEffectiveLimit && (
+          <p className="text-xs text-gray-500">
+            Límite venta directa · Ruta: {routeLimit === Infinity ? 'sin límite' : formatCurrency(routeLimit, currency)} · Cobrador: {collectorLimit === Infinity ? 'sin límite' : formatCurrency(collectorLimit, currency)} · Efectivo aplicado: {formatCurrency(effectiveLimit, currency)}
+          </p>
+        )}
+        {allowDirect ? (
+          <button onClick={handleDirectSale} disabled={saving || capExcedido}
+            className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-2xl text-base font-bold flex items-center justify-center gap-2">
+            {saving ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <FileText className="w-5 h-5" />}
+            Crear venta
+          </button>
+        ) : (
+          <>
+            <div className="flex items-start gap-2 p-3 bg-amber-50 rounded-xl border border-amber-100">
+              <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div className="text-xs text-amber-700">
+                <p>
+                  {requiereAutorizacionPorCredito
+                    ? 'El cliente ya tiene un crédito activo: esta venta se enviará como solicitud de autorización.'
+                    : canDirect && !withinLimit
+                    ? 'Esta venta supera el límite aprobado para venta directa. Se enviará como solicitud para aprobación.'
+                    : 'Esta venta requiere autorización del administrador.'}
+                </p>
+                {canDirect && (
+                  <p className="mt-1 text-amber-600">
+                    Límite ruta: {routeLimit === Infinity ? 'sin límite' : formatCurrency(routeLimit, currency)} · Límite cobrador: {collectorLimit === Infinity ? 'sin límite' : formatCurrency(collectorLimit, currency)} · Efectivo: {hasEffectiveLimit ? formatCurrency(effectiveLimit, currency) : 'sin límite'}
+                  </p>
+                )}
+              </div>
+            </div>
+            <button onClick={handleRequest} disabled={saving}
+              className="w-full h-12 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white rounded-2xl text-base font-bold flex items-center justify-center gap-2">
+              {saving ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Send className="w-5 h-5" />}
+              Enviar solicitud de venta
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Confirmación: segunda venta activa del mismo cliente */}
+      {confirmKind && activeSale && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4" onClick={() => setConfirmKind(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-5 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+              <div>
+                <p className="font-bold text-gray-900">Cliente con venta activa</p>
+                <p className="text-sm text-gray-600 mt-1">Este cliente ya tiene una venta activa. ¿Deseas crear otra venta para este cliente?</p>
+                <p className="text-xs text-gray-500 mt-2">Venta {formatCurrency(activeSale.valorVenta, currency)} · Saldo {formatCurrency(activeSale.saldo, currency)}</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmKind(null)} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-600">Cancelar</button>
+              <button onClick={() => { confirmKind === 'direct' ? handleDirectSale() : handleRequest() }}
+                className="flex-1 py-2.5 bg-amber-600 text-white rounded-xl text-sm font-medium">Sí, crear otra</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

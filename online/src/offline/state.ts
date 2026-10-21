@@ -1,7 +1,8 @@
 // MODO SIN CONEXIÓN DEL COBRADOR (Ronda 62): estado, llave, cola y avisos.
 //
 // Reglas que no se negocian (ver también vault.ts y sync.ts):
-//   · Solo el COBRADOR, y solo abonos, visitas sin pago y sus propios gastos.
+//   · Solo el COBRADOR: abonos, visitas sin pago, sus propios gastos y (Ronda 65) clientes nuevos,
+//     solicitudes de venta y la entrega del dinero de una solicitud YA APROBADA (sales.ts).
 //   · Una operación capturada sin conexión es una INTENCIÓN guardada en el dispositivo: no es
 //     un pago, no cambia saldos y nunca se presenta como confirmada. La confirma (o la rechaza)
 //     el servidor al sincronizar, con el MISMO id de operación y el MISMO cuerpo para siempre.
@@ -18,7 +19,7 @@ import {
   type Scope,
 } from './vault.ts';
 
-export type OpKind = 'payment' | 'visit' | 'expense';
+export type OpKind = 'payment' | 'visit' | 'expense' | 'client' | 'credit_request' | 'disbursement';
 /**
  *   local      — guardada SOLO en este dispositivo, aún no enviada.
  *   sending    — enviada al menos una vez sin respuesta definitiva (se comprueba con su mismo id).
@@ -40,15 +41,26 @@ export interface PendingOp {
   membershipId: string;
   companyId: string;
   routeId: string;
-  path: '/v1/collections' | '/v1/no-payment-visits' | '/v1/expenses';
+  /** Comando de siempre: `/v1/collections`, `/v1/no-payment-visits`, `/v1/expenses`, `/v1/clients`,
+   *  `/v1/credit-requests` o `/v1/credit-requests/:id/disburse`. */
+  path: string;
   /** Cuerpo EXACTO que se envía: el servidor compara su huella, un reintento debe ser idéntico. */
   body: Record<string, unknown>;
   /** Hora de captura del DISPOSITIVO (ISO). */
   capturedAt: string;
+  /**
+   * Ronda 65: operación de la que depende (alta del cliente de una solicitud). Hasta que el
+   * servidor la confirme, el cuerpo lleva `clientId: "local:<id>"`; al confirmarse se fija el id
+   * del servidor UNA vez (antes del primer envío) y el cuerpo ya no cambia.
+   */
+  dependsOn?: string;
   /** Datos solo para mostrar (cliente, importe, categoría…). */
-  ref: { saleId?: string; clientId?: string; clientName?: string; amountMinor?: number; label?: string; reason?: string; location?: string };
+  ref: { saleId?: string; clientId?: string; clientName?: string; amountMinor?: number; label?: string; reason?: string; location?: string;
+    requestId?: string; document?: string };
   status: OpStatus;
   attempts: number;
+  /** Ronda 65: primer envío al servidor (para no contar dos veces el efectivo; ver custody.ts). */
+  firstSentAt?: string;
   lastAttemptAt?: string;
   error?: { code: string; message: string; at: string };
   result?: { entityId?: string; appliedMinor?: number; newBalanceMinor?: number; date?: string };
@@ -77,10 +89,13 @@ export interface OfflineState {
   dataSavedAt: string | null;
   /** Pendientes de OTRA sesión guardados (cifrados) en este dispositivo. */
   foreignPending: number;
+  /** Ronda 65: hora de la última cifra de efectivo leída del servidor (custody.ts); cambia al releerla. */
+  custodyAt: string | null;
 }
 
 export const useOffline = create<OfflineState>(() => ({
   enabled: false, unavailable: null, ops: [], unreadable: 0, syncing: false, lastSyncAt: null, ctxFromCache: false, dataSavedAt: null, foreignPending: 0,
+  custodyAt: null,
 }));
 
 let scope: Scope | null = null;
@@ -205,7 +220,7 @@ export async function persist(op: PendingOp): Promise<void> {
   channel?.postMessage({ t: 'changed', id: op.id });
 }
 
-type Capture = Pick<PendingOp, 'kind' | 'path' | 'body' | 'routeId' | 'ref'> & { id: string; capturedAt: string; origin?: PendingOp['origin']; status?: OpStatus };
+type Capture = Pick<PendingOp, 'kind' | 'path' | 'body' | 'routeId' | 'ref' | 'dependsOn'> & { id: string; capturedAt: string; origin?: PendingOp['origin']; status?: OpStatus };
 
 /** Nueva operación capturada. Se guarda en disco ANTES de devolverla: si la app se cierra, sigue ahí. */
 export async function capture(c: Capture): Promise<PendingOp> {
@@ -216,6 +231,24 @@ export async function capture(c: Capture): Promise<PendingOp> {
   const op: PendingOp = {
     v: 1, id: c.id, kind: c.kind, origin: c.origin ?? 'offline', identityId: s.identityId, membershipId: s.membershipId, companyId: s.companyId,
     routeId: c.routeId, path: c.path, body: c.body, capturedAt: c.capturedAt, ref: c.ref, status: c.status ?? 'local', attempts: 0,
+    ...(c.dependsOn ? { dependsOn: c.dependsOn } : {}),
+  };
+  await persist(op);
+  return op;
+}
+
+/**
+ * Ronda 65: operación hecha EN LÍNEA y ya confirmada por el servidor que el dispositivo recuerda
+ * (desembolso del Cobrador): sin ella, el efectivo disponible sin conexión la contaría dos veces.
+ */
+export async function recordConfirmed(c: Capture & { result: PendingOp['result']; sentAt: string }): Promise<PendingOp | null> {
+  const s = scope;
+  if (!s || !key || !useOffline.getState().enabled) return null;
+  const at = new Date().toISOString();
+  const op: PendingOp = {
+    v: 1, id: c.id, kind: c.kind, origin: 'uncertain', identityId: s.identityId, membershipId: s.membershipId, companyId: s.companyId,
+    routeId: c.routeId, path: c.path, body: c.body, capturedAt: c.capturedAt, ref: c.ref, status: 'confirmed', attempts: 1,
+    firstSentAt: c.sentAt, lastAttemptAt: c.sentAt, confirmedAt: at, result: c.result,
   };
   await persist(op);
   return op;
@@ -244,6 +277,11 @@ export function shouldCaptureOffline(): boolean {
   if (!useOffline.getState().enabled) return false;
   const offline = (typeof navigator !== 'undefined' && navigator.onLine === false) || !useRuntime.getState().online;
   return offline || useOffline.getState().ctxFromCache;
+}
+
+/** Ronda 65: operaciones de una solicitud aprobada (su desembolso) que el dispositivo conoce, de cualquier estado. */
+export function opsForRequest(requestId: string): PendingOp[] {
+  return useOffline.getState().ops.filter((o) => o.kind === 'disbursement' && o.ref.requestId === requestId);
 }
 
 /** Operaciones sin confirmar de un crédito (para no cobrar dos veces ni descontar a ciegas). */

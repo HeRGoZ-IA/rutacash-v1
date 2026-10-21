@@ -4,6 +4,9 @@
 // componente `Select` de CLEAN, encima del número, y solo al CREAR (un cliente existente
 // conserva el suyo).
 // También, marcado: tras el alta se navega con el id que asignó el servidor.
+// Ronda 65, marcado: el COBRADOR sin conexión guarda el cliente (y, si marca «Crear venta ahora», su
+// solicitud, que espera al alta del cliente) en el dispositivo; si en línea la respuesta se pierde,
+// pasan a la cola con el MISMO id. Los textos dicen que queda guardado, nunca «registrado».
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useOpBase } from '@/hooks/useOpBase'
@@ -26,6 +29,11 @@ import { useCapitalGuard } from '@/hooks/useCapitalGuard'
 // ADEX Online: tipo de documento (DS-10).
 import { DocumentTypeSelect } from '../../../runtime/DocumentTypeSelect.tsx'
 import type { Client, Route, Sale } from '@/models/types'
+// ADEX Online (Ronda 65): alta sin conexión del Cobrador.
+import { adoptUncertainClient, captureOffline, captureOfflineClient, captureOfflineRequest } from '../../../offline/sales.ts'
+import { useOffline } from '../../../offline/state.ts'
+import { clientBodyOf } from '../../../runtime/writeAdapters.ts'
+import { toMinor } from '../../../runtime/mappers.ts'
 
 const FREQ_OPTIONS = [
   { value: 'diaria', label: 'Diaria' }, { value: 'semanal', label: 'Semanal' },
@@ -147,6 +155,10 @@ export default function CollectorNewClientPage() {
     if (existing) { setDup(existing); toast.error('Este documento ya está registrado en esta empresa.'); return }
 
     setSaving(true)
+    // ADEX Online (Ronda 65): datos para la cola sin conexión (mismo cuerpo que el alta en línea).
+    let offlineBody: Record<string, unknown> | null = null
+    let offlineId = ''
+    const offlineReady = user.rol === 'cobrador' && useOffline.getState().enabled
     try {
       const route = routes.find(r => r.id === form.routeId)
       // ADEX Online: + tipo de documento.
@@ -160,6 +172,13 @@ export default function CollectorNewClientPage() {
         fotoDocumentoUrl: form.fotoDocumentoUrl, fotoNegocioUrl: form.fotoNegocioUrl,
         status: 'activo', createdAt: nowISO(), updatedAt: nowISO(),
       } as Client
+
+      // ADEX Online (Ronda 65): sin servidor al alcance, el Cobrador guarda en el dispositivo.
+      if (offlineReady) { offlineBody = clientBodyOf(client as unknown as Record<string, unknown>); offlineId = client.id }
+      if (offlineReady && captureOffline()) {
+        await saveOffline(offlineBody!, offlineId, user.rol)
+        return
+      }
 
       if (!addSale) {
         // ADEX Online: el id del cliente es el que asigna el servidor.
@@ -189,7 +208,35 @@ export default function CollectorNewClientPage() {
         toast.success('Cliente creado y solicitud de venta enviada al administrador')
       }
       navigate(`${base}/home`)
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error al guardar') } finally { setSaving(false) }
+    } catch (e) {
+      // ADEX Online (Ronda 65): alta enviada en línea sin respuesta → cola con el MISMO id (sin duplicar).
+      const code = (e as { code?: string }).code
+      if (offlineBody && (code === 'UNCERTAIN_OPERATION' || code === 'NETWORK')) {
+        const adopted = await adoptUncertainClient(offlineBody, offlineId, nowISO()).catch(() => null)
+        if (adopted) {
+          toast.warning('No hubo respuesta del servidor. El cliente quedó guardado en este dispositivo y se confirmará al recuperar la conexión, sin duplicarse.')
+          navigate(`${base}/home`)
+          return
+        }
+      }
+      toast.error(e instanceof Error ? e.message : 'Error al guardar')
+    } finally { setSaving(false) }
+  }
+
+  // ADEX Online (Ronda 65): cliente (y su solicitud de venta) guardados en este dispositivo.
+  async function saveOffline(body: Record<string, unknown>, id: string, rol: string) {
+    const { localId } = await captureOfflineClient(body, id)
+    if (addSale) {
+      await captureOfflineRequest({
+        routeId: form.routeId, clientId: localId, amountMinor: toMinor(saleForm.valorVenta), interestRate: saleForm.tasaInteres,
+        installmentsCount: saleForm.numeroCuotas, frequency: saleForm.frecuenciaPago, startDate: saleForm.fechaInicio, paymentDays: saleForm.paymentDays,
+      }, form.nombre.trim())
+      toast.success('Sin conexión: el cliente y la solicitud de venta quedaron guardados en este dispositivo. Se enviarán al recuperar internet; la solicitud la aprueba la oficina.')
+    } else {
+      toast.success('Sin conexión: el cliente quedó guardado en este dispositivo y se enviará al recuperar internet.')
+    }
+    if (rol === 'cobrador' && params.get('returnTo') === 'new-sale') navigate(`${base}/new-sale?clientId=${encodeURIComponent(localId)}`)
+    else navigate(`${base}/home`)
   }
 
   const dupRouteName = dup ? (routes.find(r => r.id === dup.routeId)?.nombre ?? 'otra ruta') : ''

@@ -10,6 +10,10 @@
 //     transacciones: si la segunda falla, el cliente queda registrado y se dice así.
 // Los errores se lanzan como `SaleRuleError` para que las pantallas originales muestren
 // el motivo exacto (solo muestran el texto de ese tipo de error).
+//
+// Ronda 65 · COBRADOR SIN CONEXIÓN (offline/sales.ts): su solicitud se guarda en el dispositivo
+// (también la de un cliente nuevo aún sin sincronizar, que espera a su alta) y la devuelve marcada
+// `pendingSync`; el desembolso de una solicitud aprobada va por `disburseAsCollector`.
 
 import type { Client, Sale, SaleRequest, User } from '@clean/models/types';
 import { SaleRuleError, type SaleInputs } from '@clean/services/saleRequestService';
@@ -17,6 +21,12 @@ import { money, plain } from '../../runtime/commands.ts';
 import { saleFrom, saleRequestFrom, toMinor } from '../../runtime/mappers.ts';
 import { clientId, createClientOnline } from '../../runtime/writeAdapters.ts';
 import { generateId } from '@/lib/utils';
+import { useRuntime } from '../../runtime/session.ts';
+import { table } from '../../runtime/projection.ts';
+import { useOffline } from '../../offline/state.ts';
+import {
+  adoptUncertainRequest, captureOffline, captureOfflineRequest, disburseAsCollector, isLocalClientId, requestBody,
+} from '../../offline/sales.ts';
 
 export * from '@clean/services/saleRequestService';
 import * as Clean from '@clean/services/saleRequestService';
@@ -76,13 +86,35 @@ async function createDirectSaleOnline(input: Conditions, _actor: User, opts: { n
   });
 }
 
+const collectorOffline = () => useRuntime.getState().ctx?.role === 'cobrador' && useOffline.getState().enabled;
+
+/** Ronda 65: solicitud del Cobrador guardada en el dispositivo (la pantalla lo dice así; nada se aprueba). */
+function savedRequest(input: Conditions, client: string): SaleRequest {
+  return { id: '', tenantId: input.routeId, routeId: input.routeId, clientId: client, amount: input.valorVenta, status: 'pending', pendingSync: true } as unknown as SaleRequest;
+}
+
 async function createSaleRequestOnline(input: Conditions, _actor: User, opts: { newClient?: Client } = {}): Promise<SaleRequest> {
   return asSaleError(async () => {
+    // Ronda 65: sin servidor al alcance, o con un cliente nuevo aún sin sincronizar, queda en el dispositivo.
+    if (collectorOffline() && !opts.newClient && (captureOffline() || isLocalClientId(input.clientId))) {
+      const clients = (await table('clients').catch(() => [])) as Record<string, unknown>[];
+      const name = String(clients.find((c) => c['id'] === input.clientId)?.['nombre'] ?? '');
+      await captureOfflineRequest({ ...conditions(input, input.clientId) } as Parameters<typeof captureOfflineRequest>[0], name);
+      return savedRequest(input, input.clientId);
+    }
     const client = await clientFor(input, opts.newClient);
+    const opId = generateId();
+    const body = conditions(input, client);
     try {
-      const r = await money<Record<string, unknown>>('POST', '/v1/credit-requests', conditions(input, client), generateId());
+      const r = await money<Record<string, unknown>>('POST', '/v1/credit-requests', body, opId);
       return saleRequestFrom((r['request'] as Record<string, unknown>) ?? r);
     } catch (e) {
+      // Ronda 65: el Cobrador envió en línea y la respuesta se perdió → cola con el MISMO id y cuerpo.
+      const code = (e as { code?: string }).code;
+      if (collectorOffline() && (code === 'UNCERTAIN_OPERATION' || code === 'NETWORK')) {
+        const op = await adoptUncertainRequest(requestBody(body as Parameters<typeof requestBody>[0]), opId, new Date().toISOString(), '').catch(() => null);
+        if (op) return savedRequest(input, client);
+      }
       return afterClient(e, Boolean(opts.newClient), 'la solicitud');
     }
   });
@@ -95,6 +127,11 @@ async function createSaleRequestOnline(input: Conditions, _actor: User, opts: { 
  * del responsable, con id de operación (un doble toque no desembolsa dos veces).
  */
 async function confirmDisbursementOnline(saleId: string, _actor: User): Promise<void> {
+  // Ronda 65: el Cobrador entrega con SU efectivo, también sin conexión (efectivo disponible del dispositivo).
+  if (collectorOffline()) {
+    await asSaleError(() => disburseAsCollector(saleId));
+    return;
+  }
   await asSaleError(() => money('POST', `/v1/credit-requests/${saleId}/disburse`, {}, generateId()));
 }
 

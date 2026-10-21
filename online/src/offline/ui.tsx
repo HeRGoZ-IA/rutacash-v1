@@ -92,7 +92,7 @@ export function OfflineBanners({ onOpen }: { onOpen: () => void }) {
       {!reachable && (
         <div className="bg-amber-500 text-white text-xs text-center px-3 py-1.5 font-medium" data-testid="offline-banner">
           {enabled
-            ? <>Sin conexión. Los abonos, visitas y gastos se guardan en este dispositivo y se envían al volver internet.{savedAt ? <> Datos de la ruta del {formatDateTime(savedAt)}.</> : null}</>
+            ? <>Sin conexión. Lo que registres se guarda en este dispositivo y se envía al volver internet.{savedAt ? <> Datos de la ruta del {formatDateTime(savedAt)}.</> : null}</>
             : <>Sin conexión con el servidor{unavailable ? ` — ${unavailable}` : ''}</>}
         </div>
       )}
@@ -111,7 +111,18 @@ export function OfflineBanners({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-const KIND_LABEL: Record<PendingOp['kind'], string> = { payment: 'Abono', visit: 'Visita sin pago', expense: 'Gasto' };
+const KIND_LABEL: Record<PendingOp['kind'], string> = {
+  payment: 'Abono', visit: 'Visita sin pago', expense: 'Gasto',
+  // Ronda 65.
+  client: 'Cliente nuevo', credit_request: 'Solicitud de venta', disbursement: 'Desembolso',
+};
+
+/** Ronda 65: lo que significa «confirmado» en cada tipo (una solicitud recibida NO está aprobada). */
+const CONFIRMED_NOTE: Partial<Record<PendingOp['kind'], string>> = {
+  client: 'Cliente registrado en la empresa.',
+  credit_request: 'Solicitud recibida: la oficina debe aprobarla antes de entregar el dinero.',
+  disbursement: 'Crédito activo para recaudo.',
+};
 
 /** Una operación en la lista de pendientes. */
 export function PendingOpRow({ op, name, onRetry, onReviewed }: { op: PendingOp; name?: string; onRetry?: () => void; onReviewed?: () => void }) {
@@ -130,6 +141,10 @@ export function PendingOpRow({ op, name, onRetry, onReviewed }: { op: PendingOp;
         <OpStatusBadge status={op.status} />
         {op.status === 'confirmed' && op.result?.date && <span className="text-[11px] text-gray-500">Registrado con fecha {op.result.date}</span>}
       </div>
+      {op.status === 'confirmed' && CONFIRMED_NOTE[op.kind] && <p className="text-xs text-gray-600" data-testid="pending-op-note">{CONFIRMED_NOTE[op.kind]}</p>}
+      {op.kind === 'credit_request' && op.status !== 'confirmed' && op.status !== 'rejected' && (
+        <p className="text-xs text-gray-500" data-testid="pending-op-note">Aún no está aprobada: no entregues dinero por esta solicitud.</p>
+      )}
       {op.error && op.status !== 'confirmed' && (
         <p className={cn('text-xs', op.status === 'sending' || op.status === 'local' ? 'text-gray-500' : 'text-orange-700')} data-testid="pending-op-reason">{op.error.message}</p>
       )}

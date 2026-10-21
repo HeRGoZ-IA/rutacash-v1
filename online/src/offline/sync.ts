@@ -6,7 +6,10 @@
 //      membresía ya no vale, no se envía nada y el cliente vuelve al selector).
 //   2. ORDEN: por hora de captura. Un abono espera si OTRO abono anterior del MISMO crédito
 //      necesita revisión (nunca se salta uno para aplicar el siguiente sobre un saldo distinto).
-//      Visitas y gastos no dependen de nada.
+//      Visitas y gastos no dependen de nada. Ronda 65: la solicitud de un cliente nuevo espera a
+//      que el servidor confirme el alta de ese cliente; entonces fija su id (UNA vez, antes del
+//      primer envío) y desde ahí el cuerpo ya no cambia. Si el alta se rechaza, la solicitud queda
+//      retenida con su motivo: nunca se envía con un cliente inexistente ni se crea huérfana.
 //   3. EXACTAMENTE UNA VEZ: cada operación se envía con su MISMO id y su MISMO cuerpo. Si la
 //      respuesta se pierde, se consulta `/v1/operations/:id` antes de repetir (`OnlineClient.command`);
 //      el servidor serializa los intentos y devuelve el resultado guardado. Una sola sincronización
@@ -19,6 +22,7 @@ import { errorText } from '../lib/format.ts';
 import { invalidate } from '../runtime/projection.ts';
 import { api, refreshContextFromServer, useRuntime } from '../runtime/session.ts';
 import { persist, reload, useOffline, type PendingOp } from './state.ts';
+import { refreshCustody, watchCustody } from './custody.ts';
 
 const now = () => new Date().toISOString();
 
@@ -27,6 +31,11 @@ function summarize(op: PendingOp, r: Record<string, unknown>): PendingOp['result
     return { entityId: r['paymentId'] as string, appliedMinor: Number(r['appliedMinor']), newBalanceMinor: Number(r['newBalanceMinor']), date: r['paymentDate'] as string };
   }
   if (op.kind === 'visit') return { entityId: r['id'] as string, date: r['visitDate'] as string };
+  if (op.kind === 'client' || op.kind === 'credit_request') return { entityId: r['id'] as string };
+  if (op.kind === 'disbursement') {
+    const c = (r['credit'] ?? {}) as Record<string, unknown>;
+    return { entityId: c['id'] as string, date: c['disbursementDate'] as string };
+  }
   const e = (r['expense'] ?? {}) as Record<string, unknown>;
   return { entityId: e['id'] as string, date: e['expenseDate'] as string };
 }
@@ -60,6 +69,23 @@ export function syncNow(): Promise<void> {
 
 const held = (o: PendingOp) => o.status === 'review' && o.error?.code === DEPENDENCY && !o.reviewedAt;
 const sendable = (o: PendingOp) => o.status === 'local' || o.status === 'sending' || held(o);
+
+const placeholder = (id: string) => `local:${id}`;
+
+/**
+ * Ronda 65 · dependencia de un cliente nuevo. `ready`: se puede enviar (con el cuerpo ya fijado);
+ * `wait`: el alta aún no se confirmó; `held`: el alta no se aceptó (queda retenida con motivo).
+ */
+function dependency(op: PendingOp, live: Map<string, PendingOp>): { state: 'ready'; body: Record<string, unknown> } | { state: 'wait' } | { state: 'held'; message: string } {
+  if (!op.dependsOn || op.body['clientId'] !== placeholder(op.dependsOn)) return { state: 'ready', body: op.body };
+  const dep = live.get(op.dependsOn);
+  if (!dep) return { state: 'held', message: 'El cliente nuevo de esta solicitud ya no está en este dispositivo.' };
+  if (dep.status === 'confirmed' && dep.result?.entityId) return { state: 'ready', body: { ...op.body, clientId: dep.result.entityId } };
+  if (dep.status === 'review' || dep.status === 'rejected') {
+    return { state: 'held', message: `Espera al cliente nuevo${dep.ref.clientName ? ` ${dep.ref.clientName}` : ''}: ${dep.error?.message ?? 'no fue aceptado por el servidor.'}` };
+  }
+  return { state: 'wait' };
+}
 
 /** Abono ANTERIOR del mismo crédito que espera revisión (y que nadie dio por revisado). */
 function blockerOf(op: PendingOp, live: Map<string, PendingOp>): PendingOp | undefined {
@@ -96,11 +122,21 @@ async function run(): Promise<void> {
           if (!held(op)) await save({ ...op, status: 'review', error: { code: DEPENDENCY, message: 'Espera a que se revise un abono anterior de este mismo crédito.', at: now() } });
           continue;
         }
+        // Ronda 65: solicitud de un cliente nuevo → primero el cliente.
+        const dep = dependency(op, live);
+        if (dep.state === 'wait') continue;
+        if (dep.state === 'held') {
+          if (!held(op) || op.error?.message !== dep.message) await save({ ...op, status: 'review', error: { code: DEPENDENCY, message: dep.message, at: now() } });
+          continue;
+        }
         const prev = held(op) ? 'local' : op.status;
-        const sending: PendingOp = { ...op, status: 'sending', attempts: op.attempts + 1, lastAttemptAt: now(), error: op.status === 'sending' ? op.error : undefined };
+        const at = now();
+        const sending: PendingOp = { ...op, body: dep.body, status: 'sending', attempts: op.attempts + 1, firstSentAt: op.firstSentAt ?? at, lastAttemptAt: at,
+          error: op.status === 'sending' ? op.error : undefined };
+        // El cuerpo (con el id del cliente ya fijado) se guarda en disco ANTES de enviarlo.
         await save(sending);
         try {
-          const r = await api().command<Record<string, unknown>>('POST', op.path, op.body, op.id);
+          const r = await api().command<Record<string, unknown>>('POST', sending.path, sending.body, op.id);
           await save({ ...sending, status: 'confirmed', confirmedAt: now(), result: summarize(op, r), error: undefined });
           confirmed++;
         } catch (e) {
@@ -122,7 +158,11 @@ async function run(): Promise<void> {
           break;
         }
       }
-      if (confirmed > 0) invalidate();
+      if (confirmed > 0) {
+        invalidate();
+        // Ronda 65: efectivo vigente del servidor tras lo confirmado (base del cálculo sin conexión).
+        void refreshCustody();
+      }
       useOffline.setState({ lastSyncAt: now() });
     });
   } catch {
@@ -138,6 +178,8 @@ let started = false;
 export function startOfflineSync(intervalMs = 15_000): void {
   if (started) return;
   started = true;
+  // Ronda 65: con red, la cifra de efectivo del servidor se relee tras cada cambio.
+  watchCustody();
   window.addEventListener('online', () => { void syncNow(); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void syncNow(); });
   window.setInterval(() => {
