@@ -124,6 +124,25 @@ export async function offlineCollectorReady(pool: pg.Pool): Promise<boolean> {
 }
 
 /**
+ * Ronda 65 (0027): clientes, solicitudes y desembolsos sin conexión. La migración amplía la
+ * restricción de tipos de `adex.offline_captures`; se anuncia solo si ya admite 'disbursement'.
+ */
+export async function offlineSalesReady(pool: pg.Pool, attempts = 3): Promise<boolean> {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      const r = await pool.query<{ ok: boolean }>(
+        `select coalesce(bool_or(pg_get_constraintdef(oid) like '%disbursement%'), false) as ok from pg_constraint
+          where conrelid = to_regclass('adex.offline_captures') and conname = 'offline_captures_kind_check'`);
+      return r.rows[0]?.ok === true;
+    } catch {
+      if (i === attempts) return false;
+      await new Promise((resolve) => setTimeout(resolve, 1_000 * i));
+    }
+  }
+  return false;
+}
+
+/**
  * ¿Existe la relación? Con REINTENTOS (Ronda 59): la primera conexión de un proceso recién
  * arrancado en Render suele fallar (base en frío). Antes, ese fallo dejaba sin anunciar la
  * primera función comprobada (`payment-location-v1`) hasta otro reinicio, y la puerta de Vercel

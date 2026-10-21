@@ -27,7 +27,7 @@ import { createCompanyExecutor, createCompanyHandler } from '../http/companyApi.
 import { createDemoHandler } from '../http/demoApi.ts';
 import { createDemoService } from '../demo/service.ts';
 import { API_FEATURES, createOnlineServer } from './app.ts';
-import { adminTransfersReady, capitalRequestsReady, offlineCollectorReady, paymentLocationsReady } from '../collections/location.ts';
+import { adminTransfersReady, capitalRequestsReady, offlineCollectorReady, offlineSalesReady, paymentLocationsReady } from '../collections/location.ts';
 
 /** Configuración común a los dos servicios (empresa y Owner): TLS, CORS, proveedor, límites. */
 export function readCommonConfig(env: NodeJS.ProcessEnv) {
@@ -99,6 +99,8 @@ export async function start(env: NodeJS.ProcessEnv = process.env) {
   if (!(await capitalRequestsReady(apiPool))) missing.add('capital-requests-v1');
   // Ronda 62: modo sin conexión del Cobrador solo con 0026 aplicada.
   if (!(await offlineCollectorReady(apiPool))) missing.add('offline-collector-v1');
+  // Ronda 65: clientes, solicitudes y desembolsos sin conexión solo con 0027 aplicada.
+  if (!(await offlineSalesReady(apiPool))) missing.add('offline-sales-v1');
   const features = API_FEATURES.filter((f) => !missing.has(f));
   const server = createOnlineServer({
     company: createCompanyHandler(companyOpts), demo, readinessPool: apiPool, allowedOrigins: cfg.origins, trustProxy: cfg.trustProxy, rateLimit: cfg.rateLimit,

@@ -29,6 +29,7 @@ import { audit } from '../db/audit.ts';
 import { need } from '../structure/common.ts';
 import { has, optText, PAGE_ORDER, pageFilters, pathId, reqId, reqText } from '../structure/input.ts';
 import { requireOperationId, routeOf } from '../capital/service.ts';
+import { parseOffline, requireOfflineActor, storeOfflineCapture, type OfflineCapture } from '../offline/capture.ts';
 
 const FREQUENCIES: readonly PaymentFrequency[] = ['diaria', 'semanal', 'quincenal', 'mensual', 'personalizada'];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -150,15 +151,31 @@ async function samePerson(client: pg.PoolClient, ctx: ActiveContext, a: string, 
 // Solicitudes
 // ============================================================
 
-export const CREATE_REQUEST_FIELDS = ['routeId', 'clientId', 'amountMinor', 'interestRate', 'installmentsCount', 'frequency', 'startDate', 'paymentDays'] as const;
+const CONDITION_FIELDS = ['routeId', 'clientId', 'amountMinor', 'interestRate', 'installmentsCount', 'frequency', 'startDate', 'paymentDays'] as const;
+/** `offline` (Ronda 65): solicitud registrada sin conexión por el Cobrador (ver offline/capture.ts). */
+export const CREATE_REQUEST_FIELDS = [...CONDITION_FIELDS, 'offline'] as const;
+
+/**
+ * Ronda 65: captura sin conexión (solo el Cobrador) con id de operación, que identifica la
+ * evidencia de la captura. Las reglas del comando son las mismas que en línea.
+ */
+function offlineOf(ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null): OfflineCapture | null {
+  const offline = parseOffline(body['offline']);
+  if (!offline) return null;
+  requireOfflineActor(ctx);
+  if (!operationId) throw new ApiError(400, 'OPERATION_ID_REQUIRED');
+  return offline;
+}
 
 /**
  * Solicitud de crédito (`createSaleRequest`). Tener efectivo en custodia NO autoriza
  * a prestar: el Cobrador siempre solicita. Una sola pendiente por cliente (índice único).
  */
-export async function createRequest(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>) {
+export async function createRequest(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null = null) {
   const route = await routeOf(client, ctx, reqId(body, 'routeId'));
   need(ctx, 'sale.createRequest', { routeId: route.id });
+  // Sin conexión, la solicitud queda PENDIENTE igual que en línea: la aprueba otra persona.
+  const offline = offlineOf(ctx, body, operationId);
   const cond: Conditions = { amount: amountOf(body), rate: rateOf(body), count: countOf(body), frequency: frequencyOf(body), start: startOf(body), days: daysOf(body) };
   const rateError = originationRateError(ctx.role, cond.rate);
   if (rateError) throw new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED', rateError);
@@ -183,9 +200,13 @@ export async function createRequest(client: pg.PoolClient, ctx: ActiveContext, b
     [ctx.companyId, cl.id, route.id, ctx.membershipId, cond.amount, cond.rate, total, cond.count, value, cond.frequency, cond.start, cond.days,
       active.sales, reason]);
   const row = r.rows[0]!;
+  const offlineStatus = offline
+    ? await storeOfflineCapture(client, ctx, { operationId: operationId!, kind: 'credit_request', entityId: row.id, routeId: route.id, capture: offline })
+    : null;
   await audit(client, ctx, { action: 'CREATE_SALE_REQUEST', entityType: 'sale_request', entityId: row.id, routeId: route.id,
-    description: `Solicitud de crédito ${cond.amount} para ${cl.name}`, after: requestView(row) });
-  return requestView(row);
+    description: `Solicitud de crédito ${cond.amount} para ${cl.name}`, after: requestView(row),
+    ...(offline ? { metadata: { operationId, offline: { deviceCapturedAt: offline.deviceCapturedAt, stored: offlineStatus } } } : {}) });
+  return offline ? { ...requestView(row), offline: { deviceCapturedAt: offline.deviceCapturedAt } } : requestView(row);
 }
 
 export const APPROVE_FIELDS = ['notes', 'interestRate', 'frequency', 'paymentDays', 'phoneConfirmed', 'phoneConfirmationNote'] as const;
@@ -291,20 +312,35 @@ async function disburse(client: pg.PoolClient, operationId: string, requestId: s
  * confirma no tiene caja personal, de la bolsa del responsable de la ruta. Crea el
  * crédito, sus cuotas y el asiento UNA vez. Sin fondos: 409 y nada escrito.
  */
-export async function disburseRequest(client: pg.PoolClient, ctx: ActiveContext, id: string, operationId: string | null) {
+export const DISBURSE_FIELDS = ['offline'] as const;
+
+/**
+ * Ronda 65 · `offline`: el Cobrador entregó el dinero SIN CONEXIÓN con su efectivo en custodia. Al
+ * sincronizar se aplica lo mismo que en línea (solicitud aún aprobada, custodia suficiente sin
+ * contar faltante arrastrado, ruta operativa, periodo abierto); si ya no cabe, 409 y nada escrito
+ * (el dispositivo lo conserva en revisión: nunca se reintenta con otro id ni se fuerza un saldo).
+ */
+export async function disburseRequest(client: pg.PoolClient, ctx: ActiveContext, id: string, operationId: string | null, body: Record<string, unknown> = {}) {
   const opId = requireOperationId(operationId);
+  const offline = offlineOf(ctx, body, opId);
   const prev = await loadRequest(client, ctx, id);
   need(ctx, 'sale.confirmDisbursement', { routeId: prev.route_id });
   if (prev.status !== 'approved') throw new ApiError(409, 'REQUEST_NOT_DISBURSABLE');
   const c: Conditions = { amount: Number(prev.amount_minor), rate: Number(prev.interest_rate), count: prev.installments_count,
     frequency: prev.frequency, start: ymd(prev.start_date), days: prev.payment_days ?? [] };
-  const out = await disburse(client, opId, prev.id, prev.route_id, prev.client_id, c, 'Desembolso de solicitud aprobada');
+  const out = await disburse(client, opId, prev.id, prev.route_id, prev.client_id, c,
+    offline ? 'Desembolso de solicitud aprobada (sin conexión)' : 'Desembolso de solicitud aprobada');
+  const offlineStatus = offline
+    ? await storeOfflineCapture(client, ctx, { operationId: opId, kind: 'disbursement', entityId: out.credit_id, routeId: prev.route_id, capture: offline })
+    : null;
   await audit(client, ctx, { action: 'CONFIRM_DISBURSEMENT', entityType: 'sale', entityId: out.credit_id, routeId: prev.route_id,
-    description: `Desembolso confirmado (${c.amount})`, after: { saleRequestId: prev.id, operationId: out.disbursement_id }, metadata: { operationId: opId } });
-  return getCredit(client, ctx, out.credit_id);
+    description: `Desembolso confirmado (${c.amount})`, after: { saleRequestId: prev.id, operationId: out.disbursement_id },
+    metadata: { operationId: opId, ...(offline ? { offline: { deviceCapturedAt: offline.deviceCapturedAt, stored: offlineStatus } } : {}) } });
+  const credit = await getCredit(client, ctx, out.credit_id);
+  return offline ? { ...credit, offline: { deviceCapturedAt: offline.deviceCapturedAt } } : credit;
 }
 
-export const DIRECT_FIELDS = CREATE_REQUEST_FIELDS;
+export const DIRECT_FIELDS = CONDITION_FIELDS;
 
 /**
  * Venta directa (`createDirectSale`): solo `sale.createDirect` (SuperAdmin,

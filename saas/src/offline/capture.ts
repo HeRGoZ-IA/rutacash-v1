@@ -1,6 +1,7 @@
-// MODO SIN CONEXIÓN DEL COBRADOR (Ronda 62 · 0026).
+// MODO SIN CONEXIÓN DEL COBRADOR (Ronda 62 · 0026; Ronda 65 · 0027).
 //
-// Una operación capturada sin internet llega por el MISMO comando (abono, visita, gasto) con
+// Una operación capturada sin internet llega por el MISMO comando (abono, visita, gasto y, desde
+// la Ronda 65, alta de cliente, solicitud de crédito y desembolso de una solicitud aprobada) con
 // un campo `offline` que describe la captura: `{ capturedAt, knownBalanceMinor? }`. El servidor:
 //   · la acepta SOLO de un Cobrador (el modo sin conexión es suyo en esta versión);
 //   · decide con el estado VIGENTE: membresía, rol, ruta asignada y operativa, crédito,
@@ -24,6 +25,8 @@ export interface OfflineCapture {
   knownBalanceMinor: number | null;
   note: string | null;
 }
+
+export type OfflineKind = 'payment' | 'visit' | 'expense' | 'client' | 'credit_request' | 'disbursement';
 
 /** Antigüedad máxima admitida para la hora del dispositivo (más allá, se guarda sin hora). */
 const MAX_AGE_MS = 45 * 24 * 3_600_000;
@@ -71,7 +74,7 @@ export async function assertOfflineFits(client: pg.PoolClient, saleId: string, a
 
 /** Evidencia de la captura, en la misma transacción y bajo savepoint (un fallo no revierte el movimiento). */
 export async function storeOfflineCapture(client: pg.PoolClient, ctx: ActiveContext, c: {
-  operationId: string; kind: 'payment' | 'visit' | 'expense'; entityId: string; routeId: string; capture: OfflineCapture;
+  operationId: string; kind: OfflineKind; entityId: string; routeId: string; capture: OfflineCapture;
 }): Promise<'stored' | 'not_stored'> {
   await client.query('savepoint offline_capture');
   try {
