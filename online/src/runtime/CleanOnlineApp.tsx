@@ -10,6 +10,8 @@
 //   · Secretario: su layout y pantallas originales, con las mismas rutas, más el registro de
 //     transferencias entre Administradores (Ronda 53).
 //   · Ronda 53: el rol Socio, sus pantallas y Caja socios NO existen en ADEX Online (CLEAN los conserva).
+//   · Ronda 59: Notificaciones (Administrador, SuperAdmin y Cobrador) y Consultas (antes Caja); Retiros
+//     (saldo heredado de antiguas cajas de ruta) e Historial aparte ya no existen: llevan a Consultas.
 //   · Ronda 50: las pantallas de Administración y Secretario se cargan BAJO DEMANDA
 //     (`lazy`): el Cobrador no descarga dashboards ni gráficas (recharts) que no usa. Las
 //     del Cobrador y el Supervisor siguen en el paquete inicial (uso de campo, sin esperas).
@@ -58,11 +60,10 @@ const ActiveSalesPage = lazy(() => import('@/pages/admin/ActiveSalesPage'));
 const ExpensesPage = lazy(() => import('@/pages/admin/ExpensesPage'));
 const CapitalPage = lazy(() => import('@/pages/admin/CapitalPage'));
 const TransfersPage = lazy(() => import('@/pages/admin/TransfersPage'));
-const MovementHistoryPage = lazy(() => import('@/pages/admin/MovementHistoryPage'));
-const CashboxPage = lazy(() => import('@/pages/admin/CashboxPage'));
+const ConsultasPage = lazy(() => import('./ConsultasPage.tsx'));
+const NotificationsPage = lazy(() => import('./NotificationsPage.tsx'));
 const WeeklySettlementPage = lazy(() => import('@/pages/admin/WeeklySettlementPage'));
 const MovementReceiptPage = lazy(() => import('@/pages/admin/MovementReceiptPage'));
-const WithdrawalsPage = lazy(() => import('@/pages/admin/WithdrawalsPage'));
 const ExpenseCategoriesPage = lazy(() => import('@/pages/admin/ExpenseCategoriesPage'));
 const SaleAuthorizationsPage = lazy(() => import('@/pages/admin/SaleAuthorizationsPage'));
 const UsersPage = lazy(() => import('@/pages/admin/UsersPage'));
@@ -129,8 +130,24 @@ function operationalRoutes() {
       <Route path="expenses" element={<CollectorExpensesPage />} />
       <Route path="sync" element={<CollectorSyncPage />} />
       <Route path="account" element={<OperationalAccountPage />} />
+      <Route path="notificaciones" element={<CollectorNotices />} />
     </>
   );
+}
+
+/** Ronda 59: las direcciones anteriores (Caja, Historial, Retiros, Caja socios) llevan a Consultas, con sus filtros. */
+function ToConsultas({ vista }: { vista?: string }) {
+  const { search } = useLocation();
+  const p = new URLSearchParams(search);
+  if (vista) p.set('vista', vista);
+  const q = p.toString();
+  return <Navigate to={`/admin/consultas${q ? `?${q}` : ''}`} replace />;
+}
+
+/** Notificaciones en la capa operativa: solo el Cobrador (el Supervisor no tiene esta pantalla). */
+function CollectorNotices() {
+  const role = useRuntime((s) => s.ctx?.role);
+  return role === 'cobrador' ? <NotificationsPage /> : <Navigate to="../home" replace />;
 }
 
 /** Marca el cambio de pantalla: el refresco periódico relee solo lo que la pantalla actual usa. */
@@ -181,10 +198,12 @@ export function CleanOnlineApp() {
             <Route path="expenses" element={<ExpensesPage />} />
             <Route path="expense-categories" element={<ExpenseCategoriesPage />} />
             <Route path="transfers" element={<TransfersPage />} />
-            <Route path="movements" element={<MovementHistoryPage />} />
-            <Route path="partner-cash" element={<Navigate to="/admin/cashbox" replace />} />
-            <Route path="withdrawals" element={<WithdrawalsPage />} />
-            <Route path="cashbox" element={<CashboxPage />} />
+            <Route path="notificaciones" element={<NotificationsPage />} />
+            <Route path="consultas" element={<ConsultasPage />} />
+            <Route path="movements" element={<ToConsultas />} />
+            <Route path="cashbox" element={<ToConsultas vista="caja" />} />
+            <Route path="partner-cash" element={<ToConsultas vista="caja" />} />
+            <Route path="withdrawals" element={<ToConsultas vista="transferencias" />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="weekly-settlement" element={<WeeklySettlementPage />} />
             <Route path="users" element={<UsersPage />} />

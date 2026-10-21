@@ -197,7 +197,9 @@ async function ledgerCommand(path: string, p: LedgerOp, extra: Record<string, un
 
 const registerCompanyCapitalOnline = (p: LedgerOp) => ledgerCommand('/v1/capital/company/deposits', p);
 const withdrawCompanyCapitalOnline = (p: LedgerOp) => ledgerCommand('/v1/capital/company/withdrawals', p);
-const allocateCapitalToAdminOnline = (p: LedgerOp & { adminId: string }) => ledgerCommand('/v1/capital/allocations', p, { adminId: p.adminId });
+// Ronda 59: con `requestId`, la asignación atiende la solicitud de capital de ese Administrador.
+const allocateCapitalToAdminOnline = (p: LedgerOp & { adminId: string; requestId?: string }) =>
+  ledgerCommand('/v1/capital/allocations', p, { adminId: p.adminId, ...(p.requestId ? { requestId: p.requestId } : {}) });
 const returnCapitalFromAdminOnline = (p: LedgerOp & { adminId: string }) => ledgerCommand('/v1/capital/admin-returns', p, { adminId: p.adminId });
 
 async function setRouteCapitalControllerOnline(p: { actor: User | null | undefined; tenantId: string; routeId: string; adminId: string; motivo?: string }) {

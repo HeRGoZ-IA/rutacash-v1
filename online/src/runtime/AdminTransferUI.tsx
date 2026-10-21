@@ -1,4 +1,4 @@
-// Piezas de interfaz de los TRASPASOS ENTRE ADMINISTRADORES (Ronda 53), con los componentes
+// Piezas de interfaz de los TRASPASOS ENTRE ADMINISTRADORES (Rondas 53 y 59), con los componentes
 // y el estilo de CLEAN (Modal, Button, Select, MoneyInput, Badge). Las usan la pantalla de
 // Transferencias del Administrador y la del Secretario. Las reglas viven en el servidor: aquí
 // solo se muestran las acciones que el servidor ofrece a cada persona (`canConfirm`…).
@@ -17,6 +17,8 @@ import {
   DECISION_LABEL, STATE_LABEL, adminDirectory, decideAdminTransfer, registerAdminTransfer,
   type AdminOption, type AdminTransfer, type AdminTransferParty,
 } from './adminTransfers.ts';
+import type { CapitalRequest } from './capitalRequests.ts';
+import { RequestBanner } from './MoneyForms.tsx';
 
 const STATE_VARIANT = { pending: 'warning', applied: 'success', rejected: 'danger', cancelled: 'gray' } as const;
 
@@ -27,8 +29,9 @@ export function TransferStateBadge({ t }: { t: AdminTransfer }) {
 const name = (p: AdminTransferParty) => p.name ?? 'Administrador';
 
 function PartyLine({ label, p }: { label: string; p: AdminTransferParty }) {
-  const Icon = p.decision === 'confirmed' ? CheckCircle2 : p.decision === 'rejected' ? XCircle : Clock3;
-  const tone = p.decision === 'confirmed' ? 'text-emerald-600' : p.decision === 'rejected' ? 'text-red-600' : 'text-amber-600';
+  const ok = p.decision === 'confirmed' || p.decision === 'not_required';
+  const Icon = ok ? CheckCircle2 : p.decision === 'rejected' ? XCircle : Clock3;
+  const tone = ok ? 'text-emerald-600' : p.decision === 'rejected' ? 'text-red-600' : 'text-amber-600';
   return (
     <p className="flex items-start gap-1.5 text-xs text-gray-600">
       <Icon className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${tone}`} aria-hidden />
@@ -116,13 +119,16 @@ export function TransferDecisionModal({ target, currency, onClose, onDone }: {
 }
 
 /**
- * Registrar un traspaso. Administrador (`asSecretary` falso): desde SU bolsa, elige el destino.
- * Secretario: origen y destino, como traspaso ya hecho o comunicado.
+ * Registrar un traspaso. Administrador (`asSecretary` falso): desde SU bolsa, elige el destino;
+ * se aplica en el acto (R59). Con `request`, atiende la solicitud de capital de otro Administrador.
+ * Secretario: origen y destino, como traspaso ya hecho o comunicado (confirman ambos).
  */
-export function TransferRegisterModal({ open, onClose, onDone, currency, asSecretary, available }: {
+export function TransferRegisterModal({ open, onClose, onDone, currency, asSecretary, available, request }: {
   open: boolean; onClose: () => void; onDone: () => void; currency: string; asSecretary: boolean;
   /** Disponible de la propia bolsa (Administrador). `null` = desconocido. */
   available?: number | null;
+  /** Solicitud de capital que se atiende (destino e importe precargados). */
+  request?: CapitalRequest | null;
 }) {
   const [admins, setAdmins] = useState<AdminOption[]>([]);
   const [form, setForm] = useState({ origin: '', destination: '', amount: 0, reason: '' });
@@ -130,15 +136,17 @@ export function TransferRegisterModal({ open, onClose, onDone, currency, asSecre
   const [opId, setOpId] = useState('');
   useEffect(() => {
     if (!open) return;
-    setForm({ origin: '', destination: '', amount: 0, reason: '' });
+    setForm(request
+      ? { origin: '', destination: request.requester.membershipId, amount: request.amount, reason: (request.note ? `Atiendo la solicitud: ${request.note}` : 'Atiendo la solicitud').slice(0, 300) }
+      : { origin: '', destination: '', amount: 0, reason: '' });
     setOpId(generateId());
     adminDirectory().then(setAdmins).catch(() => setAdmins([]));
-  }, [open]);
+  }, [open, request]);
   const others = admins.filter((a) => !a.self);
   const origins = asSecretary ? admins : [];
   const destinations = (asSecretary ? admins.filter((a) => a.adminId !== form.origin) : others);
   const exceeds = !asSecretary && available != null && form.amount > available;
-  const dirty = form.amount > 0 || form.reason.trim() !== '';
+  const dirty = !request && (form.amount > 0 || form.reason.trim() !== '');
   async function save() {
     if (asSecretary && !form.origin) { toast.error('Selecciona el Administrador de origen'); return; }
     if (!form.destination) { toast.error('Selecciona el Administrador de destino'); return; }
@@ -147,21 +155,23 @@ export function TransferRegisterModal({ open, onClose, onDone, currency, asSecre
     if (exceeds) { toast.error('El valor supera tu capital disponible.'); return; }
     setSaving(true);
     try {
-      await registerAdminTransfer({ originAdminId: asSecretary ? form.origin : undefined, destinationAdminId: form.destination, amount: form.amount, reason: form.reason, operationId: opId });
-      toast.success('Transferencia registrada · pendiente de confirmación');
+      await registerAdminTransfer({ originAdminId: asSecretary ? form.origin : undefined, destinationAdminId: form.destination, amount: form.amount, reason: form.reason, operationId: opId, requestId: request?.id });
+      toast.success(asSecretary ? 'Transferencia registrada · pendiente de ambos Administradores' : 'Transferencia realizada');
       onDone();
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Error'); } finally { setSaving(false); }
   }
   const destName = admins.find((a) => a.adminId === form.destination)?.name;
   return (
     <Modal open={open} onClose={() => { if (!saving) onClose(); }} guarded={dirty} title={asSecretary ? 'Registrar transferencia entre Administradores' : 'Transferir a otro Administrador'} size="md"
-      footer={<><Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button><Button onClick={save} loading={saving} disabled={exceeds}>Registrar</Button></>}>
+      footer={<><Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button><Button onClick={save} loading={saving} disabled={exceeds || (!asSecretary && available === 0)}>{asSecretary ? 'Registrar' : 'Transferir'}</Button></>}>
       <div className="space-y-4" data-testid="admin-transfer-form">
+        {request && <RequestBanner r={request} currency={currency} />}
+        {!asSecretary && available === 0 && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2" role="status">No tienes capital disponible para transferir.</p>}
         {asSecretary && (
           <Select label="Administrador de origen" value={form.origin} onChange={(e) => setForm((f) => ({ ...f, origin: e.target.value, destination: f.destination === e.target.value ? '' : f.destination }))}
             options={origins.map((a) => ({ value: a.adminId, label: a.name }))} placeholder="Seleccionar" required />
         )}
-        <Select label="Administrador de destino" value={form.destination} onChange={(e) => setForm((f) => ({ ...f, destination: e.target.value }))}
+        <Select label="Administrador de destino" value={form.destination} onChange={(e) => setForm((f) => ({ ...f, destination: e.target.value }))} disabled={!!request}
           options={destinations.map((a) => ({ value: a.adminId, label: a.name }))} placeholder={destinations.length ? 'Seleccionar' : 'No hay otros Administradores activos'} required />
         <MoneyInput label="Valor" currency={currency} value={form.amount} onValueChange={(v) => setForm((f) => ({ ...f, amount: v }))} required
           hint={!asSecretary && available != null ? `Disponible: ${formatCurrency(available, currency)}` : undefined}
@@ -172,7 +182,7 @@ export function TransferRegisterModal({ open, onClose, onDone, currency, asSecre
           <p className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2" data-testid="admin-transfer-effect">
             {asSecretary
               ? `El valor queda comprometido en la bolsa de origen y pendiente de que confirmen ambos Administradores.`
-              : `${formatCurrency(form.amount, currency)} salen ya de tu disponible y llegan a ${destName ?? 'destino'} cuando lo confirme.`}
+              : `${formatCurrency(form.amount, currency)} salen de tu caja y llegan a ${destName ?? 'destino'} en el acto.`}
           </p>
         )}
       </div>

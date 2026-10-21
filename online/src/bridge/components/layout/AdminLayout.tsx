@@ -8,12 +8,15 @@
 //   3. Bloque de usuario: «Cambiar empresa o rol» (DS-05: una membresía activa, sin permisos
 //      acumulados), con el mismo estilo que «Cerrar sesión». Solo aparece si la persona
 //      tiene más de una membresía: con una sola, el menú es idéntico al de CLEAN.
+//   4. Ronda 59 · DINERO: Administrador = Caja principal, Gastos, Transferencias, Notificaciones,
+//      Consultas; SuperAdmin = Capital, Gastos, Notificaciones, Consultas. Sin Retiros (saldo
+//      heredado de antiguas cajas de ruta) ni Historial aparte: los historiales están en Consultas.
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, Users, MapPin, CreditCard, Wallet,
-  ArrowLeftRight, TrendingDown, Archive, BarChart3, CalendarRange,
-  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt, ArrowLeft, Building2, History } from 'lucide-react'
+  LayoutDashboard, Users, MapPin, CreditCard,
+  ArrowLeftRight, TrendingDown, BarChart3, CalendarRange,
+  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt, Building2, Bell, Search } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { cn } from '@/lib/utils'
@@ -26,6 +29,7 @@ import { BrandLogo } from '@/components/ui/BrandLogo'
 // ADEX Online: contexto y sesión del servidor.
 import { Repeat, Loader2 } from 'lucide-react'
 import { leaveContext, useRuntime } from '../../../runtime/session.ts'
+import { useNotificationCount } from '../../../runtime/capitalRequests.ts'
 
 interface NavItem {
   path: string
@@ -53,11 +57,11 @@ const navItems: NavItem[] = [
   { path: '/admin/capital', label: 'Caja principal', icon: <DollarSign className="w-4 h-4" />, roles: ['admin'], group: 'Dinero' },
   { path: '/admin/capital', label: 'Capital', icon: <DollarSign className="w-4 h-4" />, roles: ['superadmin'], group: 'Dinero' },
   { path: '/admin/expenses', label: 'Gastos', icon: <TrendingDown className="w-4 h-4" />, group: 'Dinero' },
-  { path: '/admin/transfers', label: 'Transferencias', icon: <ArrowLeftRight className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Dinero' },
-  // Ronda 5/6: historial unificado de movimientos reales (con comprobantes).
-  { path: '/admin/movements', label: 'Historial', icon: <History className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Control' },
-  { path: '/admin/withdrawals', label: 'Retiros', icon: <Wallet className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Dinero' },
-  { path: '/admin/cashbox', label: 'Caja', icon: <Archive className="w-4 h-4" />, group: 'Dinero' },
+  // Ronda 59: Transferencias es del Administrador; el SuperAdmin opera su capital en Capital.
+  { path: '/admin/transfers', label: 'Transferencias', icon: <ArrowLeftRight className="w-4 h-4" />, roles: ['admin'], group: 'Dinero' },
+  { path: '/admin/notificaciones', label: 'Notificaciones', icon: <Bell className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Dinero' },
+  // Ronda 59: «Caja» pasa a Consultas (movimientos, caja por ruta, historial y filtros).
+  { path: '/admin/consultas', label: 'Consultas', icon: <Search className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Dinero' },
   { path: '/admin/reports', label: 'Reportes', icon: <BarChart3 className="w-4 h-4" />, group: 'Control' },
   { path: '/admin/weekly-settlement', label: 'Liquidación', icon: <CalendarRange className="w-4 h-4" />, group: 'Control' },
   { path: '/admin/users', label: 'Usuarios', icon: <Users className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Estructura' },
@@ -82,9 +86,12 @@ export function AdminLayout() {
   const pendingAuth = usePendingSaleRequests(user, tenantId)
   const pendingAdj = usePendingAdjustmentRequests(user, tenantId)
 
+  // Ronda 59: solo lo que requiere actuar (solicitudes a atender y confirmaciones).
+  const pendingNotices = useNotificationCount()
   const badges: Record<string, number> = {
     '/admin/sale-authorizations': pendingAuth,
     '/admin/payment-adjustments': pendingAdj,
+    '/admin/notificaciones': pendingNotices,
   }
 
   const handleLogout = () => {

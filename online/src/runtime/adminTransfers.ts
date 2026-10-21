@@ -1,7 +1,7 @@
-// TRASPASOS ENTRE ADMINISTRADORES (Ronda 53) desde las pantallas de ADEX Online.
+// TRASPASOS ENTRE ADMINISTRADORES (Rondas 53 y 59) desde las pantallas de ADEX Online.
 //
-// No existen en CLEAN: el servidor es la única autoridad (compromiso, confirmaciones,
-// aplicación). Lecturas por revisión (`serverView`, se releen tras cada comando o cambio
+// No existen en CLEAN: el servidor es la única autoridad. El directo se aplica al registrarlo
+// (R59, entrega voluntaria); el registrado por Secretario espera la confirmación de ambos. Lecturas por revisión (`serverView`, se releen tras cada comando o cambio
 // detectado); comandos con id de operación (`money`: un reintento nunca duplica).
 
 import { money } from './commands.ts';
@@ -9,7 +9,7 @@ import { serverView } from './projection.ts';
 import { toMajor, toMinor } from './mappers.ts';
 
 export type TransferState = 'pending' | 'applied' | 'rejected' | 'cancelled';
-export type PartyDecision = 'pending' | 'confirmed' | 'rejected';
+export type PartyDecision = 'pending' | 'confirmed' | 'rejected' | 'not_required';
 
 export interface AdminTransferParty { adminId: string; name: string | null; decision: PartyDecision; decidedAt: string | null; reason: string | null }
 
@@ -37,10 +37,11 @@ export async function adminDirectory(): Promise<AdminOption[]> {
   return (await serverView<{ admins: AdminOption[] }>('/v1/capital/admin-directory')).admins;
 }
 
-/** Administrador: desde su bolsa (sin origen). Secretario: origen y destino. */
-export async function registerAdminTransfer(p: { originAdminId?: string; destinationAdminId: string; amount: number; reason: string; operationId: string }) {
+/** Administrador: desde su bolsa (sin origen), aplicado en el acto (R59). Secretario: origen y destino. */
+export async function registerAdminTransfer(p: { originAdminId?: string; destinationAdminId: string; amount: number; reason: string; operationId: string; requestId?: string }) {
   const body: Record<string, unknown> = { destinationAdminId: p.destinationAdminId, amountMinor: toMinor(p.amount), reason: p.reason.trim() };
   if (p.originAdminId) body['originAdminId'] = p.originAdminId;
+  if (p.requestId) body['requestId'] = p.requestId;
   return fromRaw((await money<{ transfer: Raw }>('POST', '/v1/capital/admin-transfers', body, p.operationId)).transfer);
 }
 
@@ -50,4 +51,4 @@ export async function decideAdminTransfer(id: string, what: 'confirm' | 'reject'
 }
 
 export const STATE_LABEL: Record<TransferState, string> = { pending: 'Pendiente', applied: 'Aplicada', rejected: 'Rechazada', cancelled: 'Cancelada' };
-export const DECISION_LABEL: Record<PartyDecision, string> = { pending: 'Pendiente', confirmed: 'Confirmó', rejected: 'Rechazó' };
+export const DECISION_LABEL: Record<PartyDecision, string> = { pending: 'Pendiente', confirmed: 'Confirmó', rejected: 'Rechazó', not_required: 'Recibió (entrega directa)' };

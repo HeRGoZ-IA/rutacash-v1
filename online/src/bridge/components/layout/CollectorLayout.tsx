@@ -5,9 +5,11 @@
 //      dispositivo, así que el texto dice la verdad.
 //   2. Banners «Activando el servidor» y Empresa Demo, con la misma forma.
 //   3. «Cambiar empresa o rol» (DS-05) junto a «Mi cuenta», solo con varias membresías.
+//   4. Ronda 59: el Cobrador tiene «Avisos» (Notificaciones: solicitudes de entrega y avisos, con
+//      globo de pendientes) y desde allí registra sus entregas de efectivo.
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation, Navigate } from 'react-router-dom'
-import { Home, MapPin, DollarSign, Banknote, Calculator, LogOut, WifiOff, Wifi, ShieldAlert, ChevronDown, UserCog } from 'lucide-react'
+import { Home, MapPin, DollarSign, Banknote, Calculator, LogOut, WifiOff, Wifi, ShieldAlert, ChevronDown, UserCog, Bell } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { useActiveRoute } from '@/hooks/useActiveRoute'
@@ -22,6 +24,7 @@ import { BrandLogo } from '@/components/ui/BrandLogo'
 // ADEX Online: contexto y sesión del servidor.
 import { Repeat, Loader2 } from 'lucide-react'
 import { leaveContext, useRuntime } from '../../../runtime/session.ts'
+import { useNotificationCount } from '../../../runtime/capitalRequests.ts'
 
 /**
  * Layout OPERATIVO compartido (App Cobrador y App Supervisor).
@@ -44,6 +47,7 @@ export function CollectorLayout() {
   const waking = useRuntime((s) => s.waking)
   const isDemo = useRuntime((s) => s.ctx?.company.isDemo === true)
   const multiMembership = useRuntime((s) => s.membershipCount > 1)
+  const pendingNotices = useNotificationCount()
 
   useEffect(() => { loadRoutes() }, [user])
 
@@ -82,6 +86,8 @@ export function CollectorLayout() {
     { path: `${base}/disbursements`, label: 'Desembolsos', icon: <Banknote className="w-5 h-5" />, badge: pendingDisb },
     { path: `${base}/expenses`, label: 'Gastos', icon: <DollarSign className="w-5 h-5" />, badge: 0 },
     { path: `${base}/cashclose`, label: 'Cuadre', icon: <Calculator className="w-5 h-5" />, badge: 0 },
+    // ADEX Online (Ronda 59): Notificaciones del Cobrador.
+    ...(user?.rol === 'cobrador' ? [{ path: `${base}/notificaciones`, label: 'Avisos', icon: <Bell className="w-5 h-5" />, badge: pendingNotices }] : []),
   ]
 
   const onSelectPage = location.pathname === `${base}/select-route`
