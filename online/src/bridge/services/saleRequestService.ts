@@ -29,6 +29,7 @@ import { useRuntime } from '../../runtime/session.ts';
 import { useOffline } from '../../offline/state.ts';
 import { OFFLINE_BLOCK_TEXT, OFFLINE_BLOCK_TITLE, disburseAsCollector, newClientsAndSalesBlocked } from '../../offline/sales.ts';
 import { saleDeviceLocation } from '../../runtime/deviceLocation.ts';
+import { approvalBody, approvedMismatch, type ApprovalChoice } from '../../runtime/approvalBody.ts';
 
 export * from '@clean/services/saleRequestService';
 import * as Clean from '@clean/services/saleRequestService';
@@ -43,11 +44,19 @@ async function asSaleError<T>(fn: () => Promise<T>): Promise<T> {
 
 const idOf = (r: SaleRequest | string) => (typeof r === 'string' ? r : r.id);
 
-async function approveSaleRequestOnline(requestOrId: SaleRequest | string, _actor: User, overrides?: { notes?: string }): Promise<Sale> {
+/**
+ * Ronda 73 · SOC-07: viajan TODAS las condiciones elegidas por el autorizador (antes solo `notes`:
+ * el servidor aprobaba con lo solicitado). SOC-04: también el número de parcelas. Si el servidor
+ * no guardó exactamente lo elegido, no se informa éxito.
+ */
+async function approveSaleRequestOnline(requestOrId: SaleRequest | string, _actor: User, overrides?: ApprovalChoice): Promise<Sale> {
   return asSaleError(async () => {
-    const body: Record<string, unknown> = {};
-    if (overrides?.notes) body['notes'] = overrides.notes;
-    await plain('POST', `/v1/credit-requests/${idOf(requestOrId)}/approve`, body);
+    const body = approvalBody(overrides);
+    const saved = await plain<Record<string, unknown>>('POST', `/v1/credit-requests/${idOf(requestOrId)}/approve`, body);
+    const wrong = approvedMismatch(body, saved);
+    if (wrong.length) {
+      throw new Error(`El servidor no registró las condiciones elegidas (${wrong.join(', ')}). Revise la solicitud antes de desembolsar.`);
+    }
     // El crédito aún no existe en el servidor; las pantallas solo esperan la promesa.
     return undefined as unknown as Sale;
   });
