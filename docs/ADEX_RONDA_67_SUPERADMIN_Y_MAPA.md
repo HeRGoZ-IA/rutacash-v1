@@ -105,11 +105,20 @@ sin coste contratado hoy).
 duplicar ni alterar importes, marcadores y abono anulado, filtros y rango, sin ubicación, última actividad, seguridad API y
 SQL, volumen 318 clientes / 517 actividades en 135 ms); E2E B-01…B-17 y C-01…C-07.
 
-## 4. Pruebas (cifras finales en el informe de cierre)
+## 4. Pruebas
 
-- SaaS (PostgreSQL real): tipos, unitarias y la suite completa de base de datos.
-- CLEAN / motor compartido: `npm test` de la raíz.
-- Navegador (Chrome real, build de producción, API local, datos sintéticos, teselas interceptadas): `tmp/r67/e2e.mjs`.
+| Bloque | Resultado |
+|---|---|
+| Tipos (raíz, `saas`, `online`) y build de producción de Online | OK |
+| SaaS unitarias | 23/23 |
+| SaaS con PostgreSQL real (suite completa) | 426 casos: 425 OK, 0 fallos, 1 omitida (Supabase real sin staging). En la ejecución completa `owner-panel.test.ts` abortó una vez al arrancar (transitorio); repetido solo: 10/10 |
+| CLEAN / motor compartido (`npm test` de la raíz) | 1.643 casos, 0 fallos |
+| Navegador R67 (`tmp/r67/e2e.mjs`) | 40/40 |
+| Regresión Offline 65-C1 sobre el build R67 (`tmp/r67/e2e-c1-regresion.mjs`) | 35/35 |
+| Regresión Offline R62 sobre el build R67 (`tmp/r67/e2e-r62-regresion.mjs`) | 54/54 |
+
+Navegador: Chrome real, build de producción con service worker, API real local, PostgreSQL local 0001–0029, datos
+sintéticos, teselas interceptadas (nada sale a internet), dispositivo en el huso de la empresa sintética.
 
 **Pruebas adaptadas a la regla nueva (marcadas «Ronda 67» / «[MODIFICADO Ronda 67]»):** las que usaban al SuperAdmin para
 registrar clientes, vender, cobrar, anular, castigar o desembolsar ahora lo hacen con el Administrador o comprueban el
