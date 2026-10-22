@@ -41,6 +41,15 @@ desconocida, abono sin doble conteo, respuesta perdida, conflictos, bloqueo); re
 
 **Publicación:** igual que en §8 con la capacidad `offline-disbursements-v1`.
 
+**Estado final verificado (2026-10-21, solo lectura sobre HTTPS):**
+- ADEX-Staging: migraciones 0001–0027 (0027 aplicada por el propietario con `staging:migrate`).
+- `adex-online-api` (Render, despliegue manual del propietario): `/healthz` incluye `offline-disbursements-v1`.
+- `adex-online.vercel.app` (redespliegue de `e71d5d0`): sirve `index-DrYEAZLA.js`, que contiene el aviso
+  «Operación no disponible sin internet», el efectivo disponible y el tratamiento de registros heredados;
+  `/sw.js` 200 y `/owner` 200.
+- BlueLine (1 ruta, 6 membresías, 1 oficina, sin clientes ni movimientos) y las dos cuentas Owner: huellas
+  idénticas antes y después (`tmp/r65/snapshot-antes.json` = `snapshot-despues.json`, salvo la lista de migraciones).
+
 ---
 
 
