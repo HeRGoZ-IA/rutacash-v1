@@ -25,6 +25,17 @@ import { canViewMovementHistory, listMovementHistory } from '@/services/movement
 import type { ExpenseCategory, Route, User } from '@/models/types'
 
 const PAGINA = 30
+
+/**
+ * Ronda 73 · SOC-08: una entrega o devolución entre la bolsa y un trabajador es UNA operación del
+ * servidor; la proyección la reparte en dos registros de CLEAN (`capitalMovements`/`withdrawals` y su
+ * espejo `cashCustodyMovements:<id>:custodia`). Se oculta el espejo cuando su operación ya está en la
+ * lista: agrupación por IDENTIFICADOR de la operación, nunca por importe, fecha ni texto.
+ */
+function oneRowPerOperation(list: HistoryEntry[]): HistoryEntry[] {
+  const ops = new Set(list.filter(e => e.fuente === 'capitalMovements' || e.fuente === 'withdrawals').map(e => e.id))
+  return list.filter(e => !(e.fuente === 'cashCustodyMovements' && e.id.endsWith(':custodia') && ops.has(e.id.slice(0, -':custodia'.length))))
+}
 const FILTROS_URL = ['desde', 'hasta', 'categoria', 'routeId', 'adminId', 'workerId', 'cuenta', 'estado', 'referencia'] as const
 
 const TONO_ESTADO: Record<HistoryState, string> = {
@@ -68,7 +79,7 @@ export function MovementsPanel() {
           db.expenseCategories.where('tenantId').equals(tenantId).toArray(),
         ])
         if (!alive) return
-        setEntries(es); setTodas(todasEs); setUsers(us); setRoutes(filterAccessibleRoutes(user, rts)); setCategories(cats); setError(null)
+        setEntries(oneRowPerOperation(es)); setTodas(oneRowPerOperation(todasEs)); setUsers(us); setRoutes(filterAccessibleRoutes(user, rts)); setCategories(cats); setError(null)
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : 'No se pudo cargar el historial')
       } finally { if (alive) setLoading(false) }

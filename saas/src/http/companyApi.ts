@@ -56,6 +56,7 @@ import { offlineKey } from '../offline/capture.ts';
 import { ADJUSTMENT_FIELDS, CORRECTION_FIELDS, approveAdjustment, correctCollection, createAdjustment, listAdjustments, rejectAdjustment } from '../collections/adjustments.ts';
 import { EXPENSE_FIELDS, createExpense, getExpense, listExpenses, refundExpense, reverseExpense } from '../expenses/service.ts';
 import { CLIENT_LOCATION_FIELDS, getClientLocation, routeMap, setClientLocation } from '../map/service.ts';
+import { listMovements } from '../movements/service.ts';
 import {
   PERIOD_CLOSE_FIELDS, SETTLEMENT_FIELDS, closePeriod, closeSettlement, getClosure, getSettlement, liquidation, listClosures, listSettlements, reopenPeriod,
   periodCalendar, previewSettlement, reopenSettlement, settleableWorkers,
@@ -236,6 +237,8 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: () => async (c, ctx, b, _q, op) => created(await directSale(c, ctx, b, op)) },
   { method: 'GET', pattern: new RegExp(`^/v1/credits$`), fields: null, handler: () => async (c, ctx, _b, q) => ok({ credits: await listCredits(c, ctx, q) }) },
   { method: 'GET', pattern: new RegExp(`^/v1/credits/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getCredit(c, ctx, id!)) },
+  // Ronda 73 · SOC-08: Consultas como tabla (una fila por operación lógica + eventos sin dinero), paginada en el servidor.
+  { method: 'GET', pattern: /^\/v1\/movements$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await listMovements(c, ctx, q)) },
   // Ronda 73 (0030): rectificación de un crédito desembolsado sin recaudos (Administrador) y su historial.
   { method: 'POST', pattern: new RegExp(`^/v1/credits/${ID}/rectify$`), fields: RECTIFY_FIELDS, idempotent: 'credits.rectify', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => ok(await rectifyCredit(c, ctx, id!, b, op)) },
