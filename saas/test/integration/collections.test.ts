@@ -26,6 +26,7 @@ describe('Fase 5 · recaudos', () => {
   const provider = createMemoryProvider();
   const c1 = companyId('c1');
   let r1 = '';
+  let adm: Caller;
   let bruno: Caller, ana: Caller, gabi: Caller, fabio: Caller;
   let $bruno: Money, $ana: Money, $anaCob: Money;
   let carlos: Person, dora: Person, xavier: Person, gil: Person;
@@ -40,7 +41,7 @@ describe('Fase 5 · recaudos', () => {
   const income = (r = r1) => balance(db.admin, c1, 'income', null, r);
   const cpf = () => String(randomInt(10_000_000_000, 99_999_999_999));
   const newClient = async (route: string, name: string) => {
-    const r = await bruno('POST', '/v1/clients', { routeId: route, name, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+    const r = await adm('POST', '/v1/clients', { routeId: route, name, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
     if (r.status !== 201) throw new Error(JSON.stringify(r.body));
     return r.body['id'] as string;
   };
@@ -61,6 +62,8 @@ describe('Fase 5 · recaudos', () => {
     api = await startCompanyApi(db, issuer, provider);
     r1 = (await db.admin.query(`select id from adex.routes where company_id = $1 and name = 'Ruta 1'`, [c1])).rows[0].id;
     bruno = caller(api, issuer, 'bruno', M.brunoSa); $bruno = money(bruno);
+    // Ronda 67: el SuperAdmin ya no registra clientes (cartera de solo lectura); los prepara la Administradora.
+    adm = caller(api, issuer, 'ana', M.anaAdmin);
     ana = caller(api, issuer, 'ana', M.anaAdmin); $ana = money(ana);
     $anaCob = money(caller(api, issuer, 'ana', M.anaCob));
     gabi = caller(api, issuer, 'gabi', M.gabiSec);
@@ -214,9 +217,10 @@ describe('Fase 5 · recaudos', () => {
     assert.equal((await collect(carla, s, 1_000)).status, 404);
     assert.equal((await caller(api, issuer, 'carla', M.carlaSa)('GET', `/v1/collections?saleId=${s}`)).body['collections'] instanceof Array, true);
     assert.deepEqual((await caller(api, issuer, 'carla', M.carlaSa)('GET', `/v1/collections?saleId=${s}`)).body['collections'], []);
-    await asApi(db.api, { identityId: identityOf('carla'), membershipId: M.carlaSa, companyId: companyId('c2') }, async (q) => {
+    // Ronda 67: con el Administrador de c2 (el SuperAdmin ya no tiene autoridad de cobro): el crédito de c1 no existe para él.
+    await asApi(db.api, { identityId: identityOf('hugo'), membershipId: M.hugoAdmin, companyId: companyId('c2') }, async (q) => {
       await q.query('savepoint s');
-      await assert.rejects(q.query('select adex.collection_post(gen_random_uuid(), $1, 1000, $2, null)', [s, M.carlaSa]), { code: 'AX412' });
+      await assert.rejects(q.query('select adex.collection_post(gen_random_uuid(), $1, 1000, $2, null)', [s, M.hugoAdmin]), { code: 'AX412' });
       await q.query('rollback to savepoint s');
       assert.equal(await count(q, 'select 1 from adex.payments where company_id = $1', [c1]), 0);
     });
@@ -245,8 +249,8 @@ describe('Fase 5 · recaudos', () => {
     const legs = await db.admin.query(`select a.kind, e.amount_minor::int amt from adex.capital_entries e join adex.capital_accounts a on a.id = e.account_id
                                         where e.operation_id = $1 order by e.leg`, [(r.body['payment'] as Body)['ledgerOperationId']]);
     assert.deepEqual(legs.rows, [{ kind: 'admin', amt: 5_000 }, { kind: 'portfolio', amt: -4_167 }, { kind: 'income', amt: -833 }]);
-    // El SuperAdmin también: el dinero va a la bolsa del responsable, no a una «caja de ruta».
-    assert.equal((await collect($bruno, s, 1_000)).body['receiver'], 'admin');
+    // [MODIFICADO Ronda 67] Antes el SuperAdmin también cobraba (a la bolsa del responsable). Ahora su cartera es de consulta.
+    assert.equal((await collect($bruno, s, 1_000)).status, 403);
   });
 
   test('COL-010 · historial y consultas por rol: cuotas y deuda actualizadas desde el servidor', async () => {
@@ -352,7 +356,11 @@ describe('Fase 5 · recaudos', () => {
     // Ana cobradora cobra; Ana administradora (la MISMA persona) no puede anularlo (DS-05).
     const own = ((await collect($anaCob, await credit(rAna), 1_000)).body['payment'] as Body)['id'] as string;
     assert.equal((await $ana(`/v1/collections/${own}/reverse`, { reason: 'Propio' })).body['error'], 'SELF_REDUCTION_FORBIDDEN');
-    assert.equal((await $bruno(`/v1/collections/${own}/reverse`, { reason: 'Otra persona' })).status, 201);
+    // [MODIFICADO Ronda 67] El SuperAdmin ya no anula pagos (403); otra persona con autoridad sobre la ruta sí.
+    assert.equal((await $bruno(`/v1/collections/${own}/reverse`, { reason: 'Otra persona' })).status, 403);
+    await db.admin.query('insert into adex.membership_routes (company_id, membership_id, route_id) values ($1, $2, $3) on conflict do nothing', [c1, xavier.membershipId, rAna]);
+    const byOther = await xavier.money(`/v1/collections/${own}/reverse`, { reason: 'Otra persona' });
+    assert.equal(byOther.status, 201, JSON.stringify(byOther.body));
     // Dinero ya entregado a la bolsa: no se devuelve un dinero que ya no está en sus manos.
     const left = await custody(carlos.membershipId);
     assert.equal((await $ana('/v1/capital/returns', { routeId: r1, workerId: carlos.membershipId, amountMinor: left, reason: 'Entrega del día' })).status, 201);

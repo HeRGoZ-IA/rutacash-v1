@@ -173,7 +173,8 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
   // Dos clientes registrados que nunca llegan a tener crédito; uno queda inactivo.
   const idle = await addClient('centro', d0);
   clients.splice(clients.indexOf(idle), 1);
-  await c({ seat: 'direccion', method: 'POST', path: `/v1/clients/${idle.id}/status`, day: d0, body: { status: 'inactivo' } });
+  // Ronda 67: lo inactiva el Administrador de la ruta (la cartera del SuperAdmin es de consulta).
+  await c({ seat: controller['centro'], method: 'POST', path: `/v1/clients/${idle.id}/status`, day: d0, body: { status: 'inactivo' } });
 
   // ============================================================ 2. Capital inicial
   await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/company/deposits', operation: true, day: d0, body: { amountMinor: COP(60_000_000 * Math.max(scale, 0.3)), reason: 'Capital inicial de la empresa (ficticio)' } });

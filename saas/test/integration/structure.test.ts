@@ -15,6 +15,7 @@ describe('Fase 2 · estructura de empresa, Oficinas, rutas y categorías', () =>
   let issuer: LocalIssuer;
   let api: TestServer;
   let control: TestServer;
+  let adm: Caller;
   let bruno: Caller, ana: Caller, anaCob: Caller, fabio: Caller, carla: Caller;
   const provider = createMemoryProvider();
   before(async () => {
@@ -23,6 +24,8 @@ describe('Fase 2 · estructura de empresa, Oficinas, rutas y categorías', () =>
     api = await startCompanyApi(db, issuer, provider);
     control = await startControlApi(db, issuer, provider);
     bruno = caller(api, issuer, 'bruno', M.brunoSa);
+    // Ronda 67: el SuperAdmin ya no registra clientes (cartera de solo lectura); los prepara la Administradora.
+    adm = caller(api, issuer, 'ana', M.anaAdmin);
     ana = caller(api, issuer, 'ana', M.anaAdmin);
     anaCob = caller(api, issuer, 'ana', M.anaCob);
     fabio = caller(api, issuer, 'fabio', M.fabioSec);
@@ -65,9 +68,10 @@ describe('Fase 2 · estructura de empresa, Oficinas, rutas y categorías', () =>
 
   test('STR-011 · Oficina inactiva: bloquea operaciones NUEVAS de sus rutas; borrar nunca borra rutas', async () => {
     const office = (await bruno('POST', '/v1/offices', { name: 'Oficina Temporal' })).body;
-    const route = (await bruno('POST', '/v1/routes', { name: 'Ruta Temporal', interestRate: 20, freeRate: false, maxLoanMinor: 100000, officeId: office['id'] })).body;
+    // Ronda 67: el alta la intenta la Administradora de la ruta (el SuperAdmin ya no registra clientes).
+    const route = (await bruno('POST', '/v1/routes', { name: 'Ruta Temporal', interestRate: 20, freeRate: false, maxLoanMinor: 100000, officeId: office['id'], adminIds: [M.anaAdmin] })).body;
     assert.equal((await bruno('POST', `/v1/offices/${office['id']}/status`, { status: 'inactiva' })).status, 200);
-    const client = await bruno('POST', '/v1/clients', { routeId: route['id'], name: 'X', documentType: 'CPF', document: '111.444.777-35',
+    const client = await adm('POST', '/v1/clients', { routeId: route['id'], name: 'X', documentType: 'CPF', document: '111.444.777-35',
       phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
     assert.equal(client.body['error'], 'ROUTE_NOT_OPERATIONAL');
     assert.equal((await bruno('GET', `/v1/routes/${route['id']}`)).status, 200, 'la consulta sigue');

@@ -26,6 +26,7 @@ describe('Ronda 65-C1 · desembolsos sin conexión; clientes y solicitudes solo 
   const c1 = companyId('c1');
   const r1 = routeId('c1', 1);
   let r2 = '';
+  let adm: Caller;
   let bruno: Caller, gabi: Caller, carla: Caller;
   let $bruno: Money, $ana: Money;
   let carlos: Person, dora: Person, gil: Person;
@@ -49,7 +50,7 @@ describe('Ronda 65-C1 · desembolsos sin conexión; clientes y solicitudes solo 
   };
   /** Cliente (en línea, por la oficina) + solicitud del Cobrador aprobada por la Secretaria. */
   const approved = async (who: Person, o: Body = {}, route = r1) => {
-    const cl = await bruno('POST', '/v1/clients', clientBody(route));
+    const cl = await adm('POST', '/v1/clients', clientBody(route));
     if (cl.status !== 201) throw new Error(JSON.stringify(cl.body));
     const req = await who.money('/v1/credit-requests', { routeId: route, clientId: cl.body['id'], ...cond(o) });
     if (req.status !== 201) throw new Error(JSON.stringify(req.body));
@@ -69,6 +70,8 @@ describe('Ronda 65-C1 · desembolsos sin conexión; clientes y solicitudes solo 
     issuer = await createLocalIssuer();
     api = await startCompanyApi(db, issuer, provider);
     bruno = caller(api, issuer, 'bruno', M.brunoSa); $bruno = money(bruno);
+    // Ronda 67: el SuperAdmin ya no registra clientes (cartera de solo lectura); los prepara la Administradora.
+    adm = caller(api, issuer, 'ana', M.anaAdmin);
     $ana = money(caller(api, issuer, 'ana', M.anaAdmin));
     gabi = caller(api, issuer, 'gabi', M.gabiSec);
     carla = caller(api, issuer, 'carla', M.carlaSa);
@@ -87,7 +90,7 @@ describe('Ronda 65-C1 · desembolsos sin conexión; clientes y solicitudes solo 
   after(async () => { await api.close(); await db.close(); });
 
   test('OFS-001 · 65-C1: el alta de cliente y la solicitud NO admiten captura sin conexión (ningún rol); nada se escribe', async () => {
-    const known = await bruno('POST', '/v1/clients', clientBody());
+    const known = await adm('POST', '/v1/clients', clientBody());
     for (const [who, label] of [[carlos.money, 'Cobrador'], [dora.money, 'Supervisor'], [money(bruno), 'SuperAdmin']] as const) {
       const body = { ...clientBody(), offline: off() };
       const op = randomUUID();
@@ -115,7 +118,7 @@ describe('Ronda 65-C1 · desembolsos sin conexión; clientes y solicitudes solo 
     assert.deepEqual([req.status, req.body['status'], req.body['requestedBy']], [201, 'pending', carlos.membershipId]);
     assert.equal((await carlos.call('POST', `/v1/credit-requests/${req.body['id']}/approve`, {})).status, 403, 'nadie aprueba lo suyo');
     assert.equal((await carlos.money('/v1/credit-requests', { routeId: r1, clientId: cl.body['id'], ...cond({ amountMinor: 10_000 }) })).status, 409, 'una pendiente por cliente');
-    const ten = await bruno('POST', '/v1/clients', clientBody());
+    const ten = await adm('POST', '/v1/clients', clientBody());
     assert.equal((await carlos.money('/v1/credit-requests', { routeId: r1, clientId: ten.body['id'], ...cond({ interestRate: 10 }) })).body['error'], 'INTEREST_RATE_NOT_ALLOWED');
     assert.equal((await carlos.money('/v1/clients', clientBody(r1, String(cl.body['document']).replace(/\D/g, '')))).body['error'], 'DOCUMENT_DUPLICATE');
     assert.equal((await carlos.money('/v1/credits/direct', { routeId: r1, clientId: ten.body['id'], ...cond() })).status, 403, 'sin venta directa');
@@ -226,7 +229,7 @@ describe('Ronda 65-C1 · desembolsos sin conexión; clientes y solicitudes solo 
 
   test('OFS-011 · ruta quitada al Cobrador: su desembolso pendiente no se aplica', async () => {
     await deliver(gil, 30_000, r2);
-    const cl = await bruno('POST', '/v1/clients', clientBody(r2));
+    const cl = await adm('POST', '/v1/clients', clientBody(r2));
     const req = await gil.money('/v1/credit-requests', { routeId: r2, clientId: cl.body['id'], ...cond({ amountMinor: 10_000 }) });
     // Aprueba la Administradora de esa ruta (otra persona).
     assert.equal((await caller(api, issuer, 'ana', M.anaAdmin)('POST', `/v1/credit-requests/${req.body['id']}/approve`, {})).status, 200);
@@ -251,7 +254,7 @@ describe('Ronda 65-C1 · desembolsos sin conexión; clientes y solicitudes solo 
   });
 
   test('OFS-013 · la cartera es de la ruta: venta de la oficina para la ruta del Cobrador sale de la bolsa del responsable', async () => {
-    const cl = await bruno('POST', '/v1/clients', clientBody());
+    const cl = await adm('POST', '/v1/clients', clientBody());
     const c0 = await custody(carlos.membershipId);
     const r = await $ana('/v1/credits/direct', { routeId: r1, clientId: cl.body['id'], ...cond({ amountMinor: 20_000 }) });
     assert.equal(r.status, 201, JSON.stringify(r.body));

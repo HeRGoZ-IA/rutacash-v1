@@ -30,6 +30,8 @@ import { need } from '../structure/common.ts';
 import { has, optText, PAGE_ORDER, pageFilters, pathId, reqId, reqText } from '../structure/input.ts';
 import { requireOperationId, routeOf } from '../capital/service.ts';
 import { parseOffline, requireOfflineActor, storeOfflineCapture, type OfflineCapture } from '../offline/capture.ts';
+import { parseLocation } from '../collections/location.ts';
+import { storeSaleLocation } from '../map/service.ts';
 
 const FREQUENCIES: readonly PaymentFrequency[] = ['diaria', 'semanal', 'quincenal', 'mensual', 'personalizada'];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -153,7 +155,8 @@ async function samePerson(client: pg.PoolClient, ctx: ActiveContext, a: string, 
 
 // Ronda 65-C1 (decisión del propietario): clientes y solicitudes NO se registran sin conexión;
 // estos comandos no admiten `offline` (UNKNOWN_FIELD). Sin conexión, el Cobrador llama a la oficina.
-export const CREATE_REQUEST_FIELDS = ['routeId', 'clientId', 'amountMinor', 'interestRate', 'installmentsCount', 'frequency', 'startDate', 'paymentDays'] as const;
+// Ronda 67: `location` = lectura del DISPOSITIVO al registrar la venta en línea (evidencia; nunca la del cliente).
+export const CREATE_REQUEST_FIELDS = ['routeId', 'clientId', 'amountMinor', 'interestRate', 'installmentsCount', 'frequency', 'startDate', 'paymentDays', 'location'] as const;
 
 /**
  * Ronda 65: desembolso capturado sin conexión (solo el Cobrador) con id de operación, que identifica
@@ -198,6 +201,9 @@ export async function createRequest(client: pg.PoolClient, ctx: ActiveContext, b
     [ctx.companyId, cl.id, route.id, ctx.membershipId, cond.amount, cond.rate, total, cond.count, value, cond.frequency, cond.start, cond.days,
       active.sales, reason]);
   const row = r.rows[0]!;
+  // Ronda 67: ubicación del dispositivo en un savepoint (una falla de GPS o de esquema no tumba la solicitud).
+  const location = parseLocation(body['location']);
+  if (location) await storeSaleLocation(client, ctx, { kind: 'credit_request', entityId: row.id, routeId: route.id, clientId: cl.id, location });
   await audit(client, ctx, { action: 'CREATE_SALE_REQUEST', entityType: 'sale_request', entityId: row.id, routeId: route.id,
     description: `Solicitud de crédito ${cond.amount} para ${cl.name}`, after: requestView(row) });
   return requestView(row);
@@ -358,6 +364,8 @@ export async function directSale(client: pg.PoolClient, ctx: ActiveContext, body
     activeCredits: active.sales.length + active.approvedRequests.length });
   if (decision.kind !== 'direct') throw new ApiError(409, 'AUTHORIZATION_REQUIRED');
   const out = await disburse(client, opId, null, route.id, cl.id, c, 'Venta directa');
+  const location = parseLocation(body['location']);
+  if (location) await storeSaleLocation(client, ctx, { kind: 'direct_sale', entityId: out.credit_id, routeId: route.id, clientId: cl.id, location });
   await audit(client, ctx, { action: 'CREATE_DIRECT_SALE', entityType: 'sale', entityId: out.credit_id, routeId: route.id,
     description: `Venta directa ${c.amount} a ${cl.name}`, after: { operationId: out.disbursement_id }, metadata: { operationId: opId } });
   return getCredit(client, ctx, out.credit_id);

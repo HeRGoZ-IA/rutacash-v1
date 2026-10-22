@@ -109,13 +109,19 @@ describe('Ronda 33 · RLS con contexto evaluado una vez (0020)', () => {
     for (const l of illegit) for (const t of ['payments', 'sales', 'installments', 'clients', 'expenses', 'capital_operations', 'capital_accounts', 'routes', 'audit_log']) {
       assert.ok(withMigration[`${l}:${t}`]?.startsWith('0:'), `${l} no ve ${t}`);
     }
+    // Ronda 67: las políticas de lectura de 0029 (mapa) usan las funciones de contexto de 0020 y 0028 reconoce al SuperAdmin
+    // la lectura de solicitudes. Para revertir 0020 se retiran antes esas políticas posteriores (esta base de prueba se
+    // descarta) y no se comparan las tablas que 0028/0029 cambiaron a propósito.
+    await asOwner(['client_locations', 'sale_locations', 'payment_locations'].map((t) => `drop policy ${t}_read on adex.${t};`).join(' '));
+    const LATER = [':client_locations', ':sale_locations', ':payment_locations'];
+    const changedLater = (k: string) => LATER.some((t) => k.endsWith(t)) || (k.endsWith(':sale_requests') && k.startsWith('superadmin/'));
     await asOwner(withoutPartnerCash(ROLLBACK).replace(/^(begin|commit|set local role adex_owner);$/gm, ''));
     const previous = await visibility();
     const policies = (await db.admin.query(`select count(*)::int n from pg_policies where schemaname = 'adex' and qual like '%route_in_scope%'`)).rows[0].n;
     assert.equal(policies, 0, 'la reversión restaura las políticas anteriores');
     await asOwner(withoutPartnerCash(MIGRATION));
     const again = await visibility();
-    const diff = Object.keys(previous).filter((k) => previous[k] !== withMigration[k] || previous[k] !== again[k]);
+    const diff = Object.keys(previous).filter((k) => !changedLater(k) && (previous[k] !== withMigration[k] || previous[k] !== again[k]));
     assert.deepEqual(diff, [], 'ninguna diferencia de filas ni de contenido');
   });
 

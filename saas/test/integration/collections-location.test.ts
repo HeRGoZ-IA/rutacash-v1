@@ -22,6 +22,7 @@ describe('Ronda 48 · ubicación del cobro', () => {
   const provider = createMemoryProvider();
   const c1 = companyId('c1');
   let r1 = '';
+  let adm: Caller;
   let bruno: Caller;
   let $bruno: Money, $ana: Money;
   let carlos: Person, dora: Person;
@@ -29,7 +30,7 @@ describe('Ronda 48 · ubicación del cobro', () => {
 
   const cpf = () => String(randomInt(10_000_000_000, 99_999_999_999));
   const credit = async () => {
-    const cl = await bruno('POST', '/v1/clients', { routeId: r1, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+    const cl = await adm('POST', '/v1/clients', { routeId: r1, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
     if (cl.status !== 201) throw new Error(JSON.stringify(cl.body));
     const r = await $ana('/v1/credits/direct', { routeId: r1, clientId: cl.body['id'], amountMinor: 50_000, interestRate: 20,
       installmentsCount: 12, frequency: 'diaria', startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] });
@@ -48,6 +49,8 @@ describe('Ronda 48 · ubicación del cobro', () => {
     api = await startCompanyApi(db, issuer, provider);
     r1 = (await db.admin.query(`select id from adex.routes where company_id = $1 and name = 'Ruta 1'`, [c1])).rows[0].id;
     bruno = caller(api, issuer, 'bruno', M.brunoSa); $bruno = money(bruno);
+    // Ronda 67: el SuperAdmin ya no registra clientes (cartera de solo lectura); los prepara la Administradora.
+    adm = caller(api, issuer, 'ana', M.anaAdmin);
     $ana = money(caller(api, issuer, 'ana', M.anaAdmin));
     today = (await db.admin.query(`select (now() at time zone 'America/Sao_Paulo')::date::text d`)).rows[0].d;
     const mk = (email: string, role: string, displayName: string) => newPerson(api, issuer, provider.ids, bruno, { email, role, displayName, routeIds: [r1] });
@@ -186,12 +189,16 @@ describe('Ronda 48 · ubicación del cobro', () => {
     assert.deepEqual(await locationOf(paymentId), []);
   });
 
-  test('LOC-010 · sin lectura: ni la API ni el plano Owner pueden consultar coordenadas; la historia no se modifica', async () => {
+  // [MODIFICADO Ronda 67] Antes nadie leía coordenadas. Decisión del propietario (mapa): el Administrador las lee en
+  // sus rutas (política `payment_locations_read`, `map.view`; ver route-map.test.ts MAP-008). El Owner, nunca.
+  test('LOC-010 · lectura solo por la política del mapa; el plano Owner no puede consultar coordenadas; la historia no se modifica', async () => {
     const privs = (await db.admin.query(`select has_table_privilege('adex_api', 'adex.payment_locations', 'select') api,
                                                 has_table_privilege('adex_control', 'adex.payment_locations', 'select') ctl,
                                                 has_table_privilege('adex_demo', 'adex.payment_locations', 'select') demo,
                                                 has_table_privilege('adex_api', 'adex.payment_locations', 'update') upd`)).rows[0];
-    assert.deepEqual(privs, { api: false, ctl: false, demo: false, upd: false });
+    assert.deepEqual(privs, { api: true, ctl: false, demo: false, upd: false });
+    const policies = (await db.admin.query(`select policyname, cmd from pg_policies where schemaname = 'adex' and tablename = 'payment_locations' order by 1`)).rows;
+    assert.deepEqual(policies.map((p) => `${p.policyname}:${p.cmd}`), ['payment_locations_insert:INSERT', 'payment_locations_read:SELECT']);
     const s = await credit();
     const r = await carlos.money('/v1/collections', { saleId: s, amountMinor: 5_000, location: { status: 'denied' } });
     await assert.rejects(db.admin.query(`update adex.payment_locations set status = 'captured' where payment_id = $1`, [r.body['paymentId']]), /not allowed/);

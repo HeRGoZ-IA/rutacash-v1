@@ -98,6 +98,7 @@ describe('Ronda 48.1 · reintentos seguros de abonos (cliente web real + Postgre
   const provider = createMemoryProvider();
   const c1 = companyId('c1');
   let r1 = '';
+  let adm: Caller;
   let bruno: Caller;
   let $bruno: Money, $ana: Money;
   let carlos: Person;
@@ -106,7 +107,7 @@ describe('Ronda 48.1 · reintentos seguros de abonos (cliente web real + Postgre
   let hold: { started: () => void; release: Promise<void> } | null = null;
 
   const credit = async (amountMinor = 100_000, installmentsCount = 10) => {
-    const client = (await bruno('POST', '/v1/clients', { routeId: r1, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF',
+    const client = (await adm('POST', '/v1/clients', { routeId: r1, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF',
       document: String(randomInt(10_000_000_000, 99_999_999_999)), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' })).body['id'];
     const r = await $ana('/v1/credits/direct', { routeId: r1, clientId: client, amountMinor, interestRate: 20, installmentsCount, frequency: 'diaria',
       startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] });
@@ -153,6 +154,8 @@ describe('Ronda 48.1 · reintentos seguros de abonos (cliente web real + Postgre
     proxy = await startProxy(api.base);
     r1 = (await db.admin.query(`select id from adex.routes where company_id = $1 and name = 'Ruta 1'`, [c1])).rows[0].id;
     bruno = caller(api, issuer, 'bruno', M.brunoSa); $bruno = money(bruno);
+    // Ronda 67: el SuperAdmin ya no registra clientes (cartera de solo lectura); los prepara la Administradora.
+    adm = caller(api, issuer, 'ana', M.anaAdmin);
     $ana = money(caller(api, issuer, 'ana', M.anaAdmin));
     today = (await db.admin.query(`select (now() at time zone 'America/Sao_Paulo')::date::text d`)).rows[0].d;
     carlos = await newPerson(api, issuer, provider.ids, bruno, { email: 'carlos-r481@example.test', role: 'cobrador', displayName: 'Carlos', routeIds: [r1] });

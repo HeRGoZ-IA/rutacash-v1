@@ -25,6 +25,7 @@ describe('Fase 5 · reparto capital / interés de los recaudos', () => {
   const provider = createMemoryProvider();
   const c1 = companyId('c1');
   let r1 = '';
+  let adm: Caller;
   let bruno: Caller;
   let $bruno: Money, $ana: Money;
   let carlos: Person;
@@ -34,7 +35,7 @@ describe('Fase 5 · reparto capital / interés de los recaudos', () => {
   const income = () => balance(db.admin, c1, 'income', null, r1);
   const custody = () => balance(db.admin, c1, 'custody', carlos.membershipId, r1);
   const credit = async (amountMinor: number, installmentsCount: number, interestRate = 20) => {
-    const client = (await bruno('POST', '/v1/clients', { routeId: r1, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF',
+    const client = (await adm('POST', '/v1/clients', { routeId: r1, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF',
       document: String(randomInt(10_000_000_000, 99_999_999_999)), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' })).body['id'];
     const r = await $ana('/v1/credits/direct', { routeId: r1, clientId: client, amountMinor, interestRate, installmentsCount, frequency: 'diaria',
       startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] });
@@ -76,6 +77,8 @@ describe('Fase 5 · reparto capital / interés de los recaudos', () => {
     api = await startCompanyApi(db, issuer, provider);
     r1 = (await db.admin.query(`select id from adex.routes where company_id = $1 and name = 'Ruta 1'`, [c1])).rows[0].id;
     bruno = caller(api, issuer, 'bruno', M.brunoSa); $bruno = money(bruno);
+    // Ronda 67: el SuperAdmin ya no registra clientes (cartera de solo lectura); los prepara la Administradora.
+    adm = caller(api, issuer, 'ana', M.anaAdmin);
     $ana = money(caller(api, issuer, 'ana', M.anaAdmin));
     today = (await db.admin.query(`select (now() at time zone 'America/Sao_Paulo')::date::text d`)).rows[0].d;
     carlos = await newPerson(api, issuer, provider.ids, bruno, { email: 'carlos-split@example.test', role: 'cobrador', displayName: 'Carlos', routeIds: [r1] });

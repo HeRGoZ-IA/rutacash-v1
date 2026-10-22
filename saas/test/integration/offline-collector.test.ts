@@ -23,6 +23,7 @@ describe('Ronda 62 · modo sin conexión del Cobrador', () => {
   const c1 = companyId('c1');
   let r1 = '';
   let r2 = '';
+  let adm: Caller;
   let bruno: Caller;
   let $bruno: Money, $ana: Money;
   let carlos: Person, dora: Person, gil: Person;
@@ -31,7 +32,7 @@ describe('Ronda 62 · modo sin conexión del Cobrador', () => {
 
   const cpf = () => String(randomInt(10_000_000_000, 99_999_999_999));
   const credit = async (route = r1, amountMinor = 50_000) => {
-    const cl = await bruno('POST', '/v1/clients', { routeId: route, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+    const cl = await adm('POST', '/v1/clients', { routeId: route, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
     if (cl.status !== 201) throw new Error(JSON.stringify(cl.body));
     const r = await $ana('/v1/credits/direct', { routeId: route, clientId: cl.body['id'], amountMinor, interestRate: 20,
       installmentsCount: 12, frequency: 'diaria', startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] });
@@ -50,6 +51,8 @@ describe('Ronda 62 · modo sin conexión del Cobrador', () => {
     api = await startCompanyApi(db, issuer, provider);
     r1 = (await db.admin.query(`select id from adex.routes where company_id = $1 and name = 'Ruta 1'`, [c1])).rows[0].id;
     bruno = caller(api, issuer, 'bruno', M.brunoSa); $bruno = money(bruno);
+    // Ronda 67: el SuperAdmin ya no registra clientes (cartera de solo lectura); los prepara la Administradora.
+    adm = caller(api, issuer, 'ana', M.anaAdmin);
     $ana = money(caller(api, issuer, 'ana', M.anaAdmin));
     today = (await db.admin.query(`select (now() at time zone 'America/Sao_Paulo')::date::text d`)).rows[0].d;
     carlos = await newPerson(api, issuer, provider.ids, bruno, { email: 'carlos-off@example.test', role: 'cobrador', displayName: 'Carlos', routeIds: [r1] });

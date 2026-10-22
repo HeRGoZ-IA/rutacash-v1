@@ -97,11 +97,15 @@ export async function runScenario(call: CallRunner, seatMembership: (seat: strin
   const routes = { norte: str(norte['id'], 'route norte'), centro: str(centro['id'], 'route centro') };
   await call({ seat: 'direccion', method: 'PUT', path: `/v1/members/${m('supervisor-norte')}/routes`, body: { routeIds: [routes.norte] } });
   await call({ seat: 'direccion', method: 'PUT', path: `/v1/members/${m('supervisor-centro')}/routes`, body: { routeIds: [routes.centro] } });
+  // Ronda 67: la cartera del SuperAdmin es de consulta y los puestos de personas no actúan en el escenario,
+  // así que el Administrador sintético (no asignable) queda autorizado también en Centro para registrar sus
+  // clientes ficticios. El responsable de capital de Centro sigue siendo su Administrador.
+  await call({ seat: 'direccion', method: 'PUT', path: `/v1/members/${m('admin-norte')}/routes`, body: { routeIds: [routes.norte, routes.centro] } });
 
-  // 2. Clientes ficticios.
+  // 2. Clientes ficticios. Ronda 67: los registra el Administrador sintético (la cartera del SuperAdmin es de consulta).
   const clients: Record<string, string[]> = { norte: [], centro: [] };
   for (const [i, c] of CLIENTS.entries()) {
-    const created = await call({ seat: 'direccion', method: 'POST', path: '/v1/clients', operation: true, body: {
+    const created = await call({ seat: 'admin-norte', method: 'POST', path: '/v1/clients', operation: true, body: {
       routeId: routes[c.route], name: c.name, documentType: 'CPF', document: c.doc, phonePrimary: `(00) 90000-00${String(i + 1).padStart(2, '0')}`,
       addressPrimary: `Rua Imaginária ${100 + i}, Bairro Exemplo`, addressSecondary: `Rua Imaginária ${100 + i}, Bairro Exemplo (cobro)`,
       business: c.business, notes: 'Cliente ficticio de la Empresa Demo' } });
@@ -128,8 +132,8 @@ export async function runScenario(call: CallRunner, seatMembership: (seat: strin
   await call({ seat: 'admin-norte', method: 'POST', path: `/v1/credit-requests/${str(r2['id'], 'r2')}/approve`, body: { notes: 'Aprobada (demo)' } });
   await call({ seat: 'cobrador-norte', method: 'POST', path: `/v1/credit-requests/${str(r1['id'], 'r1')}/disburse`, operation: true, body: {} });
 
-  // 5. Ruta Centro: una solicitud pendiente para la bandeja de autorizaciones.
-  await call({ seat: 'direccion', method: 'POST', path: '/v1/credit-requests', operation: true, body: {
+  // 5. Ruta Centro: una solicitud pendiente para la bandeja de autorizaciones (la registra el Administrador sintético, Ronda 67).
+  await call({ seat: 'admin-norte', method: 'POST', path: '/v1/credit-requests', operation: true, body: {
     routeId: routes.centro, clientId: clients['centro']![0]!, amountMinor: 50_000, interestRate: 20, installmentsCount: 10, frequency: 'diaria',
     startDate: today, paymentDays: [1, 2, 3, 4, 5, 6] } });
 

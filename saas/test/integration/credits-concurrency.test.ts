@@ -32,6 +32,7 @@ describe('Fase 4 · concurrencia de créditos', () => {
   const provider = createMemoryProvider();
   const c1 = companyId('c1');
   const r1 = routeId('c1', 1);
+  let adm: Caller;
   let bruno: Caller, gabi: Caller;
   let $bruno: Money, $ana: Money;
   let carlos: Person, dora: Person, xavier: Person;
@@ -40,7 +41,7 @@ describe('Fase 4 · concurrencia de créditos', () => {
   const custody = (m: string) => balance(db.admin, c1, 'custody', m, r1);
   const pool = (m: string) => balance(db.admin, c1, 'admin', m);
   const newClient = async (name: string) => {
-    const r = await bruno('POST', '/v1/clients', { routeId: r1, name, documentType: 'CPF', document: String(randomInt(10_000_000_000, 99_999_999_999)),
+    const r = await adm('POST', '/v1/clients', { routeId: r1, name, documentType: 'CPF', document: String(randomInt(10_000_000_000, 99_999_999_999)),
       phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
     if (r.status !== 201) throw new Error(JSON.stringify(r.body));
     return r.body['id'] as string;
@@ -61,6 +62,8 @@ describe('Fase 4 · concurrencia de créditos', () => {
     issuer = await createLocalIssuer();
     api = await startCompanyApi(db, issuer, provider);
     bruno = caller(api, issuer, 'bruno', M.brunoSa); $bruno = money(bruno);
+    // Ronda 67: el SuperAdmin ya no registra clientes (cartera de solo lectura); los prepara la Administradora.
+    adm = caller(api, issuer, 'ana', M.anaAdmin);
     $ana = money(caller(api, issuer, 'ana', M.anaAdmin));
     gabi = caller(api, issuer, 'gabi', M.gabiSec);
     today = (await db.admin.query(`select (now() at time zone 'America/Sao_Paulo')::date::text d`)).rows[0].d;

@@ -19,6 +19,7 @@ describe('Fase 2 · DS-11 historia protegida', () => {
   let db: TestDb;
   let issuer: LocalIssuer;
   let api: TestServer;
+  let adm: Caller;
   let bruno: Caller, ana: Caller, anaCob: Caller;
   const c1 = companyId('c1');
   const brunoCtx = { identityId: identityOf('bruno'), membershipId: M.brunoSa, companyId: c1 };
@@ -27,6 +28,8 @@ describe('Fase 2 · DS-11 historia protegida', () => {
     issuer = await createLocalIssuer();
     api = await startCompanyApi(db, issuer, createMemoryProvider());
     bruno = caller(api, issuer, 'bruno', M.brunoSa);
+    // Ronda 67: el SuperAdmin ya no registra clientes (cartera de solo lectura); los prepara la Administradora.
+    adm = caller(api, issuer, 'ana', M.anaAdmin);
     ana = caller(api, issuer, 'ana', M.anaAdmin);
     anaCob = caller(api, issuer, 'ana', M.anaCob);
   });
@@ -34,9 +37,11 @@ describe('Fase 2 · DS-11 historia protegida', () => {
 
   const refsOf = (r: { body: Record<string, unknown> }) => ((r.body['details'] as { references?: string[] } | undefined)?.references ?? []);
 
-  test('DS11-001 · cliente con préstamo histórico: borrado rechazado (API, SuperAdmin y administrador de la base)', async () => {
+  // [MODIFICADO Ronda 67] El SuperAdmin ya no borra clientes (403); el rechazo por historia lo recibe la Administradora.
+  test('DS11-001 · cliente con préstamo histórico: borrado rechazado (API, Administrador y administrador de la base)', async () => {
     const id = uid('c1:client:1');
-    const r = await bruno('POST', `/v1/clients/${id}/delete`, {});
+    assert.equal((await bruno('POST', `/v1/clients/${id}/delete`, {})).status, 403, 'Ronda 67: el SuperAdmin no borra clientes');
+    const r = await ana('POST', `/v1/clients/${id}/delete`, {});
     assert.equal(r.status, 409);
     assert.equal(r.body['error'], 'HAS_HISTORY');
     for (const ref of ['sales.client_id', 'payments.client_id', 'sale_requests.client_id']) assert.ok(refsOf(r).includes(ref), ref);
@@ -100,7 +105,9 @@ describe('Fase 2 · DS-11 historia protegida', () => {
         { code: '42501' });
     });
     await assert.rejects(db.admin.query('update adex.routes set collector_membership_id = $1 where id = $2', [M.ivanHist, routeId('c1', 1)]), { code: 'AX302' });
-    assert.equal((await bruno('POST', '/v1/clients', newClient(routeId('c1', 3), '168.995.350-09'))).body['error'], 'ROUTE_NOT_OPERATIONAL');
+    // Ronda 67: el alta la intenta la Administradora; se le autoriza la ruta 3 (inactiva) para probar su ESTADO.
+    await db.admin.query('insert into adex.membership_routes (company_id, membership_id, route_id) values ($1, $2, $3) on conflict do nothing', [c1, M.anaAdmin, routeId('c1', 3)]);
+    assert.equal((await adm('POST', '/v1/clients', newClient(routeId('c1', 3), '168.995.350-09'))).body['error'], 'ROUTE_NOT_OPERATIONAL');
   });
 
   test('DS11-006 · ni el SuperAdmin directamente en la base: sin borrado masivo, sin cascada, sin TRUNCATE', async () => {
@@ -108,7 +115,9 @@ describe('Fase 2 · DS-11 historia protegida', () => {
     await asApi(db.api, brunoCtx, async (q) => {
       for (const sql of ['delete from adex.clients where company_id = $1', 'delete from adex.routes where company_id = $1', 'delete from adex.memberships where company_id = $1 and id <> $2']) {
         await q.query('savepoint s');
-        await assert.rejects(q.query(sql, sql.includes('$2') ? [c1, M.brunoSa] : [c1]), { code: '2BP01' }, sql);
+        // Ronda 67: sobre clientes, el SuperAdmin ya no tiene política de borrado: la base no le deja ver filas que borrar.
+        if (sql.startsWith('delete from adex.clients')) assert.equal((await q.query(sql, [c1])).rowCount, 0, sql);
+        else await assert.rejects(q.query(sql, sql.includes('$2') ? [c1, M.brunoSa] : [c1]), { code: '2BP01' }, sql);
         await q.query('rollback to savepoint s');
       }
       for (const t of ['clients', 'routes', 'memberships', 'offices', 'expense_categories']) {
@@ -128,13 +137,13 @@ describe('Fase 2 · DS-11 historia protegida', () => {
        values ($1, $2, $3, $4, $5, 1000, 20, 1200, 12, 100, 'diaria', '2026-10-20', 'pending', now())`,
       [`req-${clientId}`, c1, clientId, routeId('c1', 1), M.anaCob]);
     // (a) La referencia llega primero (sin confirmar) y el borrado espera: al confirmarse, el borrado ve la historia.
-    const a = (await bruno('POST', '/v1/clients', newClient(routeId('c1', 1), '390.533.447-05'))).body['id'] as string;
+    const a = (await adm('POST', '/v1/clients', newClient(routeId('c1', 1), '390.533.447-05'))).body['id'] as string;
     const tx = new pg.Client({ connectionString: db.url('postgres') });
     await tx.connect();
     try {
       await tx.query('begin');
       await insertRequest(tx, a);
-      const deletion = bruno('POST', `/v1/clients/${a}/delete`, {});
+      const deletion = ana('POST', `/v1/clients/${a}/delete`, {});
       await new Promise((r) => setTimeout(r, 300));
       await tx.query('commit');
       const r = await deletion;
@@ -144,7 +153,7 @@ describe('Fase 2 · DS-11 historia protegida', () => {
     }
     assert.equal(await count(db.admin, 'select 1 from adex.clients where id = $1', [a]), 1);
     // (b) El borrado llega primero (sin confirmar) y la referencia espera: al confirmarse, la referencia falla.
-    const b = (await bruno('POST', '/v1/clients', newClient(routeId('c1', 1), '714.602.380-01'))).body['id'] as string;
+    const b = (await adm('POST', '/v1/clients', newClient(routeId('c1', 1), '714.602.380-01'))).body['id'] as string;
     const del = new pg.Client({ connectionString: db.url('postgres') });
     const ref = new pg.Client({ connectionString: db.url('postgres') });
     await Promise.all([del.connect(), ref.connect()]);

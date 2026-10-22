@@ -55,6 +55,7 @@ import { VISIT_FIELDS, listVisits, registerVisit } from '../collections/visits.t
 import { offlineKey } from '../offline/capture.ts';
 import { ADJUSTMENT_FIELDS, CORRECTION_FIELDS, approveAdjustment, correctCollection, createAdjustment, listAdjustments, rejectAdjustment } from '../collections/adjustments.ts';
 import { EXPENSE_FIELDS, createExpense, getExpense, listExpenses, refundExpense, reverseExpense } from '../expenses/service.ts';
+import { CLIENT_LOCATION_FIELDS, getClientLocation, routeMap, setClientLocation } from '../map/service.ts';
 import {
   PERIOD_CLOSE_FIELDS, SETTLEMENT_FIELDS, closePeriod, closeSettlement, getClosure, getSettlement, liquidation, listClosures, listSettlements, reopenPeriod,
   periodCalendar, previewSettlement, reopenSettlement, settleableWorkers,
@@ -164,6 +165,11 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'PATCH', pattern: new RegExp(`^/v1/clients/${ID}$`), fields: CLIENT_FIELDS, handler: ([id]) => async (c, ctx, b) => ok(await updateClient(c, ctx, id!, b)) },
   { method: 'POST', pattern: new RegExp(`^/v1/clients/${ID}/status$`), fields: ['status'], handler: ([id]) => async (c, ctx, b) => ok(await setClientStatus(c, ctx, id!, b)) },
   { method: 'POST', pattern: new RegExp(`^/v1/clients/${ID}/delete$`), fields: [], handler: ([id]) => async (c, ctx) => ok(await deleteClient(c, ctx, id!)) },
+  // Ronda 67 (0029): ubicación de REFERENCIA del cliente (historia auditada) y mapa del Administrador.
+  { method: 'GET', pattern: new RegExp(`^/v1/clients/${ID}/location$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getClientLocation(c, ctx, id!)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/clients/${ID}/location$`), fields: CLIENT_LOCATION_FIELDS, idempotent: 'clients.location', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b) => created(await setClientLocation(c, ctx, id!, b)) },
+  { method: 'GET', pattern: /^\/v1\/map$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await routeMap(c, ctx, q)) },
   // ---------- Capital centralizado y custodia (Fase 3) ----------
   { method: 'GET', pattern: /^\/v1\/capital\/summary$/, fields: null, handler: () => async (c, ctx) => ok(await capitalSummary(c, ctx)) },
   { method: 'GET', pattern: /^\/v1\/capital\/reconciliation$/, fields: null, handler: () => async (c, ctx) => ok(await capitalReconciliation(c, ctx)) },

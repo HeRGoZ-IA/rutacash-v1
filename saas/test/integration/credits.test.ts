@@ -25,6 +25,7 @@ describe('Fase 4 · créditos: solicitud, autorización y desembolso', () => {
   const c1 = companyId('c1');
   const r1 = routeId('c1', 1);
   const r2 = routeId('c1', 2);
+  let adm: Caller;
   let bruno: Caller, ana: Caller, gabi: Caller, anaCob: Caller, fabio: Caller;
   let $bruno: Money, $ana: Money;
   let carlos: Person, dora: Person, xavier: Person, gil: Person;
@@ -36,7 +37,7 @@ describe('Fase 4 · créditos: solicitud, autorización y desembolso', () => {
   const portfolio = (r: string) => balance(db.admin, c1, 'portfolio', null, r);
   const cpf = () => String(randomInt(10_000_000_000, 99_999_999_999));
   const newClient = async (route: string, name: string) => {
-    const r = await bruno('POST', '/v1/clients', { routeId: route, name, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+    const r = await adm('POST', '/v1/clients', { routeId: route, name, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
     if (r.status !== 201) throw new Error(JSON.stringify(r.body));
     return r.body['id'] as string;
   };
@@ -50,6 +51,8 @@ describe('Fase 4 · créditos: solicitud, autorización y desembolso', () => {
     issuer = await createLocalIssuer();
     api = await startCompanyApi(db, issuer, provider);
     bruno = caller(api, issuer, 'bruno', M.brunoSa); $bruno = money(bruno);
+    // Ronda 67: el SuperAdmin ya no registra clientes (cartera de solo lectura); los prepara la Administradora.
+    adm = caller(api, issuer, 'ana', M.anaAdmin);
     ana = caller(api, issuer, 'ana', M.anaAdmin); $ana = money(ana);
     gabi = caller(api, issuer, 'gabi', M.gabiSec);
     anaCob = caller(api, issuer, 'ana', M.anaCob);
@@ -96,7 +99,7 @@ describe('Fase 4 · créditos: solicitud, autorización y desembolso', () => {
     assert.equal((await request(gabi, r1, cl)).status, 403, 'la Secretaria no solicita');
     assert.equal((await request(fabio, r1, cl)).status, 403, 'el Socio no solicita');
     const inactive = await newClient(r1, 'Inactivo');
-    assert.equal((await bruno('POST', `/v1/clients/${inactive}/status`, { status: 'inactivo' })).status, 200);
+    assert.equal((await ana('POST', `/v1/clients/${inactive}/status`, { status: 'inactivo' })).status, 200);
     assert.equal(await err(carlos.call, r1, inactive), 'CLIENT_NOT_ACTIVE');
     assert.equal((await request(carlos.call, r1, cl)).status, 201);
     assert.equal(await err(carlos.call, r1, cl), 'PENDING_REQUEST_EXISTS', 'una sola pendiente por cliente');
@@ -125,7 +128,10 @@ describe('Fase 4 · créditos: solicitud, autorización y desembolso', () => {
     assert.equal((await dora.call('POST', `/v1/credit-requests/${own}/reject`, { reason: 'Propia' })).body['error'], 'SELF_APPROVAL_FORBIDDEN');
     const anas = (await request(anaCob, r5, await newClient(r5, 'De Ana cobradora'))).body['id'] as string;
     assert.equal((await ana('POST', `/v1/credit-requests/${anas}/approve`, {})).body['error'], 'SELF_APPROVAL_FORBIDDEN', 'Ana administradora = Ana cobradora');
-    assert.equal((await bruno('POST', `/v1/credit-requests/${anas}/approve`, {})).status, 200, 'otra persona sí');
+    // Ronda 67: el SuperAdmin ya no autoriza (cartera de solo lectura); otra persona con autoridad en r5 sí.
+    assert.equal((await bruno('POST', `/v1/credit-requests/${anas}/approve`, {})).status, 403, 'el SuperAdmin la consulta, pero no la resuelve');
+    await db.admin.query('insert into adex.membership_routes (company_id, membership_id, route_id) values ($1, $2, $3) on conflict do nothing', [c1, M.gabiSec, r5]);
+    assert.equal((await gabi('POST', `/v1/credit-requests/${anas}/approve`, {})).status, 200, 'otra persona sí');
   });
 
   test('CRED-005 · rechazo con motivo: no crea nada y ya no se desembolsa', async () => {
@@ -183,7 +189,8 @@ describe('Fase 4 · créditos: solicitud, autorización y desembolso', () => {
     assert.equal(await custody(carlos.membershipId, r1), 0);
   });
 
-  test('CRED-008 · desembolso administrativo: solo el responsable de capital o el SuperAdmin, desde la bolsa del responsable', async () => {
+  // [MODIFICADO Ronda 67] Antes el SuperAdmin también desembolsaba (con la bolsa del responsable). Ahora su cartera es de solo lectura.
+  test('CRED-008 · desembolso administrativo: solo el responsable de capital, desde su bolsa; el SuperAdmin ya no', async () => {
     const mk = async (name: string) => {
       const req = (await request(carlos.call, r1, await newClient(r1, name), { amountMinor: 30_000 })).body['id'] as string;
       assert.equal((await gabi('POST', `/v1/credit-requests/${req}/approve`, {})).status, 200);
@@ -194,7 +201,9 @@ describe('Fase 4 · créditos: solicitud, autorización y desembolso', () => {
     const before = await pool(M.anaAdmin);
     assert.equal((await disburse($ana, a)).status, 201);
     assert.equal(await pool(M.anaAdmin), before - 30_000);
-    assert.equal((await disburse($bruno, b)).status, 201, 'el SuperAdmin paga con la bolsa del responsable');
+    assert.ok([403, 404].includes((await disburse($bruno, b)).status), 'Ronda 67: el SuperAdmin no desembolsa');
+    assert.equal(await pool(M.anaAdmin), before - 30_000, 'y no se movió dinero');
+    assert.equal((await disburse($ana, b)).status, 201);
     assert.equal(await pool(M.anaAdmin), before - 60_000);
     assert.equal(await count(db.admin, `select 1 from adex.capital_operations where kind = 'LOAN_DISBURSEMENT' and admin_membership_id = $1`, [M.anaAdmin]), 2);
   });

@@ -142,6 +142,11 @@ export async function offlineDisbursementsReady(pool: pg.Pool, attempts = 3): Pr
   return false;
 }
 
+/** Ronda 67 (0028 + 0029): mapa del Administrador y cartera de solo lectura del SuperAdmin. */
+export async function routeMapReady(pool: pg.Pool): Promise<boolean> {
+  return relationExists(pool, 'adex.client_locations');
+}
+
 /**
  * ¿Existe la relación? Con REINTENTOS (Ronda 59): la primera conexión de un proceso recién
  * arrancado en Render suele fallar (base en frío). Antes, ese fallo dejaba sin anunciar la

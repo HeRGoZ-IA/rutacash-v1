@@ -21,6 +21,7 @@ describe('ADEX Online · capa operativa', () => {
   const c1 = companyId('c1');
   let r1 = '';
   let r2 = '';
+  let adm: Caller;
   let bruno: Caller;
   let $bruno: Money, $ana: Money;
   let carlos: Person, gil: Person, sec: Person;
@@ -28,7 +29,7 @@ describe('ADEX Online · capa operativa', () => {
 
   const cpf = () => String(randomInt(10_000_000_000, 99_999_999_999));
   const newClient = async (route: string) => {
-    const r = await bruno('POST', '/v1/clients', { routeId: route, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+    const r = await adm('POST', '/v1/clients', { routeId: route, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
     if (r.status !== 201) throw new Error(JSON.stringify(r.body));
     return r.body['id'] as string;
   };
@@ -46,6 +47,8 @@ describe('ADEX Online · capa operativa', () => {
     api = await startCompanyApi(db, issuer, provider);
     r1 = (await db.admin.query(`select id from adex.routes where company_id = $1 and name = 'Ruta 1'`, [c1])).rows[0].id;
     bruno = caller(api, issuer, 'bruno', M.brunoSa); $bruno = money(bruno);
+    // Ronda 67: el SuperAdmin ya no registra clientes (cartera de solo lectura); los prepara la Administradora.
+    adm = caller(api, issuer, 'ana', M.anaAdmin);
     $ana = money(caller(api, issuer, 'ana', M.anaAdmin));
     today = (await db.admin.query(`select (now() at time zone 'America/Sao_Paulo')::date::text d`)).rows[0].d;
     carlos = await newPerson(api, issuer, provider.ids, bruno, { email: 'carlos-of@example.test', role: 'cobrador', displayName: 'Carlos', routeIds: [r1] });
