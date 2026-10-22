@@ -163,6 +163,7 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
     ],
     omitted: [], added: [
       { column: 'ledger_operation_id', reason: 'Fase 4: asiento de desembolso del libro de capital del servidor (capital_operations); CLEAN no tiene libro de doble entrada' },
+      { column: 'rectification_count', reason: 'Ronda 73 (0030): rectificaciones del crédito desembolsado (historial en credit_rectifications; concurrencia optimista)' },
     ],
   },
   {
@@ -297,6 +298,8 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       { column: 'cancelled_at', reason: 'Fase 4: cancelación auditada de una solicitud aprobada sin desembolsar (en CLEAN, venta pendiente marcada perdida)' },
       { column: 'cancelled_by_membership_id', reason: 'Fase 4: quién canceló la solicitud aprobada (autoridad sale.cancel, Administrador o SuperAdmin)' },
       { column: 'cancel_reason', reason: 'Fase 4: motivo obligatorio de la cancelación de una solicitud aprobada que no se entregará' },
+      { column: 'requested_installments_count', reason: 'Ronda 73 (0030): parcelas solicitadas (las aprobadas pueden cambiar; CLEAN no lo congelaba)' },
+      { column: 'approved_installments_count', reason: 'Ronda 73 (0030): parcelas aprobadas por quien autoriza (SOC-04)' },
     ],
   },
   {

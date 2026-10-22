@@ -112,8 +112,10 @@ describe('Ronda 33 · RLS con contexto evaluado una vez (0020)', () => {
     // Ronda 67: las políticas de lectura de 0029 (mapa) usan las funciones de contexto de 0020 y 0028 reconoce al SuperAdmin
     // la lectura de solicitudes. Para revertir 0020 se retiran antes esas políticas posteriores (esta base de prueba se
     // descarta) y no se comparan las tablas que 0028/0029 cambiaron a propósito.
-    await asOwner(['client_locations', 'sale_locations', 'payment_locations'].map((t) => `drop policy ${t}_read on adex.${t};`).join(' '));
-    const LATER = [':client_locations', ':sale_locations', ':payment_locations'];
+    // Ronda 73: igual con la lectura del historial de rectificaciones (0030).
+    await asOwner(['client_locations', 'sale_locations', 'payment_locations'].map((t) => `drop policy ${t}_read on adex.${t};`).join(' ')
+      + ' drop policy credit_rectifications_ctx on adex.credit_rectifications;');
+    const LATER = [':client_locations', ':sale_locations', ':payment_locations', ':credit_rectifications'];
     const changedLater = (k: string) => LATER.some((t) => k.endsWith(t)) || (k.endsWith(':sale_requests') && k.startsWith('superadmin/'));
     await asOwner(withoutPartnerCash(ROLLBACK).replace(/^(begin|commit|set local role adex_owner);$/gm, ''));
     const previous = await visibility();

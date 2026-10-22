@@ -22,6 +22,13 @@ const ERRORS: Record<string, string> = {
   SELF_REDUCTION_FORBIDDEN: 'Nadie registra la reducción de su propia custodia.',
   REQUEST_STATE_INVALID: 'La solicitud cambió de estado. Se recargó la información.',
   REQUEST_NOT_DISBURSABLE: 'La solicitud ya no se puede desembolsar.',
+  // Ronda 73 · corrección de ventas desembolsadas (SOC-09).
+  CREDIT_HAS_COLLECTIONS: 'La venta ya tiene cobros registrados: no se puede corregir.',
+  DISBURSEMENT_SETTLED: 'El desembolso ya está incluido en un cuadre: no se puede corregir.',
+  CUSTODIAN_CHANGED: 'El trabajador que entregó el dinero ya no tiene caja en esta ruta: la corrección necesita una revisión aparte.',
+  CREDIT_CHANGED: 'La venta cambió mientras la corregía. Vuelva a abrirla y revise los datos.',
+  NOTHING_TO_RECTIFY: 'No hay cambios que corregir.',
+  INSTALLMENTS_REDUCTION_BLOCKED: 'No se puede reducir el número de parcelas de una venta desembolsada (decisión pendiente del propietario).',
   PENDING_REQUEST_EXISTS: 'Ese cliente ya tiene una solicitud pendiente.',
   INTEREST_RATE_NOT_ALLOWED: 'Tasa no permitida para su rol (el Cobrador solicita al 20 %).',
   INVALID_CONDITIONS: 'Condiciones no válidas (la fecha de inicio no puede ser anterior a hoy).',

@@ -147,6 +147,11 @@ export async function routeMapReady(pool: pg.Pool): Promise<boolean> {
   return relationExists(pool, 'adex.client_locations');
 }
 
+/** Ronda 73 (0030): parcelas en la autorización y rectificación de créditos desembolsados. */
+export async function creditRectificationReady(pool: pg.Pool): Promise<boolean> {
+  return relationExists(pool, 'adex.credit_rectifications');
+}
+
 /**
  * ¿Existe la relación? Con REINTENTOS (Ronda 59): la primera conexión de un proceso recién
  * arrancado en Render suele fallar (base en frío). Antes, ese fallo dejaba sin anunciar la

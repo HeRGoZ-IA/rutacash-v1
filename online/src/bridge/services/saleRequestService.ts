@@ -139,6 +139,15 @@ async function markSaleLostOnline(): Promise<void> {
   throw new SaleRuleError('Marcar un crédito como perdido (castigo) todavía no está disponible en el servidor de ADEX Online.');
 }
 
+/** Ronda 73 · SOC-09: rectificación de una venta desembolsada (Administrador, `POST /v1/credits/:id/rectify`). */
+async function rectifyDisbursedSaleOnline(saleId: string, _actor: User, input: Clean.RectifySaleInput): Promise<void> {
+  await asSaleError(() => money('POST', `/v1/credits/${encodeURIComponent(saleId)}/rectify`, {
+    amountMinor: toMinor(input.valorVenta), interestRate: input.tasaInteres, installmentsCount: input.numeroCuotas, frequency: input.frecuenciaPago,
+    startDate: input.fechaInicio, paymentDays: input.paymentDays, expectedRectifications: input.rectificacionesVistas,
+    reason: input.motivo.trim(), evidence: input.evidencia.trim(), offlineChecked: input.sinCapturasPendientes === true,
+  }, input.operationId));
+}
+
 // Firmas ORIGINALES de CLEAN (las pantallas y servicios originales las llaman así).
 export const approveSaleRequest = approveSaleRequestOnline as unknown as typeof Clean.approveSaleRequest;
 export const rejectSaleRequest = rejectSaleRequestOnline as unknown as typeof Clean.rejectSaleRequest;
@@ -146,3 +155,4 @@ export const createDirectSale = createDirectSaleOnline as unknown as typeof Clea
 export const markSaleLost = markSaleLostOnline as unknown as typeof Clean.markSaleLost;
 export const createSaleRequest = createSaleRequestOnline as unknown as typeof Clean.createSaleRequest;
 export const confirmDisbursement = confirmDisbursementOnline as unknown as typeof Clean.confirmDisbursement;
+export const rectifyDisbursedSale = rectifyDisbursedSaleOnline as unknown as typeof Clean.rectifyDisbursedSale;

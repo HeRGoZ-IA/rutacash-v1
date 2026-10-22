@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { ChevronLeft, ChevronRight, CheckCircle, XCircle, Phone, ShieldAlert, ClipboardCheck } from 'lucide-react'
 import { Select } from '@/components/ui/Input'
 import { ClientCreditHistory } from '@/components/ui/ClientCreditHistory'
+import { ApprovalInstallments } from '@/components/ui/ApprovalInstallments'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
@@ -53,6 +54,8 @@ export default function CollectorAuthorizationsPage() {
   const [tasa, setTasa] = useState(20)
   const [freq, setFreq] = useState<PaymentFrequency>('diaria')
   const [dias, setDias] = useState<number[]>([])
+  // Ronda 73 · SOC-04: parcelas modificables antes de aprobar.
+  const [cuotas, setCuotas] = useState(20)
   const [telefono, setTelefono] = useState(false)
   const [notaTelefono, setNotaTelefono] = useState('')
   const [rechazando, setRechazando] = useState(false)
@@ -97,7 +100,7 @@ export default function CollectorAuthorizationsPage() {
 
   function abrir(r: SaleRequest) {
     setSeleccion(r.id)
-    setTasa(r.interestRate); setFreq(r.frequency); setDias(r.paymentDays ?? [])
+    setTasa(r.interestRate); setFreq(r.frequency); setDias(r.paymentDays ?? []); setCuotas(r.installmentsCount)
     setTelefono(!!r.phoneConfirmed); setNotaTelefono(r.phoneConfirmationNote ?? '')
     setRechazando(false); setMotivo('')
   }
@@ -105,10 +108,12 @@ export default function CollectorAuthorizationsPage() {
   async function aprobar() {
     if (!actual || !user) return
     if (dias.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
+    if (puedeModificar && (!Number.isInteger(cuotas) || cuotas < 1 || cuotas > 1000)) { toast.error('Indica un número de parcelas válido'); return }
     setTrabajando(true)
     try {
       const overrides = puedeModificar
-        ? { interestRate: tasa, frequency: freq, paymentDays: dias, phoneConfirmed: telefono, phoneConfirmationNote: notaTelefono || undefined }
+        ? { interestRate: tasa, frequency: freq, paymentDays: dias, phoneConfirmed: telefono, phoneConfirmationNote: notaTelefono || undefined,
+            ...(cuotas !== actual.installmentsCount ? { installmentsCount: cuotas } : {}) }
         : { phoneConfirmed: telefono, phoneConfirmationNote: notaTelefono || undefined }
       await approveSaleRequest(actual.id, user, overrides)
       await logApprovalAudit(actual, user, overrides, money(actual.amount)).catch(() => undefined)
@@ -184,6 +189,7 @@ export default function CollectorAuthorizationsPage() {
                 options={ALLOWED_INTEREST_RATES.map(t => ({ value: String(t), label: `${t}%` }))} />
               <Select label="Forma de pago" value={freq} onChange={e => setFreq(e.target.value as PaymentFrequency)} options={FREQ_OPTIONS} />
             </div>
+            <ApprovalInstallments amount={actual.amount} rate={tasa} count={cuotas} onCount={setCuotas} currency={currency} requested={actual.installmentsCount} />
             <div className="flex flex-wrap gap-2">
               {WEEK_DAYS.map(d => {
                 const on = dias.includes(d.value)

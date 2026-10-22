@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ActiveCreditNotice } from '@/components/ui/ActiveCreditNotice'
+import { ApprovalInstallments } from '@/components/ui/ApprovalInstallments'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
@@ -53,6 +54,8 @@ export default function SecretarioAuthorizationsPage() {
   const [tasa, setTasa] = useState(20)
   const [freq, setFreq] = useState<PaymentFrequency>('diaria')
   const [days, setDays] = useState<number[]>([])
+  // Ronda 73 · SOC-04: parcelas modificables antes de aprobar.
+  const [cuotas, setCuotas] = useState(20)
   const [phoneConfirmed, setPhoneConfirmed] = useState(false)
   const [phoneNote, setPhoneNote] = useState('')
 
@@ -78,7 +81,7 @@ export default function SecretarioAuthorizationsPage() {
   async function openDetail(req: SaleRequest) {
     setDetail(req)
     setRejecting(false); setRejectReason('')
-    setTasa(req.interestRate); setFreq(req.frequency); setDays(req.paymentDays ?? [])
+    setTasa(req.interestRate); setFreq(req.frequency); setDays(req.paymentDays ?? []); setCuotas(req.installmentsCount)
     setPhoneConfirmed(!!req.phoneConfirmed); setPhoneNote(req.phoneConfirmationNote ?? '')
     // Nada de la solicitud anterior mientras carga la nueva.
     setClientSales([]); setCreditContext(null)
@@ -104,11 +107,15 @@ export default function SecretarioAuthorizationsPage() {
     if (!detail || !user) return
     if (!can(user, 'authorization.approve', { routeId: detail.routeId })) { toast.error('No autorizado para esta ruta'); return }
     if (days.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
+    if (!Number.isInteger(cuotas) || cuotas < 1 || cuotas > 1000) { toast.error('Indica un número de parcelas válido'); return }
     setWorking(true)
     try {
       const changed = tasa !== detail.interestRate || freq !== detail.frequency || JSON.stringify(days) !== JSON.stringify(detail.paymentDays ?? [])
+        || cuotas !== detail.installmentsCount
       await approveSaleRequest(detail, user, {
         interestRate: tasa, frequency: freq, paymentDays: days,
+        // Solo si cambia: el servidor recalcula total, parcela y calendario con lo aprobado.
+        ...(cuotas !== detail.installmentsCount ? { installmentsCount: cuotas } : {}),
         phoneConfirmed, phoneConfirmationNote: phoneNote || undefined,
       })
       await logAction({
@@ -223,6 +230,7 @@ export default function SecretarioAuthorizationsPage() {
                   <Select label="Porcentaje" value={String(tasa)} onChange={e => setTasa(Number(e.target.value))} options={TASA_OPTIONS} />
                   <Select label="Frecuencia" value={freq} onChange={e => setFreq(e.target.value as PaymentFrequency)} options={FREQ_OPTIONS} />
                 </div>
+                <ApprovalInstallments amount={detail.amount} rate={tasa} count={cuotas} onCount={setCuotas} currency={currency} requested={detail.installmentsCount} />
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Días de pago</label>
                   <div className="flex flex-wrap gap-2">

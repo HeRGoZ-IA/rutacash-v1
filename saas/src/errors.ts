@@ -65,6 +65,13 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX505': return new ApiError(403, 'SELF_APPROVAL_FORBIDDEN');
     case 'AX506': return new ApiError(409, 'REQUEST_NOT_DISBURSABLE');
     case 'AX507': return new ApiError(409, 'DIRECT_SALE_LIMIT');
+    // Ronda 73 · rectificación de créditos desembolsados (0030).
+    case 'AX520': return new ApiError(409, 'CREDIT_HAS_COLLECTIONS');
+    case 'AX521': return new ApiError(409, 'DISBURSEMENT_SETTLED');
+    case 'AX522': return new ApiError(409, 'CUSTODIAN_CHANGED');
+    case 'AX523': return new ApiError(409, 'CREDIT_CHANGED');
+    case 'AX524': return new ApiError(400, 'NOTHING_TO_RECTIFY');
+    case 'AX525': return new ApiError(409, 'INSTALLMENTS_REDUCTION_BLOCKED');
     // Fase 5 · recaudos y gastos (0013). Sin cifras de saldos.
     case 'AX701': return new ApiError(409, 'CREDIT_NOT_ACTIVE');
     case 'AX702': return new ApiError(409, 'CREDIT_NOT_DISBURSED');

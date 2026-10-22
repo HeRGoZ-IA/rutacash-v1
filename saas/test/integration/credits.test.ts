@@ -79,7 +79,7 @@ describe('Fase 4 · créditos: solicitud, autorización y desembolso', () => {
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assert.deepEqual([r.body['status'], r.body['totalAmountMinor'], r.body['installmentValueMinor'], r.body['requestedBy'], r.body['authorizationReason']],
       ['pending', 60_000, 5_000, carlos.membershipId, 'no-direct-capability']);
-    assert.deepEqual(r.body['requested'], { interestRate: 20, frequency: 'diaria', paymentDays: [1, 2, 3, 4, 5, 6] });
+    assert.deepEqual(r.body['requested'], { interestRate: 20, frequency: 'diaria', paymentDays: [1, 2, 3, 4, 5, 6], installmentsCount: 12 });
     assert.equal(await salesOf(cl), 0, 'una solicitud no es un crédito');
     assert.equal(await count(db.admin, 'select 1 from adex.capital_operations'), ops, 'ni mueve dinero');
     const audit = await db.admin.query(`select actor_role from adex.audit_log where action = 'CREATE_SALE_REQUEST' and entity_id = $1 and txid is not null`, [r.body['id']]);
@@ -115,7 +115,7 @@ describe('Fase 4 · créditos: solicitud, autorización y desembolso', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.deepEqual([r.body['status'], r.body['interestRate'], r.body['totalAmountMinor'], r.body['installmentValueMinor'], r.body['reviewedBy']],
       ['approved', 10, 55_000, 4_583, M.gabiSec]);
-    assert.deepEqual(r.body['requested'], { interestRate: 20, frequency: 'diaria', paymentDays: [1, 2, 3, 4, 5, 6] }, 'lo solicitado no se sobrescribe');
+    assert.deepEqual(r.body['requested'], { interestRate: 20, frequency: 'diaria', paymentDays: [1, 2, 3, 4, 5, 6], installmentsCount: 12 }, 'lo solicitado no se sobrescribe');
     assert.equal(await salesOf(cl), 0, 'aprobar no crea la deuda');
     const actions = (await db.admin.query(`select action from adex.audit_log where entity_id = $1 order by action`, [req])).rows.map((x) => x.action);
     assert.deepEqual(actions, ['APPROVE_SALE_REQUEST', 'CHANGE_SALE_CONDITIONS', 'CREATE_SALE_REQUEST', 'PHONE_CONFIRMATION']);

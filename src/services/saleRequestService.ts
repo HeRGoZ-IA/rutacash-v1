@@ -85,6 +85,32 @@ export function buildSaleWithInstallments(
 // ============================================================
 
 /** Error de regla de negocio de ventas (mensaje listo para mostrar). */
+/**
+ * Ronda 73 · SOC-09: corrección de una venta YA DESEMBOLSADA (capital realmente entregado,
+ * interés, parcelas y calendario) por el Administrador. Solo existe en ADEX Online: el
+ * servidor registra la diferencia de capital como asiento nuevo y conserva el original.
+ */
+export interface RectifySaleInput {
+  valorVenta: number
+  tasaInteres: number
+  numeroCuotas: number
+  frecuenciaPago: PaymentFrequency
+  fechaInicio: string
+  paymentDays: number[]
+  motivo: string
+  evidencia: string
+  /** Quien corrige confirmó con el trabajador que no hay cobros guardados sin conexión. */
+  sinCapturasPendientes: boolean
+  /** Rectificaciones que vio (si otra llegó antes, el servidor rechaza). */
+  rectificacionesVistas: number
+  /** Un id por intención: un reintento con el mismo id nunca corrige dos veces. */
+  operationId: string
+}
+
+export async function rectifyDisbursedSale(_saleId: string, _actor: User, _input: RectifySaleInput): Promise<void> {
+  throw new SaleRuleError('La corrección de ventas desembolsadas solo está disponible en ADEX Online.')
+}
+
 export class SaleRuleError extends Error {
   constructor(message: string) {
     super(message)
@@ -322,6 +348,8 @@ export interface ApprovalOverrides {
   interestRate?: number
   frequency?: PaymentFrequency
   paymentDays?: number[]
+  /** Ronda 73 · SOC-04: parcelas finales (con `authorization.modifyConditions`). */
+  installmentsCount?: number
   phoneConfirmed?: boolean
   phoneConfirmationNote?: string
 }
@@ -389,9 +417,10 @@ export async function approveSaleRequest(requestOrId: SaleRequest | string, acto
   const finalInterest = overrides?.interestRate ?? request.interestRate
   const finalFrequency = overrides?.frequency ?? request.frequency
   const finalPaymentDays = overrides?.paymentDays ?? request.paymentDays ?? []
+  const finalCount = overrides?.installmentsCount ?? request.installmentsCount
   // Modificar condiciones exige su propia capacidad, pero SOLO si algo cambia.
   const cambia = finalInterest !== request.interestRate || finalFrequency !== request.frequency
-    || JSON.stringify(finalPaymentDays) !== JSON.stringify(request.paymentDays ?? [])
+    || JSON.stringify(finalPaymentDays) !== JSON.stringify(request.paymentDays ?? []) || finalCount !== request.installmentsCount
   if (cambia) assertCan(actor, 'authorization.modifyConditions', { routeId: request.routeId, tenantId: request.tenantId })
   // Registrar una confirmación telefónica NUEVA exige su capacidad.
   if (overrides?.phoneConfirmed && !request.phoneConfirmed) {
@@ -401,7 +430,7 @@ export async function approveSaleRequest(requestOrId: SaleRequest | string, acto
   const input: SaleInputs = {
     tenantId: request.tenantId, routeId: request.routeId,
     clientId: request.clientId, createdByUserId: request.collectorId,
-    valorVenta: request.amount, tasaInteres: finalInterest, numeroCuotas: request.installmentsCount,
+    valorVenta: request.amount, tasaInteres: finalInterest, numeroCuotas: finalCount,
     frecuenciaPago: finalFrequency, fechaInicio: request.startDate, paymentDays: finalPaymentDays,
   }
   // La fecha de inicio puede haber quedado atrás mientras esperaba: no se exige.

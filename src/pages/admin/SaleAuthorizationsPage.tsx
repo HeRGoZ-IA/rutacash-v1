@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PaymentDaysBadges } from '@/components/ui/PaymentDaysBadges'
+import { ApprovalInstallments } from '@/components/ui/ApprovalInstallments'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
@@ -13,7 +14,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatDate } from '@/lib/formatters'
 import { approveSaleRequest, rejectSaleRequest } from '@/services/saleRequestService'
 import { logAction } from '@/services/auditService'
-import { canAccessRoute, filterByAccessibleRoute } from '@/lib/permissions'
+import { can, canAccessRoute, filterByAccessibleRoute } from '@/lib/permissions'
 import type { SaleRequest, Client, Route, User, Sale, SaleRequestStatus } from '@/models/types'
 
 const STATUS_META: Record<SaleRequestStatus, { label: string; variant: 'warning' | 'success' | 'danger' | 'info' | 'gray' }> = {
@@ -43,6 +44,9 @@ export default function SaleAuthorizationsPage() {
   const [rejecting, setRejecting] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const [working, setWorking] = useState(false)
+  // Ronda 73 · SOC-04/SOC-07: tasa y parcelas que se aprobarán (con `authorization.modifyConditions`).
+  const [tasa, setTasa] = useState(20)
+  const [cuotas, setCuotas] = useState(20)
   // Ronda 48 (H-03): «Aprobar» solo existe dentro del detalle y se habilita cuando el
   // historial del cliente ya está a la vista (nunca se aprueba a ciegas).
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -72,6 +76,7 @@ export default function SaleAuthorizationsPage() {
 
   async function openDetail(req: SaleRequest, startRejecting = false) {
     setDetail(req)
+    setTasa(req.interestRate); setCuotas(req.installmentsCount)
     setRejecting(startRejecting)
     setRejectReason('')
     setClientSales([])
@@ -89,9 +94,14 @@ export default function SaleAuthorizationsPage() {
   async function handleApprove() {
     if (!detail || !user || working) return
     if (!canAccessRoute(user, detail.routeId)) { toast.error('No tienes permiso sobre la ruta de esta solicitud.'); return }
+    if (!Number.isInteger(cuotas) || cuotas < 1 || cuotas > 1000) { toast.error('Indica un número de parcelas válido'); return }
     setWorking(true)
     try {
-      await approveSaleRequest(detail, user)
+      // Solo lo que cambió: el servidor recalcula total, parcela y calendario con lo aprobado.
+      await approveSaleRequest(detail, user, {
+        ...(tasa !== detail.interestRate ? { interestRate: tasa } : {}),
+        ...(cuotas !== detail.installmentsCount ? { installmentsCount: cuotas } : {}),
+      })
       await logAction({ tenantId, userId: user.id, action: 'CREATE_SALE', entityType: 'SaleRequest', entityId: detail.id, descripcion: `Solicitud de venta aprobada (${formatCurrency(detail.amount, currency)})` })
       toast.success('Solicitud aprobada. Venta creada, pendiente de desembolso por el cobrador.')
       setDetail(null)
@@ -333,6 +343,14 @@ export default function SaleAuthorizationsPage() {
                 <PaymentDaysBadges days={detail.paymentDays} size="sm" />
               </div>
             </div>
+            {detail.status === 'pending' && !rejecting && user && can(user, 'authorization.modifyConditions', { routeId: detail.routeId }) && (
+              <div className="rounded-xl border border-gray-200 p-4 space-y-3">
+                <p className="text-sm font-semibold text-gray-700">Condiciones a aprobar (modificables)</p>
+                <Select label="Tasa" value={String(tasa)} onChange={e => setTasa(Number(e.target.value))}
+                  options={[{ value: '10', label: '10%' }, { value: '20', label: '20%' }]} />
+                <ApprovalInstallments amount={detail.amount} rate={tasa} count={cuotas} onCount={setCuotas} currency={currency} requested={detail.installmentsCount} />
+              </div>
+            )}
             </div>
             {/* fin columna izquierda */}
 

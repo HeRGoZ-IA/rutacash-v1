@@ -356,6 +356,8 @@ export interface Client {
 export interface Sale {
   id: string
   tenantId: string
+  /** Ronda 73 (solo ADEX Online): rectificaciones aplicadas a la venta desembolsada (SOC-09). */
+  rectificationCount?: number
   routeId: string
   clientId: string
   createdByUserId: string

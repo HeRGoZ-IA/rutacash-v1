@@ -47,6 +47,8 @@ interface RequestRow {
   requested_payment_days: number[] | null; approved_interest_rate: string | null; approved_frequency: PaymentFrequency | null;
   approved_payment_days: number[] | null; phone_confirmed: boolean | null; phone_confirmation_note: string | null;
   active_credit_sale_ids: string[] | null; authorization_reason: string | null;
+  // Ronda 73 (0030): parcelas pedidas y aprobadas (NULL en solicitudes anteriores: valen `installments_count`).
+  requested_installments_count?: number | null; approved_installments_count?: number | null;
   cancelled_at: Date | null; cancelled_by_membership_id: string | null; cancel_reason: string | null;
 }
 
@@ -61,9 +63,11 @@ function requestView(r: RequestRow) {
     status: r.status, amountMinor: Number(r.amount_minor), interestRate: Number(r.interest_rate), totalAmountMinor: Number(r.total_amount_minor),
     installmentsCount: r.installments_count, installmentValueMinor: Number(r.installment_value_minor), frequency: r.frequency,
     startDate: ymd(r.start_date), paymentDays: r.payment_days ?? [], requestedAt: r.requested_at.toISOString(),
-    requested: { interestRate: num(r.requested_interest_rate), frequency: r.requested_frequency, paymentDays: r.requested_payment_days },
+    requested: { interestRate: num(r.requested_interest_rate), frequency: r.requested_frequency, paymentDays: r.requested_payment_days,
+      installmentsCount: r.requested_installments_count ?? r.installments_count },
     approved: r.approved_interest_rate === null ? null
-      : { interestRate: num(r.approved_interest_rate), frequency: r.approved_frequency, paymentDays: r.approved_payment_days },
+      : { interestRate: num(r.approved_interest_rate), frequency: r.approved_frequency, paymentDays: r.approved_payment_days,
+          installmentsCount: r.approved_installments_count ?? r.installments_count },
     reviewedAt: iso(r.reviewed_at), reviewedBy: r.reviewed_by_membership_id, rejectionReason: r.rejection_reason, approvalNotes: r.approval_notes,
     phoneConfirmed: r.phone_confirmed ?? false, phoneConfirmationNote: r.phone_confirmation_note,
     authorizationReason: r.authorization_reason, activeCreditSaleIdsAtRequest: r.active_credit_sale_ids ?? [],
@@ -209,13 +213,15 @@ export async function createRequest(client: pg.PoolClient, ctx: ActiveContext, b
   return requestView(row);
 }
 
-export const APPROVE_FIELDS = ['notes', 'interestRate', 'frequency', 'paymentDays', 'phoneConfirmed', 'phoneConfirmationNote'] as const;
+export const APPROVE_FIELDS = ['notes', 'interestRate', 'frequency', 'paymentDays', 'installmentsCount', 'phoneConfirmed', 'phoneConfirmationNote'] as const;
 
 /**
  * Aprobación (`approveSaleRequest`): fija las condiciones FINALES. NO crea el crédito
- * ni mueve dinero. Cambiar tasa, frecuencia o días exige `authorization.modifyConditions`;
- * el importe y el número de cuotas no se cambian. Nadie resuelve su propia solicitud
- * (ni con otra membresía). Dos aprobaciones simultáneas: una gana; la otra, 409.
+ * ni mueve dinero. Cambiar tasa, frecuencia, días o (Ronda 73, SOC-04) número de parcelas
+ * exige `authorization.modifyConditions`; el importe no se cambia. Total, valor de la
+ * parcela y calendario se recalculan aquí y el desembolso usa SOLO lo aprobado. Nadie
+ * resuelve su propia solicitud (ni con otra membresía). Dos aprobaciones simultáneas:
+ * una gana; la otra, 409.
  */
 export async function approveRequest(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Record<string, unknown>) {
   const prev = await loadRequest(client, ctx, id);
@@ -226,27 +232,30 @@ export async function approveRequest(client: pg.PoolClient, ctx: ActiveContext, 
   }
   await routeOf(client, ctx, prev.route_id);
   await activeClient(client, ctx, prev.client_id, prev.route_id);
-  const before = { interestRate: Number(prev.interest_rate), frequency: prev.frequency, paymentDays: prev.payment_days ?? [] };
+  const before = { interestRate: Number(prev.interest_rate), frequency: prev.frequency, paymentDays: prev.payment_days ?? [], installmentsCount: prev.installments_count };
   const after = {
     interestRate: has(body, 'interestRate') ? rateOf(body) : before.interestRate,
     frequency: has(body, 'frequency') ? frequencyOf(body) : before.frequency,
     paymentDays: has(body, 'paymentDays') ? daysOf(body) : before.paymentDays,
+    installmentsCount: has(body, 'installmentsCount') ? countOf(body) : before.installmentsCount,
   };
   const changes = JSON.stringify(before) !== JSON.stringify(after);
   if (changes) need(ctx, 'authorization.modifyConditions', { routeId: prev.route_id });
   const phone = has(body, 'phoneConfirmed') ? body['phoneConfirmed'] === true : (prev.phone_confirmed ?? false);
   if (has(body, 'phoneConfirmed') && typeof body['phoneConfirmed'] !== 'boolean') throw new ApiError(400, 'INVALID_INPUT', 'phoneConfirmed must be boolean');
   if (phone && !prev.phone_confirmed) need(ctx, 'authorization.phoneConfirm', { routeId: prev.route_id });
-  const { total, value } = financials({ amount: Number(prev.amount_minor), rate: after.interestRate, count: prev.installments_count,
+  const { total, value } = financials({ amount: Number(prev.amount_minor), rate: after.interestRate, count: after.installmentsCount,
     frequency: after.frequency, start: ymd(prev.start_date), days: after.paymentDays });
+  // Las parcelas solo se escriben si cambian (0030): sin cambio, la aprobación es la de siempre.
+  const countChanged = after.installmentsCount !== before.installmentsCount;
   const r = await client.query<RequestRow>(
     `update adex.sale_requests set status = 'approved', reviewed_at = now(), reviewed_by_membership_id = $3, approval_notes = $4,
             interest_rate = $5, frequency = $6, payment_days = $7, total_amount_minor = $8, installment_value_minor = $9,
             approved_interest_rate = $5, approved_frequency = $6, approved_payment_days = $7, phone_confirmed = $10,
-            phone_confirmation_note = coalesce($11, phone_confirmation_note)
+            phone_confirmation_note = coalesce($11, phone_confirmation_note)${countChanged ? ', installments_count = $12' : ''}
       where company_id = $1 and id = $2 and status = 'pending' returning *`,
     [ctx.companyId, prev.id, ctx.membershipId, optText(body, 'notes', 500), after.interestRate, after.frequency, after.paymentDays, total, value,
-      phone, optText(body, 'phoneConfirmationNote', 300)]);
+      phone, optText(body, 'phoneConfirmationNote', 300), ...(countChanged ? [after.installmentsCount] : [])]);
   if (!r.rows[0]) throw new ApiError(409, 'REQUEST_STATE_INVALID');
   const base = { entityType: 'sale_request', entityId: prev.id, routeId: prev.route_id };
   await audit(client, ctx, { ...base, action: 'APPROVE_SALE_REQUEST', description: `Solicitud aprobada (${Number(prev.amount_minor)})`, before, after: { ...after, phoneConfirmed: phone } });
@@ -372,6 +381,77 @@ export async function directSale(client: pg.PoolClient, ctx: ActiveContext, body
 }
 
 // ============================================================
+// Rectificación de un crédito desembolsado (Ronda 73 · SOC-09 · 0030)
+// ============================================================
+
+export const RECTIFY_FIELDS = ['amountMinor', 'interestRate', 'installmentsCount', 'frequency', 'startDate', 'paymentDays',
+  'expectedRectifications', 'reason', 'evidence', 'offlineChecked'] as const;
+
+function textOf(body: Record<string, unknown>, key: string, min: number, max: number): string {
+  const v = reqText(body, key, max);
+  if (v.trim().length < min) throw new ApiError(400, 'INVALID_INPUT', `${key} needs at least ${min} characters`, { field: key });
+  return v.trim();
+}
+
+/**
+ * Decisión del propietario (Ronda 73): el ADMINISTRADOR corrige un crédito desembolsado SIN
+ * recaudos, cuyo desembolso no entró en un cuadre ni en un periodo cerrado (capital
+ * realmente entregado, interés, parcelas y calendario). Nunca se borra el crédito ni se toca
+ * su asiento: la diferencia de capital es una operación nueva (`DISBURSEMENT_ADJUSTMENT`)
+ * entre la cuenta que pagó y la cartera, y las cuotas se rehacen con el motor de CLEAN; lo
+ * anterior queda completo en `adex.credit_rectifications`. Todo en `adex.credit_rectify`
+ * (una transacción, bloqueos ruta → crédito → cuentas, id de operación idempotente).
+ * `expectedRectifications` = rectificaciones que vio quien corrige (si otra llegó antes, 409).
+ * `offlineChecked`: el servidor no ve capturas aún guardadas en un dispositivo sin conexión;
+ * quien rectifica confirma que lo verificó con el trabajador.
+ */
+export async function rectifyCredit(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Record<string, unknown>, operationId: string | null) {
+  const opId = requireOperationId(operationId);
+  pathId(id);
+  const s = (await client.query<SaleRow>('select * from adex.sales where company_id = $1 and id = $2', [ctx.companyId, id])).rows[0];
+  if (!s) throw new ApiError(404, 'NOT_FOUND');
+  need(ctx, 'sale.cancel', { routeId: s.route_id });
+  if (ctx.role !== 'admin') throw new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED', 'only an administrator rectifies a disbursed credit');
+  const c: Conditions = { amount: amountOf(body), rate: rateOf(body), count: countOf(body), frequency: frequencyOf(body), start: startOf(body), days: daysOf(body) };
+  const expected = body['expectedRectifications'];
+  if (typeof expected !== 'number' || !Number.isInteger(expected) || expected < 0) {
+    throw new ApiError(400, 'INVALID_INPUT', 'expectedRectifications is required', { field: 'expectedRectifications' });
+  }
+  const reason = textOf(body, 'reason', 10, 300);
+  const evidence = textOf(body, 'evidence', 10, 500);
+  if (body['offlineChecked'] !== true) {
+    throw new ApiError(400, 'INVALID_INPUT', 'confirm there are no offline captures pending for this credit', { field: 'offlineChecked' });
+  }
+  const { schedule } = financials(c);
+  const r = (await client.query<{ rectification_id: string; adjustment_id: string | null; delta_minor: string }>(
+    'select * from adex.credit_rectify($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)',
+    [opId, s.id, expected, c.amount, c.rate, c.count, c.frequency, c.start, c.days, JSON.stringify(schedule), reason, evidence, true])).rows[0]!;
+  const before = { amountMinor: Number(s.sale_value_minor), interestRate: Number(s.interest_rate), installmentsCount: s.installments_count,
+    frequency: s.payment_frequency, startDate: ymd(s.start_date), paymentDays: s.payment_days ?? [], totalMinor: Number(s.total_value_minor) };
+  const after = { amountMinor: c.amount, interestRate: c.rate, installmentsCount: c.count, frequency: c.frequency, startDate: c.start, paymentDays: c.days,
+    totalMinor: calculateTotalWithInterest({ valorVenta: c.amount, tasaInteres: c.rate }).valorTotal };
+  await audit(client, ctx, { action: 'RECTIFY_CREDIT', entityType: 'sale', entityId: s.id, routeId: s.route_id,
+    description: `Rectificación del crédito desembolsado (capital ${before.amountMinor} → ${c.amount})`, before, after, reason,
+    metadata: { operationId: opId, rectificationId: r.rectification_id, adjustmentOperationId: r.adjustment_id, deltaMinor: Number(r.delta_minor), evidence } });
+  const credit = await getCredit(client, ctx, s.id);
+  return { ...credit, rectification: { id: r.rectification_id, adjustmentOperationId: r.adjustment_id, deltaMinor: Number(r.delta_minor) } };
+}
+
+/** Historial de rectificaciones del crédito (Administrador y SuperAdmin de la ruta, por RLS). */
+export async function listRectifications(client: pg.PoolClient, ctx: ActiveContext, id: string) {
+  pathId(id);
+  need(ctx, 'sale.viewActive');
+  if (!(await client.query('select 1 from adex.sales where company_id = $1 and id = $2', [ctx.companyId, id])).rowCount) throw new ApiError(404, 'NOT_FOUND');
+  const r = await client.query<{ id: string; sequence_no: number; adjustment_operation_id: string | null; delta_minor: string; before_state: Record<string, unknown>;
+    after_state: Record<string, unknown>; reason: string; evidence: string; actor_membership_id: string; business_date: string | Date; created_at: Date }>(
+    `select id, sequence_no, adjustment_operation_id, delta_minor, before_state, after_state, reason, evidence, actor_membership_id, business_date, created_at
+       from adex.credit_rectifications where company_id = $1 and sale_id = $2 order by sequence_no`, [ctx.companyId, id]);
+  return r.rows.map((x) => ({ id: x.id, sequence: x.sequence_no, adjustmentOperationId: x.adjustment_operation_id, deltaMinor: Number(x.delta_minor),
+    before: x.before_state, after: x.after_state, reason: x.reason, evidence: x.evidence, actorId: x.actor_membership_id,
+    businessDate: ymd(x.business_date), at: x.created_at.toISOString() }));
+}
+
+// ============================================================
 // Consultas (RLS por ruta y rol)
 // ============================================================
 
@@ -415,6 +495,7 @@ interface SaleRow {
   payment_frequency: string; payment_days: number[] | null; start_date: string | Date; estimated_end_date: string | Date; status: string;
   disbursement_status: string | null; disbursed_by_collector_id: string | null; disbursed_by_membership_id: string | null;
   disbursement_date: string | Date | null; disbursed_at: Date | null; sale_request_id: string | null; ledger_operation_id: string | null; created_at: Date;
+  rectification_count?: number;   // Ronda 73 (0030)
 }
 
 function creditView(s: SaleRow) {
@@ -426,6 +507,7 @@ function creditView(s: SaleRow) {
     status: s.status, disbursementStatus: s.disbursement_status, disbursedByCollectorId: s.disbursed_by_collector_id,
     disbursedBy: s.disbursed_by_membership_id, disbursementDate: s.disbursement_date ? ymd(s.disbursement_date) : null,
     disbursedAt: iso(s.disbursed_at), saleRequestId: s.sale_request_id, ledgerOperationId: s.ledger_operation_id, createdAt: s.created_at.toISOString(),
+    rectificationCount: s.rectification_count ?? 0,
   };
 }
 

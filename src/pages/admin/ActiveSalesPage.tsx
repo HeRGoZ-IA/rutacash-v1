@@ -7,6 +7,7 @@ import { SaleStatusBadge, InstallmentStatusBadge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PaymentDaysBadges } from '@/components/ui/PaymentDaysBadges'
+import { RectifySaleModal } from '@/components/ui/RectifySaleModal'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
@@ -60,6 +61,8 @@ export default function ActiveSalesPage() {
   const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
   const [detailSale, setDetailSale] = useState<Sale | null>(null)
+  // Ronda 73 · SOC-09: corrección de la venta desembolsada (Administrador, sin cobros).
+  const [rectifyOpen, setRectifyOpen] = useState(false)
   const [detailInstallments, setDetailInstallments] = useState<Installment[]>([])
   // Pagos del crédito abierto (vigentes y anulados) y nombres para mostrarlos.
   const [detailPayments, setDetailPayments] = useState<Payment[]>([])
@@ -449,6 +452,11 @@ export default function ActiveSalesPage() {
         </>
       )}
 
+      {detailSale && user && rectifyOpen && (
+        <RectifySaleModal sale={detailSale} user={user} currency={currency} open={rectifyOpen} onClose={() => setRectifyOpen(false)}
+          onDone={async () => { setRectifyOpen(false); await refreshDetail(detailSale.id) }} />
+      )}
+
       {/* Create Sale Modal */}
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nueva venta" size="mdPlus"
         footer={<><Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancelar</Button><Button onClick={handleCreateSale} loading={saving} disabled={capExcedido}>Crear venta</Button></>}>
@@ -535,6 +543,9 @@ export default function ActiveSalesPage() {
               )}
               {detailSale.status === 'activa' && (
                 <Button variant="danger" onClick={() => { setLostSale(detailSale); setLostOpen(true) }} icon={<XCircle className="w-4 h-4" />}>Marcar perdida</Button>
+              )}
+              {user?.rol === 'admin' && detailSale.status === 'activa' && detailSale.disbursementStatus === 'desembolsado' && detailPayments.length === 0 && (
+                <Button variant="secondary" onClick={() => setRectifyOpen(true)}>Corregir venta</Button>
               )}
             </>
           }>

@@ -38,7 +38,8 @@ export type CapitalKind =
   | 'COMPANY_DEPOSIT' | 'COMPANY_WITHDRAWAL' | 'ADMIN_ALLOCATION' | 'ADMIN_RETURN' | 'PARTNER_CONTRIBUTION'
   | 'WORKER_DELIVERY' | 'WORKER_RETURN' | 'WORKER_TRANSFER' | 'ROUTE_REASSIGNMENT' | 'REVERSAL' | 'LOAN_DISBURSEMENT'
   | 'COLLECTION' | 'WORKER_EXPENSE' | 'ROUTE_EXPENSE' | 'COMPANY_EXPENSE' | 'EXPENSE_REFUND'
-  | 'SETTLEMENT_RETURN' | 'SETTLEMENT_SURPLUS' | 'ADMIN_TRANSFER_HOLD' | 'ADMIN_TRANSFER_APPLY' | 'ADMIN_TRANSFER_RELEASE';
+  | 'SETTLEMENT_RETURN' | 'SETTLEMENT_SURPLUS' | 'ADMIN_TRANSFER_HOLD' | 'ADMIN_TRANSFER_APPLY' | 'ADMIN_TRANSFER_RELEASE'
+  | 'DISBURSEMENT_ADJUSTMENT';
 
 /**
  * Recaudos y gastos (Fase 5) y asientos de un cuadre (Fase 6): se corrigen por su propio
@@ -172,6 +173,7 @@ const ACTIONS: Record<CapitalKind, string> = {
   COLLECTION: 'REGISTER_PAYMENT', WORKER_EXPENSE: 'CREATE_EXPENSE', ROUTE_EXPENSE: 'CREATE_EXPENSE', COMPANY_EXPENSE: 'CREATE_EXPENSE',
   EXPENSE_REFUND: 'EXPENSE_REFUNDED', SETTLEMENT_RETURN: 'CASH_SETTLEMENT_CLOSED', SETTLEMENT_SURPLUS: 'CASH_SETTLEMENT_CLOSED',
   ADMIN_TRANSFER_HOLD: 'ADMIN_TRANSFER_REGISTERED', ADMIN_TRANSFER_APPLY: 'ADMIN_TRANSFER_APPLIED', ADMIN_TRANSFER_RELEASE: 'ADMIN_TRANSFER_RELEASED',
+  DISBURSEMENT_ADJUSTMENT: 'RECTIFY_CREDIT',
 };
 
 /** Escribe, audita (misma transacción) y responde con lo que el actor puede ver. */
@@ -382,6 +384,8 @@ export async function reverseOperation(client: pg.PoolClient, ctx: ActiveContext
   if (!orig) throw new ApiError(404, 'NOT_FOUND');
   // Un crédito desembolsado no se «anula»: el dinero está en manos del cliente (cobros y castigo, fases 4–5).
   if (orig.kind === 'LOAN_DISBURSEMENT') throw new ApiError(409, 'REVERSAL_NOT_ALLOWED');
+  // Ronda 73: el ajuste de una rectificación se corrige con otra rectificación del crédito.
+  if (orig.kind === 'DISBURSEMENT_ADJUSTMENT') throw new ApiError(409, 'REVERSAL_NOT_ALLOWED', 'rectify the credit again instead');
   // Un aporte histórico de socio (Ronda 53) ya no tiene contrapartida a la que volver.
   if (orig.kind === 'PARTNER_CONTRIBUTION') throw new ApiError(409, 'REVERSAL_NOT_ALLOWED', 'historical partner contributions cannot be reversed');
   // Un recaudo o un gasto se anula con su comando (recalcula el crédito o enlaza el gasto).
@@ -562,11 +566,16 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
       where o.company_id = $1 and o.currency_code <> c.currency_code`);
   const conservation = await q(`select coalesce(sum(balance_minor), 0)::text n from adex.capital_accounts where company_id = $1`);
   // Crédito ↔ libro: cada desembolso con su crédito (mismo importe y ruta) y viceversa.
+  // Ronda 73: el capital vigente de un crédito rectificado = desembolso + Σ ajustes (pata de la cartera, con signo).
   const unmatched = await q(
     `select count(*)::text n from adex.capital_operations o
       where o.company_id = $1 and o.kind = 'LOAN_DISBURSEMENT'
         and not exists (select 1 from adex.sales s where s.company_id = o.company_id and s.id = o.sale_id and s.ledger_operation_id = o.id
-                          and s.sale_value_minor = o.amount_minor and s.route_id = o.route_id and s.disbursement_status = 'desembolsado')`);
+                          and s.sale_value_minor = o.amount_minor + coalesce((select sum(e.amount_minor) from adex.capital_operations j
+                                join adex.capital_entries e on e.company_id = j.company_id and e.operation_id = j.id
+                                join adex.capital_accounts a on a.company_id = e.company_id and a.id = e.account_id and a.kind = 'portfolio'
+                               where j.company_id = s.company_id and j.sale_id = s.id and j.kind = 'DISBURSEMENT_ADJUSTMENT'), 0)
+                          and s.route_id = o.route_id and s.disbursement_status = 'desembolsado')`);
   const orphanCredits = await q(
     `select count(*)::text n from adex.sales s
       where s.company_id = $1 and s.ledger_operation_id is not null
