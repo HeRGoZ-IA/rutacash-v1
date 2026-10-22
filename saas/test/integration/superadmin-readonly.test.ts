@@ -31,7 +31,7 @@ describe('Ronda 67 · SuperAdmin: cartera de solo lectura', () => {
   const brunoCtx = { identityId: identityOf('bruno'), membershipId: M.brunoSa, companyId: c1 };
   const cpf = () => String(randomInt(10_000_000_000, 99_999_999_999));
   const clientBody = (route = r1) => ({ routeId: route, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF', document: cpf(),
-    phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+    phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' });
   const saleBody = (clientId: string): Body => ({ routeId: r1, clientId, amountMinor: 50_000, interestRate: 20, installmentsCount: 12,
     frequency: 'diaria', startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] });
   const newClient = async () => {

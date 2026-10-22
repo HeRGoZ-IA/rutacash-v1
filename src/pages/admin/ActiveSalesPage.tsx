@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { DEFAULT_INSTALLMENTS } from '@/lib/saleDefaults'
 import { Plus, CreditCard, Search, XCircle, DollarSign, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea } from '@/components/ui/Input'
@@ -83,7 +84,7 @@ export default function ActiveSalesPage() {
 
   const [form, setForm] = useState({
     clientId: '', routeId: '', valorVenta: 0, tasaInteres: 20,
-    numeroCuotas: 30, frecuenciaPago: 'diaria' as const, fechaInicio: today(),
+    numeroCuotas: DEFAULT_INSTALLMENTS, frecuenciaPago: 'diaria' as const, fechaInicio: today(),
     paymentDays: [1, 2, 3, 4, 5, 6] as number[], // Lun-Sáb por defecto
   })
 
@@ -229,7 +230,7 @@ export default function ActiveSalesPage() {
       }, user)
       toast.success('Venta creada con cuotas generadas')
       setCreateOpen(false)
-      setForm({ clientId: '', routeId: '', valorVenta: 0, tasaInteres: 20, numeroCuotas: 30, frecuenciaPago: 'diaria', fechaInicio: today(), paymentDays: [1, 2, 3, 4, 5, 6] })
+      setForm({ clientId: '', routeId: '', valorVenta: 0, tasaInteres: 20, numeroCuotas: DEFAULT_INSTALLMENTS, frecuenciaPago: 'diaria', fechaInicio: today(), paymentDays: [1, 2, 3, 4, 5, 6] })
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Error al crear la venta')
@@ -486,7 +487,7 @@ export default function ActiveSalesPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <MoneyInput label="Valor de la venta" currency={currency} value={form.valorVenta} onValueChange={v => setForm(f => ({ ...f, valorVenta: v }))} required />
             <Select label="Tasa interés" value={String(form.tasaInteres)} onChange={e => setForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={TASA_OPTIONS} />
-            <Input label="N° de parcelas" type="number" min={1} required value={form.numeroCuotas || ''} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
+            <Input label="N° de parcelas" type="number" min={1} required value={form.numeroCuotas || ''} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder={`Ej: ${DEFAULT_INSTALLMENTS}`} />
           </div>
           {form.routeId && capDisponible != null && (
             <div className={`rounded-xl p-3 text-sm border ${capExcedido ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>

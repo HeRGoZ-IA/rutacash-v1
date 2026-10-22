@@ -118,7 +118,7 @@ describe('Fase 5 · gastos', () => {
     const delivery = (await db.admin.query(`select id from adex.capital_operations where kind = 'WORKER_DELIVERY' and worker_membership_id = $1`, [carlos.membershipId])).rows[0].id;
     assert.equal((await $ana(`/v1/capital/operations/${delivery}/reverse`, { reason: 'Anular la Base' })).body['error'], 'FUNDS_ALREADY_USED');
     // Desembolso desde la custodia negativa: rechazado sin crear la obligación.
-    const client = (await adm('POST', '/v1/clients', { routeId: r1, name: 'Cliente gasto', documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' })).body['id'] as string;
+    const client = (await adm('POST', '/v1/clients', { routeId: r1, name: 'Cliente gasto', documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' })).body['id'] as string;
     const req = (await carlos.call('POST', '/v1/credit-requests', { routeId: r1, clientId: client, amountMinor: 1_000, interestRate: 20, installmentsCount: 2, frequency: 'diaria', startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] })).body['id'] as string;
     assert.equal((await gabi('POST', `/v1/credit-requests/${req}/approve`, {})).status, 200);
     assert.equal((await carlos.money(`/v1/credit-requests/${req}/disburse`, {})).body['error'], 'INSUFFICIENT_FUNDS');
@@ -133,7 +133,7 @@ describe('Fase 5 · gastos', () => {
     // Base nueva y cobros compensan el negativo (posición del ciclo, como en CLEAN).
     assert.equal((await $ana('/v1/capital/deliveries', { routeId: r1, workerId: carlos.membershipId, amountMinor: 1_000, reason: 'Base' })).status, 201);
     assert.equal(await custody(carlos.membershipId), -3_000);
-    const sale = ((await $ana('/v1/credits/direct', { routeId: r1, clientId: (await adm('POST', '/v1/clients', { routeId: r1, name: 'Paga', documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' })).body['id'],
+    const sale = ((await $ana('/v1/credits/direct', { routeId: r1, clientId: (await adm('POST', '/v1/clients', { routeId: r1, name: 'Paga', documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' })).body['id'],
       amountMinor: 10_000, interestRate: 20, installmentsCount: 2, frequency: 'diaria', startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] })).body['credit'] as Body)['id'] as string;
     assert.equal((await carlos.money('/v1/collections', { saleId: sale, amountMinor: 5_000 })).status, 201);
     assert.equal(await custody(carlos.membershipId), 2_000);

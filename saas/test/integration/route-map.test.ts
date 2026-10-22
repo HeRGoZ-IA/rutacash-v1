@@ -37,7 +37,7 @@ describe('Ronda 67 · mapa de rutas del Administrador', () => {
   let today = '';
   const cpf = () => String(randomInt(10_000_000_000, 99_999_999_999));
   const newClient = async (route = r1, name = `Cliente ${randomUUID().slice(0, 6)}`) => {
-    const r = await ana('POST', '/v1/clients', { routeId: route, name, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'Rua A, 10', addressSecondary: 'Loja' });
+    const r = await ana('POST', '/v1/clients', { routeId: route, name, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'Rua A, 10', addressSecondary: 'Loja', business: 'Negocio sintético' });
     if (r.status !== 201) throw new Error(JSON.stringify(r.body));
     return r.body['id'] as string;
   };

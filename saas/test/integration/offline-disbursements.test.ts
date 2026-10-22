@@ -36,7 +36,7 @@ describe('Ronda 65-C1 · desembolsos sin conexión; clientes y solicitudes solo 
   const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
   const off = (h = 1) => ({ capturedAt: hoursAgo(h) });
   const clientBody = (route = r1, document = cpf(), name = `Cliente ${randomUUID().slice(0, 6)}`) =>
-    ({ routeId: route, name, documentType: 'CPF', document, phonePrimary: '1', addressPrimary: 'Rua A', addressSecondary: 'Rua B' });
+    ({ routeId: route, name, documentType: 'CPF', document, phonePrimary: '1', addressPrimary: 'Rua A', addressSecondary: 'Rua B', business: 'Negocio sintético' });
   const cond = (o: Body = {}) => ({ amountMinor: 50_000, interestRate: 20, installmentsCount: 12, frequency: 'diaria', startDate: today, paymentDays: [1, 2, 3, 4, 5, 6], ...o });
   const custody = (m: string, r = r1) => balance(db.admin, c1, 'custody', m, r);
   const portfolio = (r = r1) => balance(db.admin, c1, 'portfolio', null, r);

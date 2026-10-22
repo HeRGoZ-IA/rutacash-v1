@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { DEFAULT_INSTALLMENTS } from '@/lib/saleDefaults'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useOpBase } from '@/hooks/useOpBase'
 import { ChevronLeft, AlertTriangle, Save } from 'lucide-react'
@@ -48,7 +49,7 @@ export default function CollectorNewClientPage() {
   // Crear venta en el mismo flujo
   const [addSale, setAddSale] = useState(false)
   const [saleForm, setSaleForm] = useState({
-    valorVenta: 0, tasaInteres: 20, numeroCuotas: 30,
+    valorVenta: 0, tasaInteres: 20, numeroCuotas: DEFAULT_INSTALLMENTS,
     frecuenciaPago: 'diaria' as Sale['frecuenciaPago'], fechaInicio: today(),
     paymentDays: [1, 2, 3, 4, 5, 6] as number[],
   })
@@ -253,7 +254,7 @@ export default function CollectorNewClientPage() {
                 <Select label="Forma de pago" value={saleForm.frecuenciaPago} onChange={e => setSaleForm(f => ({ ...f, frecuenciaPago: e.target.value as Sale['frecuenciaPago'] }))} options={FREQ_OPTIONS} />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <Input label="N° de parcelas" type="number" min={1} value={saleForm.numeroCuotas || ''} onChange={e => { const v = e.target.value; setSaleForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
+                <Input label="N° de parcelas" type="number" min={1} value={saleForm.numeroCuotas || ''} onChange={e => { const v = e.target.value; setSaleForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder={`Ej: ${DEFAULT_INSTALLMENTS}`} />
                 <Input label="Fecha de inicio" type="date" min={today()} value={saleForm.fechaInicio} onChange={e => setSaleForm(f => ({ ...f, fechaInicio: e.target.value }))} />
               </div>
               <div>

@@ -166,7 +166,7 @@ describe('Fase 5 · cobertura remota F5-D02, D12, operaciones inciertas y aislam
   async function credit(amountMinor: number, installmentsCount = 10) {
     const doc = String(10_000_000_000 + Number.parseInt(randomBytes(4).toString('hex'), 16) % 89_999_999_999);
     const cl = await call('sa', 'POST', '/v1/clients', m.sa, { routeId: r.r1, name: `Cliente ficticio R9 ${++clientSeq}`, documentType: 'CPF', document: doc,
-      phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+      phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' });
     assert.equal(cl.status, 201, JSON.stringify(cl.body));
     const res = await money('ana', '/v1/credits/direct', m.ana, { routeId: r.r1, clientId: cl.body['id'], amountMinor, interestRate: 20, installmentsCount,
       frequency: 'diaria', startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] });

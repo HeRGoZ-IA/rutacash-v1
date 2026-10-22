@@ -77,7 +77,7 @@ describe('Fase 2 · estructura y catálogo en ADEX-Staging (Auth real + PostgreS
     return { status: r.status, body: (await r.json()) as Record<string, unknown> };
   };
   const client = (doc: string, name = 'Cliente Staging') => ({ routeId: routeId('c3', 1), name, documentType: 'CC', document: doc,
-    phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+    phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' });
   const doc = () => String(randomInt(1_000_000_000, 9_999_999_999));
 
   test('STG-P2-001 · migración 0007 aplicada en gestionado: unicidad DS-10, guardas DS-11 y restricción del responsable', async () => {

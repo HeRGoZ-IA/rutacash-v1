@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { DEFAULT_INSTALLMENTS } from '@/lib/saleDefaults'
 import { Plus, Search, Users, Trash2, AlertTriangle, FileText, Phone, MapPin, Building2, ImageOff } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select } from '@/components/ui/Input'
@@ -50,7 +51,7 @@ const WEEK_DAYS = [
 ]
 
 const EMPTY_SALE_FORM = {
-  valorVenta: 0, tasaInteres: 20, numeroCuotas: 30,
+  valorVenta: 0, tasaInteres: 20, numeroCuotas: DEFAULT_INSTALLMENTS,
   frecuenciaPago: 'diaria' as Sale['frecuenciaPago'], fechaInicio: today(),
   paymentDays: [1, 2, 3, 4, 5, 6] as number[],
 }
@@ -450,7 +451,7 @@ export default function ClientsPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <MoneyInput label="Valor del préstamo" currency={currency} value={saleForm.valorVenta} onValueChange={v => setSaleForm(f => ({ ...f, valorVenta: v }))} required />
                     <Select label="Tasa interés" value={String(saleForm.tasaInteres)} onChange={e => setSaleForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={TASA_OPTIONS} />
-                    <Input label="N° de parcelas" type="number" min={1} required value={saleForm.numeroCuotas || ''} onChange={e => { const v = e.target.value; setSaleForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
+                    <Input label="N° de parcelas" type="number" min={1} required value={saleForm.numeroCuotas || ''} onChange={e => { const v = e.target.value; setSaleForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder={`Ej: ${DEFAULT_INSTALLMENTS}`} />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Select label="Frecuencia de pago" value={saleForm.frecuenciaPago} onChange={e => setSaleForm(f => ({ ...f, frecuenciaPago: e.target.value as Sale['frecuenciaPago'] }))} options={FREQ_OPTIONS} />

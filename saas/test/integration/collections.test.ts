@@ -41,7 +41,7 @@ describe('Fase 5 · recaudos', () => {
   const income = (r = r1) => balance(db.admin, c1, 'income', null, r);
   const cpf = () => String(randomInt(10_000_000_000, 99_999_999_999));
   const newClient = async (route: string, name: string) => {
-    const r = await adm('POST', '/v1/clients', { routeId: route, name, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+    const r = await adm('POST', '/v1/clients', { routeId: route, name, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' });
     if (r.status !== 201) throw new Error(JSON.stringify(r.body));
     return r.body['id'] as string;
   };

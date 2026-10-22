@@ -139,7 +139,7 @@ describe('Fase 6 · cuadres y cierres (ADEX-Staging)', { skip: SKIP }, () => {
   async function credit(route: string, amountMinor = $(2_000_000)) {
     const doc = String(1_000_000 + Number.parseInt(randomBytes(3).toString('hex'), 16) % 8_999_999);
     const cl = await call('sa', 'POST', '/v1/clients', m.sa, { routeId: route, name: `Cliente ficticio F6 ${++clientSeq}`, documentType: 'CC', document: doc,
-      phonePrimary: '3000000000', addressPrimary: 'Calle 1', addressSecondary: 'Barrio' });
+      phonePrimary: '3000000000', addressPrimary: 'Calle 1', addressSecondary: 'Barrio', business: 'Negocio sintético' });
     assert.equal(cl.status, 201, JSON.stringify(cl.body));
     const res = await money('ana', '/v1/credits/direct', m.ana, { routeId: route, clientId: cl.body['id'], amountMinor, interestRate: 20, installmentsCount: 10,
       frequency: 'diaria', startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] });

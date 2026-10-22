@@ -38,7 +38,7 @@ describe('Ronda 73 · bloque A: condiciones autorizadas, parcelas y rectificaci�
   const portfolio = (r: string) => balance(db.admin, c1, 'portfolio', null, r);
   const cpf = () => String(randomInt(10_000_000_000, 99_999_999_999));
   const newClient = async (name: string) => {
-    const r = await ana('POST', '/v1/clients', { routeId: r1, name, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+    const r = await ana('POST', '/v1/clients', { routeId: r1, name, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' });
     if (r.status !== 201) throw new Error(JSON.stringify(r.body));
     return r.body['id'] as string;
   };
@@ -151,6 +151,29 @@ describe('Ronda 73 · bloque A: condiciones autorizadas, parcelas y rectificaci�
     assert.equal((await db.admin.query('select status, interest_rate::int r from adex.sale_requests where id = $1', [id])).rows[0].status, 'pending');
   });
 
+  // ---------------- SOC-05 ----------------
+
+  test('R73-SOC05-001 · Negocio obligatorio al crear; vacío o espacios rechazados; clientes anteriores sin negocio siguen editables y nada se rellena', async () => {
+    const base = { routeId: r1, name: 'Cliente Negocio', documentType: 'CPF', phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' };
+    for (const business of [undefined, '', '   ', null]) {
+      const r = await ana('POST', '/v1/clients', { ...base, document: cpf(), ...(business === undefined ? {} : { business }) });
+      assert.deepEqual([r.status, r.body['error']], [400, 'INVALID_INPUT'], String(business));
+    }
+    const ok = await ana('POST', '/v1/clients', { ...base, document: cpf(), business: '  Panadería  ' });
+    assert.equal(ok.status, 201, JSON.stringify(ok.body));
+    assert.equal(ok.body['business'], 'Panadería');
+    assert.equal((await ana('PATCH', `/v1/clients/${ok.body['id']}`, { business: ' ' })).body['error'], 'INVALID_INPUT', 'un negocio registrado no se vacía');
+    // Cliente ANTERIOR a la regla (sin negocio): se simula en esta base sintética aislada.
+    const legacy = await ana('POST', '/v1/clients', { ...base, document: cpf(), business: 'Temporal' });
+    await db.admin.query('update adex.clients set business = null where id = $1', [legacy.body['id']]);
+    const old = { id: legacy.body['id'] as string };
+    const before = await count(db.admin, 'select 1 from adex.clients where business is null');
+    const edit = await ana('PATCH', `/v1/clients/${old.id}`, { phoneSecondary: '2', business: '' });
+    assert.equal(edit.status, 200, JSON.stringify(edit.body));
+    assert.equal((await db.admin.query('select business from adex.clients where id = $1', [old.id])).rows[0].business, null, 'no se inventa un negocio');
+    assert.equal(await count(db.admin, 'select 1 from adex.clients where business is null'), before, 'ningún cliente existente se rellenó');
+  });
+
   // ---------------- SOC-02 ----------------
 
   test('R73-SOC02-001 · venta directa del Administrador responsable: paga su BOLSA aunque la ruta no tenga efectivo en custodia; fondos insuficientes y concurrencia', async () => {
@@ -159,7 +182,7 @@ describe('Ronda 73 · bloque A: condiciones autorizadas, parcelas y rectificaci�
     const rz = route['id'] as string;
     assert.equal(route['capitalControllerId'], zoe.membershipId, 'Zoe es la responsable de capital');
     assert.equal((await $bruno('/v1/capital/allocations', { adminId: zoe.membershipId, amountMinor: 100_000, reason: 'Bolsa de Zoe' })).status, 201);
-    const client = async (name: string) => (await zoe.call('POST', '/v1/clients', { routeId: rz, name, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' })).body['id'] as string;
+    const client = async (name: string) => (await zoe.call('POST', '/v1/clients', { routeId: rz, name, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' })).body['id'] as string;
     assert.equal(await count(db.admin, `select 1 from adex.capital_accounts where kind = 'custody' and route_id = $1 and balance_minor > 0`, [rz]), 0, 'sin efectivo en la ruta');
     const ok = await zoe.money('/v1/credits/direct', { routeId: rz, clientId: await client('Directa Zoe'), ...cond({ amountMinor: 60_000 }) });
     assert.equal(ok.status, 201, JSON.stringify(ok.body));

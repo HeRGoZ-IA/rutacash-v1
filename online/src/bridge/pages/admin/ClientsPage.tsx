@@ -6,6 +6,7 @@
 // Ronda 67, marcado con «ADEX Online (R67):»: sin `client.create` / `client.edit` / `client.deactivate`
 // (SuperAdmin: cartera de solo lectura) no hay «Nuevo cliente», «Editar» ni borrado; la ficha se consulta.
 import { useState, useEffect } from 'react'
+import { DEFAULT_INSTALLMENTS } from '@/lib/saleDefaults'
 import { Plus, Search, Users, Trash2, AlertTriangle, FileText, Phone, MapPin, Building2, ImageOff } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select } from '@/components/ui/Input'
@@ -59,7 +60,7 @@ const WEEK_DAYS = [
 ]
 
 const EMPTY_SALE_FORM = {
-  valorVenta: 0, tasaInteres: 20, numeroCuotas: 30,
+  valorVenta: 0, tasaInteres: 20, numeroCuotas: DEFAULT_INSTALLMENTS,
   frecuenciaPago: 'diaria' as Sale['frecuenciaPago'], fechaInicio: today(),
   paymentDays: [1, 2, 3, 4, 5, 6] as number[],
 }
@@ -223,6 +224,8 @@ export default function ClientsPage() {
     if (!form.nombre.trim() || !form.documento.trim() || !form.telefonoPrincipal.trim()) { toast.error('Nombre, documento y teléfono son obligatorios'); return }
     if (!form.direccionPrincipal.trim()) { toast.error('La dirección de la casa es obligatoria'); return }
     if (!form.direccionSecundaria.trim()) { toast.error('La dirección del negocio es obligatoria'); return }
+    // Ronda 73 · SOC-05: obligatorio al dar de alta; un cliente anterior sin negocio se puede seguir editando.
+    if (!form.negocio.trim() && (!editing || editing.negocio)) { toast.error('Indica el negocio del cliente'); return }
     if (!form.routeId) { toast.error('Debes seleccionar una ruta'); return }
     // Guard de datos: no permitir crear/editar en una ruta no autorizada (fail-closed).
     if (!canAccessRoute(user, form.routeId)) { toast.error('No tienes permiso sobre esa ruta.'); return }
@@ -439,7 +442,7 @@ export default function ClientsPage() {
           </div>
           <Input label="Dirección de la casa" value={form.direccionPrincipal} onChange={e => setForm(f => ({ ...f, direccionPrincipal: e.target.value }))} required placeholder="Ej: Cll 45 #23-12, Barrio Centro" />
           <Input label="Dirección del negocio" value={form.direccionSecundaria} onChange={e => setForm(f => ({ ...f, direccionSecundaria: e.target.value }))} required placeholder="Ej: Cra 8 #12-30, Local 2" />
-          <Input label="Negocio" value={form.negocio} onChange={e => setForm(f => ({ ...f, negocio: e.target.value }))} placeholder="Nombre del negocio o actividad" />
+          <Input label="Negocio" value={form.negocio} onChange={e => setForm(f => ({ ...f, negocio: e.target.value }))} required={!editing || !!editing.negocio} placeholder="Nombre del negocio o actividad" />
           {/* Fotos (Paquete 2.5): documento y negocio/lugar de cobro */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <PhotoInput label="Foto del documento" value={form.fotoDocumentoUrl} onChange={url => setForm(f => ({ ...f, fotoDocumentoUrl: url }))} />
@@ -475,7 +478,7 @@ export default function ClientsPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <MoneyInput label="Valor del préstamo" currency={currency} value={saleForm.valorVenta} onValueChange={v => setSaleForm(f => ({ ...f, valorVenta: v }))} required />
                     <Select label="Tasa interés" value={String(saleForm.tasaInteres)} onChange={e => setSaleForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={TASA_OPTIONS} />
-                    <Input label="N° de parcelas" type="number" min={1} required value={saleForm.numeroCuotas || ''} onChange={e => { const v = e.target.value; setSaleForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder="Ej: 30" />
+                    <Input label="N° de parcelas" type="number" min={1} required value={saleForm.numeroCuotas || ''} onChange={e => { const v = e.target.value; setSaleForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder={`Ej: ${DEFAULT_INSTALLMENTS}`} />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Select label="Frecuencia de pago" value={saleForm.frecuenciaPago} onChange={e => setSaleForm(f => ({ ...f, frecuenciaPago: e.target.value as Sale['frecuenciaPago'] }))} options={FREQ_OPTIONS} />

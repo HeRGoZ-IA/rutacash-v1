@@ -63,7 +63,7 @@ describe('Fase 6 · cuadres y cierres', () => {
   const credit = async (route: string, amountMinor = $(2_000_000)) => {
     const cl = await ana('POST', '/v1/clients', { routeId: route, name: `Cliente ficticio F6 ${++clientSeq}`, documentType: 'CC',
       document: String(1_000_000 + Number.parseInt(randomBytes(3).toString('hex'), 16) % 8_999_999), phonePrimary: '3000000000',
-      addressPrimary: 'Calle 1', addressSecondary: 'Barrio' });
+      addressPrimary: 'Calle 1', addressSecondary: 'Barrio', business: 'Negocio sintético' });
     assert.equal(cl.status, 201, JSON.stringify(cl.body));
     const r = await $ana('/v1/credits/direct', { routeId: route, clientId: cl.body['id'], amountMinor, interestRate: 20, installmentsCount: 10,
       frequency: 'diaria', startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] });
@@ -649,7 +649,7 @@ describe('Fase 6 · cuadres y cierres', () => {
     assert.deepEqual([await custody(w.membershipId, r), await carried(w.membershipId, r)], [$(90_000), $(40_000)]);
     const request = async (amountMinor: number) => {
       const cl = await ana('POST', '/v1/clients', { routeId: r, name: `Cliente ficticio F6 ${++clientSeq}`, documentType: 'CC',
-        document: String(1_000_000 + Number.parseInt(randomBytes(3).toString('hex'), 16) % 8_999_999), phonePrimary: '3000000000', addressPrimary: 'Calle 1', addressSecondary: 'B' });
+        document: String(1_000_000 + Number.parseInt(randomBytes(3).toString('hex'), 16) % 8_999_999), phonePrimary: '3000000000', addressPrimary: 'Calle 1', addressSecondary: 'B', business: 'Negocio sintético' });
       const req = await w.call('POST', '/v1/credit-requests', { routeId: r, clientId: cl.body['id'], amountMinor, interestRate: 20, installmentsCount: 10,
         frequency: 'diaria', startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] });
       assert.equal(req.status, 201, JSON.stringify(req.body));

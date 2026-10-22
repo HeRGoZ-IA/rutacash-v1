@@ -12,7 +12,7 @@ import { createLocalIssuer, createMemoryProvider, startCompanyApi, type LocalIss
 import { M, caller, type Caller } from '../helpers/phase2.ts';
 
 const newClient = (route: string, doc: string) => ({
-  routeId: route, name: 'Sin historia', documentType: 'CPF', document: doc, phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b',
+  routeId: route, name: 'Sin historia', documentType: 'CPF', document: doc, phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético',
 });
 
 describe('Fase 2 · DS-11 historia protegida', () => {

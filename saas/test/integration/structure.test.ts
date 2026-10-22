@@ -72,7 +72,7 @@ describe('Fase 2 · estructura de empresa, Oficinas, rutas y categorías', () =>
     const route = (await bruno('POST', '/v1/routes', { name: 'Ruta Temporal', interestRate: 20, freeRate: false, maxLoanMinor: 100000, officeId: office['id'], adminIds: [M.anaAdmin] })).body;
     assert.equal((await bruno('POST', `/v1/offices/${office['id']}/status`, { status: 'inactiva' })).status, 200);
     const client = await adm('POST', '/v1/clients', { routeId: route['id'], name: 'X', documentType: 'CPF', document: '111.444.777-35',
-      phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+      phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' });
     assert.equal(client.body['error'], 'ROUTE_NOT_OPERATIONAL');
     assert.equal((await bruno('GET', `/v1/routes/${route['id']}`)).status, 200, 'la consulta sigue');
     assert.equal((await bruno('POST', `/v1/offices/${office['id']}/delete`, {})).body['error'], 'OFFICE_HAS_ROUTES');

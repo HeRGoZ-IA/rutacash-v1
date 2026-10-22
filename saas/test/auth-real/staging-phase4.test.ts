@@ -102,7 +102,7 @@ describe('Fase 4 · créditos en ADEX-Staging (Auth real + PostgreSQL gestionado
   const newClient = async () => {
     const doc = String(10_000_000_000 + Number.parseInt(randomBytes(4).toString('hex'), 16) % 89_999_999_999);
     const r = await call('boss', 'POST', '/v1/clients', m.sa, { routeId: route, name: `Cliente ficticio ${++clientSeq}`, documentType: 'CPF', document: doc,
-      phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+      phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' });
     assert.equal(r.status, 201, JSON.stringify(r.body));
     return r.body['id'] as string;
   };

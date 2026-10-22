@@ -48,7 +48,10 @@ const TEXT_FIELDS: Record<string, { col: keyof Row; required: boolean; max: numb
   phoneSecondary: { col: 'phone_secondary', required: false, max: 40 },
   addressPrimary: { col: 'address_primary', required: true, max: 300 },
   addressSecondary: { col: 'address_secondary', required: true, max: 300 },
-  business: { col: 'business', required: false, max: 160 },
+  // Ronda 73 · SOC-05: el NEGOCIO del cliente (su actividad, no la empresa del SaaS) es obligatorio
+  // al dar de alta; al editar, si se envía, no puede quedar vacío. Los clientes existentes sin él
+  // no se tocan (nada se rellena con un valor inventado).
+  business: { col: 'business', required: true, max: 160 },
   notes: { col: 'notes', required: false, max: 1000 },
   documentPhotoUrl: { col: 'document_photo_url', required: false, max: 2048 },
   businessPhotoUrl: { col: 'business_photo_url', required: false, max: 2048 },
@@ -141,7 +144,15 @@ export async function updateClient(client: pg.PoolClient, ctx: ActiveContext, id
   }
   const next: Record<string, string | null> = {};
   for (const [field, f] of Object.entries(TEXT_FIELDS)) {
+    if (field === 'business') continue;
     if (has(body, field)) next[f.col] = f.required ? reqText(body, field, f.max) : optText(body, field, f.max);
+  }
+  // Ronda 73 · SOC-05: un cliente anterior sin negocio se puede seguir editando sin inventarlo;
+  // un negocio registrado no se puede vaciar.
+  if (has(body, 'business')) {
+    const v = optText(body, 'business', TEXT_FIELDS['business']!.max);
+    if (v !== null) next['business'] = v;
+    else if (prev.business !== null) throw new ApiError(400, 'INVALID_INPUT', 'business is required', { field: 'business' });
   }
   if ('document_photo_url' in next) photo(next['document_photo_url']!);
   if ('business_photo_url' in next) photo(next['business_photo_url']!);

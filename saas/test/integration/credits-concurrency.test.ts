@@ -42,7 +42,7 @@ describe('Fase 4 · concurrencia de créditos', () => {
   const pool = (m: string) => balance(db.admin, c1, 'admin', m);
   const newClient = async (name: string) => {
     const r = await adm('POST', '/v1/clients', { routeId: r1, name, documentType: 'CPF', document: String(randomInt(10_000_000_000, 99_999_999_999)),
-      phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+      phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' });
     if (r.status !== 201) throw new Error(JSON.stringify(r.body));
     return r.body['id'] as string;
   };

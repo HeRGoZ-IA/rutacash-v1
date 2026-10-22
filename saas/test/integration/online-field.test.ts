@@ -29,7 +29,7 @@ describe('ADEX Online · capa operativa', () => {
 
   const cpf = () => String(randomInt(10_000_000_000, 99_999_999_999));
   const newClient = async (route: string) => {
-    const r = await adm('POST', '/v1/clients', { routeId: route, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+    const r = await adm('POST', '/v1/clients', { routeId: route, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' });
     if (r.status !== 201) throw new Error(JSON.stringify(r.body));
     return r.body['id'] as string;
   };

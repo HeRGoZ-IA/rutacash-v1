@@ -57,7 +57,7 @@ const COMMANDS: Command[] = [
   { name: 'GET /v1/clients/:id', caps: ['client.view'], routeScoped: true, run: (c, s) => c('GET', `/v1/clients/${s.client}`) },
   { name: 'POST /v1/clients', caps: ['client.create'], routeScoped: true,
     run: (c, s, i) => c('POST', '/v1/clients', { routeId: s.route, name: `Matriz ${i}`, documentType: 'PAS', document: `MX${String(i).padStart(6, '0')}`,
-      phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' }) },
+      phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' }) },
   { name: 'PATCH /v1/clients/:id', caps: ['client.edit', 'client.editLimited'], routeScoped: true, run: (c, s, i) => c('PATCH', `/v1/clients/${s.client}`, { notes: `Matriz ${i}` }) },
   { name: 'POST /v1/clients/:id/status', caps: ['client.deactivate'], routeScoped: true, run: (c, s) => c('POST', `/v1/clients/${s.client}/status`, { status: 'activo' }) },
 ];

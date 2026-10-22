@@ -11,7 +11,7 @@ import { createLocalIssuer, createMemoryProvider, startCompanyApi, type LocalIss
 import { M, caller, parallel, type Caller } from '../helpers/phase2.ts';
 
 const base = (routeIdValue: string, documentType: string, document: string, name = 'Cliente') => ({
-  routeId: routeIdValue, name, documentType, document, phonePrimary: '+55 11 9999-0000', addressPrimary: 'Rua 1', addressSecondary: 'Loja 2',
+  routeId: routeIdValue, name, documentType, document, phonePrimary: '+55 11 9999-0000', addressPrimary: 'Rua 1', addressSecondary: 'Loja 2', business: 'Negocio sintético',
 });
 
 describe('Fase 2 · clientes y DS-10', () => {
@@ -43,7 +43,7 @@ describe('Fase 2 · clientes y DS-10', () => {
     assert.equal((await anaSup('POST', '/v1/clients', base(routeId('c2', 1), 'CC', '1020304050'))).status, 201, 'Supervisor en Colombia');
     assert.equal((await anaCob('POST', '/v1/clients', base(routeId('c1', 2), 'CPF', '111.111.111-11'))).status, 403, 'ruta no autorizada');
     for (const who of [fabio, gabi]) assert.equal((await who('POST', '/v1/clients', base(r1, 'CPF', '222.222.222-22'))).status, 403);
-    const missing = await ana('POST', '/v1/clients', { ...base(r1, 'CPF', '333.333.333-33'), addressSecondary: '' });
+    const missing = await ana('POST', '/v1/clients', { ...base(r1, 'CPF', '333.333.333-33'), addressSecondary: '', business: 'Negocio sintético' });
     assert.equal(missing.status, 400, 'dirección de cobro/negocio obligatoria (CLEAN)');
     const audit = await db.admin.query(`select route_id, actor_role, txid is not null t from adex.audit_log where action = 'CREATE_CLIENT' and entity_id = $1`, [cob.body['id']]);
     assert.deepEqual(audit.rows, [{ route_id: r1, actor_role: 'cobrador', t: true }]);

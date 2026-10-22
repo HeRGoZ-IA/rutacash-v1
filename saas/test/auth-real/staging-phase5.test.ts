@@ -104,7 +104,7 @@ describe('Fase 5 · recaudos y gastos en ADEX-Staging (Auth real + PostgreSQL ge
   const credit = async (amountMinor: number, installmentsCount = 10) => {
     const doc = String(10_000_000_000 + Number.parseInt(randomBytes(4).toString('hex'), 16) % 89_999_999_999);
     const cl = await call('boss', 'POST', '/v1/clients', m.sa, { routeId: route, name: `Cliente ficticio ${++clientSeq}`, documentType: 'CPF', document: doc,
-      phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+      phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' });
     assert.equal(cl.status, 201, JSON.stringify(cl.body));
     const r = await money('boss', '/v1/credits/direct', m.admin, { routeId: route, clientId: cl.body['id'], amountMinor, interestRate: 20, installmentsCount,
       frequency: 'diaria', startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] });

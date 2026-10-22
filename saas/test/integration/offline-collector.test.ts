@@ -32,7 +32,7 @@ describe('Ronda 62 · modo sin conexión del Cobrador', () => {
 
   const cpf = () => String(randomInt(10_000_000_000, 99_999_999_999));
   const credit = async (route = r1, amountMinor = 50_000) => {
-    const cl = await adm('POST', '/v1/clients', { routeId: route, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' });
+    const cl = await adm('POST', '/v1/clients', { routeId: route, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' });
     if (cl.status !== 201) throw new Error(JSON.stringify(cl.body));
     const r = await $ana('/v1/credits/direct', { routeId: route, clientId: cl.body['id'], amountMinor, interestRate: 20,
       installmentsCount: 12, frequency: 'diaria', startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] });

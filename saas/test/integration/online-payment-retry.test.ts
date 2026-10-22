@@ -108,7 +108,7 @@ describe('Ronda 48.1 · reintentos seguros de abonos (cliente web real + Postgre
 
   const credit = async (amountMinor = 100_000, installmentsCount = 10) => {
     const client = (await adm('POST', '/v1/clients', { routeId: r1, name: `Cliente ${randomUUID().slice(0, 6)}`, documentType: 'CPF',
-      document: String(randomInt(10_000_000_000, 99_999_999_999)), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' })).body['id'];
+      document: String(randomInt(10_000_000_000, 99_999_999_999)), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' })).body['id'];
     const r = await $ana('/v1/credits/direct', { routeId: r1, clientId: client, amountMinor, interestRate: 20, installmentsCount, frequency: 'diaria',
       startDate: today, paymentDays: [0, 1, 2, 3, 4, 5, 6] });
     if (r.status !== 201) throw new Error(JSON.stringify(r.body));
