@@ -1,31 +1,19 @@
 node_modules/
 dist/
 node_modules
-tests/_out.mjs
-tests/_out.financial.mjs
-tests/_out.bootstrap.mjs
-tests/_out.migrations.mjs
-tests/_out.settlements.mjs
-tests/_out.platform.mjs
-tests/_out.workercash.mjs
-tests/_out.basecash.mjs
 tmp/
-tests/_out.interestrate.mjs
-tests/_out.activecredit.mjs
-tests/_out.financialreversal.mjs
-tests/_out.routebase.mjs
-tests/_out.supervisorbase.mjs
-tests/_out.workertransfer.mjs
-tests/_out.paymentreversal.mjs
-tests/_out.paymentsync.mjs
-tests/_out.expenseclassification.mjs
-tests/_out.capitalcontrol.mjs
-tests/_out.expensecash.mjs
-tests/_out.adminexpense.mjs
-tests/_out.adminpool.mjs
-tests/_out.transferops.mjs
-tests/_out.movementhistory.mjs
-tests/_out.disbursement.mjs
-tests/_out.capitalcustody.mjs
-tests/_out.periodauthority.mjs
-tests/_out.centralcapital.mjs
+
+# Bundles que generan los scripts test:* de package.json
+tests/_out*.mjs
+
+# Secretos: nunca se versionan (solo las plantillas .env.example)
+.env
+.env.*
+!.env.example
+*.pem
+*.crt
+*.key
+
+# Exportaciones comprimidas y configuración local de herramientas
+*.zip
+.impeccable/

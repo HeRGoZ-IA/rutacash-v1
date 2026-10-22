@@ -97,8 +97,10 @@ Las rondas sin documento propio se indican con «—» en la referencia. La corr
 | 2026-10-21 | R65 / 65-C1 | Desembolsos aprobados sin conexión; clientes y ventas offline retirados | `24ef149`, `448b28c`, `e71d5d0`, `dcb0575` | 0027 | Sí | **PUBLICADO** 2026-10-21 | [R65](./ADEX_RONDA_65_OFFLINE_DESEMBOLSOS.md) |
 | 2026-10-21/22 | R67 | SuperAdmin con cartera de solo lectura; mapa de rutas del Administrador | `9902795`, `b310279`, `2b3ef13`, `54944b8`, `b44379b` | 0028–0029 | Sí | **PUBLICADO** 2026-10-22 | [R67](./ADEX_RONDA_67_SUPERADMIN_Y_MAPA.md) |
 | 2026-10-22 | R70 | Este registro (solo documentación) | ver §I | — | Doc. | — | este archivo |
+| 2026-10-22 | R71 | Auditoría de organización de archivos y plan por bloques (diagnóstico) | `6686c14` | — | Doc. | — | [Auditoría](./AUDITORIA_ORGANIZACION_PROYECTO_ADEX.md) |
+| 2026-10-22 | R72 | Bloques 1–3 de R71: limpieza local de regenerables (25 clústeres PostgreSQL de prueba, copias de compilaciones, `node_modules` del experimento; 5 675 → 767 MB, sin commit por ser archivos ignorados); 13 documentos antiguos a [`historico/clean-2026/`](./historico/clean-2026/); `README.md` de raíz; `.gitignore` con `.env*`, certificados, claves, `*.zip`, `.impeccable/`. Sin cambios funcionales; evidencias de `tmp/` conservadas (bloques 0 y 4 no autorizados) | commit que añade esta fila (`git log -1 -- docs/historico`) | — | Doc. / config. | Sin despliegue manual | [Auditoría §11](./AUDITORIA_ORGANIZACION_PROYECTO_ADEX.md) |
 
-**Hitos registrados:** 14 de la etapa CLEAN y 26 de la etapa SaaS (40 en total).
+**Hitos registrados:** 14 de la etapa CLEAN y 28 de la etapa SaaS (42 en total).
 
 ---
 
@@ -281,6 +283,7 @@ Al cerrar cada ronda (lo hace quien la cierra, en el mismo commit documental):
 5. **Estado (§F) y pendientes (§G):** actualizar; mover a «cerrados» lo que se cierre.
 6. **Pruebas:** no copiar resultados; enlazar la sección del documento de la ronda.
 7. Ante duda: «NO VERIFICADO». Nunca completar por memoria.
+8. **Orden de archivos:** aplicar las reglas R1–R11 de la [auditoría de organización §12](./AUDITORIA_ORGANIZACION_PROYECTO_ADEX.md): salidas en `tmp/rNN/`; al terminar las pruebas, borrar solo las copias de compilación de la ronda y los `tmp/saas-phase01/pgdata-*` de ejecuciones que ya no estén activas (comprobando antes procesos y `postmaster.pid`); conservar arneses, registros finales, instantáneas y capturas finales; nada nuevo en la raíz. Ante duda, conservar y reportar.
 
 ---
 

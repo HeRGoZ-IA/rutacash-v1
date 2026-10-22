@@ -148,7 +148,7 @@
 
 ## ¿Qué queda para V2?
 
-Ver `future-roadmap.md`
+Ver [`future-roadmap.md`](../../future-roadmap.md)
 
 ## Usuarios demo
 

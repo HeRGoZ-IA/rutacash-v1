@@ -22,7 +22,7 @@ Script temporal con los servicios de producción sobre Dexie real (fake-indexedd
 ## 3. Causa raíz
 
 1. **La regla no existía en el dominio.** "Un Cobrador no otorga un segundo crédito a quien ya tiene uno activo" no estaba en ningún servicio. Lo único que había era:
-   - la **alerta de pantalla** del 25-jun (`CAMBIOS_SOCIO_REVISION_25_JUNIO.md` §7: *"no se bloquea: alerta fuerte + confirmación"*), y
+   - la **alerta de pantalla** del 25-jun (`historico/clean-2026/CAMBIOS_SOCIO_REVISION_25_JUNIO.md` §7: *"no se bloquea: alerta fuerte + confirmación"*), y
    - la ausencia de `sale.createDirect` en el rol Cobrador.
 
    El segundo crédito se evitaba solo porque el Cobrador no tenía venta directa, no porque existiera una regla sobre el cliente.
@@ -59,7 +59,7 @@ Descartados con prueba: la capacidad del Supervisor **no** contaminó la del Cob
 
 ## 6. Alcance del "crédito activo": por cliente, en toda la empresa
 
-Evidencia: el documento del cliente es único por empresa, sin importar la ruta (`CAMBIOS_SOCIO_REVISION_25_JUNIO.md` §6), y `findActiveSaleForClient` siempre buscó por `clientId` en todas las rutas. Se conserva ese alcance. Un cliente trasladado a otra ruta con su crédito anterior vivo sigue bloqueado (`ACTIVE-CREDIT-012`). Las ventas de otra empresa nunca cuentan.
+Evidencia: el documento del cliente es único por empresa, sin importar la ruta (`historico/clean-2026/CAMBIOS_SOCIO_REVISION_25_JUNIO.md` §6), y `findActiveSaleForClient` siempre buscó por `clientId` en todas las rutas. Se conserva ese alcance. Un cliente trasladado a otra ruta con su crédito anterior vivo sigue bloqueado (`ACTIVE-CREDIT-012`). Las ventas de otra empresa nunca cuentan.
 
 ## 7. Solución
 
