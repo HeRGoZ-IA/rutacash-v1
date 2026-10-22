@@ -145,9 +145,9 @@ export default function CollectorNewSalePage() {
     const capital = await recheckCapital(form.valorVenta)
     if (capital.exceeded) {
       const motivo = verCapital
-        ? `La venta supera la Base de la ruta (${formatCurrency(capital.available ?? 0, currency)})`
-        : 'La venta supera la Base de la ruta. Reduce el monto o solicita una inyección de capital.'
-      toast.error(capExcedido ? motivo : `La Base de la ruta cambió mientras completabas la venta. ${motivo}`)
+        ? `La venta supera el dinero disponible (${formatCurrency(capital.available ?? 0, currency)})`
+        : 'La venta supera el dinero disponible. Reduce el monto o solicita una inyección de capital.'
+      toast.error(capExcedido ? motivo : `El dinero disponible cambió mientras completabas la venta. ${motivo}`)
       return
     }
     // Si el cliente ya tiene venta activa, pedir confirmación antes de crear otra.
@@ -252,13 +252,13 @@ export default function CollectorNewSalePage() {
             capital financiero, y solo cuando lo supera: la regla sigue vigente. */}
         {selectedClient && verCapital && capDisponible != null && (
           <div className={`rounded-xl p-3 text-sm border ${capExcedido ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>
-            Base de la ruta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
-            {capExcedido && <p className="text-xs mt-1 font-medium">El valor supera la Base de la ruta. Reduce el monto o inyecta capital a la ruta.</p>}
+            Disponible para esta venta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
+            {capExcedido && <p className="text-xs mt-1 font-medium">El valor supera el dinero disponible para esta venta. Reduce el monto o solicita capital.</p>}
           </div>
         )}
         {selectedClient && !verCapital && capExcedido && (
           <div className="rounded-xl p-3 text-sm border bg-red-50 border-red-200 text-red-700">
-            La venta supera la Base de la ruta. Reduce el monto o solicita una inyección de capital al administrador.
+            La venta supera el dinero disponible. Reduce el monto o solicita una inyección de capital al administrador.
           </div>
         )}
 

@@ -151,6 +151,29 @@ describe('Ronda 73 · bloque A: condiciones autorizadas, parcelas y rectificaci�
     assert.equal((await db.admin.query('select status, interest_rate::int r from adex.sale_requests where id = $1', [id])).rows[0].status, 'pending');
   });
 
+  // ---------------- SOC-02 ----------------
+
+  test('R73-SOC02-001 · venta directa del Administrador responsable: paga su BOLSA aunque la ruta no tenga efectivo en custodia; fondos insuficientes y concurrencia', async () => {
+    const zoe = await newPerson(api, issuer, provider.ids, bruno, { email: 'r73-zoe@example.test', role: 'admin', displayName: 'Zoe', routeIds: [] });
+    const route = (await bruno('POST', '/v1/routes', { name: 'Ruta R73', interestRate: 20, freeRate: false, maxLoanMinor: 0, adminIds: [zoe.membershipId, xavier.membershipId] })).body;
+    const rz = route['id'] as string;
+    assert.equal(route['capitalControllerId'], zoe.membershipId, 'Zoe es la responsable de capital');
+    assert.equal((await $bruno('/v1/capital/allocations', { adminId: zoe.membershipId, amountMinor: 100_000, reason: 'Bolsa de Zoe' })).status, 201);
+    const client = async (name: string) => (await zoe.call('POST', '/v1/clients', { routeId: rz, name, documentType: 'CPF', document: cpf(), phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b' })).body['id'] as string;
+    assert.equal(await count(db.admin, `select 1 from adex.capital_accounts where kind = 'custody' and route_id = $1 and balance_minor > 0`, [rz]), 0, 'sin efectivo en la ruta');
+    const ok = await zoe.money('/v1/credits/direct', { routeId: rz, clientId: await client('Directa Zoe'), ...cond({ amountMinor: 60_000 }) });
+    assert.equal(ok.status, 201, JSON.stringify(ok.body));
+    assert.equal(await pool(zoe.membershipId), 40_000, 'salió de la bolsa de Zoe');
+    assert.equal((await zoe.money('/v1/credits/direct', { routeId: rz, clientId: await client('Sin fondos'), ...cond({ amountMinor: 40_001 }) })).body['error'], 'INSUFFICIENT_FUNDS');
+    assert.equal((await xavier.money('/v1/credits/direct', { routeId: rz, clientId: await client('No responsable'), ...cond({ amountMinor: 1_000 }) })).body['error'], 'CAPITAL_AUTHORITY_REQUIRED',
+      'otro Administrador de la ruta no gasta la bolsa del responsable');
+    const [a, b] = [await client('Concurrente A'), await client('Concurrente B')];
+    const res = await Promise.all([a, b].map((c) => zoe.money('/v1/credits/direct', { routeId: rz, clientId: c, ...cond({ amountMinor: 30_000 }) })));
+    assert.deepEqual(res.map((r) => r.status).sort(), [201, 409], 'dos ventas de 30.000 con 40.000: una sola');
+    assert.equal(await pool(zoe.membershipId), 10_000, 'sin doble consumo');
+    assert.deepEqual(await reconcile(db.admin, c1), CLEAN);
+  });
+
   // ---------------- SOC-04 ----------------
 
   test('R73-SOC04-001 · el autorizador cambia 12 → 20 parcelas: valor, total, calendario y fecha final recalculados; pedido y aprobado se conservan', async () => {

@@ -205,7 +205,7 @@ export default function ActiveSalesPage() {
     const client = clientMap.get(form.clientId)
     if (!client || client.routeId !== form.routeId) { toast.error('El cliente seleccionado no pertenece a la ruta'); return }
     if (form.valorVenta <= 0) { toast.error('El valor de la venta debe ser mayor a 0'); return }
-    if (capDisponible != null && form.valorVenta > capDisponible) { toast.error(`La venta supera la Base de la ruta (${formatCurrency(capDisponible, currency)})`); return }
+    if (capDisponible != null && form.valorVenta > capDisponible) { toast.error(`La venta supera el dinero disponible (${formatCurrency(capDisponible, currency)})`); return }
     if (form.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return }
     if (![10, 20].includes(form.tasaInteres)) { toast.error('La tasa de interés debe ser 10% o 20%'); return }
     if (form.fechaInicio < today()) { toast.error('La fecha de inicio de cobro no puede ser anterior a hoy'); return }
@@ -490,8 +490,8 @@ export default function ActiveSalesPage() {
           </div>
           {form.routeId && capDisponible != null && (
             <div className={`rounded-xl p-3 text-sm border ${capExcedido ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>
-              Base de la ruta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
-              {capExcedido && <p className="text-xs mt-1 font-medium">El valor supera la Base de la ruta. Reduce el monto o inyecta capital a la ruta.</p>}
+              Disponible para esta venta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
+              {capExcedido && <p className="text-xs mt-1 font-medium">El valor supera el dinero disponible para esta venta. Reduce el monto o solicita capital.</p>}
             </div>
           )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
