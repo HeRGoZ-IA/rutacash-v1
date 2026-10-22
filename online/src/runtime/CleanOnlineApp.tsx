@@ -12,6 +12,8 @@
 //   · Ronda 53: el rol Socio, sus pantallas y Caja socios NO existen en ADEX Online (CLEAN los conserva).
 //   · Ronda 59: Notificaciones (Administrador, SuperAdmin y Cobrador) y Consultas (antes Caja); Retiros
 //     (saldo heredado de antiguas cajas de ruta) e Historial aparte ya no existen: llevan a Consultas.
+//   · Ronda 67: la CARTERA del SuperAdmin es solo Clientes (consulta). Ventas Activas, Autorizaciones y
+//     Ajustes de pago son del Administrador: el SuperAdmin que entra por URL vuelve a Clientes.
 //   · Ronda 50: las pantallas de Administración y Secretario se cargan BAJO DEMANDA
 //     (`lazy`): el Cobrador no descarga dashboards ni gráficas (recharts) que no usa. Las
 //     del Cobrador y el Supervisor siguen en el paquete inicial (uso de campo, sin esperas).
@@ -49,6 +51,7 @@ import CollectorSelectRoutePage from '@/pages/collector/CollectorSelectRoutePage
 import OperationalAccountPage from '@/pages/collector/OperationalAccountPage';
 import { RequireAuth } from '@/components/auth/guards';
 import { useAuth } from '@/hooks/useAuth';
+import { carteraClientsOnly } from '@/lib/permissions';
 import LoginPage from '@/pages/auth/LoginPage';
 const DashboardPage = lazy(() => import('@/pages/admin/DashboardPage'));
 const OfficesPage = lazy(() => import('@/pages/admin/OfficesPage'));
@@ -62,6 +65,8 @@ const CapitalPage = lazy(() => import('@/pages/admin/CapitalPage'));
 const TransfersPage = lazy(() => import('@/pages/admin/TransfersPage'));
 const ConsultasPage = lazy(() => import('./ConsultasPage.tsx'));
 const NotificationsPage = lazy(() => import('./NotificationsPage.tsx'));
+// Ronda 67: mapa del Administrador (Leaflet viaja solo en este paquete bajo demanda).
+const RouteMapPage = lazy(() => import('./RouteMapPage.tsx'));
 const WeeklySettlementPage = lazy(() => import('@/pages/admin/WeeklySettlementPage'));
 const MovementReceiptPage = lazy(() => import('@/pages/admin/MovementReceiptPage'));
 const ExpenseCategoriesPage = lazy(() => import('@/pages/admin/ExpenseCategoriesPage'));
@@ -150,6 +155,13 @@ function CollectorNotices() {
   return role === 'cobrador' ? <NotificationsPage /> : <Navigate to="../home" replace />;
 }
 
+/** Ronda 67: pantallas de CARTERA que no son Clientes (el SuperAdmin solo consulta Clientes). */
+function CarteraOperativa({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  if (carteraClientsOnly(user?.rol)) return <Navigate to="/admin/clients" replace />;
+  return <>{children}</>;
+}
+
 /** Marca el cambio de pantalla: el refresco periódico relee solo lo que la pantalla actual usa. */
 function NavigationMark() {
   const { pathname } = useLocation();
@@ -189,9 +201,10 @@ export function CleanOnlineApp() {
             <Route path="offices/:officeId" element={<OfficeDetailPage />} />
             <Route path="routes" element={<RoutesPage />} />
             <Route path="clients" element={<ClientsPage />} />
-            <Route path="active-sales" element={<ActiveSalesPage />} />
-            <Route path="sale-authorizations" element={<SaleAuthorizationsPage />} />
-            <Route path="payment-adjustments" element={<PaymentAdjustmentsPage />} />
+            <Route path="active-sales" element={<CarteraOperativa><ActiveSalesPage /></CarteraOperativa>} />
+            <Route path="sale-authorizations" element={<CarteraOperativa><SaleAuthorizationsPage /></CarteraOperativa>} />
+            <Route path="payment-adjustments" element={<CarteraOperativa><PaymentAdjustmentsPage /></CarteraOperativa>} />
+            <Route path="mapa" element={<RequireAuth roles={['admin']}><RouteMapPage /></RequireAuth>} />
             <Route path="capital" element={<CapitalPage />} />
             {/* En el SaaS el capital centralizado rige desde el alta: no hay transición. */}
             <Route path="capital/transicion" element={<Navigate to="/admin/capital" replace />} />

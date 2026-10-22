@@ -270,14 +270,15 @@ await spec('AUTHBOX-002', 'D30', 'Administrador asociado no responsable: rechazo
   assert(can(ADMIN_B, 'sale.confirmDisbursement', { routeId: R1, tenantId: T }), 'el caso no prueba D30: Beatriz no tenía el permiso general')
 })
 
-await spec('AUTHBOX-003', 'D30', 'SuperAdmin de la empresa: desembolso válido, saldos una sola vez', async () => {
+// [MODIFICADO Ronda 67] Antes el SuperAdmin desembolsaba; ahora su cartera es de solo lectura: rechazo sin efecto.
+await spec('AUTHBOX-003', 'D30', 'SuperAdmin de la empresa: ya no desembolsa (cartera de solo lectura), sin tocar saldos', async () => {
   await empresa(5000)
   const s = await aprobada(JUAN, 600)
   const a = await saldos()
-  await confirmDisbursement(s.id, SA)
+  const e = await sinEfecto(() => confirmDisbursement(s.id, SA))
   const b = await saldos()
-  metric('antes → después', `${fila(a)} → ${fila(b)}`)
-  assert(b.base === a.base - 600 && b.sinAsignar === a.sinAsignar - 600, 'saldos incorrectos')
+  metric('antes → después', `${fila(a)} → ${fila(b)} · ${texto(e)}`)
+  assert(b.base === a.base && b.sinAsignar === a.sinAsignar, 'saldos alterados')
 })
 
 await spec('AUTHBOX-004', 'D30', 'SuperAdmin de OTRA empresa: rechazo', async () => {

@@ -415,7 +415,7 @@ await spec('WORKER-XFER-020', 'no crea una transferencia financiera Ruta → Rut
 await spec('WORKER-XFER-021', 'efectivo compuesto: Base + cobros − desembolsos (y sin el arrastre de faltantes)', async () => {
   await empresa()
   await capital(1_000_000)
-  const venta = await createDirectSale(entrada(await cliente(), SUPER, 200_000), SUPER)   // venta administrativa, cobrable
+  const venta = await createDirectSale(entrada(await cliente(), ADMIN, 200_000), ADMIN)   // venta administrativa, cobrable (Ronda 67: el Admin)
   await entregar(FABIO, 100_000)
   await cobra(FABIO, venta, 60_000)        // + cobros
   await desembolsa(FABIO, 50_000)          // − desembolso de su efectivo

@@ -80,6 +80,8 @@ export const CAPABILITY_METADATA: Record<Capability, CapabilityMeta> = {
   'client.edit': { key: 'client.edit', label: 'Modificar clientes', description: 'Actualizar los datos de clientes autorizados.', category: 'Clientes', risk: 'medio' },
   'client.editLimited': { key: 'client.editLimited', label: 'Editar datos operativos del cliente', description: 'Actualizar datos operativos (teléfono, dirección, observaciones).', category: 'Clientes' },
   'client.deactivate': { key: 'client.deactivate', label: 'Inactivar clientes', description: 'Baja lógica de clientes (nunca destructiva).', category: 'Clientes', risk: 'medio' },
+  'client.setLocation': { key: 'client.setLocation', label: 'Fijar la ubicación del cliente', description: 'Registrar o corregir la ubicación de referencia del cliente (GPS en el lugar o punto en el mapa), con su origen y auditada.', category: 'Clientes' },
+  'map.view': { key: 'map.view', label: 'Mapa de rutas', description: 'Consultar en un mapa los clientes con ubicación y la actividad de las rutas autorizadas.', category: 'Rutas' },
 
   // Ventas
   'sale.viewActive': { key: 'sale.viewActive', label: 'Ver ventas activas', description: 'Consultar las ventas activas.', category: 'Ventas' },

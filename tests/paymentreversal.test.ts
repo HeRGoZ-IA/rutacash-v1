@@ -123,7 +123,8 @@ const entrada = (clientId: string, actor: User, valor: number, cuotas: number, r
 })
 /** Crédito administrativo (cobrable de inmediato): 1.000.000 al 20% en 20 cuotas = 60.000. */
 async function credito(valor = 1_000_000, cuotas = 20, clientId?: string): Promise<Sale> {
-  return createDirectSale(entrada(clientId ?? await cliente(), SUPER, valor, cuotas), SUPER)
+  // Ronda 67: la venta la registra el Administrador (la cartera del SuperAdmin es de solo lectura).
+  return createDirectSale(entrada(clientId ?? await cliente(), ADMIN, valor, cuotas), ADMIN)
 }
 async function cobra(u: User, sale: Sale, valor: number, fecha = today()): Promise<Payment> {
   const r = await registerPayment({ saleId: sale.id, requestedAmount: valor, actor: u, fecha })
@@ -404,11 +405,12 @@ await spec('PAY-REV-014', 'la reversión no se puede anular (ni corregido ni anu
   assert(!isPaymentAnnullable(reversal) && !canAnnulPayment(SUPER, reversal), 'la UI ofrece anular la reversión')
 })
 
-await spec('PAY-REV-015', 'permisos: SuperAdmin y Admin sí; Supervisor, Secretario, Cobrador y Socio no', async () => {
+// [MODIFICADO Ronda 67] Antes el SuperAdmin también anulaba pagos; ahora su cartera es de solo lectura.
+await spec('PAY-REV-015', 'permisos: Admin sí; SuperAdmin, Supervisor, Secretario, Cobrador y Socio no', async () => {
   await empresa()
   const v = await credito()
   const filas: string[] = []
-  for (const [u, debe] of [[LAURA, false], [SECRE, false], [FABIO, false], [SOCIO, false], [ADMIN, true], [SUPER, true]] as [User, boolean][]) {
+  for (const [u, debe] of [[LAURA, false], [SECRE, false], [FABIO, false], [SOCIO, false], [ADMIN, true], [SUPER, false]] as [User, boolean][]) {
     const p = await cobra(CARLOS, v, 1_000)
     const r = await rechazo(() => anular(p, u))
     const ui = canAnnulPayment(u, p)
@@ -608,7 +610,8 @@ await spec('PAY-REV-026', 'concurrencia: dos anulaciones simultáneas del mismo 
   await empresa()
   const v = await credito()
   const p = await cobra(FABIO, v, 25_000)
-  const rs = await Promise.all([rechazo(() => anular(p, ADMIN)), rechazo(() => anular(p, SUPER))])
+  // Ronda 67: dos Administradores autorizados de la ruta a la vez (el SuperAdmin ya no anula).
+  const rs = await Promise.all([rechazo(() => anular(p, ADMIN)), rechazo(() => anular(p, ADMIN))])
   const reversiones = (await db.payments.toArray()).filter(x => x.state === 'reversal')
   metric('resultados', rs.join(' | '))
   assert(rs.filter(r => r === 'ACEPTADO').length === 1 && reversiones.length === 1, 'pasaron dos anulaciones')

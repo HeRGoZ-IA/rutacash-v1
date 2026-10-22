@@ -641,7 +641,8 @@ await spec('OWNER-AUTH-003', 'Owner · Acceso', 'ser Owner NO concede ningún pr
   assert(!readSource('src/models/types.ts').includes("'owner'"),
     'el rol de plataforma no puede formar parte de los roles de empresa')
   // Y ningún rol de empresa conserva capacidades SaaS.
-  assert(perms.includes("superadmin: ['platform.access', 'company.create', 'company.suspend']"),
+  // Ronda 67: la lista incompatible del Super Admin sigue empezando por las tres capacidades SaaS (y añade las escrituras de cartera).
+  assert(perms.includes("superadmin: ['platform.access', 'company.create', 'company.suspend'"),
     'las capacidades SaaS deben ser incompatibles con el Super Admin')
 
   const su = usuario({ tenantId: 't-1', rol: 'superadmin' })

@@ -14,6 +14,10 @@
 // Ronda 65-C1 · COBRADOR SIN CONEXIÓN (offline/sales.ts): NO registra clientes ni ventas (llama a la
 // oficina; aquí se vuelve a comprobar aunque la pantalla ya lo impida) y nada se deja en cola. El
 // desembolso de una solicitud aprobada que el dispositivo conoce va por `disburseAsCollector`.
+//
+// Ronda 67 · GPS AL VENDER EN LÍNEA: la venta directa y la solicitud llevan la lectura del dispositivo
+// de quien registra (`location`), pedida UNA vez antes de escribir nada. Sin permiso o sin GPS la venta
+// sigue igual y viaja la causa. Es evidencia de dónde estaba quien registró, NUNCA la ubicación del cliente.
 
 import type { Client, Sale, SaleRequest, User } from '@clean/models/types';
 import { SaleRuleError, type SaleInputs } from '@clean/services/saleRequestService';
@@ -24,6 +28,7 @@ import { generateId } from '@/lib/utils';
 import { useRuntime } from '../../runtime/session.ts';
 import { useOffline } from '../../offline/state.ts';
 import { OFFLINE_BLOCK_TEXT, OFFLINE_BLOCK_TITLE, disburseAsCollector, newClientsAndSalesBlocked } from '../../offline/sales.ts';
+import { saleDeviceLocation } from '../../runtime/deviceLocation.ts';
 
 export * from '@clean/services/saleRequestService';
 import * as Clean from '@clean/services/saleRequestService';
@@ -74,9 +79,10 @@ function afterClient(e: unknown, created: boolean, what: string): never {
 async function createDirectSaleOnline(input: Conditions, _actor: User, opts: { newClient?: Client } = {}): Promise<Sale> {
   return asSaleError(async () => {
     refuseWithoutServer();
+    const location = await saleDeviceLocation();
     const client = await clientFor(input, opts.newClient);
     try {
-      const r = await money<Record<string, unknown>>('POST', '/v1/credits/direct', conditions(input, client), generateId());
+      const r = await money<Record<string, unknown>>('POST', '/v1/credits/direct', { ...conditions(input, client), location }, generateId());
       return saleFrom((r['credit'] as Record<string, unknown>) ?? r);
     } catch (e) {
       return afterClient(e, Boolean(opts.newClient), 'la venta');
@@ -94,9 +100,10 @@ function refuseWithoutServer(): void {
 async function createSaleRequestOnline(input: Conditions, _actor: User, opts: { newClient?: Client } = {}): Promise<SaleRequest> {
   return asSaleError(async () => {
     refuseWithoutServer();
+    const location = await saleDeviceLocation();
     const client = await clientFor(input, opts.newClient);
     try {
-      const r = await money<Record<string, unknown>>('POST', '/v1/credit-requests', conditions(input, client), generateId());
+      const r = await money<Record<string, unknown>>('POST', '/v1/credit-requests', { ...conditions(input, client), location }, generateId());
       return saleRequestFrom((r['request'] as Record<string, unknown>) ?? r);
     } catch (e) {
       return afterClient(e, Boolean(opts.newClient), 'la solicitud');

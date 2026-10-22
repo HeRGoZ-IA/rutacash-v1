@@ -86,6 +86,7 @@ const base = (id: string, nombre: string, rol: User['rol'], rutas: string[], ext
 
 const SUPER = base('u-super', 'Sonia SuperAdmin', 'superadmin', [])
 const ADMIN = base('u-admin', 'Andrés Admin', 'admin', [R_NORTE, R_SUR])
+// Ronda 67: las correcciones de pago las hace el Administrador (la cartera del SuperAdmin es de solo lectura).
 const ADMIN_SUR = base('u-admin-sur', 'Alba Admin Sur', 'admin', [R_SUR])
 const JUAN = base('u-juan', 'Juan Cobrador', 'cobrador', [R_NORTE, R_SUR])
 const PEDRO = base('u-pedro', 'Pedro Cobrador', 'cobrador', [R_NORTE])
@@ -461,7 +462,7 @@ await spec('LOCAL-SYNC-016', 'Semántica', 'la suma bruta del Dashboard equivale
   await empresa()
   const sale = await venta(R_NORTE)
   const p = await pagar(JUAN, sale, 100_000)
-  const corr = await correctPayment(SUPER, p.id, { newValor: 80_000, reason: 'error de digitación' })
+  const corr = await correctPayment(ADMIN, p.id, { newValor: 80_000, reason: 'error de digitación' })
   metric('corrección', corr.success ? 'aplicada' : corr.error)
   assert(corr.success, `la corrección falló: ${corr.error}`)
   const pagos = await db.payments.where('routeId').equals(R_NORTE).toArray()
@@ -805,7 +806,7 @@ for (const [id, tabla] of [['CASH-SETTLEMENT-023', 'payments'], ['CASH-SETTLEMEN
 await spec('CASH-SETTLEMENT-026', 'Semántica', 'motor por rango = effectivePayments() cuando la corrección cae en el mismo ciclo', async () => {
   await empresa()
   const p = await pagar(JUAN, await venta(R_NORTE), 100_000)
-  await correctPayment(SUPER, p.id, { newValor: 80_000, reason: 'valor mal digitado' })
+  await correctPayment(ADMIN, p.id, { newValor: 80_000, reason: 'valor mal digitado' })
   const pagos = await db.payments.where('routeId').equals(R_NORTE).toArray()
   const vigente = effectivePayments(pagos).filter(x => x.collectorId === JUAN.id).reduce((s, x) => s + x.valor, 0)
   const prev = await previewDe(JUAN.id)
@@ -817,7 +818,7 @@ await spec('CASH-SETTLEMENT-027', 'Semántica', 'corrección en un ciclo POSTERI
   await empresa()
   const p = await pagar(JUAN, await venta(R_NORTE), 100_000)
   await cerrar(JUAN.id, 100_000)
-  await correctPayment(SUPER, p.id, { newValor: 80_000, reason: 'valor mal digitado' })
+  await correctPayment(ADMIN, p.id, { newValor: 80_000, reason: 'valor mal digitado' })
   const prev = await previewDe(JUAN.id)
   metric('ciclo nuevo · recaudado / esperado', `${prev.recaudado} / ${prev.esperado}`)
   assert(prev.recaudado === -20_000, `debía cargarse el ajuste −20.000, se cargó ${prev.recaudado}`)
@@ -830,7 +831,7 @@ await spec('CASH-SETTLEMENT-028', 'Histórico', 'NO se inventa histórico: lo an
   await tick()
   await db.tenants.update(T, { cashModelStartAt: new Date().toISOString() })
   await tick()
-  await correctPayment(SUPER, viejo.id, { newValor: 650_000, reason: 'corrección de un pago histórico' })
+  await correctPayment(ADMIN, viejo.id, { newValor: 650_000, reason: 'corrección de un pago histórico' })
   await pagar(JUAN, sale, 50_000)
   const p = await previewDe(JUAN.id)
   metric('recaudado del primer ciclo', p.recaudado)

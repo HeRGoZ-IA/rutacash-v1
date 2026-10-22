@@ -3,6 +3,8 @@
 // exige para validar el número y su unicidad con el catálogo del país; se pide con el mismo
 // componente `Select` de CLEAN, encima del número, y solo al CREAR (un cliente existente
 // conserva el suyo).
+// Ronda 67, marcado con «ADEX Online (R67):»: sin `client.create` / `client.edit` / `client.deactivate`
+// (SuperAdmin: cartera de solo lectura) no hay «Nuevo cliente», «Editar» ni borrado; la ficha se consulta.
 import { useState, useEffect } from 'react'
 import { Plus, Search, Users, Trash2, AlertTriangle, FileText, Phone, MapPin, Building2, ImageOff } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -24,7 +26,7 @@ import { generateId } from '@/lib/utils'
 import { nowISO, formatDate, today, formatCurrency, normalizeDoc } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { createDirectSale } from '@/services/saleRequestService'
-import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
+import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute, can } from '@/lib/permissions'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 // ADEX Online: tipo de documento (DS-10).
@@ -64,6 +66,10 @@ const EMPTY_SALE_FORM = {
 
 export default function ClientsPage() {
   const { user } = useAuth()
+  // ADEX Online (R67): qué escrituras ofrece la pantalla (el servidor vuelve a autorizar cada una).
+  const puedeCrear = can(user, 'client.create')
+  const puedeEditar = can(user, 'client.edit') || can(user, 'client.editLimited')
+  const puedeBorrar = can(user, 'client.deactivate') && can(user, 'client.edit')
   const { tenantId, currency } = useTenant()
   // FILTRO OFICINA → RUTA: la Oficina estrecha las rutas ya autorizadas. El
   // contexto puede llegar por `?officeId=` desde el panel de una Oficina.
@@ -161,6 +167,7 @@ export default function ClientsPage() {
   const [tipoDocumento, setTipoDocumento] = useState('')
 
   function openCreate() {
+    if (!puedeCrear) return
     setEditing(null)
     setDupClient(null)
     const init = { nombre: '', documento: '', telefonoPrincipal: '', telefonoSecundario: '', direccionPrincipal: '', direccionSecundaria: '', negocio: '', routeId: routes[0]?.id ?? '', notas: '', fotoDocumentoUrl: undefined as string | undefined, fotoNegocioUrl: undefined as string | undefined }
@@ -171,6 +178,7 @@ export default function ClientsPage() {
   }
 
   function openEdit(client: Client) {
+    if (!puedeEditar) return
     setEditing(client)
     setDupClient(null)
     setAddSale(false)
@@ -211,6 +219,7 @@ export default function ClientsPage() {
   }
 
   async function handleSave() {
+    if (editing ? !puedeEditar : !puedeCrear) return
     if (!form.nombre.trim() || !form.documento.trim() || !form.telefonoPrincipal.trim()) { toast.error('Nombre, documento y teléfono son obligatorios'); return }
     if (!form.direccionPrincipal.trim()) { toast.error('La dirección de la casa es obligatoria'); return }
     if (!form.direccionSecundaria.trim()) { toast.error('La dirección del negocio es obligatoria'); return }
@@ -269,6 +278,7 @@ export default function ClientsPage() {
   }
 
   async function requestDelete(client: Client) {
+    if (!puedeBorrar) return
     setCheckingId(client.id)
     try {
       const totalSales = await db.sales.where('clientId').equals(client.id).count()
@@ -281,6 +291,7 @@ export default function ClientsPage() {
   }
 
   async function confirmDelete() {
+    if (!puedeBorrar) return
     if (!deleteTarget) return
     setDeleting(true)
     try {
@@ -301,7 +312,7 @@ export default function ClientsPage() {
           <h1 className="text-xl font-bold text-gray-900">Clientes</h1>
           <p className="text-sm text-gray-500 mt-0.5">{filtered.length} de {clients.length} cliente(s)</p>
         </div>
-        <Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Nuevo cliente</Button>
+        {puedeCrear && <Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Nuevo cliente</Button>}
       </div>
 
       {/* Filters */}
@@ -329,7 +340,7 @@ export default function ClientsPage() {
       {loading ? (
         <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
       ) : filtered.length === 0 ? (
-        <EmptyState icon={<Users className="w-8 h-8" />} title="No se encontraron clientes" action={<Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Nuevo cliente</Button>} />
+        <EmptyState icon={<Users className="w-8 h-8" />} title="No se encontraron clientes" action={puedeCrear ? <Button onClick={openCreate} icon={<Plus className="w-4 h-4" />}>Nuevo cliente</Button> : undefined} />
       ) : (
         <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
           <div className="overflow-x-auto">
@@ -375,14 +386,14 @@ export default function ClientsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end">
-                        <Button
+                        {puedeBorrar && <Button
                           variant="ghost"
                           size="sm"
                           onClick={(e) => { e.stopPropagation(); requestDelete(c) }}
                           loading={checkingId === c.id}
                           icon={<Trash2 className="w-3.5 h-3.5 text-red-400" />}
                           className="text-red-400 hover:text-red-600 hover:bg-red-50"
-                        />
+                        />}
                       </div>
                     </td>
                   </tr>
@@ -514,7 +525,7 @@ export default function ClientsPage() {
 
       {/* Ficha del cliente */}
       <Modal open={detailOpen} onClose={() => setDetailOpen(false)} title="Ficha del cliente" size="lg"
-        footer={<><Button variant="secondary" onClick={() => setDetailOpen(false)}>Cerrar</Button><Button onClick={() => { if (selected) { openEdit(selected); setDetailOpen(false) } }}>Editar</Button></>}>
+        footer={<><Button variant="secondary" onClick={() => setDetailOpen(false)}>Cerrar</Button>{puedeEditar && <Button onClick={() => { if (selected) { openEdit(selected); setDetailOpen(false) } }}>Editar</Button>}</>}>
         {selected && (() => {
           const activas = detailSales.filter(s => s.status === 'activa')
           const cerradas = detailSales.filter(s => s.status === 'finalizada')

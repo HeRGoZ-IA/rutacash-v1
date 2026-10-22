@@ -124,7 +124,8 @@ const entrada = (clientId: string, actor: User, valor: number, cuotas: number, r
 })
 /** Crédito administrativo: 1.000.000 al 20% en 20 cuotas = 60.000 (por defecto). */
 async function credito(valor = 1_000_000, cuotas = 20, routeId = R1, tenantId = T): Promise<Sale> {
-  const actor = tenantId === T ? SUPER : AJENO_ADMIN
+  // Ronda 67: la venta la registra el Administrador (la cartera del SuperAdmin es de solo lectura).
+  const actor = tenantId === T ? ADMIN : AJENO_ADMIN
   return createDirectSale(entrada(await cliente(routeId, tenantId), actor, valor, cuotas, routeId, tenantId), actor)
 }
 /** Pago del Cobrador; `offline` → queda 'pending' como lo deja PaymentPage sin red. */

@@ -3,7 +3,8 @@ import { CheckCircle2, Circle, ChevronRight, X } from 'lucide-react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { db } from '@/lib/db'
 import { useTenant } from '@/hooks/useTenant'
-import { authorizedRouteIdsOf } from '@/lib/permissions'
+import { authorizedRouteIdsOf, can } from '@/lib/permissions'
+import { useAuth } from '@/hooks/useAuth'
 
 interface Step {
   id: string
@@ -22,6 +23,7 @@ interface Step {
 export function SetupChecklist() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { user } = useAuth()
   const { tenantId } = useTenant()
   const [steps, setSteps] = useState<Step[]>([])
   const [loading, setLoading] = useState(true)
@@ -67,7 +69,8 @@ export function SetupChecklist() {
         { id: 'usuario', label: 'Agrega Supervisor / Cobrador / Socio / Secretario', description: 'Equipo operativo de la empresa', path: '/admin/users', cta: 'Crear Usuario', done: otherOps },
         { id: 'cliente', label: 'Registra tu primer Cliente', description: 'Persona o negocio al que prestarás', path: '/admin/clients', cta: 'Crear Cliente', done: clients > 0 },
         { id: 'venta', label: 'Crea tu primera Venta', description: 'Préstamo con cuotas y tasa de interés', path: '/admin/active-sales', cta: 'Crear Venta', done: sales > 0 },
-      ])
+      // Ronda 67: sin pasos de cartera para quien no puede registrar clientes ni ventas (SuperAdmin).
+      ].filter(s => (s.id !== 'cliente' || can(user, 'client.create')) && (s.id !== 'venta' || can(user, 'sale.createDirect') || can(user, 'sale.createRequest'))))
     } finally {
       setLoading(false)
     }

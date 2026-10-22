@@ -360,14 +360,15 @@ async function creditoDesembolsado(valor = 2000): Promise<Sale> {
   return (await db.sales.get(s.id))!
 }
 
-await spec('LOST6C-001', 'Castigos', 'un crédito desembolsado puede castigarse (Admin y SuperAdmin de la ruta)', async () => {
+// [MODIFICADO Ronda 67] Antes el SuperAdmin también castigaba; ahora su cartera es de solo lectura.
+await spec('LOST6C-001', 'Castigos', 'un crédito desembolsado puede castigarse (Admin de la ruta); el SuperAdmin ya no', async () => {
   await empresa(5000)
   const a = await creditoDesembolsado(1000)
   const b = await creditoDesembolsado(1000)
   await markSaleLost(a.id, ADMIN, 'Cliente ilocalizable hace 45 días')
-  await markSaleLost(b.id, SA, 'Cliente fallecido sin herederos')
+  await sinEfecto(() => markSaleLost(b.id, SA, 'Cliente fallecido sin herederos'))
   metric('Admin / SuperAdmin', `${(await db.sales.get(a.id))!.status} / ${(await db.sales.get(b.id))!.status}`)
-  assert((await db.sales.get(a.id))!.status === 'perdida' && (await db.sales.get(b.id))!.status === 'perdida', 'no se pudo castigar')
+  assert((await db.sales.get(a.id))!.status === 'perdida' && (await db.sales.get(b.id))!.status === 'activa', 'castigo incorrecto')
 })
 
 await spec('LOST6C-002', 'Castigos', 'el castigo no mueve Base, custodia ni transferencias', async () => {

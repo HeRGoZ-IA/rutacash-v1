@@ -245,18 +245,20 @@ await spec('ACTIVE-CREDIT-007', G_AC, 'Supervisor autorizado conserva el crédit
   assert(can(LAURA, 'sale.createDirect', { routeId: R_NORTE, tenantId: T }) && !can(JUAN, 'sale.createDirect', { routeId: R_NORTE, tenantId: T }), 'la matriz de capacidades cambió')
 })
 
-await spec('ACTIVE-CREDIT-008', G_AC, 'Admin/SuperAdmin conservan su comportamiento (directa, sin límite operativo, por servicio)', async () => {
+// [MODIFICADO Ronda 67] Antes el SuperAdmin también vendía directo; ahora su cartera es de solo lectura (rechazo).
+await spec('ACTIVE-CREDIT-008', G_AC, 'Admin conserva la venta directa (sin límite operativo, por servicio); el SuperAdmin ya no vende', async () => {
   await empresa()
   const { carlos } = await carlosConVentaA()
   const admin = await createDirectSale(entrada(R_NORTE, carlos.id, ADMIN, 800_000), ADMIN)
-  const sup = await createDirectSale(entrada(R_NORTE, carlos.id, SUPER, 900_000), SUPER)
+  const sup = await rechazo(() => createDirectSale(entrada(R_NORTE, carlos.id, SUPER, 900_000), SUPER))
   const socio = await rechazo(() => createDirectSale(entrada(R_NORTE, carlos.id, SOCIO), SOCIO))
   const secre = await rechazo(() => createSaleRequest(entrada(R_NORTE, carlos.id, SECRE), SECRE))
   const paginas = ['src/pages/admin/ActiveSalesPage.tsx', 'src/pages/admin/ClientsPage.tsx'].map(readSource)
   metric('Admin 800k (límite de ruta 500k)', `${admin.status} · desembolsado por ${admin.disbursedByUserId} · caja personal ${admin.disbursedByCollectorId ?? 'ninguna'}`)
-  metric('SuperAdmin 900k', sup.status)
+  metric('SuperAdmin 900k', sup)
   metric('Socio / Secretario', `${socio} / ${secre}`)
-  assert(admin.status === 'activa' && admin.disbursedByCollectorId === undefined && sup.status === 'activa', 'Admin/SuperAdmin perdieron la venta directa')
+  assert(admin.status === 'activa' && admin.disbursedByCollectorId === undefined, 'el Admin perdió la venta directa')
+  assert(sup !== 'ACEPTADO', 'el SuperAdmin registró una venta (su cartera es de solo lectura)')
   assert(socio !== 'ACEPTADO' && secre !== 'ACEPTADO', 'un perfil sin autoridad comercial creó ventas')
   assert(paginas.every(src => src.includes('createDirectSale(') && !src.includes('db.sales.add')), 'las pantallas de Admin siguen escribiendo la venta por su cuenta')
 })
@@ -367,7 +369,8 @@ async function gastar(actor: User, routeId: string, valor: number): Promise<void
 /** Venta cobrable de Carlos otorgada ANTES por la administración (sin caja personal). */
 async function ventaAdministrativa(routeId: string, valor: number): Promise<Sale> {
   const c = await cliente(routeId)
-  return createDirectSale(entrada(routeId, c.id, SUPER, valor, { numeroCuotas: 10 }), SUPER)
+  // Ronda 67: la registra el Administrador (la cartera del SuperAdmin es de solo lectura).
+  return createDirectSale(entrada(routeId, c.id, ADMIN, valor, { numeroCuotas: 10 }), ADMIN)
 }
 /** Juan desembolsa `valor`: solicita, Laura aprueba y Juan entrega el dinero. */
 async function desembolsoDeJuan(routeId: string, valor: number): Promise<Sale> {

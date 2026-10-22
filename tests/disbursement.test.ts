@@ -339,7 +339,8 @@ await spec('LOST-001', 'T6 transición', 'venta YA desembolsada → perdida: cas
   metric('segundo castigo', otra)
 })
 
-await spec('LOST-002', 'T6 permisos', 'marcar perdida conserva la matriz: solo Admin/SuperAdmin de la ruta (sale.cancel)', async () => {
+// [MODIFICADO Ronda 67] Antes el SuperAdmin también castigaba; ahora su cartera es de solo lectura.
+await spec('LOST-002', 'T6 permisos', 'marcar perdida conserva la matriz: solo el Admin de la ruta (sale.cancel); el SuperAdmin ya no', async () => {
   await empresa()
   const res: string[] = []
   for (const u of [JUAN, LAURA, SECRE, ADMIN_2]) {
@@ -350,10 +351,11 @@ await spec('LOST-002', 'T6 permisos', 'marcar perdida conserva la matriz: solo A
   const s1 = await aprobada(JUAN, 300)
   await markSaleLost(s1.id, ADMIN, 'Admin de la ruta')
   const s2 = await aprobada(JUAN, 300)
-  await markSaleLost(s2.id, SA, 'SuperAdmin de la empresa')
+  const sa = await sinEfecto(() => markSaleLost(s2.id, SA, 'SuperAdmin de la empresa'))
+  res.push(`superadmin: ${sa.split(':')[0]}`)
   const s3 = await aprobada(JUAN, 300)
   const vacio = await sinEfecto(() => markSaleLost(s3.id, ADMIN, '   '))
-  res.push(`Admin / SuperAdmin: aceptado`, `motivo vacío: ${vacio.split(':')[0]}`)
+  res.push(`Admin: aceptado`, `motivo vacío: ${vacio.split(':')[0]}`)
   for (const x of res) metric('·', x)
 })
 

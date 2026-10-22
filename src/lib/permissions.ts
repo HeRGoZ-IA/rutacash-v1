@@ -64,6 +64,8 @@ export type Capability =
   | 'client.edit'          // edición completa
   | 'client.editLimited'   // solo datos operativos (Secretario)
   | 'client.deactivate'    // baja lógica (nunca destructiva)
+  | 'client.setLocation'   // Ronda 67: fijar/corregir la ubicación de REFERENCIA del cliente
+  | 'map.view'             // Ronda 67: mapa de rutas del Administrador (clientes y actividad)
   // Ventas
   | 'sale.viewActive'
   | 'sale.viewHistory'
@@ -125,6 +127,26 @@ export type Capability =
 
 // --- Capacidades predeterminadas por rol ---
 
+// Escrituras de CARTERA (clientes, ventas, autorizaciones y pagos). Ronda 67: el SuperAdmin
+// no tiene ninguna; los perfiles operativos conservan las suyas.
+export const CARTERA_WRITE_CAPS: readonly Capability[] = [
+  'client.create', 'client.edit', 'client.editLimited', 'client.deactivate',
+  'sale.createDirect', 'sale.createRequest', 'sale.editBeforeDisbursement',
+  'sale.adjustAfterDisbursement', 'sale.cancel', 'sale.confirmDisbursement',
+  'authorization.access', 'authorization.approve', 'authorization.reject',
+  'authorization.modifyConditions', 'authorization.phoneConfirm',
+  'payment.register', 'payment.correct', 'payment.reverse', 'payment.approveAdjustment',
+  'client.setLocation',
+]
+
+/**
+ * Ronda 67: ¿la CARTERA de este rol se limita a Clientes en modo consulta? (SuperAdmin).
+ * Oculta Ventas Activas, Autorizaciones y Ajustes de pago, y protege sus URL.
+ */
+export function carteraClientsOnly(rol: UserRole | null | undefined): boolean {
+  return rol === 'superadmin'
+}
+
 // SUPER ADMIN — MÁXIMA AUTORIDAD DE **UNA** EMPRESA, y nada por encima de eso.
 //
 // Perdió toda responsabilidad SaaS: ya no accede a la plataforma, no crea empresas y
@@ -142,12 +164,12 @@ const SUPERADMIN_CAPS: Capability[] = [
   'route.viewAll', 'route.viewAssigned',
   'user.viewAll', 'user.create', 'user.edit', 'user.block', 'user.setRole',
   'user.grantCapabilities', 'user.resetPassword', 'password.changeOwn',
-  'client.create', 'client.view', 'client.edit', 'client.editLimited', 'client.deactivate',
-  'sale.viewActive', 'sale.viewHistory', 'sale.createDirect', 'sale.createRequest',
-  'sale.editBeforeDisbursement', 'sale.adjustAfterDisbursement', 'sale.cancel', 'sale.confirmDisbursement',
-  'authorization.access', 'authorization.approve', 'authorization.reject',
-  'authorization.modifyConditions', 'authorization.phoneConfirm',
-  'payment.register', 'payment.correct', 'payment.reverse', 'payment.viewHistory', 'payment.approveAdjustment',
+  // Ronda 67 (decisión del propietario): CARTERA del SuperAdmin = solo Clientes, en CONSULTA.
+  // Ve clientes, sus créditos y sus pagos; no crea, edita, borra ni cambia de ruta clientes,
+  // no vende, no autoriza, no cobra ni corrige pagos. Ver CARTERA_WRITE_CAPS.
+  'client.view',
+  'sale.viewActive', 'sale.viewHistory',
+  'payment.viewHistory',
   'expense.register', 'expense.correct',
   'cashbox.viewRoute', 'cashbox.viewOwnCollection', 'cashbox.viewConsolidated', 'cashbox.dailyClose',
   'partnerCash.viewOwn', 'partnerCash.viewAll', 'partnerCash.registerMovement', 'transfer.create',
@@ -168,6 +190,8 @@ const ADMIN_CAPS: Capability[] = [
   'user.viewAll', 'user.create', 'user.edit', 'user.block', 'user.setRole',
   'user.grantCapabilities', 'user.resetPassword', 'password.changeOwn',
   'client.create', 'client.view', 'client.edit', 'client.deactivate',
+  // Ronda 67: ubicación de referencia del cliente y mapa de sus rutas.
+  'client.setLocation', 'map.view',
   'sale.viewActive', 'sale.viewHistory', 'sale.createDirect', 'sale.createRequest',
   'sale.editBeforeDisbursement', 'sale.adjustAfterDisbursement', 'sale.cancel', 'sale.confirmDisbursement',
   'authorization.access', 'authorization.approve', 'authorization.reject', 'authorization.modifyConditions',
@@ -203,7 +227,7 @@ const SOCIO_CAPS: Capability[] = [
 // SIN indicadores consolidados y SIN cerrar la semana.
 const SUPERVISOR_CAPS: Capability[] = [
   'route.viewAssigned',
-  'client.create', 'client.view',
+  'client.create', 'client.view', 'client.setLocation',
   'sale.viewActive', 'sale.viewHistory', 'sale.createRequest', 'sale.confirmDisbursement',
   'sale.createDirect',
   'authorization.access', 'authorization.approve', 'authorization.reject',
@@ -223,7 +247,7 @@ const SUPERVISOR_CAPS: Capability[] = [
 // administrativos consolidados. NO venta directa (toda venta = solicitud).
 const COBRADOR_CAPS: Capability[] = [
   'route.viewAssigned',
-  'client.create', 'client.view',
+  'client.create', 'client.view', 'client.setLocation',
   'sale.viewActive', 'sale.viewHistory', 'sale.createRequest', 'sale.confirmDisbursement',
   'payment.register', 'payment.viewHistory',
   'expense.register',
@@ -270,7 +294,8 @@ export function capabilitiesForRole(rol: UserRole): Capability[] {
 const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
   // El Super Admin es empresa, no plataforma. Estas tres capacidades son del Owner y
   // NINGÚN rol empresarial puede tenerlas, ni por rol base ni por delegación.
-  superadmin: ['platform.access', 'company.create', 'company.suspend'],
+  // Ronda 67: tampoco ninguna escritura de CARTERA (su cartera es de solo lectura).
+  superadmin: ['platform.access', 'company.create', 'company.suspend', ...CARTERA_WRITE_CAPS],
   admin: [
     // El Administrador no es plataforma ni gestiona empresas ni borra rutas.
     'platform.access', 'company.create', 'company.edit', 'company.suspend',
@@ -527,6 +552,7 @@ export interface PermissionContext {
 const ROUTE_SCOPED: ReadonlySet<Capability> = new Set<Capability>([
   'route.edit', 'route.block', 'route.assign', 'route.viewAssigned',
   'client.create', 'client.view', 'client.edit', 'client.editLimited', 'client.deactivate',
+  'client.setLocation', 'map.view',
   'sale.viewActive', 'sale.viewHistory', 'sale.createDirect', 'sale.createRequest',
   'sale.editBeforeDisbursement', 'sale.adjustAfterDisbursement', 'sale.cancel', 'sale.confirmDisbursement',
   'authorization.access', 'authorization.approve', 'authorization.reject',

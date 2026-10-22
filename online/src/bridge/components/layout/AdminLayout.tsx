@@ -11,12 +11,15 @@
 //   4. Ronda 59 · DINERO: Administrador = Caja principal, Gastos, Transferencias, Notificaciones,
 //      Consultas; SuperAdmin = Capital, Gastos, Notificaciones, Consultas. Sin Retiros (saldo
 //      heredado de antiguas cajas de ruta) ni Historial aparte: los historiales están en Consultas.
+//   5. Ronda 67: CARTERA del SuperAdmin = solo Clientes (consulta). Ventas Activas, Autorizaciones y
+//      Ajustes de pago son del Administrador (sus URL también están protegidas en CleanOnlineApp).
+//      «Mapa» (Cartera) es solo del Administrador.
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, MapPin, CreditCard,
   ArrowLeftRight, TrendingDown, BarChart3, CalendarRange,
-  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt, Building2, Bell, Search } from 'lucide-react'
+  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt, Building2, Bell, Search, Map as MapIcon } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { cn } from '@/lib/utils'
@@ -50,9 +53,11 @@ const navItems: NavItem[] = [
   { path: '/admin/offices', label: 'Oficinas', icon: <Building2 className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Estructura' },
   { path: '/admin/routes', label: 'Rutas', icon: <MapPin className="w-4 h-4" />, group: 'Estructura' },
   { path: '/admin/clients', label: 'Clientes', icon: <Users className="w-4 h-4" />, group: 'Cartera' },
-  { path: '/admin/active-sales', label: 'Ventas Activas', icon: <CreditCard className="w-4 h-4" />, group: 'Cartera' },
-  { path: '/admin/sale-authorizations', label: 'Autorizaciones', icon: <ClipboardCheck className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Cartera' },
-  { path: '/admin/payment-adjustments', label: 'Ajustes de pago', icon: <Receipt className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Cartera' },
+  { path: '/admin/active-sales', label: 'Ventas Activas', icon: <CreditCard className="w-4 h-4" />, roles: ['admin'], group: 'Cartera' },
+  { path: '/admin/sale-authorizations', label: 'Autorizaciones', icon: <ClipboardCheck className="w-4 h-4" />, roles: ['admin'], group: 'Cartera' },
+  { path: '/admin/payment-adjustments', label: 'Ajustes de pago', icon: <Receipt className="w-4 h-4" />, roles: ['admin'], group: 'Cartera' },
+  // Ronda 67: mapa de clientes y actividad de las rutas del Administrador (no es seguimiento en tiempo real).
+  { path: '/admin/mapa', label: 'Mapa', icon: <MapIcon className="w-4 h-4" />, roles: ['admin'], group: 'Cartera' },
   // Ronda 3/6: para el Administrador, Capital es su CAJA PRINCIPAL (misma página y bolsa).
   { path: '/admin/capital', label: 'Caja principal', icon: <DollarSign className="w-4 h-4" />, roles: ['admin'], group: 'Dinero' },
   { path: '/admin/capital', label: 'Capital', icon: <DollarSign className="w-4 h-4" />, roles: ['superadmin'], group: 'Dinero' },

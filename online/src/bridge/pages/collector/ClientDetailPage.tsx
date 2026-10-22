@@ -1,6 +1,7 @@
 // ADEX Online: COPIA de ClientDetailPage (CLEAN). Cambio marcado «ADEX Online (Ronda 62)»: el
 // detalle muestra las VISITAS SIN PAGO del crédito (del servidor) y las guardadas en este dispositivo
 // sin sincronizar. Antes se registraban, pero ninguna pantalla las mostraba. Nada más cambia.
+// «ADEX Online (Ronda 67)»: bloque «Ubicación del cliente» (referencia, fijada con el GPS estando en el lugar).
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useOpBase } from '@/hooks/useOpBase'
@@ -20,6 +21,9 @@ import { isOpen, useOffline } from '../../../offline/state.ts'
 import { reasonLabel } from '../../../offline/captures.ts'
 import { OpStatusBadge } from '../../../offline/ui.tsx'
 import { formatDateTime } from '@/lib/formatters'
+// ADEX Online (Ronda 67).
+import { can } from '@/lib/permissions'
+import { ClientReferenceLocation } from '../../../runtime/ClientReferenceLocation.tsx'
 
 /**
  * Orden de "Parcelas recientes" (Ajustes post-Revisión 2):
@@ -209,6 +213,9 @@ export default function ClientDetailPage() {
           <p className="text-sm"><span className="text-gray-400">Dir:</span> {client.direccionPrincipal}</p>
           <p className="text-sm"><span className="text-gray-400">Doc:</span> {client.documento}</p>
         </div>
+
+        {/* ADEX Online (Ronda 67): ubicación de referencia del cliente. */}
+        <ClientReferenceLocation clientId={client.id} canSet={can(user, 'client.setLocation', { routeId: client.routeId })} />
 
         {/* ADEX Online (Ronda 62): visitas sin pago (servidor) y las guardadas en el dispositivo. */}
         {(visits.length > 0 || pendingVisits.length > 0) && (

@@ -14,7 +14,7 @@ import { toast } from '@/components/ui/Toast'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useDataRevision } from '@/hooks/useDataRevision'
-import { can, ROLE_LABELS, canManageUser } from '@/lib/permissions'
+import { can, ROLE_LABELS, canManageUser, carteraClientsOnly } from '@/lib/permissions'
 import { formatCurrency } from '@/lib/formatters'
 import { NO_OFFICE_LABEL } from '@/lib/officeGrouping'
 import { officeSummaryCsvRows, officeRoutesCsvRows } from '@/lib/officeExecutive'
@@ -643,8 +643,9 @@ export default function OfficeDetailPage() {
           <div className="flex items-center gap-2 w-max md:w-auto">
             <Button variant="ghost" size="sm" icon={<Users className="w-3.5 h-3.5" />}
               onClick={() => navigate(`/admin/clients?officeId=${office.id}`)}>Ver Clientes</Button>
-            <Button variant="ghost" size="sm" icon={<CreditCard className="w-3.5 h-3.5" />}
-              onClick={() => navigate(`/admin/active-sales?officeId=${office.id}`)}>Ver Ventas</Button>
+            {/* Ronda 67: Ventas Activas no forma parte de la cartera del SuperAdmin (solo Clientes). */}
+            {!carteraClientsOnly(user?.rol) && <Button variant="ghost" size="sm" icon={<CreditCard className="w-3.5 h-3.5" />}
+              onClick={() => navigate(`/admin/active-sales?officeId=${office.id}`)}>Ver Ventas</Button>}
             <Button variant="ghost" size="sm" icon={<Archive className="w-3.5 h-3.5" />}
               onClick={() => navigate(`/admin/cashbox?officeId=${office.id}`)}>Ver Caja</Button>
             <Button variant="ghost" size="sm" icon={<BarChart3 className="w-3.5 h-3.5" />}

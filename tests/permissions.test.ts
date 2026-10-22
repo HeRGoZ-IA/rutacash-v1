@@ -11,7 +11,7 @@ import {
   assignableRoles,
   hasOperationalRoutes, isRouteUnrestricted, filterByAccessibleRoute, filterAccessibleRoutes,
   isCapabilityCompatible, sanitizeGrantedCapabilities, delegableCapabilitiesFor,
-  isPartnerInScope, isTransferInScope, type Capability,
+  isPartnerInScope, isTransferInScope, type Capability, CARTERA_WRITE_CAPS, carteraClientsOnly,
 } from '../src/lib/permissions'
 import { CAPABILITY_METADATA, CATEGORY_ORDER } from '../src/lib/capabilityCatalog'
 import { getEffectiveCompanyStatus, isCompanyBlocked } from '../src/lib/company'
@@ -78,7 +78,15 @@ const cobrador = mkUser('cobrador', { authorizedRouteIds: ['r1'] })
 const secretario = mkUser('secretario', { authorizedRouteIds: ['r1'] })
 
 // --- D. VENTAS: venta directa vs solicitud ---
-check('superadmin puede venta directa', can(superadmin, 'sale.createDirect', { routeId: 'r1' }))
+// [MODIFICADO Ronda 67 — CARTERA del SuperAdmin = solo Clientes, en consulta] Regla anterior:
+// el SuperAdmin hacía venta directa. Regla aprobada: no escribe en cartera por ninguna vía.
+check('R67 — superadmin NO hace venta directa', !can(superadmin, 'sale.createDirect', { routeId: 'r1' }))
+check('R67 — superadmin consulta clientes, créditos y pagos', can(superadmin, 'client.view', { routeId: 'r1' }) && can(superadmin, 'sale.viewActive') && can(superadmin, 'sale.viewHistory') && can(superadmin, 'payment.viewHistory'))
+check('R67 — superadmin sin ninguna escritura de cartera', CARTERA_WRITE_CAPS.every(c => !can(superadmin, c, { routeId: 'r1' })))
+check('R67 — tampoco por delegación (capacidades incompatibles)', CARTERA_WRITE_CAPS.every(c => !isCapabilityCompatible('superadmin', c)))
+check('R67 — admin conserva las escrituras de cartera en su ruta', CARTERA_WRITE_CAPS.filter(c => c !== 'client.editLimited' && c !== 'authorization.phoneConfirm').every(c => can(admin, c, { routeId: 'r1' })))
+check('R67 — superadmin conserva capital, gastos y cuadres', ['capital.manage', 'capital.allocateAdmins', 'capital.assignController', 'cashCustody.manage', 'expense.register', 'expense.correct', 'settlement.close', 'cashSettlement.close', 'user.create', 'route.create'].every(c => can(superadmin, c as Capability)))
+check('R67 — solo la cartera del superadmin se limita a Clientes', carteraClientsOnly('superadmin') && !carteraClientsOnly('admin'))
 check('admin puede venta directa (ruta autorizada)', can(admin, 'sale.createDirect', { routeId: 'r1' }))
 check('cobrador NO puede venta directa', !can(cobrador, 'sale.createDirect', { routeId: 'r1' }))
 // [MODIFICADO 2026-09-24 — autoridad comercial del Supervisor] Regla anterior: el Supervisor NO
