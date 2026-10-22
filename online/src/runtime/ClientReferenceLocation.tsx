@@ -1,8 +1,9 @@
 // UBICACIÓN DE REFERENCIA DEL CLIENTE en la ficha del Cobrador y del Supervisor (Ronda 67).
 //
-// Estando en el lugar del cliente, la persona pulsa «Estoy en el lugar del cliente» y confirma:
-// se toma UNA lectura del GPS del dispositivo y se guarda como referencia con su origen
-// («GPS en el lugar»), su precisión y quién la tomó (auditado; la anterior queda en el historial).
+// Estando en el lugar del cliente, la persona pulsa «Estoy en el lugar del cliente»: se toma UNA
+// lectura del GPS del dispositivo y (Ronda 73 · SOC-06) se MUESTRA su precisión antes de guardar;
+// solo «Guardar esta ubicación» la registra como referencia con su origen («GPS en el lugar»), su
+// precisión y quién la tomó (auditado; la anterior queda en el historial, visible aquí).
 // Nada se guarda automáticamente: un abono o una venta registrados en otro sitio nunca mueven al
 // cliente. Solo con conexión (no hay registro de ubicación sin internet) y sin seguimiento.
 
@@ -17,25 +18,32 @@ import { generateId } from '@/lib/utils';
 import { api } from './session.ts';
 import { money } from './commands.ts';
 
-interface Current { source: 'gps_on_site' | 'map_pin'; setAt: string; setByName: string | null; accuracyM: number | null }
+interface Current { source: 'gps_on_site' | 'map_pin'; setAt: string; setByName: string | null; accuracyM: number | null; note?: string | null }
+interface Reading { lat: number; lng: number; accuracyM: number | null; capturedAt: string | null }
+/** Por encima de esta precisión se advierte antes de guardar (la lectura podría no ser la del lugar). */
+const POOR_ACCURACY_M = 100;
 
 export function ClientReferenceLocation({ clientId, canSet }: { clientId: string; canSet: boolean }) {
   const [current, setCurrent] = useState<Current | null>(null);
+  const [history, setHistory] = useState<Current[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [reading, setReading] = useState<Reading | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
     try {
-      const r = await api().get<{ current: Current | null }>(`/v1/clients/${encodeURIComponent(clientId)}/location`);
-      setCurrent(r.current); setState('ready');
+      const r = await api().get<{ current: Current | null; history?: Current[] }>(`/v1/clients/${encodeURIComponent(clientId)}/location`);
+      setCurrent(r.current); setHistory(r.history ?? []); setState('ready');
     } catch {
       setState('unavailable');
     }
   };
   useEffect(() => { void load(); }, [clientId]);
 
-  const save = async () => {
+  // Paso 1: una lectura del GPS (nada se guarda todavía).
+  const read = async () => {
     setBusy(true);
     try {
       const g = await captureLocation();
@@ -43,11 +51,23 @@ export function ClientReferenceLocation({ clientId, canSet }: { clientId: string
         toast.error(`${GEO_STATUS_LABEL[g.status]}. No se guardó ninguna ubicación.`);
         return;
       }
+      setReading({ lat: g.lat, lng: g.lng, accuracyM: g.accuracyM ?? null, capturedAt: g.capturedAt ?? null });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Paso 2: guardar la lectura que la persona vio y confirmó.
+  const save = async () => {
+    if (!reading) return;
+    setBusy(true);
+    try {
       await money('POST', `/v1/clients/${encodeURIComponent(clientId)}/location`, {
-        source: 'gps_on_site', lat: g.lat, lng: g.lng, ...(g.accuracyM != null ? { accuracyM: g.accuracyM } : {}), ...(g.capturedAt ? { capturedAt: g.capturedAt } : {}),
+        source: 'gps_on_site', lat: reading.lat, lng: reading.lng, ...(reading.accuracyM != null ? { accuracyM: reading.accuracyM } : {}),
+        ...(reading.capturedAt ? { capturedAt: reading.capturedAt } : {}),
       }, generateId());
       toast.success('Ubicación del cliente guardada.');
-      setConfirm(false);
+      setConfirm(false); setReading(null);
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -70,12 +90,38 @@ export function ClientReferenceLocation({ clientId, canSet }: { clientId: string
           Estoy en el lugar del cliente
         </Button>
       )}
-      <Modal open={confirm} onClose={() => { if (!busy) setConfirm(false); }} title="Guardar ubicación del cliente" size="sm"
-        footer={<><Button variant="secondary" onClick={() => setConfirm(false)} disabled={busy}>Cancelar</Button><Button onClick={() => void save()} loading={busy} data-testid="client-location-confirm">Usar mi ubicación actual</Button></>}>
+      {state === 'ready' && history.length > 1 && (
+        <button type="button" className="block text-xs text-primary-700 hover:underline" onClick={() => setShowHistory((s) => !s)} aria-expanded={showHistory}>
+          {showHistory ? 'Ocultar historial' : `Ver historial (${history.length})`}
+        </button>
+      )}
+      {showHistory && (
+        <ul className="text-xs text-gray-600 space-y-0.5" data-testid="client-location-history">
+          {history.map((h, i) => (
+            <li key={i}>{formatDate(h.setAt)} · {h.source === 'gps_on_site' ? 'GPS en el lugar' : 'marcada en el mapa'}{h.accuracyM != null ? ` ±${h.accuracyM} m` : ''}{h.setByName ? ` · ${h.setByName}` : ''}</li>
+          ))}
+        </ul>
+      )}
+      <Modal open={confirm} onClose={() => { if (!busy) { setConfirm(false); setReading(null); } }} title="Guardar ubicación del cliente" size="sm"
+        footer={reading
+          ? <><Button variant="secondary" onClick={() => void read()} disabled={busy}>Repetir lectura</Button><Button onClick={() => void save()} loading={busy} data-testid="client-location-save">Guardar esta ubicación</Button></>
+          : <><Button variant="secondary" onClick={() => setConfirm(false)} disabled={busy}>Cancelar</Button><Button onClick={() => void read()} loading={busy} data-testid="client-location-confirm">Tomar mi ubicación actual</Button></>}>
         <div className="space-y-2 text-sm">
-          <p>Confirme que está <b>en el lugar donde se atiende a este cliente</b>. Se tomará una sola lectura del GPS de este dispositivo y quedará como su ubicación de referencia, con su nombre y la fecha.</p>
-          {current && <p className="text-amber-700">Sustituye a la ubicación actual; la anterior queda en el historial.</p>}
-          <p className="text-gray-500">Si no está en el lugar, no la guarde: la oficina puede marcarla en el mapa.</p>
+          {!reading ? (
+            <>
+              <p>Confirme que está <b>en el lugar donde se atiende a este cliente</b>. Se tomará una sola lectura del GPS de este dispositivo; podrá revisarla antes de guardarla.</p>
+              {current && <p className="text-amber-700">Sustituye a la ubicación actual; la anterior queda en el historial.</p>}
+              <p className="text-gray-500">Si no está en el lugar, no la guarde: la oficina puede marcarla en el mapa.</p>
+            </>
+          ) : (
+            <>
+              <p data-testid="client-location-reading">Lectura tomada: precisión <b>{reading.accuracyM != null ? `±${Math.round(reading.accuracyM)} m` : 'desconocida'}</b>.</p>
+              {(reading.accuracyM == null || reading.accuracyM > POOR_ACCURACY_M) && (
+                <p className="text-amber-700">La precisión es baja: acérquese a un lugar abierto y repita la lectura, o deje que la oficina la marque en el mapa.</p>
+              )}
+              <p className="text-gray-500">Se guardará como «GPS en el lugar», con su nombre y la fecha.</p>
+            </>
+          )}
         </div>
       </Modal>
     </div>

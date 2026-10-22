@@ -29,9 +29,12 @@ import { cn } from '@/lib/utils';
 import { api } from './session.ts';
 import { money } from './commands.ts';
 import { toMajor } from './mappers.ts';
+import { geocoder, PRECISION_LABEL, type GeocodeResult } from './geocoding.ts';
+import { useRuntime } from './session.ts';
 
 type Kind = 'sale' | 'payment' | 'visit';
 interface Device { status: string; lat: number | null; lng: number | null; accuracyM: number | null; capturedAt: string | null; receivedAt: string | null }
+interface LocationHistory { source: string; setAt: string; setByName: string | null; accuracyM: number | null; note?: string | null }
 interface MapClient {
   id: string; name: string; routeId: string; address: string; addressSecondary: string | null; status: string;
   location: null | { source: 'gps_on_site' | 'map_pin'; lat: number; lng: number; accuracyM: number | null; setAt: string; setBy: string; setByName: string | null; setByRole: string };
@@ -103,6 +106,13 @@ export default function RouteMapPage() {
   const [picking, setPicking] = useState<MapClient | null>(null);
   const [pinned, setPinned] = useState<{ client: MapClient; lat: number; lng: number } | null>(null);
   const [note, setNote] = useState('');
+  // Ronda 73 · SOC-06: punto PROVISIONAL (arrastrable) antes de confirmar, su origen y el historial del cliente.
+  const [draft, setDraft] = useState<{ lat: number; lng: number; fromAddress?: GeocodeResult } | null>(null);
+  const [history, setHistory] = useState<LocationHistory[] | null>(null);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<GeocodeResult[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const draftRef = useRef<L.Marker | null>(null);
   const [saving, setSaving] = useState(false);
   const [missingOpen, setMissingOpen] = useState(false);
   const [tilesFailed, setTilesFailed] = useState(false);
@@ -254,18 +264,57 @@ export default function RouteMapPage() {
     if (!map || !picking) return;
     const el = map.getContainer();
     el.style.cursor = 'crosshair';
-    const onClick = (e: L.LeafletMouseEvent) => setPinned({ client: picking, lat: Number(e.latlng.lat.toFixed(6)), lng: Number(e.latlng.lng.toFixed(6)) });
+    const onClick = (e: L.LeafletMouseEvent) => setDraft({ lat: Number(e.latlng.lat.toFixed(6)), lng: Number(e.latlng.lng.toFixed(6)) });
     map.on('click', onClick);
+    // Centrar en los clientes ya ubicados de su ruta (ayuda a encontrar la dirección escrita).
+    const near = (data?.clients ?? []).filter((c) => c.routeId === picking.routeId && c.location);
+    if (near.length) map.fitBounds(L.latLngBounds(near.map((c) => [c.location!.lat, c.location!.lng] as [number, number])), { padding: [32, 32], maxZoom: 16 });
+    // Historial auditado de su ubicación de referencia.
+    setHistory(null);
+    void api().get<{ history: LocationHistory[] }>(`/v1/clients/${encodeURIComponent(picking.id)}/location`)
+      .then((r) => setHistory(r.history)).catch(() => setHistory([]));
     return () => { map.off('click', onClick); el.style.cursor = ''; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [picking]);
+
+  // Marcador provisional: se corrige arrastrándolo o tocando otro punto; nada se guarda sin confirmar.
+  useEffect(() => {
+    const map = mapRef.current;
+    draftRef.current?.remove();
+    draftRef.current = null;
+    if (!map || !draft) return;
+    const icon = L.divIcon({ className: '', iconSize: [28, 28], iconAnchor: [14, 28],
+      html: '<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C8 2 5 5 5 9c0 5 7 13 7 13s7-8 7-13c0-4-3-7-7-7z" fill="#2563eb" stroke="#fff" stroke-width="1.5"/><circle cx="12" cy="9" r="2.6" fill="#fff"/></svg>' });
+    const m = L.marker([draft.lat, draft.lng], { draggable: true, icon, title: 'Ubicación propuesta: arrástrela para corregirla', zIndexOffset: 1000 }).addTo(map);
+    m.on('dragend', () => { const p = m.getLatLng(); setDraft((d) => (d ? { ...d, lat: Number(p.lat.toFixed(6)), lng: Number(p.lng.toFixed(6)) } : d)); });
+    draftRef.current = m;
+    return () => { m.remove(); };
+  }, [draft]);
+
+  const stopPicking = () => { setPicking(null); setDraft(null); setResults(null); setQuery(''); setHistory(null); };
+
+  const search = async () => {
+    if (!geocoder || !query.trim()) return;
+    setSearching(true);
+    try {
+      const country = useRuntime.getState().ctx?.company.countryCode ?? '';
+      const c = mapRef.current?.getCenter();
+      setResults(await geocoder.search(query.trim(), { countryCode: country, ...(c ? { near: { lat: c.lat, lng: c.lng } } : {}) }));
+    } catch {
+      setResults([]);
+    } finally { setSearching(false); }
+  };
 
   const savePin = async () => {
     if (!pinned) return;
     setSaving(true);
     try {
-      await money('POST', `/v1/clients/${pinned.client.id}/location`, { source: 'map_pin', lat: pinned.lat, lng: pinned.lng, ...(note.trim() ? { note: note.trim().slice(0, 200) } : {}) }, generateId());
+      // Desde una dirección: queda como punto en el mapa (aproximado), nunca como GPS confirmado.
+      const origin = draft?.fromAddress ? `Desde la dirección «${draft.fromAddress.label}» (${PRECISION_LABEL[draft.fromAddress.precision]}), confirmada a mano.` : '';
+      const fullNote = [origin, note.trim()].filter(Boolean).join(' ').slice(0, 200);
+      await money('POST', `/v1/clients/${pinned.client.id}/location`, { source: 'map_pin', lat: pinned.lat, lng: pinned.lng, ...(fullNote ? { note: fullNote } : {}) }, generateId());
       toast.success(`Ubicación de ${pinned.client.name} guardada (marcada en el mapa).`);
-      setPinned(null); setPicking(null); setNote('');
+      setPinned(null); stopPicking(); setNote('');
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -323,9 +372,36 @@ export default function RouteMapPage() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-2">
           {picking && (
-            <div className="rounded-xl border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-800 flex items-center justify-between gap-2" data-testid="map-picking">
-              <span><Crosshair className="inline w-4 h-4 mr-1" />Toque en el mapa el lugar donde se atiende a <b>{picking.name}</b>.</span>
-              <Button variant="ghost" size="sm" onClick={() => setPicking(null)}>Cancelar</Button>
+            <div className="rounded-xl border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-800 space-y-2" data-testid="map-picking">
+              <div className="flex items-start justify-between gap-2">
+                <span><Crosshair className="inline w-4 h-4 mr-1" />{draft ? 'Ajuste el marcador azul arrastrándolo (o toque otro punto) y confirme:' : 'Toque en el mapa el lugar donde se atiende a'} <b>{picking.name}</b>.</span>
+                <Button variant="ghost" size="sm" onClick={stopPicking}>Cancelar</Button>
+              </div>
+              <p className="text-xs text-primary-900" data-testid="map-picking-address">Dirección registrada: <b>{picking.address}</b>{picking.addressSecondary ? <> · Cobro: <b>{picking.addressSecondary}</b></> : null}</p>
+              {geocoder && (
+                <div className="space-y-1">
+                  <div className="flex gap-2">
+                    <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar dirección" aria-label="Buscar dirección" />
+                    <Button variant="secondary" size="sm" onClick={() => void search()} loading={searching}>Buscar</Button>
+                  </div>
+                  {results && (results.length === 0
+                    ? <p className="text-xs">Sin resultados: marque el punto a mano.</p>
+                    : <ul className="max-h-40 overflow-y-auto divide-y divide-primary-100 bg-white rounded-lg border border-primary-100">
+                        {results.map((r, i) => (
+                          <li key={i}><button type="button" className="w-full text-left px-2 py-1.5 text-xs hover:bg-primary-50"
+                            onClick={() => { setDraft({ lat: r.lat, lng: r.lng, fromAddress: r }); mapRef.current?.setView([r.lat, r.lng], 18); }}>
+                            {r.label} <span className="text-gray-500">· {PRECISION_LABEL[r.precision]}</span></button></li>
+                        ))}
+                      </ul>)}
+                  {results && results.length > 1 && <p className="text-xs">Varias coincidencias: elija la correcta y ajuste el marcador.</p>}
+                  <p className="text-[11px] text-primary-700">Resultados de {geocoder.name}: siempre aproximados hasta que usted confirme el punto.</p>
+                </div>
+              )}
+              {draft && (
+                <div className="flex justify-end">
+                  <Button size="sm" onClick={() => setPinned({ client: picking, lat: draft.lat, lng: draft.lng })} data-testid="map-draft-confirm">Confirmar este punto</Button>
+                </div>
+              )}
             </div>
           )}
           <div className="relative">
@@ -401,6 +477,16 @@ export default function RouteMapPage() {
               ({pinned.lat.toFixed(5)}, {pinned.lng.toFixed(5)}). Queda registrado como «punto marcado en el mapa», con su nombre y la fecha.</p>
             {pinned.client.location && <p className="text-amber-700">Sustituye a la ubicación actual ({pinned.client.location.source === 'gps_on_site' ? 'GPS en el lugar' : 'punto en el mapa'}, {formatDate(pinned.client.location.setAt)}). La anterior queda en el historial.</p>}
             <Input label="Nota (opcional)" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder="Ej.: local en la esquina, portón azul" />
+            {history && history.length > 0 && (
+              <div data-testid="map-location-history">
+                <p className="text-xs font-semibold text-gray-600 mb-1">Historial de su ubicación ({history.length})</p>
+                <ul className="text-xs text-gray-600 space-y-0.5 max-h-28 overflow-y-auto">
+                  {history.map((h, i) => (
+                    <li key={i}>{formatDateTime(h.setAt)} · {h.source === 'gps_on_site' ? 'GPS en el lugar' : 'punto en el mapa'}{h.accuracyM != null ? ` ±${h.accuracyM} m` : ''}{h.setByName ? ` · ${h.setByName}` : ''}{h.note ? ` · ${h.note}` : ''}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
       </Modal>
