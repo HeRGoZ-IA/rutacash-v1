@@ -161,7 +161,9 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       id('saleRequestId', 'sale_request_id'), f('motivoPerdida', 'lost_reason'), instant('lostAt', 'lost_at'),
       id('lostByUserId', 'lost_by_membership_id'), created, updated,
     ],
-    omitted: [], added: [
+    omitted: [
+      { field: 'rectificationCount', reason: 'Ronda 73 (0030): dato SOLO del servidor (rectificaciones del crédito desembolsado) que ADEX Online lee de la API; CLEAN local no rectifica ventas y no se importa' },
+    ], added: [
       { column: 'ledger_operation_id', reason: 'Fase 4: asiento de desembolso del libro de capital del servidor (capital_operations); CLEAN no tiene libro de doble entrada' },
       { column: 'rectification_count', reason: 'Ronda 73 (0030): rectificaciones del crédito desembolsado (historial en credit_rectifications; concurrencia optimista)' },
     ],

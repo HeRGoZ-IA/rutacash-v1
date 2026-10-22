@@ -58,7 +58,6 @@ const COLUMNS: { key: ColKey; label: string }[] = [
   { key: 'destino', label: 'Destino' }, { key: 'importe', label: 'Importe' }, { key: 'estado', label: 'Estado' }, { key: 'referencia', label: 'Referencia' },
   { key: 'usuario', label: 'Registró' },
 ];
-const COLS_KEY = 'adex.consultas.columnas';
 const PAGE = 100;
 
 interface Filters {
@@ -67,11 +66,8 @@ interface Filters {
 }
 type Sort = 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
 
+/** Columnas visibles: preferencia de la pantalla (ADEX Online no guarda nada en el dispositivo, SEC5-003). */
 function readCols(): Set<ColKey> {
-  try {
-    const raw = localStorage.getItem(COLS_KEY);
-    if (raw) return new Set(JSON.parse(raw) as ColKey[]);
-  } catch { /* sin almacenamiento: todas visibles */ }
   return new Set(COLUMNS.map((c) => c.key));
 }
 
@@ -247,7 +243,6 @@ export function MovementsTable() {
   const toggleCol = (k: ColKey) => setCols((prev) => {
     const next = new Set(prev);
     if (next.has(k)) { if (next.size > 1) next.delete(k); } else next.add(k);
-    try { localStorage.setItem(COLS_KEY, JSON.stringify([...next])); } catch { /* preferencia solo de esta sesión */ }
     return next;
   });
   const anyFilter = Boolean(filters.from || filters.to || filters.money || filters.q || filters.minAmount || filters.maxAmount || filters.origen || filters.destino)
