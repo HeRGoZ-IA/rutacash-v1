@@ -2,7 +2,7 @@
 //
 // Convertir una dirección escrita en coordenadas exige un servicio de geocodificación externo. Ninguno
 // está aprobado (claves, tarifas y condiciones de uso son decisión del propietario: ver
-// docs/RONDA_73_CORRECCIONES_SOCIO.md, «SOC-06»). Mientras `geocoder` sea null, el mapa NO muestra el
+// docs/ADEX_RONDA_73_CORRECCIONES_SOCIO.md, «SOC-06»). Mientras `geocoder` sea null, el mapa NO muestra el
 // buscador y el Administrador ubica al cliente marcando y ajustando el punto a mano con la dirección
 // escrita a la vista.
 //
