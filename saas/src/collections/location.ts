@@ -147,6 +147,11 @@ export async function routeMapReady(pool: pg.Pool): Promise<boolean> {
   return relationExists(pool, 'adex.client_locations');
 }
 
+/** Ronda 73 (0031): una sola sesión activa por identidad. */
+export async function singleSessionReady(pool: pg.Pool): Promise<boolean> {
+  return relationExists(pool, 'adex.identity_active_sessions');
+}
+
 /** Ronda 73 (0030): parcelas en la autorización y rectificación de créditos desembolsados. */
 export async function creditRectificationReady(pool: pg.Pool): Promise<boolean> {
   return relationExists(pool, 'adex.credit_rectifications');

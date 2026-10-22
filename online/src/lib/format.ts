@@ -5,7 +5,7 @@ const ERRORS: Record<string, string> = {
   INVALID_CREDENTIALS: 'Correo o contraseña incorrectos.',
   AUTH_UNAVAILABLE: 'El servicio de acceso no responde. Inténtelo de nuevo.',
   SESSION_EXPIRED: 'La sesión caducó. Inicie sesión de nuevo.',
-  SESSION_REVOKED: 'La sesión fue cerrada. Inicie sesión de nuevo.',
+  SESSION_REVOKED: 'La sesión se cerró (por ejemplo, porque se inició sesión en otro dispositivo). Inicie sesión de nuevo.',
   IDENTITY_NOT_PROVISIONED: 'Su usuario todavía no tiene acceso a ninguna empresa.',
   IDENTITY_DISABLED: 'Su usuario está desactivado.',
   COMPANY_BLOCKED: 'La empresa no está disponible (suspendida, en mantenimiento o retirada).',

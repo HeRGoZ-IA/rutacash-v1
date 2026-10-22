@@ -32,6 +32,7 @@ import {
   refreshRouteCounts, registerPayment, resolveOperator, setCompanyStatus, setPaymentStatus, superadminAccessLink, updateBilling, updateProfile,
 } from '../control/service.ts';
 import { readJson, scopeOf, send } from './common.ts';
+import { claimSession } from '../identity/service.ts';
 
 export interface ControlApiOptions {
   /** Pool conectado como `adex_control`. */
@@ -106,6 +107,9 @@ export function createControlHandler(opts: ControlApiOptions): (req: http.Incomi
       if (!handler) throw new ApiError(404, 'NOT_FOUND');
       const body = fields ? await readJson(req, fields) : {};
       const h = handler;
+      // Ronda 73 · SOC-01: el inicio de sesión del Owner deja esta sesión como la única vigente
+      // ANTES de validar el contexto (la nueva sesión aún no es la vigente).
+      if (p === '/control/v1/session/start') await withTransaction(opts.pool, (c) => claimSession(c, claims, 'adex_control'));
       const result = await withTransaction(opts.pool, async (c) => {
         await resolveOperator(c, claims);
         return h(c, body, claims);

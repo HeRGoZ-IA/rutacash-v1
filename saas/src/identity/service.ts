@@ -331,3 +331,22 @@ export async function logout(client: pg.PoolClient, claims: SessionClaims, scope
   await client.query('insert into adex.revoked_sessions (session_id, identity_id, reason) values ($1, $2, $3)',
     [claims.sessionId, claims.identityId, 'logout']);
 }
+
+// ---------- Ronda 73 · SOC-01: una sola sesión activa por identidad (0031) ----------
+const claimReady: Record<'adex' | 'adex_control', boolean | null> = { adex: null, adex_control: null };
+
+/**
+ * Inicio de sesión EXPLÍCITO: la sesión del token pasa a ser la única vigente de la identidad y la
+ * anterior queda revocada (`superseded`). Se llama solo al iniciar sesión (empresa:
+ * `POST /v1/session/claim`; Owner: `POST /control/v1/session/start`), nunca al renovar el token ni
+ * al cambiar de empresa o rol (DS-05). Sin 0031 aplicada no hace nada (la API no depende del orden).
+ */
+export async function claimSession(client: pg.PoolClient, claims: SessionClaims, schema: 'adex' | 'adex_control' = 'adex'): Promise<{ claimed: boolean; revokedPrevious: boolean }> {
+  claimReady[schema] ??= (await client.query<{ r: boolean }>(`select to_regprocedure('${schema}.claim_session(uuid,uuid,bigint)') is not null r`)).rows[0]!.r;
+  if (!claimReady[schema]) return { claimed: false, revokedPrevious: false };
+  const r = (await client.query<{ r: { outcome: string; revokedPrevious?: boolean } }>(`select ${schema}.claim_session($1, $2, $3) r`,
+    [claims.identityId, claims.sessionId, claims.iat])).rows[0]!.r;
+  if (r.outcome === 'IDENTITY_NOT_PROVISIONED') throw new ApiError(403, 'IDENTITY_NOT_PROVISIONED');
+  if (r.outcome !== 'ok') throw new ApiError(401, 'SESSION_REVOKED');
+  return { claimed: true, revokedPrevious: r.revokedPrevious === true };
+}

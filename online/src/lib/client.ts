@@ -95,6 +95,16 @@ const HEALTH_PROBE_MS = 4_000;
 /** Errores que significan «el contexto elegido ya no vale»: volver al selector. */
 export const CONTEXT_LOST = new Set(['COMPANY_BLOCKED', 'MEMBERSHIP_INACTIVE', 'MEMBERSHIP_NOT_FOUND', 'CONTEXT_INVALID']);
 /** Errores que significan «la sesión terminó»: volver a iniciar sesión. */
+/** `session_id` de un token (sin verificar: solo para comparar sesiones entre pestañas). */
+function sessionIdOf(token: string | undefined): string | null {
+  try {
+    const part = token?.split('.')[1];
+    if (!part) return null;
+    const json = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/'))) as { session_id?: unknown };
+    return typeof json.session_id === 'string' ? json.session_id : null;
+  } catch { return null; }
+}
+
 export const SESSION_LOST = new Set(['SESSION_REVOKED', 'IDENTITY_DISABLED', 'NOT_SIGNED_IN', 'SESSION_EXPIRED', 'MISSING_TOKEN']);
 
 export interface ActiveContextView {
@@ -153,6 +163,10 @@ export class OnlineClient {
     const t = await this.auth.signInWithPassword(email.trim().toLowerCase(), password);
     this.session = { ...t, activeMembershipId: null };
     await this.store.save(this.session);
+    // Ronda 73 · SOC-01: inicio de sesión EXPLÍCITO → esta es la única sesión vigente de la persona;
+    // la de cualquier otro dispositivo queda revocada en el servidor. Una API anterior (404) lo ignora.
+    await this.request('POST', '/v1/session/claim', { body: {}, context: false })
+      .catch((e) => { if (!(e instanceof ApiFailure && e.status === 404)) throw e; });
     return decideContext(await this.memberships());
   }
 
@@ -327,6 +341,18 @@ export class OnlineClient {
     if (--this.slowCount === 0) this.emit('waking', false);
   }
 
+  /**
+   * Ronda 73 · SOC-01: termina la sesión de ESTA pestaña. El almacenamiento es compartido por las
+   * pestañas del navegador: si otra ya inició una sesión nueva (otro `session_id`), se conserva.
+   */
+  private async dropSession(): Promise<void> {
+    const mine = sessionIdOf(this.session?.accessToken);
+    this.session = null;
+    const stored = await this.store.load().catch(() => null);
+    if (!stored || !mine || sessionIdOf(stored.accessToken) === mine) await this.store.clear();
+    this.emit('session');
+  }
+
   private require(): StoredSession {
     if (!this.session) throw new ApiFailure(401, 'NOT_SIGNED_IN');
     return this.session;
@@ -339,7 +365,9 @@ export class OnlineClient {
       try {
         const t = await this.auth.refresh(s.refreshToken);
         this.session = { ...t, activeMembershipId: s.activeMembershipId };
-        await this.store.save(this.session);
+        // Ronda 73: si otra pestaña ya guardó una sesión NUEVA, no se sobrescribe con esta.
+        const stored = await this.store.load().catch(() => null);
+        if (!stored || sessionIdOf(stored.accessToken) === sessionIdOf(s.accessToken)) await this.store.save(this.session);
       } catch (e) {
         // Ronda 62: SIN RED (o el proveedor caído) la sesión NO se borra: es «sin conexión», no
         // «sesión terminada». Antes, un Cobrador sin internet con el token caducado perdía la
@@ -348,9 +376,7 @@ export class OnlineClient {
           this.emit('network', false);
           throw new NetworkFailure('NETWORK');
         }
-        this.session = null;
-        await this.store.clear();
-        this.emit('session');
+        await this.dropSession();
         throw new ApiFailure(401, 'SESSION_EXPIRED');
       } finally {
         this.refreshing = null;
@@ -384,9 +410,7 @@ export class OnlineClient {
     if (!res.ok) {
       const code = String(body['error'] ?? `HTTP_${res.status}`);
       if (SESSION_LOST.has(code) || code === 'INVALID_TOKEN') {
-        this.session = null;
-        await this.store.clear();
-        this.emit('session');
+        await this.dropSession();
       } else if (CONTEXT_LOST.has(code) && membership && membership === this.activeMembershipId) {
         await this.clearContext();
         this.emit('context', code);

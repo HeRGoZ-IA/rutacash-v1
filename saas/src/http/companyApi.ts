@@ -21,7 +21,7 @@ import type { IdentityProvider } from '../auth/provider.ts';
 import { listOwnMemberships, resolveContext, resolveIdentity, type ActiveContext } from '../authz/context.ts';
 import { capabilitiesOf } from '../authz/cleanRules.ts';
 import {
-  createMember, deleteMember, listMembers, logout, memberAccessLink, setMemberOfficeRoutes, setMemberRoutes, setMemberStatus, updateMember,
+  claimSession, createMember, deleteMember, listMembers, logout, memberAccessLink, setMemberOfficeRoutes, setMemberRoutes, setMemberStatus, updateMember,
 } from '../identity/service.ts';
 import { COMPANY_FIELDS, getCompany, updateCompany } from '../structure/company.ts';
 import {
@@ -433,6 +433,12 @@ export function createCompanyHandler(opts: CompanyApiOptions): (req: http.Incomi
       if (method === 'GET' && url.pathname === '/v1/me/memberships') {
         const memberships = await withTransaction(opts.pool, (c) => listOwnMemberships(c, claims), txOpts);
         return send(res, 200, { identityId: claims.identityId, memberships });
+      }
+      // Ronda 73 · SOC-01: inicio de sesión explícito → esta sesión es la única vigente (0031).
+      if (method === 'POST' && url.pathname === '/v1/session/claim') {
+        await readJson(req, []);
+        const out = await withTransaction(opts.pool, (c) => claimSession(c, claims), txOpts);
+        return send(res, 200, out);
       }
       if (method === 'POST' && url.pathname === '/v1/session/logout') {
         const scope = scopeOf(await readJson(req, ['scope']));
