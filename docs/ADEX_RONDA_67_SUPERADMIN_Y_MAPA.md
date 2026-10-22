@@ -145,3 +145,14 @@ Orden obligatorio:
 
 La API nueva sobre una base sin 0028/0029 sigue funcionando: la matriz ya bloquea al SuperAdmin, no anuncia `route-map-v1`
 y la ubicación de una venta, si la tabla aún no existe, se descarta bajo savepoint sin afectar la venta.
+
+**Estado final verificado (2026-10-22, solo lectura sobre HTTPS):**
+- ADEX-Staging: migraciones 0001–0029 (0028 y 0029 aplicadas por el propietario con `staging:migrate`); tablas `client_locations`
+  y `sale_locations` vacías; políticas del mapa presentes; `clients_manage_*` sin SuperAdmin.
+- `adex-online-api` (Render, despliegue manual de `54944b8`): `/healthz` incluye `route-map-v1`; `/v1/map` sin sesión → 401.
+- `adex-online.vercel.app` (redespliegue de `54944b8`): sirve `index-NVUgseqU.js` (antes `index-C8V9ERhh.js`), con «Mapa» (`/admin/mapa`),
+  «Ubicación del cliente» y el aviso Offline de 65-C1; Leaflet y las teselas solo en el paquete bajo demanda del mapa; `/sw.js` 200, `/owner` 200.
+- BlueLine (1 ruta, 6 membresías, 1 oficina, sin clientes, movimientos ni ubicaciones) y las dos cuentas Owner: huellas idénticas antes y
+  después (`tmp/r67/snapshot-antes.json` = `snapshot-despues.json`, salvo la lista de migraciones).
+
+**RONDA 67 CERRADA Y PUBLICADA.**
