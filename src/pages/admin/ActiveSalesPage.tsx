@@ -453,10 +453,6 @@ export default function ActiveSalesPage() {
         </>
       )}
 
-      {detailSale && user && rectifyOpen && (
-        <RectifySaleModal sale={detailSale} user={user} currency={currency} open={rectifyOpen} onClose={() => setRectifyOpen(false)}
-          onDone={async () => { setRectifyOpen(false); await refreshDetail(detailSale.id) }} />
-      )}
 
       {/* Create Sale Modal */}
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nueva venta" size="mdPlus"
@@ -660,6 +656,12 @@ export default function ActiveSalesPage() {
           </div>
         )}
       </Modal>
+
+      {/* Ronda 73 · SOC-09: después del detalle, para quedar por encima de él */}
+      {detailSale && user && rectifyOpen && (
+        <RectifySaleModal sale={detailSale} user={user} currency={currency} open={rectifyOpen} onClose={() => setRectifyOpen(false)}
+          onDone={async () => { setRectifyOpen(false); await refreshDetail(detailSale.id) }} />
+      )}
     </div>
   )
 }
