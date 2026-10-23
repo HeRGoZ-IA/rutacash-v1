@@ -14,7 +14,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { getAuthorizedRouteIds } from '@/lib/roles'
 import { can } from '@/lib/permissions'
-import { ALLOWED_INTEREST_RATES, defaultOriginationRate, originationRateError, originationRatesFor } from '@/lib/interestRatePolicy'
+import { ALLOWED_INTEREST_RATES, defaultOriginationRate, originationRateError, originationRatesFor, routeRatePolicyOf } from '@/lib/interestRatePolicy'
 import { generateId } from '@/lib/utils'
 import { nowISO, normalizeDoc, formatCurrency, formatDate, today } from '@/lib/formatters'
 import { computeSaleFinancials, createDirectSale, createSaleRequest, directSaleLimit, type SaleInputs } from '@/services/saleRequestService'
@@ -85,7 +85,7 @@ export default function CollectorNewClientPage() {
   // D73-01: tasas que se pueden originar en la ruta elegida (Cobrador: la de la ruta, o 10%/20% con
   // «Tasa libre»). El servidor vuelve a comprobarlo con la configuración vigente.
   const rutaElegida = routes.find(r => r.id === form.routeId)
-  const ratePolicy = rutaElegida ? { tasaInteres: rutaElegida.tasaInteres, tasaLibre: rutaElegida.tasaLibre } : null
+  const ratePolicy = routeRatePolicyOf(rutaElegida)
   const tasas = user ? originationRatesFor(user.rol, ratePolicy) : ALLOWED_INTEREST_RATES
   useEffect(() => {
     if (!user || !ratePolicy) return

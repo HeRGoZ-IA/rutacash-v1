@@ -28,6 +28,15 @@ export interface RouteRatePolicy {
 export const isAllowedRate = (rate: number): boolean => (ALLOWED_INTEREST_RATES as readonly number[]).includes(rate)
 
 /**
+ * Política de una ruta tal como está guardada. Rutas locales antiguas de CLEAN sin tasa ni «Tasa libre»
+ * conservan el comportamiento anterior (20 %, sin tasa libre). En el servidor ambos campos son obligatorios.
+ */
+export function routeRatePolicyOf(route: { tasaInteres?: number | null; tasaLibre?: boolean | null } | null | undefined): RouteRatePolicy | null {
+  if (!route) return null
+  return { tasaInteres: route.tasaInteres ?? 20, tasaLibre: route.tasaLibre ?? false }
+}
+
+/**
  * Tasas con las que `rol` puede ORIGINAR una venta o solicitud en la ruta. Sin la ruta, el Cobrador no
  * tiene ninguna (la pantalla debe conocer la ruta antes de ofrecer una tasa).
  */

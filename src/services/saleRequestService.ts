@@ -25,7 +25,7 @@ import type {
 } from '@/models/types'
 import { assertRouteOperationalContext } from '@/services/officeService'
 import { activeCreditsOf, decideSaleOrigination, isActiveCredit } from '@/lib/activeCredit'
-import { ALLOWED_INTEREST_RATES, originationRateError } from '@/lib/interestRatePolicy'
+import { ALLOWED_INTEREST_RATES, originationRateError, routeRatePolicyOf } from '@/lib/interestRatePolicy'
 import { buildActiveCreditContext, type ActiveCreditContext } from '@/lib/activeCreditContext'
 
 export interface SaleInputs {
@@ -215,7 +215,7 @@ async function assertSaleIntegrity(
  */
 async function assertOriginationRate(input: SaleInputs, actor: User): Promise<void> {
   const route = await db.routes.get(input.routeId)
-  const error = originationRateError(actor.rol, input.tasaInteres, route ? { tasaInteres: route.tasaInteres, tasaLibre: route.tasaLibre } : null)
+  const error = originationRateError(actor.rol, input.tasaInteres, routeRatePolicyOf(route))
   if (error) throw new SaleRuleError(error)
 }
 
