@@ -141,7 +141,9 @@ describe('ADEX Online · resiliencia para Render Free (proceso real, TLS, reinic
       // Ronda 73: con 0030 y 0031 aplicadas, más la consulta de movimientos (solo API).
       'credit-rectification-v1', 'movements-v1', 'single-session-v1',
       // Post-R73: bloque A (0032, rectificación con pagos) y bloque B (Consultas v2, solo API).
-      'rectification-payments-v1', 'movements-v2'] }]);
+      'rectification-payments-v1', 'movements-v2',
+      // R74 Base por Ruta (0034, solo API; fuera de la puerta de Vercel).
+      'route-base-v1'] }]);
     const ready = await call('GET', '/readyz', { membership: null });
     assert.deepEqual([ready.status, ready.body], [200, { status: 'ready' }], 'PostgreSQL over TLS with the CA file');
     assert.equal(health.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');

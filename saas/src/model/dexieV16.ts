@@ -96,6 +96,8 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       { column: 'timezone', reason: 'P6/DS-04: zona IANA de la empresa, reloj de los periodos. No existe en Dexie (hoy manda el dispositivo)' },
       { column: 'is_demo', reason: 'ADEX Online v1 (0011): Empresa Demo con datos ficticios, ciclo de vida en adex_demo. Inmutable; una importación de CLEAN siempre es false' },
       { column: 'retired_at', reason: 'ADEX Online v1 (0011): retirada definitiva de una Empresa Demo (reinicio = recreación). Solo Demos; NULL en toda empresa importada' },
+      { column: 'capital_model', reason: 'R74 Base por Ruta (0034): modelo de capital de la empresa (admin_pool | migrating | route_base); lo cambia solo el SuperAdmin con adex.capital_model_transition. Toda importación es admin_pool' },
+      { column: 'route_base_since', reason: 'R74 Base por Ruta (0034): instante del corte al modelo route_base (NULL en los demás modelos)' },
     ],
   },
   {
@@ -113,7 +115,9 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       id('capitalControllerAdminId', 'capital_controller_membership_id'), instant('capitalControllerSince', 'capital_controller_since'),
       f('status', 'status'), created, updated,
     ],
-    omitted: [], added: [],
+    omitted: [], added: [
+      { column: 'handover_state', reason: 'R74 Base por Ruta (0034): ruta «en entrega» al cambiar el responsable hasta que el nuevo confirma el conteo (acta en route_handover_records). Toda importación es normal' },
+    ],
   },
   {
     dexieTable: 'users', entity: 'User', source: 'models', sqlTable: 'adex.memberships',
@@ -211,7 +215,9 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
   {
     dexieTable: 'expenseCategories', entity: 'ExpenseCategory', source: 'models', sqlTable: 'adex.expense_categories',
     fields: [id('id', 'id'), tenant, f('nombre', 'name'), f('icono', 'icon'), f('activa', 'active', 'bool')],
-    omitted: [], added: [],
+    omitted: [], added: [
+      { column: 'nature', reason: 'R74 Base por Ruta (0034, O4): naturaleza del gasto (operativo | bien_duradero | otro) para no presentar compras durables como gasto operativo. Toda importación es operativo' },
+    ],
   },
   {
     dexieTable: 'expenses', entity: 'Expense', source: 'models', sqlTable: 'adex.expenses',

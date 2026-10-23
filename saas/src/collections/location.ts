@@ -157,6 +157,20 @@ export async function creditRectificationReady(pool: pg.Pool): Promise<boolean> 
   return relationExists(pool, 'adex.credit_rectifications');
 }
 
+/**
+ * R74 Base por Ruta (0034): modelo de capital por empresa, Base por ruta, entregas y panel.
+ * UN solo intento: corre después de las comprobaciones anteriores, que ya reintentan; con la base
+ * inaccesible, más reintentos alargarían el arranque por encima del margen de Render (RND-002).
+ */
+export async function routeBaseReady(pool: pg.Pool): Promise<boolean> {
+  try {
+    const r = await pool.query<{ ok: boolean }>("select to_regprocedure('adex.route_base_post(uuid,text,bigint,text,text,text,text)') is not null as ok");
+    return r.rows[0]?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Bloque A post-R73 (0032): rectificación con pagos y reaplicación de pagos anulados. */
 export async function rectificationPaymentsReady(pool: pg.Pool): Promise<boolean> {
   for (let i = 1; i <= 3; i++) {

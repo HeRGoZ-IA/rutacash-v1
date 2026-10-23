@@ -39,7 +39,12 @@ export type CapitalKind =
   | 'WORKER_DELIVERY' | 'WORKER_RETURN' | 'WORKER_TRANSFER' | 'ROUTE_REASSIGNMENT' | 'REVERSAL' | 'LOAN_DISBURSEMENT'
   | 'COLLECTION' | 'WORKER_EXPENSE' | 'ROUTE_EXPENSE' | 'COMPANY_EXPENSE' | 'EXPENSE_REFUND'
   | 'SETTLEMENT_RETURN' | 'SETTLEMENT_SURPLUS' | 'ADMIN_TRANSFER_HOLD' | 'ADMIN_TRANSFER_APPLY' | 'ADMIN_TRANSFER_RELEASE'
-  | 'DISBURSEMENT_ADJUSTMENT' | 'PRINCIPAL_RECLASSIFICATION';
+  | 'DISBURSEMENT_ADJUSTMENT' | 'PRINCIPAL_RECLASSIFICATION'
+  // R74 Base por Ruta (0034): solo con `companies.capital_model = 'route_base'` (ver routeBase.ts).
+  | 'ROUTE_BASE_INJECTION' | 'ROUTE_BASE_WITHDRAWAL' | 'ROUTE_TRANSFER' | 'LEGACY_POOL_TO_ROUTE';
+
+/** Operaciones de la Base (0034): se escriben y se anulan con `adex.route_base_post`. */
+export const ROUTE_BASE_KINDS: readonly string[] = ['ROUTE_BASE_INJECTION', 'ROUTE_BASE_WITHDRAWAL', 'ROUTE_TRANSFER', 'LEGACY_POOL_TO_ROUTE'];
 
 /**
  * Recaudos y gastos (Fase 5) y asientos de un cuadre (Fase 6): se corrigen por su propio
@@ -50,7 +55,7 @@ const OWN_CORRECTION_KINDS: readonly string[] = ['COLLECTION', 'WORKER_EXPENSE',
 
 const COMPANY_KINDS: readonly string[] = ['COMPANY_DEPOSIT', 'COMPANY_WITHDRAWAL', 'ADMIN_ALLOCATION', 'ADMIN_RETURN'];
 
-interface OpRow {
+export interface OpRow {
   id: string; operation_id: string; kind: CapitalKind; amount_minor: string; currency_code: string; route_id: string | null;
   to_route_id: string | null; admin_membership_id: string | null; worker_membership_id: string | null;
   counterpart_membership_id: string | null; sale_request_id: string | null; reverses_operation_id: string | null;
@@ -60,7 +65,7 @@ interface OpRow {
 
 const ymd = (d: string | Date) => (typeof d === 'string' ? d : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
 
-function opView(r: OpRow) {
+export function opView(r: OpRow) {
   return {
     id: r.id, operationId: r.operation_id, kind: r.kind, amountMinor: Number(r.amount_minor), currencyCode: r.currency_code,
     routeId: r.route_id, toRouteId: r.to_route_id, adminId: r.admin_membership_id, workerId: r.worker_membership_id,
@@ -73,7 +78,7 @@ function opView(r: OpRow) {
 // ---------- Entradas ----------
 
 /** Importe en unidades menores: entero positivo, sin decimales (nunca coma flotante). */
-function amountOf(body: Record<string, unknown>): number {
+export function amountOf(body: Record<string, unknown>): number {
   const v = body['amountMinor'];
   if (typeof v !== 'number' || !Number.isSafeInteger(v) || v <= 0) {
     throw new ApiError(400, 'INVALID_INPUT', 'amountMinor must be a positive integer (minor units)', { field: 'amountMinor' });
@@ -81,7 +86,7 @@ function amountOf(body: Record<string, unknown>): number {
   return v;
 }
 
-const reasonOf = (body: Record<string, unknown>) => {
+export const reasonOf = (body: Record<string, unknown>) => {
   const r = reqText(body, 'reason', 300);
   if (r.length < 3) throw new ApiError(400, 'INVALID_INPUT', 'reason is required', { field: 'reason' });
   return r;
@@ -153,7 +158,7 @@ async function post(client: pg.PoolClient, operationId: string, p: PostParams): 
 }
 
 /** Patas de la operación VISIBLES para el actor (RLS: nunca la bolsa ajena). */
-async function visibleEntries(client: pg.PoolClient, ctx: ActiveContext, opId: string) {
+export async function visibleEntries(client: pg.PoolClient, ctx: ActiveContext, opId: string) {
   const r = await client.query<{ leg: number; kind: string; membership_id: string | null; route_id: string | null; amount_minor: string; balance_after_minor: string }>(
     `select e.leg, a.kind, a.membership_id, a.route_id, e.amount_minor, e.balance_after_minor
        from adex.capital_entries e join adex.capital_accounts a on a.company_id = e.company_id and a.id = e.account_id
@@ -164,7 +169,7 @@ async function visibleEntries(client: pg.PoolClient, ctx: ActiveContext, opId: s
   }));
 }
 
-const ACTIONS: Record<CapitalKind, string> = {
+export const ACTIONS: Record<CapitalKind, string> = {
   COMPANY_DEPOSIT: 'COMPANY_CAPITAL_DEPOSIT', COMPANY_WITHDRAWAL: 'COMPANY_CAPITAL_WITHDRAWAL',
   ADMIN_ALLOCATION: 'ADMIN_CAPITAL_ALLOCATED', ADMIN_RETURN: 'ADMIN_CAPITAL_RETURNED',
   PARTNER_CONTRIBUTION: 'PARTNER_CONTRIBUTION_REGISTERED', WORKER_DELIVERY: 'CENTRAL_CAPITAL_DELIVERED',
@@ -174,6 +179,8 @@ const ACTIONS: Record<CapitalKind, string> = {
   EXPENSE_REFUND: 'EXPENSE_REFUNDED', SETTLEMENT_RETURN: 'CASH_SETTLEMENT_CLOSED', SETTLEMENT_SURPLUS: 'CASH_SETTLEMENT_CLOSED',
   ADMIN_TRANSFER_HOLD: 'ADMIN_TRANSFER_REGISTERED', ADMIN_TRANSFER_APPLY: 'ADMIN_TRANSFER_APPLIED', ADMIN_TRANSFER_RELEASE: 'ADMIN_TRANSFER_RELEASED',
   DISBURSEMENT_ADJUSTMENT: 'RECTIFY_CREDIT', PRINCIPAL_RECLASSIFICATION: 'RECTIFY_CREDIT',
+  ROUTE_BASE_INJECTION: 'ROUTE_BASE_INJECTED', ROUTE_BASE_WITHDRAWAL: 'ROUTE_BASE_WITHDRAWN', ROUTE_TRANSFER: 'ROUTE_BASE_TRANSFERRED',
+  LEGACY_POOL_TO_ROUTE: 'UNASSIGNED_CAPITAL_ASSIGNED',
 };
 
 /** Escribe, audita (misma transacción) y responde con lo que el actor puede ver. */
@@ -392,6 +399,11 @@ export async function reverseOperation(client: pg.PoolClient, ctx: ActiveContext
   if (orig.kind === 'DISBURSEMENT_ADJUSTMENT' || orig.kind === 'PRINCIPAL_RECLASSIFICATION') throw new ApiError(409, 'REVERSAL_NOT_ALLOWED', 'rectify the credit again instead');
   // Un aporte histórico de socio (Ronda 53) ya no tiene contrapartida a la que volver.
   if (orig.kind === 'PARTNER_CONTRIBUTION') throw new ApiError(409, 'REVERSAL_NOT_ALLOWED', 'historical partner contributions cannot be reversed');
+  // R74 Base por Ruta (0034): solo la inyección se anula, con su propio comando (`adex.route_base_post`).
+  if (ROUTE_BASE_KINDS.includes(orig.kind) || (orig.kind === 'REVERSAL' && ROUTE_BASE_KINDS.includes(orig.reverses_kind ?? ''))) {
+    const { reverseRouteBase } = await import('./routeBase.ts');
+    return reverseRouteBase(client, ctx, orig, reasonOf(body), operationId);
+  }
   // Un recaudo o un gasto se anula con su comando (recalcula el crédito o enlaza el gasto).
   if (OWN_CORRECTION_KINDS.includes(orig.kind) || (orig.kind === 'REVERSAL' && OWN_CORRECTION_KINDS.includes(orig.reverses_kind ?? ''))) {
     throw new ApiError(409, 'REVERSAL_NOT_ALLOWED', 'use the command of the operation (collection, expense, settlement or administrator transfer)');
@@ -563,7 +575,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
   const unbalanced = l('unbalanced');
   // Contrapartidas (externa, interés) miden lo que entró; la custodia solo puede
   // quedar negativa por un gasto del trabajador (73209ce), comprobado pata a pata.
-  const overdrawn = await q(`select count(*)::text n from adex.capital_accounts where company_id = $1 and kind not in ('external', 'income', 'custody', 'unidentified') and balance_minor < 0`);
+  const overdrawn = await q(`select count(*)::text n from adex.capital_accounts where company_id = $1 and kind not in ('external', 'income', 'custody', 'unidentified', 'route_funding') and balance_minor < 0`);
   const negativeCustody = l('negativeCustody');
   const foreignCurrency = await q(
     `select count(*)::text n from adex.capital_operations o join adex.companies c on c.id = o.company_id
@@ -672,6 +684,11 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
     { name: 'closed-periods-unchanged', ok: closedDrift === 0, detail: closedDrift },
     { name: 'transit-matches-pending-transfers', ok: transitDrift === 0, detail: transitDrift },
     { name: 'income-matches-interest', ok: incomeDrift === 0, detail: incomeDrift },
+    // R74 Base por Ruta (0034): ninguna ruta consume dinero de otra; desde el corte las bolsas no reciben
+    // nada (solo se reparte «sin asignar») y cada operación que no cruza rutas suma cero dentro de cada ruta.
+    { name: 'legs-in-route-scope', ok: l('routeScope') === 0, detail: l('routeScope') },
+    { name: 'no-admin-pool-inflow-after-cutover', ok: l('adminInflowAfterCutover') === 0, detail: l('adminInflowAfterCutover') },
+    { name: 'route-conservation', ok: l('routeConservation') === 0, detail: l('routeConservation') },
   ];
   return { ok: checks.every((c) => c.ok), checks };
 }

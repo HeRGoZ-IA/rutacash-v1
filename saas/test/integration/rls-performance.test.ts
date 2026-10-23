@@ -115,9 +115,16 @@ describe('Ronda 33 · RLS con contexto evaluado una vez (0020)', () => {
     // Ronda 73: igual con la lectura del historial de rectificaciones (0030).
     await asOwner(['client_locations', 'sale_locations', 'payment_locations'].map((t) => `drop policy ${t}_read on adex.${t};`).join(' ')
       + ' drop policy credit_rectifications_ctx on adex.credit_rectifications;'
-      + ' drop policy credit_rectification_cases_ctx on adex.credit_rectification_cases; drop policy credit_rectification_cases_insert on adex.credit_rectification_cases;');
-    const LATER = [':client_locations', ':sale_locations', ':payment_locations', ':credit_rectifications', ':credit_rectification_cases'];
-    const changedLater = (k: string) => LATER.some((t) => k.endsWith(t)) || (k.endsWith(':sale_requests') && k.startsWith('superadmin/'));
+      + ' drop policy credit_rectification_cases_ctx on adex.credit_rectification_cases; drop policy credit_rectification_cases_insert on adex.credit_rectification_cases;'
+      // R74 Base por Ruta (0034): actas de entrega, activaciones y la lectura ampliada de cuentas/operaciones de la ruta.
+      + ' drop policy route_handover_records_ctx on adex.route_handover_records; drop policy capital_model_activations_ctx on adex.capital_model_activations;'
+      + ' drop policy capital_accounts_route_ctx on adex.capital_accounts; drop policy capital_operations_route_base_ctx on adex.capital_operations;');
+    const LATER = [':client_locations', ':sale_locations', ':payment_locations', ':credit_rectifications', ':credit_rectification_cases',
+      ':route_handover_records', ':capital_model_activations'];
+    // 0034 amplía a propósito lo que el Administrador y el Supervisor ven de las cuentas de SUS rutas (cartera, interés,
+    // gastos, control, Base) y, con ellas, sus patas: no se comparan esas lecturas.
+    const route034 = (k: string) => (k.startsWith('admin/') || k.startsWith('supervisor/')) && (k.endsWith(':capital_accounts') || k.endsWith(':capital_entries'));
+    const changedLater = (k: string) => LATER.some((t) => k.endsWith(t)) || (k.endsWith(':sale_requests') && k.startsWith('superadmin/')) || route034(k);
     await asOwner(withoutPartnerCash(ROLLBACK).replace(/^(begin|commit|set local role adex_owner);$/gm, ''));
     const previous = await visibility();
     const policies = (await db.admin.query(`select count(*)::int n from pg_policies where schemaname = 'adex' and qual like '%route_in_scope%'`)).rows[0].n;

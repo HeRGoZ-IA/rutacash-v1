@@ -44,6 +44,10 @@ import {
 } from '../capital/requests.ts';
 import { notificationCount, notifications } from '../capital/notifications.ts';
 import {
+  ASSIGN_FIELDS, HANDOVER_FIELDS, INJECT_FIELDS, MODEL_FIELDS, TRANSFER_FIELDS, WITHDRAW_FIELDS, assignUnassigned, capitalModel, confirmHandover, injectBase,
+  listHandovers, modelPrerequisites, routePanel, transferBase, transferDestinations, transitionModel, withdrawBase,
+} from '../capital/routeBase.ts';
+import {
   REGISTER_FIELDS, adminDirectory, cancelAdminTransfer, decideAdminTransfer, getAdminTransfer, listAdminTransfers, registerAdminTransfer,
 } from '../capital/adminTransfers.ts';
 import {
@@ -154,9 +158,9 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: ([id], provider) => async (c, ctx) => ok(await memberAccessLink(c, ctx, id!, provider)) },
   // ---------- Categorías de gasto ----------
   { method: 'GET', pattern: /^\/v1\/expense-categories$/, fields: null, handler: () => async (c, ctx) => ok({ categories: await listCategories(c, ctx) }) },
-  { method: 'POST', pattern: /^\/v1\/expense-categories$/, fields: ['name', 'icon'], idempotent: 'expense_categories.create',
+  { method: 'POST', pattern: /^\/v1\/expense-categories$/, fields: ['name', 'icon', 'nature'], idempotent: 'expense_categories.create',
     handler: () => async (c, ctx, b) => created(await createCategory(c, ctx, b)) },
-  { method: 'PATCH', pattern: new RegExp(`^/v1/expense-categories/${ID}$`), fields: ['name', 'icon', 'active'],
+  { method: 'PATCH', pattern: new RegExp(`^/v1/expense-categories/${ID}$`), fields: ['name', 'icon', 'active', 'nature'],
     handler: ([id]) => async (c, ctx, b) => ok(await updateCategory(c, ctx, id!, b)) },
   { method: 'POST', pattern: new RegExp(`^/v1/expense-categories/${ID}/delete$`), fields: [], handler: ([id]) => async (c, ctx) => ok(await deleteCategory(c, ctx, id!)) },
   // ---------- Clientes ----------
@@ -203,6 +207,24 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'POST', pattern: new RegExp(`^/v1/capital/operations/${ID}/reverse$`), fields: ['reason'], idempotent: 'capital.reversal', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => created(await reverseOperation(c, ctx, id!, b, op)) },
   // ---------- Traspasos entre Administradores (Ronda 53, D2): compromiso → confirmaciones → aplicación ----------
+  // ---------- Base por Ruta (R74, 0034): solo con companies.capital_model = 'route_base' ----------
+  { method: 'GET', pattern: /^\/v1\/capital\/model$/, fields: null, handler: () => async (c, ctx) => ok(await capitalModel(c, ctx)) },
+  { method: 'GET', pattern: /^\/v1\/capital\/model\/prerequisites$/, fields: null, handler: () => async (c, ctx) => ok(await modelPrerequisites(c, ctx)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/model$/, fields: MODEL_FIELDS, idempotent: 'capital.model_transition', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => ok(await transitionModel(c, ctx, b, op)) },
+  { method: 'GET', pattern: /^\/v1\/capital\/route-panel$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await routePanel(c, ctx, q)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/route-base\/injections$/, fields: INJECT_FIELDS, idempotent: 'capital.route_base_injection', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await injectBase(c, ctx, b, op)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/route-base\/withdrawals$/, fields: WITHDRAW_FIELDS, idempotent: 'capital.route_base_withdrawal', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await withdrawBase(c, ctx, b, op)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/route-base\/transfers$/, fields: TRANSFER_FIELDS, idempotent: 'capital.route_transfer', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await transferBase(c, ctx, b, op)) },
+  { method: 'GET', pattern: /^\/v1\/capital\/route-base\/transfer-destinations$/, fields: null, handler: () => async (c, ctx) => ok({ routes: await transferDestinations(c, ctx) }) },
+  { method: 'POST', pattern: /^\/v1\/capital\/route-base\/unassigned-assignments$/, fields: ASSIGN_FIELDS, idempotent: 'capital.unassigned_assignment', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await assignUnassigned(c, ctx, b, op)) },
+  { method: 'GET', pattern: /^\/v1\/capital\/handovers$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ handovers: await listHandovers(c, ctx, q) }) },
+  { method: 'POST', pattern: new RegExp(`^/v1/capital/handovers/${ID}/confirm$`), fields: HANDOVER_FIELDS, idempotent: 'capital.handover_confirm', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => ok(await confirmHandover(c, ctx, id!, b, op)) },
   { method: 'GET', pattern: /^\/v1\/capital\/admin-directory$/, fields: null, handler: () => async (c, ctx) => ok({ admins: await adminDirectory(c, ctx) }) },
   { method: 'GET', pattern: /^\/v1\/capital\/admin-transfers$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ transfers: await listAdminTransfers(c, ctx, q) }) },
   { method: 'POST', pattern: /^\/v1\/capital\/admin-transfers$/, fields: REGISTER_FIELDS, idempotent: 'capital.admin_transfer_register', requiresOperation: true,

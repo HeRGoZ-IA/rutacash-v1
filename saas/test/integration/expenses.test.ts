@@ -366,7 +366,9 @@ describe('Fase 5 · gastos', () => {
       const run = asApi(db.api, { ...byRole[role]!, companyId: c1 }, async (q) => (await q.query('select adex.capital_ledger_checks() r')).rows[0].r);
       if (role !== 'superadmin') { await assert.rejects(run, (e: { code?: string }) => e.code === '42501', role); continue; }
       const r = await run as Record<string, number>;
-      assert.deepEqual(Object.keys(r).sort(), ['carriedDrift', 'closedDrift', 'mismatched', 'negativeCustody', 'settlementDrift', 'surplusDrift', 'unbalanced']);
+      // R74 Base por Ruta (0034): + adminInflowAfterCutover, routeConservation y routeScope.
+      assert.deepEqual(Object.keys(r).sort(), ['adminInflowAfterCutover', 'carriedDrift', 'closedDrift', 'mismatched', 'negativeCustody', 'routeConservation',
+        'routeScope', 'settlementDrift', 'surplusDrift', 'unbalanced']);
       for (const [k, v] of Object.entries(r)) assert.equal(v, 0, k);
     }
   });

@@ -43,6 +43,8 @@ function opNotice(o: OpRow, ctx: ActiveContext): string | null {
     if (o.kind === 'ADMIN_ALLOCATION' && o.admin_membership_id === me) return 'capital-received';
     if (o.kind === 'ADMIN_RETURN' && o.admin_membership_id === me) return 'capital-collected';
     if (o.kind === 'WORKER_RETURN' && o.admin_membership_id === me && o.actor_role === 'cobrador') return 'cash-delivered';
+    // R74 Base por Ruta (0034, O11): transferencia recibida en una ruta de la que es responsable (inmediata, sin aceptación).
+    if (o.kind === 'ROUTE_TRANSFER' && o.counterpart_membership_id === me) return 'route-transfer-received';
   }
   if (ctx.role === 'superadmin' && o.kind === 'ADMIN_RETURN' && o.actor_role === 'admin') return 'capital-returned';
   if (ctx.role === 'cobrador' && o.worker_membership_id === me) {
@@ -53,7 +55,7 @@ function opNotice(o: OpRow, ctx: ActiveContext): string | null {
 }
 
 const OP_KINDS: Record<string, readonly string[]> = {
-  admin: ['ADMIN_ALLOCATION', 'ADMIN_RETURN', 'WORKER_RETURN'],
+  admin: ['ADMIN_ALLOCATION', 'ADMIN_RETURN', 'WORKER_RETURN', 'ROUTE_TRANSFER'],
   superadmin: ['ADMIN_RETURN'],
   cobrador: ['WORKER_DELIVERY', 'WORKER_RETURN'],
 };
@@ -81,7 +83,9 @@ export async function notificationCount(client: pg.PoolClient, ctx: ActiveContex
                and (holder_membership_id = $2 or (holder_membership_id is null and $3 = 'superadmin'))
                and requester_membership_id <> $2)
           + (select count(*) from adex.admin_transfers where company_id = $1 and state = 'pending' and $3 = 'admin'
-               and ((origin_admin_membership_id = $2 and origin_decision = 'pending') or (destination_admin_membership_id = $2 and destination_decision = 'pending'))) n`,
+               and ((origin_admin_membership_id = $2 and origin_decision = 'pending') or (destination_admin_membership_id = $2 and destination_decision = 'pending')))
+          -- R74 Base por Ruta (0034, O5): entregas de ruta pendientes de SU conteo.
+          + (select count(*) from adex.route_handover_records where company_id = $1 and status = 'pendiente' and to_membership_id = $2 and $3 = 'admin') n`,
     [ctx.companyId, ctx.membershipId, ctx.role]);
   return { actionRequired: Number(r.rows[0]!.n) };
 }
@@ -96,7 +100,7 @@ export async function notifications(client: pg.PoolClient, ctx: ActiveContext) {
        from adex.capital_operations
       where company_id = $1 and kind = any($2) and reverses_operation_id is null and created_at > now() - make_interval(days => $3)
         and actor_membership_id <> $4
-        and ($5 = 'superadmin' or admin_membership_id = $4 or worker_membership_id = $4)
+        and ($5 = 'superadmin' or admin_membership_id = $4 or worker_membership_id = $4 or counterpart_membership_id = $4)
       order by created_at desc, id limit $6`, [ctx.companyId, kinds, INFO_DAYS, me, ctx.role, INFO_LIMIT * 2])).rows;
 
   const names = await memberNames(client, ctx, [
@@ -136,6 +140,17 @@ export async function notifications(client: pg.PoolClient, ctx: ActiveContext) {
       if (received || t.state !== 'applied') {
         info.push({ at: t.closed_at.toISOString(), item: { type: received ? 'transfer-received' : 'transfer-closed', at: t.closed_at.toISOString(), transfer: transferView(t) } });
       }
+    }
+  }
+  // R74 Base por Ruta (0034, O5): el nuevo responsable debe confirmar el conteo de la Base.
+  if (ctx.role === 'admin') {
+    const h = await client.query<{ id: string; route_id: string; route_name: string; from_membership_id: string | null; base_at_start_minor: string; started_at: Date }>(
+      `select h.id, h.route_id, r.name route_name, h.from_membership_id, h.base_at_start_minor, h.started_at
+         from adex.route_handover_records h join adex.routes r on r.company_id = h.company_id and r.id = h.route_id
+        where h.company_id = $1 and h.status = 'pendiente' and h.to_membership_id = $2 order by h.started_at desc, h.id`, [ctx.companyId, me]);
+    for (const x of h.rows) {
+      actionRequired.push({ type: 'handover-confirmation', at: x.started_at.toISOString(), handover: { id: x.id, routeId: x.route_id, routeName: x.route_name,
+        fromId: x.from_membership_id, baseAtStartMinor: Number(x.base_at_start_minor) } });
     }
   }
   for (const o of ops) {

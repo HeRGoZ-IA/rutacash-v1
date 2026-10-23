@@ -61,6 +61,15 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX418': return new ApiError(409, 'REQUEST_MISMATCH');
     // R74 (0033, DS-05): nadie entrega capital a su propia custodia, tampoco con otra membresía.
     case 'AX419': return new ApiError(403, 'SELF_DELIVERY_FORBIDDEN');   // entregar o traspasar efectivo a la propia custodia
+    // R74 · Base por Ruta (0034). Sin cifras de saldos.
+    case 'AX421': return new ApiError(409, 'CAPITAL_MODEL_OPERATION_REFUSED');  // capital de empresa / bolsas con `route_base`
+    case 'AX422': return new ApiError(409, 'CAPITAL_MIGRATION_IN_PROGRESS');    // empresa en `migrating`
+    case 'AX423': return new ApiError(409, 'ROUTE_IN_HANDOVER');                // ruta «en entrega»: falta el conteo del nuevo responsable
+    case 'AX424': return new ApiError(409, 'ROUTE_SCOPE_VIOLATION');            // una pata de otra ruta (segunda barrera)
+    case 'AX425': return new ApiError(409, 'ACTIVATION_PREREQUISITES_FAILED');  // activar `route_base` sin cumplir requisitos
+    case 'AX426': return new ApiError(409, 'GENERAL_EXPENSE_FUNDING_PENDING');  // O4: financiación del gasto general sin decidir
+    case 'AX427': return new ApiError(409, 'HANDOVER_NOT_PENDING');
+    case 'AX428': return new ApiError(409, 'ROUTE_BASE_NOT_ACTIVE');            // comando de Base en una empresa sin `route_base`
     // Fase 4 · solicitudes y desembolsos.
     case 'AX501': return new ApiError(409, 'REQUEST_STATE_INVALID');
     case 'AX502': return new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED');
