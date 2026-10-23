@@ -461,3 +461,85 @@ Orden: (1) **copia previa** cifrada como en R73 §8.1 (o la política de respald
 
 ### 12.3 Orden de archivos (regla R8)
 Salidas de la ronda en `tmp/r74/` (a, b, c, e1h). Se conservan arneses, registros finales y capturas; se borran solo las copias de compilación de la ronda.
+
+---
+
+## 13. Continuación (2026-10-23): decisiones del propietario y preparación de publicación
+
+El propietario revisó este informe y aprobó continuar con las recomendaciones, con una **modificación importante en O4**. Esta sección registra las decisiones (**sustituyen** a las recomendaciones de §8 donde difieren), lo implementado después y el estado de publicación. Los apartados anteriores se conservan como historia.
+
+### 13.1 Decisiones aprobadas
+
+| Id | Decisión del propietario | Estado |
+|---|---|---|
+| D74-A1 | Sin cambio de capital (solo tasa, parcelas o calendario), ni el desembolso incluido en un cuadre ni un cambio posterior de custodio bloquean la rectificación; sin mover efectivo, sin tocar asientos, con la reclasificación, auditoría, idempotencia y conciliación. Si cambia el capital, rigen las restricciones financieras | **APROBADA** · ya implementada así en 0032 (§1.2) · probada (R74-A-BLK-002, R74-A-BLK-005) |
+| D74-A2 | No ampliar las rectificaciones a periodos cerrados (posibilidad futura documentada en §1.2) | **APROBADO MANTENER BLOQUEADO** · así está |
+| D74-A3 | Total corregido inferior a lo pagado: bloqueado hasta definir sobrepagos y devoluciones | **APROBADO MANTENER BLOQUEADO** · así está (`OVERPAYMENT`) |
+| D74-A4 | No reaplicar pagos cuya anulación ya entró en un cuadre (conciliación excepcional aparte, sin efectivo duplicado) | **APROBADO MANTENER BLOQUEADO** · así está (`REVERSAL_SETTLED`) |
+| Undel | La reproducción sintética ya pasó; el caso real se comprueba desde la interfaz publicada, sin scripts sobre BlueLine | Sin cambios. Consulta de solo lectura previa a publicar (§13.3): BlueLine tiene 2 pagos anulados, 0 cuadres y 0 periodos cerrados, de modo que hoy la reaplicación no quedaría bloqueada por `REVERSAL_SETTLED` |
+| D74-B1 | Mantener Dinero y Actividad, filtros en servidor, perspectivas, resúmenes, detalle y diseño adaptable. Periodo por defecto «Hoy». El Cobrador solo consulta su propia custodia por la API. El Administrador, por defecto, una perspectiva válida del modelo actual; con Base por Ruta, su ruta o una selección explícita (no perpetuar la bolsa). CSV si se puede recuperar con seguridad | **APROBADA** · CSV **implementado**: se arma en el navegador recorriendo las mismas páginas del servidor con los filtros vigentes (misma RLS), tope 5 000 filas con aviso, separador «;» y coma decimal; nombres tal como se registraron |
+| D74-C1 | Formatear nombres de personas en el comprobante imprimible; empresas, marcas y razones sociales tal como se registraron; sin Title Case indiscriminado | **APROBADA** · **implementada** (`MovementReceiptPage`: personas formateadas; el nombre de la empresa no se toca). Separación asistida nombre/negocio: **PENDIENTE** |
+| E1 | El SuperAdmin deja las operaciones financieras de ruta; conserva estructura y supervisión y, **temporalmente**, el capital de empresa. Dejará de mover dinero por completo cuando Base por Ruta sustituya las bolsas. Antes de publicar, comprobar que las rutas activas tienen responsable autorizado | **APROBADO PARA PUBLICACIÓN CONTROLADA** · comprobación hecha (§13.3): la única ruta activa tiene responsable válido |
+| E2 | Retirar depósitos, retiros, asignaciones y operaciones de capital del SuperAdmin cuando el modelo nuevo ofrezca las equivalentes desde las rutas, sin etapa en que nadie pueda inyectar Base | **APROBADO** · se implementa por empresa al activar Base por Ruta (§14) |
+| O1 / O2 | Cuenta `route_base` por ruta y contrapartida por ruta para inyecciones y retiros | **APROBADAS** · §14 |
+| O3 | Saldos de bolsa no atribuibles quedan «sin asignar», visibles y controlados; reparto por procedimiento auditado con confirmación del Administrador; **sin** reparto proporcional ni plazo automático de 30 días | **APROBADA CON MODIFICACIÓN** (**sustituye** la recomendación de plazo de §8) · §14 |
+| **O4** | **No todo gasto administrativo se imputa a una ruta.** Tres alcances: ruta, general del Administrador, general de empresa. **Alcance y fuente del dinero son dimensiones distintas.** Sin ruta pagadora arbitraria, sin que una ruta financie en silencio a otra, gasto económico registrado una sola vez. Gastos compartidos ≠ distribución analítica de costos. Clasificación mínima: operativos, adquisición de bienes duraderos, otros | **APROBADA CON MODIFICACIÓN IMPORTANTE** · **sustituye** la recomendación de §8 («imputar a una ruta»). Diseño en §13.2; la **fuente de fondos** de los gastos generales queda como **decisión D74-O4F** |
+| O5 | Cambio de responsable con entrega y recepción controladas; la Base permanece en la ruta; diferencias en acta, sin movimientos ficticios | **APROBADA** · §14 |
+| O6 | El SuperAdmin autoriza estructuralmente la activación por empresa, con respaldo, conciliación, plan de saldos, responsables, bolsas sin asignar, compatibilidad Offline, recuperación y evidencia | **APROBADA** · §14 |
+| O7 | No combinar SuperAdmin y Administrador en la misma identidad dentro de una empresa; comprobar combinaciones existentes antes | **APROBADA** · consulta previa: **ninguna** identidad con varias membresías activas en el gestionado · **implementada** en 0033 |
+| O8 | Resultado operativo básico = interés efectivamente cobrado − gastos operativos atribuibles; no es utilidad contable ni dinero retirable; gastos generales aparte; bienes duraderos clasificados aparte; sin depreciación ni impuestos | **APROBADA CON PRECISIÓN** · §14 |
+| O9 | Tres estados distintos: resultado operativo negativo, flujo operativo negativo por crecimiento de cartera, insuficiencia de liquidez; una inyección no es pérdida | **APROBADA** · §14 |
+| O10 | Sin cálculo automático de «ganancia retirable»; un solo «Retiro de Base», diferenciado de ganancias | **DECISIÓN DIFERIDA** |
+| O11 | Transferencia explícita entre rutas (también con responsables distintos), iniciada por el responsable de origen y notificada al de destino; atómica, idempotente, auditada, sin negativos, con comprobante y sin doble conteo | **APROBADA** · §14; tránsito o confirmación física: ver §13.2 |
+| D74-H1 | Enmienda de DS-05 (una persona solo acumula membresías activas en una empresa si es Administrador; SuperAdmin + Administrador nunca; por empresa; sin autoasignación) | **APROBADA** · registrada en [Visión §7](./VISION_Y_PRINCIPIOS_SAAS_ADEX.md) · **implementada** en 0033 |
+| D74-H2 | Cerrar: traspaso de efectivo de otro trabajador a la propia custodia, y asignación de rutas a otra membresía de la misma persona | **APROBADA** · **implementada** en 0033 y en la API |
+
+### 13.2 O4 modificado: diseño de gastos generales
+
+**Dos dimensiones independientes en cada gasto:**
+
+| Dimensión | Valores | Para qué sirve |
+|---|---|---|
+| **Alcance** (a quién beneficia) | `ruta` (una ruta) · `administrador` (varias rutas de un mismo Administrador) · `empresa` (no atribuible a una ruta ni a un Administrador) | Análisis de resultados: resultado propio de cada ruta, gastos generales de Administrador, gastos generales de empresa y consolidado. **Sin prorrateo automático** (requeriría una política explícita) |
+| **Fuente del dinero** (qué cuenta pagó realmente) | La Base de una ruta concreta, la custodia de un trabajador, la cuenta de empresa (modelo actual) o —por decidir— otra fuente | Trazabilidad del efectivo: cada salida de dinero debe tener una fuente válida antes de ejecutarse |
+| **Naturaleza** (clasificación mínima) | `operativo` · `bien_duradero` (p. ej. la motocicleta) · `otro` | Que una compra de un bien duradero no aparezca sin explicación como gasto operativo del periodo ni como «pérdida». Sin depreciación, impuestos ni contabilidad patrimonial |
+
+Registro de cada gasto: empresa, Administrador responsable (si aplica), concepto, importe, fecha, categoría y naturaleza, cuenta realmente utilizada, quién registró, evidencia y alcance. Un gasto general del Administrador **no crea una caja personal**.
+
+**Decisión pendiente D74-O4F — fuente de fondos de los gastos generales con Base por Ruta** (en el modelo actual siguen pagándose como hoy, desde la empresa o la bolsa):
+
+| Alternativa | Cómo funciona | Ventajas | Riesgos |
+|---|---|---|---|
+| **A · Aportes explícitos al pagar (recomendada para gastos del Administrador)** | Al registrar el gasto general, el Administrador indica de qué rutas **bajo su responsabilidad** sale el dinero y cuánto de cada una (la suma = el gasto). Una sola operación con varias patas (una por ruta aportante) y un único gasto con alcance `administrador` | Sin cuenta nueva; el gasto existe una sola vez; cada aporte es explícito, autorizado y conciliable; ninguna ruta de otro responsable participa | Exige decidir los aportes en el momento del pago |
+| B · Fondo administrativo por Administrador | Cuenta nueva que solo recibe aportes explícitos de sus rutas y solo paga gastos generales | Separa el momento del aporte y del pago | Es una segunda caja: riesgo de reconstruir la antigua bolsa |
+| C · Gastos generales de empresa | C1: aportes explícitos de rutas, cada uno autorizado por el responsable de esa ruta (dos pasos). C2: registro de un gasto pagado **fuera** de ADEX (informativo para resultados, sin movimiento de efectivo en el libro) | C1 trazable; C2 honesto cuando el dinero no salió de ninguna ruta | C1 más lento; C2 no controla efectivo |
+
+**Decisión del propietario (2026-10-23): D74-O4F APROBADA para gastos generales del Administrador = alternativa A.** El Administrador decide de cuántas y cuáles de sus rutas sale el aporte para cubrir cada gasto general y cuánto aporta cada una; el gasto se registra una sola vez con alcance `administrador`. Pendiente de implementar sobre Base por Ruta (§14). **Gastos generales de empresa (2026-10-23): C1 y C2 APROBADAS, ambas se usan.** En C2, si el Administrador cubrió el gasto con dinero propio, debe quedar un **saldo a favor del Administrador**. Precisiones **confirmadas por el propietario (2026-10-23)**:
+1. **Todo gasto C2 registrado en ADEX es reembolsable** («si lo registro es porque quiero que se me reembolse; si no, no lo incluyo»). No hay variante «no reembolsable»: el gasto se registra una vez y crea una **obligación de la empresa con ese Administrador** (cuenta de pasivo por Administrador).
+2. **Sin aprobación:** los Administradores son socios del SuperAdmin y tienen su plena confianza; el saldo a favor queda firme al registrarlo el Administrador. Se conservan motivo, evidencia opcional, auditoría de quién lo registró, visibilidad para el SuperAdmin y corrección solo por anulación auditable (nunca borrado). *(Sustituye la precisión propuesta de aprobación por el SuperAdmin.)*
+3. El saldo a favor **no es efectivo**: no suma a ninguna Base ni caja; se muestra aparte («reembolsos pendientes a Administradores») en la Caja principal y en el consolidado.
+4. El **reembolso** se paga con aportes explícitos de rutas (como C1), autorizados por el responsable de cada ruta; puede ser parcial y reduce la obligación.
+El mismo mecanismo puede servir para gastos generales del Administrador cuando sus rutas no tengan Base suficiente. No es patrimonio personal: es una obligación nacida de un gasto de la empresa.
+
+**Recomendación (original):** A para gastos generales del Administrador; C1 y C2 para gastos generales de empresa (C2 cuando el pago se hizo con dinero que ADEX no administra). B solo si la operación real lo exige, con una justificación escrita. Hasta decidirlo, en empresas con Base por Ruta los gastos generales quedan **rechazados con un mensaje claro** (no se activa el modelo en ninguna empresa todavía); los gastos de ruta se pagan con la Base de esa ruta y los del trabajador con su custodia.
+
+**O11 · ¿tránsito o confirmación?** La regla aprobada en R59 es «quien tiene el dinero lo entrega sin pedir permiso». La transferencia entre rutas se aplica en el acto y se notifica al destino. Una confirmación de recepción física **solo** importa si la entrega entre responsables distintos puede quedar en el camino; si el propietario lo considera necesario, se añade un estado «en tránsito» con confirmación del destino y un desacuerdo registrable (decisión **D74-O11T**, recomendación: no por ahora; revisar con la operación real).
+
+### 13.3 Puerta previa a la publicación (A, B, C, E1, H, I)
+
+| Punto | Resultado | Evidencia |
+|---|---|---|
+| Árbol local y commits | `main` local: `416998f` sobre `552cf93` … `f9bec14`; `origin/main` = `2fa7152` (nada publicado de R74) | `git log` |
+| Contenido final de 0032 y 0033 | 0032 sin cambios (ya conforme a D74-A1…A4). 0033 **ampliada antes de aplicarse**: regla de perfiles D74-H1/O7 (`memberships_profile_rule`, `AX313`), traspaso a la propia custodia (`AX419`) y rutas a otra membresía propia (`membership_routes_no_self_scope`) | migraciones |
+| Reversiones | 0032 **8/8**; 0033 **9/9** (con los objetos nuevos) | `tmp/r74/a/rollback-check-0032.log`, `tmp/r74p/rollback-0033.log` |
+| Regresión completa en una copia limpia del commit (0001–0033, sin trabajo en curso) | SaaS: tipos sin errores; unidad **31/31**; PostgreSQL **509**: 504 ✔ · 4 ✖ · 1 omitida. Los ✖: **HIST-001/002/003** (históricos, previos a R73) y **ONL-061** (límite de peticiones), que pasó **17/17** al repetirlo aislado: inestabilidad de tiempos bajo la carga de dos suites en paralelo, no un defecto. CLEAN: 28 suites, salida 0. Online: tipos sin errores | `tmp/r74p/saas-full.log`, `tmp/r74p/onl-rerun.log`, `tmp/r74p/clean-full.log`, `tmp/r74p/online-tsc.log` |
+| Fallos nuevos frente a la línea base | Ninguno | ídem |
+| Rutas activas con responsable autorizado (E1) | BlueLine: 1 ruta activa («Aguas Lindas») con responsable de capital **válido** | consulta de **solo lectura** `tmp/r74p/pregate-antes.json` |
+| Combinaciones de membresías existentes (O7, D74-H1) | **Ninguna** identidad con varias membresías activas | ídem |
+| Estado gestionado | Migraciones 0001–0031; 1 empresa (BlueLine) con conservación del libro = 0; 2 Owners reales activos | ídem |
+| Respaldo previo | Volcado lógico de solo lectura cifrado (AES-256-GCM, clave DPAPI), `adex-20261023T1820`, 82 tablas con datos, descifrado verificado; **restauración completa** en PostgreSQL local aislado: **82 tablas y 2 067 filas idénticas** al origen, migraciones hasta 0031; único aviso benigno «schema public already exists». Guardado fuera del repositorio, en la carpeta privada del propietario | `tmp/r74p/restore-check.log` |
+| Compatibilidad API/frontend | La API nueva anuncia `movements-v2` siempre y `rectification-payments-v1` solo con 0032; la puerta de Vercel exige ambas. `/v1/movements` de R73 intacto. La API nueva necesita 0032 y 0033 aplicadas antes de desplegarse (usa sus columnas y reglas) | código |
+
+**Conclusión:** las puertas técnicas están **superadas**. La publicación **no se ejecutó**: requiere la autorización específica del propietario. Si pasan días antes de publicar y BlueLine registra operaciones, repetir el respaldo (mismo procedimiento) justo antes de migrar.
+
+**Orden cuando se autorice** (terminal integrada de VS Code, PowerShell): (1) respaldo si hubo operaciones desde `adex-20261023T1820`; (2) `cd saas; npm run staging:migrate` → debe aplicar solo 0032 y 0033; (3) `git push origin main` desde la raíz (Vercel cancelará el build hasta el paso 5); (4) Render, *Manual Deploy* de `adex-online-api` y de `adex-owner-api` (si falla la autenticación justo después de migrar, reintentar: R73 §8.3); (5) `https://adex-online-api.onrender.com/healthz` con `movements-v2` y `rectification-payments-v1`; (6) Vercel *Redeploy* y comprobar `VITE_VERCEL_GIT_COMMIT_SHA`; (7) comprobación de solo lectura de BlueLine y Owners (`node --require ./tmp/r26/dns-fix.cjs tmp/r74p/pregate.mjs despues`). **Qué cambia para los usuarios de BlueLine:** el SuperAdmin ya no cuadra, cierra periodos ni opera cajas de ruta (lo hace el Administrador responsable); nadie puede darse perfiles a sí mismo; las ventas con pagos se pueden corregir y los pagos anulados reaplicar.

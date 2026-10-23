@@ -96,11 +96,12 @@ La forma del sistema propuesto está en [ARQUITECTURA_SAAS_PROPUESTA_2026-10.md 
 | Elemento | Estado |
 |---|---|
 | **DS-05:** una identidad por persona; varias membresías independientes por empresa y rol; **contexto activo explícito** en cada operación; **sin herencia ni acumulación de permisos** | **APROBADO** |
+| **Enmienda de DS-05 (D74-H1 y O7, 2026-10-23):** se mantienen una identidad por persona, membresías independientes por empresa y rol, contexto activo explícito, **una sola membresía por operación**, sin acumulación de permisos y **nadie aprueba lo propio con otra membresía** (comparación por persona). Regla añadida: **en una misma empresa**, una persona solo puede tener **varias membresías activas si una de ellas es Administrador** de esa empresa; **SuperAdmin y cualquier otro perfil no se combinan** en la misma empresa; **nadie se asigna a sí mismo** membresías, reactivaciones ni rutas de otra de sus membresías. La regla es **por empresa**: no limita relaciones distintas con otras empresas del SaaS. **Sustituye** la lectura amplia «varias membresías por empresa y rol» de la fila anterior. Implementación: migración 0033 y API (R74) | **APROBADO** · implementado y probado en local; **no publicado** ([R74 §13](./ADEX_RONDA_74_INTERVENCION_INTEGRAL.md)) |
 | Membresía desactivada deja de operar de inmediato, aunque el token siga vigente | VALIDADO TÉCNICAMENTE (ID-004, MANAGED-ID-001) |
 | Los permisos no viajan en el token: se releen en PostgreSQL en cada operación | VALIDADO TÉCNICAMENTE (Fase 0A §N.4) |
 | **Supabase Auth** como proveedor de identidad (ES256/JWKS, logout que revoca la sesión) | VALIDADO TÉCNICAMENTE como **candidato**. Selección **PENDIENTE** (DS-03), con una condición abierta: cómo cortar el token de acceso antes de su caducidad en operaciones financieras |
 | Las contraseñas locales actuales (texto plano) **no se migran**: cada usuario restablece la suya | Propuesta técnica (DS-03); PENDIENTE de aprobación junto con DS-03 |
-| Cómo presenta la interfaz el selector de empresa y rol | PENDIENTE (detalle de DS-05) |
+| Cómo presenta la interfaz el selector de empresa y rol | Existe en ADEX Online (`/contexto`, «Cambiar empresa o rol», sin cerrar sesión), verificado en R74 §6 |
 | Registro de intentos denegados y retención de auditoría | PENDIENTE (DS-14) |
 
 ## 8. Integridad financiera y fuente de verdad
