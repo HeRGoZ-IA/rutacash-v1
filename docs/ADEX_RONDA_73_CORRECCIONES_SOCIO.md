@@ -6,7 +6,7 @@
 | Base | `main` @ `72b6e1b` (= `origin/main` al empezar) |
 | Alcance | SOC-01 a SOC-09. **SOC-10 excluida y no tocada** (CPF/RG) |
 | Entorno de trabajo | Solo PostgreSQL **local** y aislado, empresas y personas **sintéticas**. Ninguna operación sobre ADEX-Staging, BlueLine ni las cuentas Owner |
-| Estado de publicación | **Nada publicado.** Commits locales sin `push`; migraciones 0030 y 0031 **creadas, no aplicadas** en el PostgreSQL gestionado |
+| Estado de publicación | **Nada publicado.** Commits locales sin `push`; migraciones 0030 y 0031 **creadas, no aplicadas**. Cierre: ver §7 (CERRADA EN LOCAL / PENDIENTE DE PUBLICACIÓN, puerta de recuperación no superada) |
 
 ## 0. Criterios de cierre definidos antes de implementar
 
@@ -123,3 +123,130 @@ El E2E encontró un defecto real de esta ronda que se corrigió antes del cierre
 ## 6. Publicación (no realizada)
 
 Orden obligatorio cuando el propietario lo autorice: aplicar 0030 y 0031 en el PostgreSQL gestionado → desplegar `adex-online-api` y `adex-owner-api` (manual) → comprobar `/healthz` (`credit-rectification-v1`, `movements-v1`, `single-session-v1`) → `push` a `main` (Vercel compila; la puerta exige las funciones). El commit `3c869b1` (SOC-07) y `f976e66` (SOC-02) no dependen de la API ni de migraciones y podrían publicarse antes, pero comparten rama con el resto: hacerlo exige una rama o un orden de `push` decidido por el propietario.
+
+---
+
+## 7. Continuación y cierre (2026-10-22): decisiones del propietario D73-01 a D73-06
+
+El propietario resolvió las decisiones de §5. Esta sección **sustituye** a §5 y §6.
+
+### 7.1 Decisiones aprobadas y su implementación
+
+| Decisión | Regla | Implementación |
+|---|---|---|
+| **D73-01** Tasa libre | Sin «Tasa libre», el Cobrador origina con la tasa de su ruta; con «Tasa libre», elige 10 % o 20 %. Solo existen 10 % y 20 %. **Sustituye** «el Cobrador solo origina al 20 %». El autorizador conserva la facultad de modificar; el desembolso usa solo lo aprobado | Política pura `src/lib/interestRatePolicy.ts` (con la ruta). La API la aplica con la configuración **vigente** de la ruta y el guardián de PostgreSQL (0030) la vuelve a exigir. La tasa de una ruta solo puede ser 10 o 20 (alta y edición). Los formularios del Cobrador ofrecen la política de la ruta y se releen cuando cambia la configuración; antes de una solicitud en línea, el dispositivo relee la ruta del servidor. Sin conexión, el Cobrador sigue sin crear clientes, solicitudes ni ventas |
+| **D73-02** Reducir parcelas | El Administrador puede aumentar o **reducir** parcelas en una rectificación válida | Las cuotas nunca se borran: las que quedan fuera del calendario pasan al estado nuevo `sustituida` (importe, pagado y saldo 0). El motor de recaudos (`credit_recompute`) las ignora y la API no las lista. El calendario anterior queda completo en el historial de la rectificación. Al volver a aumentar se reactivan las mismas filas (sin duplicados) |
+| **D73-03** Excepciones | Siguen **bloqueadas** las correcciones sin saldo, con custodio cambiado, con desembolso en cuadre, en periodo cerrado o con cobros sin conexión pendientes | `GET /v1/credits/:id/rectification-check` explica el bloqueo antes de intentar, sin efectos. El diálogo muestra cada motivo en lenguaje claro y permite **registrar el caso** (`POST …/rectification-cases`, append-only, con la comprobación del servidor) **sin tocar el libro ni la venta** |
+| **D73-04** Sesión única y Offline | Las capturas del dispositivo desplazado se conservan, no se envían con la sesión revocada y, tras volver a autenticarse, pasan por **revisión explícita** | Al detectar la sesión cerrada, la sincronización guarda cada operación pendiente en «Requiere revisión» con el motivo. Incluye las enviadas sin respuesta y las retenidas por dependencia. Nada se envía solo: «Reintentar» la envía con su **mismo id** y las validaciones vigentes. No hay sesión especial ni se borra nada |
+| **D73-05** Búsqueda por dirección | Pospuesta (sin proveedor, claves ni costos) | Se publican las mejoras de SOC-06; el buscador permanece oculto |
+| **D73-06** Venta real del incidente | Se corrige con SOC-09 desde la interfaz, solo si cumple los requisitos | **No se tocó.** Procedimiento en §7.6 |
+
+### 7.2 Pruebas del cierre
+
+Todas sobre PostgreSQL **local** (0001–0031) con datos **sintéticos**. Registros en `tmp/r73/` (no versionado).
+
+| Conjunto | Resultado | Registro |
+|---|---|---|
+| SaaS completo (`npm test`) | Unidad **29/29** · PostgreSQL **473**: **469 ✔**, 3 ✖ (HIST-001/002/003, idénticos a la línea base `72b6e1b`), 1 omitida (staging real) | `close-saas-final.log` |
+| Pruebas de R73 en PostgreSQL | **47/47**: `r73-credits` 21, `r73-movements` 6, `r73-sessions` 6, `r73-decisions` 14 (D73-01 ×8, D73-02 ×4, D73-03 ×2) | `close-r73-tests.log` |
+| Unidad de R73 | 6/6 (cuerpo de aprobación ×3, retención Offline D73-04 ×3) | dentro de la suite de unidad |
+| CLEAN (`npm test` de la raíz) | Todas las suites **sin fallos** (EXIT 0). `interestrate` se actualizó a la regla D73-01, que sustituye a la anterior | `close-clean-final.log` |
+| E2E en Chrome real (build de producción, pila local) | **52/52**. Los 40 escenarios SOC anteriores más los D73: Cobrador en **móvil** con «Tasa libre» (10/20), configuración cambiada con la pantalla abierta, reducción 30 → 20 desde la pantalla, bloqueo explicado y caso registrado sin efecto financiero, **dos teléfonos del mismo Cobrador** (abono sin conexión retenido, no aplicado con la sesión revocada, revisado y aplicado una sola vez) | `e2e-close.log`, `e2e/*.png` |
+| Reversión de 0030/0031 | **9/9** en local | `rollback-check.log` |
+
+Las pruebas encontraron dos defectos de esta continuación, ya corregidos: los formularios no releían la ruta al cambiar su configuración, y las rutas locales antiguas de CLEAN sin tasa quedaban sin política.
+
+Criterios de cierre del encargo (§10):
+
+| # | Criterio | Estado |
+|---|---|---|
+| 1–5 | Tasa libre, aumentar y reducir parcelas, integridad de SOC-09, excepciones bloqueadas, Offline de sesiones desplazadas | **Cumplidos** (pruebas anteriores) |
+| 6–7 | SOC-01 a SOC-09 mantienen sus pruebas; sin regresiones financieras nuevas | **Cumplidos** |
+| 8–10 | Migraciones aplicadas, API con capacidades, Vercel sirviendo el código nuevo | **No cumplidos: bloqueados por la puerta de recuperación** (§7.4) |
+| 11 | BlueLine y Owners protegidos | **Cumplido** (nada se tocó) |
+| 12 | Registro Maestro actualizado | **Cumplido** |
+
+### 7.3 Revisión final de migraciones (0030 y 0031)
+
+| Aspecto | Resultado |
+|---|---|
+| Orden y dependencias | 0030 y 0031 van después de las 29 aplicadas y solo dependen de objetos de 0002–0029. Las aplicadas **no se modificaron** (su huella SHA-256 no cambia). 0030 se amplió en esta continuación porque **nunca se ha aplicado** en el gestionado |
+| Efecto sobre datos existentes | Solo **añaden**: columnas nullable o con valor por defecto, tablas nuevas, funciones, políticas y restricciones que las filas existentes ya cumplen. No modifican ni borran filas (comprobado en local sobre el conjunto sintético: RB-04 y RB-05) |
+| Funciones reemplazadas | `sale_requests_guard` (0018), `credit_recompute` (0013), `custody_cycle` y `route_period_figures` (0014), `ctx_session_valid` (0005) y la política de lectura de `capital_operations` (0023). Mientras no haya cuotas sustituidas ni ajustes, los resultados son idénticos |
+| Bloqueos | Cada archivo corre en su propia transacción. `ALTER TABLE` toma bloqueos breves sobre `sale_requests`, `sales`, `installments`, `capital_operations` y `revoked_sessions`, sin reescribir las tablas. Conviene aplicarlas con poco tráfico |
+| Permisos y RLS | Tablas nuevas con RLS forzado. `adex_api` solo lee rectificaciones, inserta casos y ejecuta las funciones; `adex_control` solo la envoltura de `claim_session` |
+| Compatibilidad con la API | La API nueva tolera la ausencia de 0031 (`claim` sin efecto) y solo anuncia `credit-rectification-v1` y `single-session-v1` si su migración está aplicada. **No** debe desplegarse la API nueva sin 0030: el guardián anterior seguiría exigiendo el 20 % al Cobrador y las parcelas aprobadas fallarían |
+| Sesiones existentes | Al aplicar 0031 ninguna sesión cae: la regla rige desde el primer inicio de sesión explícito de cada identidad |
+| Recuperación ante fallo | Un error durante una migración revierte su transacción. Los scripts de reversión `saas/db/rollback/0030_…down.sql` y `0031_…down.sql` se verificaron en local (`tmp/r73/rollback-check.mjs`, **9/9**): esquema idéntico al de 0029, datos intactos y migraciones reaplicables. El de 0030 **se niega** a ejecutarse si ya hubo rectificaciones, casos o parcelas cambiadas; en ese caso se corrige hacia adelante. **Un script de reversión no es una copia de seguridad de datos** |
+
+### 7.4 Puerta de recuperación previa a migraciones: **NO SUPERADA**
+
+| Punto | Evidencia | Resultado |
+|---|---|---|
+| Proveedor y plan | Supabase, `sa-east-1`. Declaración del propietario en `saas/.env.staging`: **plan Free sin método de pago**. El arnés de staging lo documenta igual | Free |
+| Respaldos existentes, último, frecuencia y retención | No hay token de la API de gestión: la variable existe vacía, porque el procedimiento pide revocarlo tras usarlo. No se pudo listar ninguna copia. La documentación oficial de Supabase solo describe copias diarias accesibles para Pro (7 días), Team (14) y Enterprise (30), y recomienda a los proyectos Free exportar sus datos con `supabase db dump` | **Desconocido / no verificable.** Según el proveedor, el plan Free no ofrece copias restaurables |
+| PITR | Solo como complemento de pago en Pro, Team o Enterprise (requiere cómputo Small o mayor) | **No disponible** en Free |
+| Restauración probada | Ninguna (R39 ya lo registraba) | **No** |
+| Restauración aislada | No hay copia que restaurar. Duplicar datos reales fuera de la infraestructura requiere aprobación específica | No realizada |
+| Punto de recuperación antes de migrar | No existe | **No** |
+
+**Decisión aplicada:** el encargo dice que, si la protección es desconocida o no verificable, se **detiene la publicación que depende de 0030 y 0031**. No apliqué migraciones, no desplegué Render, no hice `push` y Vercel no recibió nada. Tampoco publiqué una parte suelta: la API nueva necesita 0030 y el frontend nuevo exige `credit-rectification-v1` en la puerta de Vercel.
+
+**Alternativas para el propietario** (cualquiera desbloquea la puerta; no ejecuté ninguna):
+
+1. **Copia lógica previa hecha por el propietario** (recomendada como mínimo): `pg_dump` de la base gestionada a un archivo cifrado en un equipo suyo, antes de migrar, y comprobar que el archivo se lee (`pg_restore --list`). Esto copia datos reales fuera del proveedor y **requiere su aprobación expresa**. Comandos en §7.5.
+2. **Pasar el proyecto a Supabase Pro** (copias diarias accesibles durante 7 días; PITR opcional de pago). Es un costo y un cambio de plan: decisión del propietario. Tras el cambio, esperar a que exista la copia diaria y anotar su fecha antes de aplicar 0030 y 0031.
+3. **Aceptar expresamente el riesgo** de migrar sin copia. Se apoyaría en que 0030 y 0031 solo añaden, corren en transacción y tienen la reversión probada en local. No lo recomiendo como única medida: no protege ante un error humano posterior ni ante una pérdida del proveedor.
+
+### 7.5 Pasos para publicar cuando el propietario lo autorice (en este orden)
+
+Todos se ejecutan en la terminal integrada de VS Code (PowerShell), desde `RutaCash\saas`. No ejecuté ninguno.
+
+1. **Copia previa** (alternativa 1, si la aprueba). Requiere el cliente `pg_dump` 17 instalado. El comando toma el host y la contraseña de `saas\.env.staging` sin mostrarlos:
+   ```powershell
+   $e = @{}; Get-Content .env.staging | ? { $_ -match '^([A-Z0-9_]+)=(.+)$' } | % { $e[$matches[1]] = $matches[2] }
+   $env:PGPASSWORD = $e['SUPABASE_DB_PASSWORD']
+   $f = "$HOME\adex-antes-0030-$(Get-Date -Format yyyyMMdd-HHmm).dump"
+   pg_dump -h $e['SUPABASE_POOLER_HOST'] -p 5432 -U "postgres.$($e['ADEX_STAGING_PROJECT_REF'])" -d postgres -Fc -f $f
+   pg_restore --list $f | Select-Object -First 5
+   Remove-Item Env:PGPASSWORD
+   ```
+   - Efecto: un archivo en su equipo con **todos** los datos, incluidos BlueLine y los Owners. Guárdelo cifrado y fuera del repositorio.
+   - Comprobación: `pg_restore --list` muestra el índice sin errores.
+2. **Migraciones:** `npm run staging:migrate` (sin `--seed`). Es el único modo que admite la base con usuarios reales (BlueLine y Owners); `staging:check` se detiene a propósito con usuarios reales.
+   - Antes de escribir, el script comprueba la identidad del proyecto y la huella exacta de 0001–0029.
+   - Efecto esperado: aplica **solo** `0030_credit_conditions_rectification.sql` y `0031_single_active_session.sql`, cada una en su transacción.
+   - Comprobación: la salida lista esas dos como aplicadas y no muestra «BLOQUEADO».
+   - Si algo falla a mitad, esa migración se revierte sola. Si hiciera falta deshacerlas después, están `saas/db/rollback/0031_…down.sql` y luego `0030_…down.sql`, ejecutadas como administrador en ese orden.
+3. **Frontend en GitHub:** `git push origin main`, desde la raíz. Vercel intentará compilar y su puerta cancelará el build mientras la API no anuncie las funciones nuevas. Es lo esperado.
+4. **Render (manual):** en el panel, *Manual Deploy → Deploy latest commit* de `adex-online-api` y de `adex-owner-api`.
+5. **Verificación de la API:**
+   - `https://adex-online-api.onrender.com/healthz` debe anunciar `credit-rectification-v1`, `movements-v1` y `single-session-v1`.
+   - `https://adex-owner-api.onrender.com/healthz` sigue con `owner-v1, owner-clean-v1, owner-email-v1`.
+6. **Vercel:** *Redeploy* del último commit.
+   - Comprobación: el bundle de `https://adex-online.vercel.app/` contiene un `VITE_VERCEL_GIT_COMMIT_SHA` igual al HEAD publicado.
+7. **Comprobaciones seguras** (solo lectura): iniciar sesión con las cuentas Owner y de BlueLine y ver Consultas y el mapa. No crear clientes, ventas, pagos ni gastos en BlueLine.
+
+### 7.6 Venta real del incidente SOC-07 (D73-06): procedimiento para el Administrador
+
+Solo **después** de publicar. En Ventas Activas, abrir la venta y pulsar «Corregir venta»:
+
+1. Confirmar que cliente, fecha de desembolso, importe y condiciones mostradas corresponden a la venta del incidente.
+2. Al abrirse el diálogo, el servidor comprueba que la venta no tenga cobros, que el desembolso esté fuera de cuadres y de periodos cerrados, y que el trabajador siga siendo custodio de la ruta (o que la bolsa sea la propia). Si algo falla, lo explica y **no deja corregir**; en ese caso se puede registrar el caso.
+3. Cambiar la tasa a 10 % (y las parcelas, si corresponde). Revisar el resumen (total y valor de parcela) antes de guardar.
+4. Escribir el motivo (p. ej. «el Secretario aprobó al 10 % y el sistema desembolsó al 20 %») y la evidencia (aprobación del Secretario o confirmación con el cliente).
+5. Confirmar con el Cobrador que no tiene cobros de esa venta guardados sin conexión. Si los tiene, marcarlo: la corrección queda bloqueada y el caso se puede registrar.
+6. Pulsar «Registrar corrección». El desembolso original y su fecha se conservan, las parcelas pasan a las del 10 % y el historial guarda el antes y el después.
+
+Si la venta ya tiene cobros, esta función no permite corregirla (D73-03): registrar el caso.
+
+### 7.7 Estado
+
+| | |
+|---|---|
+| Código | Completo y probado en local (commits sobre `72b6e1b`, ver el Registro Maestro) |
+| Migraciones | 0030 y 0031 **creadas, NO aplicadas** |
+| Render / Vercel | **Sin cambios** (nada desplegado) |
+| BlueLine y Owners | Ninguna operación ni lectura de sus datos. Solo se leyó la configuración local, sin mostrar secretos |
+| SOC-10 | **No tocada** |
+| Declaración | **CERRADA EN LOCAL / PENDIENTE DE PUBLICACIÓN.** Bloqueada por la puerta de recuperación (§7.4) hasta que el propietario elija una alternativa |
