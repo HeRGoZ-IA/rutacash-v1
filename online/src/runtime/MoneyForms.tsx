@@ -51,12 +51,14 @@ function useCompanyPeople() {
 // ============================================================
 // Pedir capital
 // ============================================================
-export function RequestModal({ open, onClose, onDone, currency, initialKind }: {
+export function RequestModal({ open, onClose, onDone, currency, initialKind, kinds }: {
   open: boolean; onClose: () => void; onDone: () => void; currency: string; initialKind?: RequestKind;
+  /** R74 Base por Ruta: solo estas solicitudes (las de bolsa no existen en ese modelo). */
+  kinds?: RequestKind[];
 }) {
   const me = useRuntime((s) => s.ctx);
   const role = me?.role === 'superadmin' ? 'superadmin' : 'admin';
-  const options = REQUEST_OPTIONS[role];
+  const options = kinds ? REQUEST_OPTIONS[role].filter((o) => kinds.includes(o.kind)) : REQUEST_OPTIONS[role];
   const { users, routes } = useCompanyPeople();
   const [admins, setAdmins] = useState<AdminOption[]>([]);
   const [f, setF] = useState({ kind: options[0]!.kind, holderId: '', routeId: '', concept: 'recaudo' as 'recaudo' | 'base', amount: 0, note: '' });

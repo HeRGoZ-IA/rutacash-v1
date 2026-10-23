@@ -14,6 +14,8 @@
 //   5. Ronda 67: CARTERA del SuperAdmin = solo Clientes (consulta). Ventas Activas, Autorizaciones y
 //      Ajustes de pago son del Administrador (sus URL también están protegidas en CleanOnlineApp).
 //      «Mapa» (Cartera) es solo del Administrador.
+//   6. Ronda 74 · Base por Ruta: con `route_base`, «Capital» del SuperAdmin se llama «Panel de rutas»
+//      (panel de solo lectura; ya no mueve capital). Con `admin_pool`, el menú no cambia.
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
@@ -34,6 +36,7 @@ import { BrandLogo } from '@/components/ui/BrandLogo'
 import { Repeat, Loader2 } from 'lucide-react'
 import { leaveContext, useRuntime } from '../../../runtime/session.ts'
 import { useNotificationCount } from '../../../runtime/capitalRequests.ts'
+import { isRouteBaseUi, useCapitalModel } from '../../../runtime/routeBase/api.ts'
 
 interface NavItem {
   path: string
@@ -112,9 +115,10 @@ export function AdminLayout() {
     void leaveContext().then(() => navigate('/contexto'))
   }
 
+  const capitalModel = useCapitalModel()
   const visibleItems = navItems.filter(
     (item) => !item.roles || !user?.rol || item.roles.includes(user.rol)
-  )
+  ).map((item) => (isRouteBaseUi(capitalModel) && item.path === '/admin/capital' && item.label === 'Capital' ? { ...item, label: 'Panel de rutas' } : item))
   // Ronda 50: secciones en orden fijo; Configuración siempre al final.
   const settings = visibleItems.filter((i) => i.path === '/admin/settings')
   const sections = GROUP_ORDER

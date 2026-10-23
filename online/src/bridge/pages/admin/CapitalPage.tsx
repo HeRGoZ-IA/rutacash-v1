@@ -9,10 +9,15 @@
 //   · Administrador → «Caja principal»: resumen de su caja (Ronda 59). Las operaciones están en
 //     Transferencias y el detalle en Consultas.
 //
+// R74 · Base por Ruta: la pantalla depende del MODELO DE CAPITAL de la empresa (`GET /v1/capital/model`).
+// `admin_pool` (toda empresa real hoy) = esta pantalla, sin cambios. `route_base`/`migrating` = el panel
+// consolidado por ruta (`runtime/routeBase/CajaPrincipalRB.tsx`). El SuperAdmin llega a la activación
+// (estructural, no mueve dinero) desde «Modelo de capital».
+//
 // Todas las cifras son las del servidor (`/v1/capital/summary` y custodias); las que el servidor no
 // calcula no se muestran. Sin «Conciliación de la bolsa» parcial ni historiales largos (Ronda 59).
 import { useState, useEffect } from 'react'
-import { History, MapPin, Plus, Repeat, ShieldAlert, UserCog, Wallet } from 'lucide-react'
+import { History, MapPin, Plus, Repeat, Settings2, ShieldAlert, UserCog, Wallet } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { Select, Textarea } from '@/components/ui/Input'
@@ -42,6 +47,8 @@ import { toMajor } from '../../../runtime/mappers.ts'
 import { PoolSummary, type AdminPoolFigures } from '../../../runtime/PoolSummary.tsx'
 import { getRequest, type CapitalRequest } from '../../../runtime/capitalRequests.ts'
 import { RequestBanner, RequestModal } from '../../../runtime/MoneyForms.tsx'
+import { isRouteBaseUi, useCapitalModel } from '../../../runtime/routeBase/api.ts'
+import { CajaPrincipalRB } from '../../../runtime/routeBase/CajaPrincipalRB.tsx'
 
 type SaOperation = 'COMPANY_DEPOSIT' | 'ADMIN_ALLOCATION' | 'ADMIN_RETURN' | 'COMPANY_WITHDRAWAL'
 
@@ -75,7 +82,15 @@ function Stat({ label, value, tone = 'text-gray-900', bg = 'bg-gray-50', testId 
   )
 }
 
+/** Elige la pantalla por el modelo de capital de la empresa (sin parpadeo: espera la primera respuesta). */
 export default function CapitalPage() {
+  const model = useCapitalModel()
+  if (model === null) return <div className="flex justify-center py-16" role="status" aria-label="Cargando"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
+  if (isRouteBaseUi(model)) return <CajaPrincipalRB model={model} />
+  return <PoolCapitalPage />
+}
+
+function PoolCapitalPage() {
   const { tenantId, currency } = useTenant()
   const { user } = useAuth()
   const officeFilter = useOfficeRouteFilter()
@@ -209,6 +224,9 @@ export default function CapitalPage() {
       </div>
       {esSuperAdmin && !verAdminId && (
         <div className="flex flex-wrap gap-2">
+          <Link to="/admin/capital/modelo" className="inline-flex items-center justify-center gap-2 h-9 px-4 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50" data-testid="sa-capital-model">
+            <Settings2 className="w-4 h-4" aria-hidden />Modelo de capital
+          </Link>
           <Link to="/admin/consultas?categoria=capital" className="inline-flex items-center justify-center gap-2 h-9 px-4 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
             <History className="w-4 h-4" aria-hidden />Ver movimientos
           </Link>

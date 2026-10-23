@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowDownLeft, ArrowUpRight, Bell, CheckCircle2, Clock3, Inbox as InboxIcon, Plus, Send, XCircle } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Bell, CheckCircle2, Clock3, Handshake, Inbox as InboxIcon, Plus, Send, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -23,6 +23,7 @@ import { CONCEPT_LABEL, REQUEST_STATE_LABEL, fetchInbox, getRequest, requestTitl
 import { CloseRequestModal, DeliverCashModal, RequestModal } from './MoneyForms.tsx';
 import { listAdminTransfers, type AdminTransfer } from './adminTransfers.ts';
 import { TransferDecisionModal } from './AdminTransferUI.tsx';
+import { HandoverDialog } from './routeBase/HandoverDialog.tsx';
 
 /** Dónde se atiende cada solicitud (el MISMO formulario de la operación). */
 const ATTEND_PATH: Record<string, string> = {
@@ -40,6 +41,7 @@ export default function NotificationsPage() {
   const [asking, setAsking] = useState(false);
   const [delivering, setDelivering] = useState<{ request: CapitalRequest | null } | null>(null);
   const [deciding, setDeciding] = useState<{ t: AdminTransfer; what: 'confirm' | 'reject' } | null>(null);
+  const [receiving, setReceiving] = useState<{ routeId: string; name: string } | null>(null);
   const money = (n: number) => formatCurrency(n, currency);
   const cobrador = role === 'cobrador';
   const consultas = role === 'admin' || role === 'superadmin';
@@ -101,6 +103,11 @@ export default function NotificationsPage() {
                           <Button size="sm" onClick={() => { void decide(n.transfer.id, 'confirm'); }}>{n.transfer.mySide === 'destination' ? 'Confirmar recepción' : 'Confirmar envío'}</Button>
                           <Button size="sm" variant="secondary" onClick={() => { void decide(n.transfer.id, 'reject'); }}>Rechazar</Button>
                         </>} />
+                    ) : n.type === 'handover-confirmation' ? (
+                      <Row icon={<Handshake className="w-4 h-4 text-violet-600" />} amount={money(n.handover.baseAtStart)}
+                        title={`Recibir la ruta ${n.handover.routeName}: cuenta la Base y confirma`}
+                        detail="Ahora eres el responsable. La ruta está en entrega hasta que confirmes el conteo." at={n.at}
+                        actions={<Button size="sm" onClick={() => setReceiving({ routeId: n.handover.routeId, name: n.handover.routeName })} data-testid="handover-attend">Confirmar conteo</Button>} />
                     ) : null}
                   </li>
                 ))}
@@ -142,6 +149,7 @@ export default function NotificationsPage() {
       <CloseRequestModal target={closing} currency={currency} onClose={() => setClosing(null)} onDone={() => { setClosing(null); reload(); }} />
       <DeliverCashModal open={!!delivering} request={delivering?.request ?? null} currency={currency}
         onClose={() => setDelivering(null)} onDone={() => { setDelivering(null); reload(); }} />
+      <HandoverDialog routeId={receiving?.routeId ?? null} routeName={receiving?.name} onClose={() => setReceiving(null)} onDone={() => { setReceiving(null); reload(); }} />
       <TransferDecisionModal target={deciding} currency={currency} onClose={() => setDeciding(null)} onDone={() => { setDeciding(null); reload(); }} />
     </div>
   );
@@ -150,6 +158,7 @@ export default function NotificationsPage() {
 function key(n: Notice): string {
   if ('request' in n) return `r:${n.request.id}:${n.type}`;
   if ('transfer' in n) return `t:${n.transfer.id}:${n.type}`;
+  if ('handover' in n) return `h:${n.handover.id}`;
   return `o:${n.operation.id}`;
 }
 
@@ -184,6 +193,7 @@ const OP_TEXT: Record<string, (o: { actor: { name: string | null }; workerName: 
   'capital-returned': (o) => `${formatPersonName(o.actor.name) || 'Un Administrador'} devolvió capital`,
   'capital-delivered': (o) => `Capital recibido de ${formatPersonName(o.actor.name) || 'tu Administrador'}`,
   'return-registered': (o) => `${formatPersonName(o.actor.name) || 'Tu Administrador'} registró una devolución tuya`,
+  'route-transfer-received': (o) => `Transferencia de Base recibida de ${formatPersonName(o.actor.name) || 'otro Administrador'}`,
 };
 
 function InfoRow({ n, money, consultas }: { n: Notice; money: (n: number) => string; consultas: boolean }) {
@@ -206,7 +216,7 @@ function InfoRow({ n, money, consultas }: { n: Notice; money: (n: number) => str
   }
   if ('operation' in n) {
     const o = n.operation;
-    const incoming = n.type === 'capital-received' || n.type === 'cash-delivered' || n.type === 'capital-returned' || n.type === 'capital-delivered';
+    const incoming = n.type === 'capital-received' || n.type === 'cash-delivered' || n.type === 'capital-returned' || n.type === 'capital-delivered' || n.type === 'route-transfer-received';
     return <Row icon={incoming ? <ArrowDownLeft className="w-4 h-4 text-emerald-600" /> : <ArrowUpRight className="w-4 h-4 text-amber-600" />}
       title={OP_TEXT[n.type]?.(o) ?? 'Movimiento registrado'} detail={o.reason} amount={money(o.amount)} at={n.at}
       actions={consultas ? <Link to={`/admin/consultas?referencia=${encodeURIComponent(o.id.slice(0, 8))}`} className="text-xs text-primary-700 hover:underline">Ver movimiento</Link> : undefined} />;

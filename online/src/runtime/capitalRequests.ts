@@ -92,7 +92,7 @@ export async function deliverOwnCash(p: { routeId: string; amount: number; conce
 // ---------- Notificaciones ----------
 
 export type NoticeType = 'capital-received' | 'capital-collected' | 'cash-delivered' | 'capital-returned' | 'capital-delivered' | 'return-registered'
-  | 'transfer-received' | 'transfer-closed' | 'request-resolved';
+  | 'transfer-received' | 'transfer-closed' | 'request-resolved' | 'route-transfer-received';
 
 export interface NoticeOperation {
   id: string; kind: string; amount: number; routeId: string | null; reason: string;
@@ -105,8 +105,12 @@ export interface NoticeTransfer {
   registeredBy: { membershipId: string; name: string | null }; mySide: 'origin' | 'destination';
 }
 
+/** R74 Base por Ruta (O5): el nuevo responsable debe contar la Base y confirmar la entrega. */
+export interface NoticeHandover { id: string; routeId: string; routeName: string; fromId: string | null; baseAtStart: number }
+
 export type Notice =
   | { type: 'request'; at: string; request: CapitalRequest }
+  | { type: 'handover-confirmation'; at: string; handover: NoticeHandover }
   | { type: 'transfer-confirmation'; at: string; transfer: NoticeTransfer }
   | { type: 'request-resolved'; at: string; request: CapitalRequest }
   | { type: 'transfer-received' | 'transfer-closed'; at: string; transfer: NoticeTransfer }
@@ -118,6 +122,7 @@ export interface Inbox { actionRequired: Notice[]; waiting: Notice[]; info: Noti
 function mapNotice(n: any): Notice {
   if (n.request) return { ...n, request: fromRaw(n.request) };
   if (n.transfer) return { ...n, transfer: { ...n.transfer, amount: toMajor(n.transfer.amountMinor) } };
+  if (n.handover) return { ...n, handover: { ...n.handover, baseAtStart: toMajor(n.handover.baseAtStartMinor) } };
   return { ...n, operation: { ...n.operation, amount: toMajor(n.operation.amountMinor) } };
 }
 

@@ -11,6 +11,10 @@
 //   · Rutas solo de consulta. «Ver movimientos» lleva a Consultas (no hay historial aquí).
 //
 // El SuperAdmin no tiene esta pantalla (opera su capital en Capital).
+//
+// R74 · Base por Ruta: con `route_base`/`migrating` (`GET /v1/capital/model`) la pantalla es
+// `runtime/routeBase/TransferenciasRB.tsx` (sin bolsas ni devoluciones al SuperAdmin). Con `admin_pool`,
+// esta pantalla sin cambios.
 import { useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowDownLeft, ArrowUpRight, Bell, CornerUpLeft, History, MapPin, Plus, Send, Users } from 'lucide-react'
@@ -37,6 +41,8 @@ import { listAdminTransfers } from '../../../runtime/adminTransfers.ts'
 import { TransferRegisterModal } from '../../../runtime/AdminTransferUI.tsx'
 import { getRequest, type CapitalRequest, type RequestKind } from '../../../runtime/capitalRequests.ts'
 import { RequestModal, ReturnToCompanyModal } from '../../../runtime/MoneyForms.tsx'
+import { isRouteBaseUi, useCapitalModel } from '../../../runtime/routeBase/api.ts'
+import { TransferenciasRB } from '../../../runtime/routeBase/TransferenciasRB.tsx'
 
 interface PoolSummary { admins: { adminId: string; availableMinor: number }[] }
 
@@ -48,6 +54,15 @@ const MODO: TransferMode = { central: true, heredado: {} }
 const REQUEST_KIND: Partial<Record<OpKind, RequestKind>> = { 'request-sa': 'admin_allocation', 'request-admin': 'admin_transfer', 'request-worker': 'worker_return' }
 
 export default function TransfersPage() {
+  const model = useCapitalModel()
+  const { user } = useAuth()
+  if (user?.rol === 'superadmin') return <Navigate to="/admin/capital" replace />
+  if (model === null) return <div className="flex justify-center py-16" role="status" aria-label="Cargando"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
+  if (isRouteBaseUi(model)) return <TransferenciasRB model={model} />
+  return <PoolTransfersPage />
+}
+
+function PoolTransfersPage() {
   const { tenantId, currency } = useTenant()
   const officeFilter = useOfficeRouteFilter()
   const { user } = useAuth()

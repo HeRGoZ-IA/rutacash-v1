@@ -110,6 +110,15 @@ const ERRORS: Record<string, string> = {
   OFFLINE_NOT_ALLOWED: 'Solo el Cobrador puede registrar operaciones sin conexión.',
   ROUTE_HAS_ACTIVE_COLLECTOR: 'La ruta tiene un Cobrador activo: solo él registra abonos y visitas. Para sustituirlo, la oficina debe bloquearlo antes.',
   OFFLINE_KEY_UNAVAILABLE: 'No se pudo preparar el modo sin conexión en este dispositivo.',
+  // Ronda 74 · Base por Ruta (0034, AX421–AX428).
+  CAPITAL_MODEL_OPERATION_REFUSED: 'Con Base por Ruta el capital de empresa y las bolsas de Administradores no se mueven: el dinero está en la Base de cada ruta.',
+  CAPITAL_MIGRATION_IN_PROGRESS: 'La empresa está pasando a Base por Ruta: las bolsas están congeladas hasta que el SuperAdmin complete la activación.',
+  ROUTE_IN_HANDOVER: 'La ruta está en entrega: el nuevo responsable debe contar la Base y confirmar antes de mover dinero.',
+  ROUTE_SCOPE_VIOLATION: 'Una ruta no puede usar la Base de otra ruta.',
+  ACTIVATION_PREREQUISITES_FAILED: 'No se cumplen los requisitos para activar Base por Ruta. Revise la lista y vuelva a comprobar.',
+  GENERAL_EXPENSE_FUNDING_PENDING: 'Con Base por Ruta, los gastos generales todavía no se pueden registrar: falta habilitar su financiación. Los gastos de una ruta se pagan con su Base.',
+  HANDOVER_NOT_PENDING: 'Esta ruta ya no tiene una entrega pendiente de confirmar.',
+  ROUTE_BASE_NOT_ACTIVE: 'La empresa no usa Base por Ruta: esta operación no está disponible.',
 };
 
 const FIELD: Record<string, string> = {
@@ -118,6 +127,9 @@ const FIELD: Record<string, string> = {
   capitalControllerId: 'Responsable de capital', membershipId: 'Responsable de capital', reason: 'Motivo', displayName: 'Nombre', icon: 'Icono',
   legalName: 'Razón social', taxId: 'Identificación tributaria', address: 'Dirección', contactName: 'Persona de contacto', routeIds: 'Rutas',
   selectedRouteIds: 'Rutas', status: 'Estado',
+  routeId: 'Ruta', fromRouteId: 'Ruta de origen', toRouteId: 'Ruta destino', amountMinor: 'Valor', evidence: 'Evidencia',
+  backupReference: 'Referencia del respaldo', companyBalanceNote: 'Nota sobre el capital de la empresa', countedMinor: 'Valor contado',
+  expectedSeenMinor: 'Base esperada', note: 'Nota', sourceNote: 'Origen del dinero', workerId: 'Cobrador', target: 'Cambio de modelo',
 };
 
 export function errorText(err: unknown): string {
@@ -186,4 +198,6 @@ export const OPERATION_KIND: Record<string, string> = {
   EXPENSE_REFUND: 'Reintegro de gasto', SETTLEMENT_RETURN: 'Efectivo entregado en cuadre', SETTLEMENT_SURPLUS: 'Sobrante de cuadre (en control)',
   ADMIN_TRANSFER_HOLD: 'Transferencia a otro Administrador (comprometida)', ADMIN_TRANSFER_APPLY: 'Transferencia recibida de otro Administrador',
   ADMIN_TRANSFER_RELEASE: 'Transferencia entre Administradores liberada',
+  ROUTE_BASE_INJECTION: 'Inyección de Base', ROUTE_BASE_WITHDRAWAL: 'Retiro de Base', ROUTE_TRANSFER: 'Transferencia entre rutas',
+  LEGACY_POOL_TO_ROUTE: 'Reparto de saldo sin asignar',
 };

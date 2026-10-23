@@ -63,6 +63,8 @@ const ActiveSalesPage = lazy(() => import('@/pages/admin/ActiveSalesPage'));
 const ExpensesPage = lazy(() => import('@/pages/admin/ExpensesPage'));
 const CapitalPage = lazy(() => import('@/pages/admin/CapitalPage'));
 const TransfersPage = lazy(() => import('@/pages/admin/TransfersPage'));
+// R74 · Base por Ruta: activación del modelo (SuperAdmin, estructural; no mueve dinero).
+const CapitalModelPage = lazy(() => import('./routeBase/ActivationPage.tsx'));
 const ConsultasPage = lazy(() => import('./ConsultasPage.tsx'));
 const NotificationsPage = lazy(() => import('./NotificationsPage.tsx'));
 // Ronda 67: mapa del Administrador (Leaflet viaja solo en este paquete bajo demanda).
@@ -208,6 +210,7 @@ export function CleanOnlineApp() {
             <Route path="capital" element={<CapitalPage />} />
             {/* En el SaaS el capital centralizado rige desde el alta: no hay transición. */}
             <Route path="capital/transicion" element={<Navigate to="/admin/capital" replace />} />
+            <Route path="capital/modelo" element={<RequireAuth roles={['superadmin']}><CapitalModelPage /></RequireAuth>} />
             <Route path="expenses" element={<ExpensesPage />} />
             <Route path="expense-categories" element={<ExpenseCategoriesPage />} />
             <Route path="transfers" element={<TransfersPage />} />

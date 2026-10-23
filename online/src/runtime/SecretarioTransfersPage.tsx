@@ -4,6 +4,11 @@
 // que él hizo por ellos fuera de ADEX). ADEX no toca cuentas bancarias: registra el hecho.
 // Queda pendiente hasta que AMBOS Administradores confirmen desde su perfil; el Secretario
 // no confirma por nadie y solo puede cancelar lo que él registró mientras esté pendiente.
+//
+// R74 · Base por Ruta: con `route_base` las bolsas de los Administradores no reciben dinero, así que
+// una transferencia entre Administradores ya no se puede aplicar (AX421). La pantalla conserva el
+// historial, explica el cambio y no ofrece «Registrar». El dinero entre rutas lo mueve el responsable
+// de la ruta de origen (Transferencias → Transferencia entre rutas). Con `admin_pool`, sin cambios.
 import { useEffect, useState } from 'react';
 import { ArrowLeftRight, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -13,6 +18,7 @@ import { useTenant } from '@/hooks/useTenant';
 import { useDataRevision } from '@/hooks/useDataRevision';
 import { listAdminTransfers, STATE_LABEL, type AdminTransfer, type TransferState } from './adminTransfers.ts';
 import { TransferCard, TransferDecisionModal, TransferRegisterModal } from './AdminTransferUI.tsx';
+import { isRouteBaseUi, useCapitalModel } from './routeBase/api.ts';
 
 export default function SecretarioTransfersPage() {
   const { currency } = useTenant();
@@ -21,6 +27,8 @@ export default function SecretarioTransfersPage() {
   const [form, setForm] = useState(false);
   const [decision, setDecision] = useState<{ t: AdminTransfer; what: 'confirm' | 'reject' | 'cancel' } | null>(null);
   const revision = useDataRevision();
+  const model = useCapitalModel();
+  const routeBase = isRouteBaseUi(model);
   const load = () => listAdminTransfers().then(setTransfers).catch(() => setTransfers([]));
   useEffect(() => { void load(); }, [revision]);
 
@@ -31,8 +39,14 @@ export default function SecretarioTransfersPage() {
     <div className="p-4 md:p-6 space-y-5 max-w-5xl">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-bold text-gray-900">Transferencias entre Administradores</h1>
-        <Button onClick={() => setForm(true)} icon={<Plus className="w-4 h-4" />} data-testid="register-admin-transfer">Registrar transferencia</Button>
+        {model !== null && !routeBase && <Button onClick={() => setForm(true)} icon={<Plus className="w-4 h-4" />} data-testid="register-admin-transfer">Registrar transferencia</Button>}
       </div>
+      {routeBase && (
+        <p className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900" role="status" data-testid="secretary-route-base">
+          La empresa usa <b>Base por Ruta</b>: el dinero pertenece a cada ruta y ya no hay cajas de Administradores entre las que transferir.
+          Cuando haga falta mover dinero entre rutas, lo registra el Administrador responsable de la ruta de origen. Aquí queda el historial.
+        </p>
+      )}
 
       {transfers == null ? (
         <div className="flex justify-center py-10"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
