@@ -130,7 +130,7 @@ describe('Fase 0 · esquema completo frente a Dexie v16', () => {
       // Ronda 62 (0026): evidencia de captura sin conexión y llave por membresía para cifrar el dispositivo.
       // Ronda 67 (0029): ubicación de referencia del cliente (historia) y del dispositivo al vender (mapa).
       // Ronda 73 (0030): historial append-only de rectificaciones de créditos desembolsados; (0031) sesión vigente por identidad.
-      assert.deepEqual(extra, ['adex.admin_transfers', 'adex.capital_accounts', 'adex.capital_entries', 'adex.capital_operations', 'adex.capital_requests', 'adex.client_locations', 'adex.correction_steps', 'adex.credit_rectifications', 'adex.currencies', 'adex.custody_settlements',
+      assert.deepEqual(extra, ['adex.admin_transfers', 'adex.capital_accounts', 'adex.capital_entries', 'adex.capital_operations', 'adex.capital_requests', 'adex.client_locations', 'adex.correction_steps', 'adex.credit_rectification_cases', 'adex.credit_rectifications', 'adex.currencies', 'adex.custody_settlements',
         'adex.document_types', 'adex.identities', 'adex.identity_active_sessions', 'adex.membership_routes', 'adex.offline_captures', 'adex.offline_keys', 'adex.operations', 'adex.payment_locations', 'adex.period_closures', 'adex.revoked_sessions', 'adex.sale_locations']);
     });
 

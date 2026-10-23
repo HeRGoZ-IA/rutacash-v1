@@ -41,6 +41,8 @@ export const EXPECTED_API_WRITES: Record<string, string[]> = {
   'adex.payment_locations': ['INSERT'],
   // Ronda 67 (0029): ubicación de referencia del cliente y del dispositivo al vender, solo alta (historia).
   'adex.client_locations': ['INSERT'],
+  // Ronda 73 (0030, D73-03): casos de rectificación excepcional, solo alta (sin efecto financiero).
+  'adex.credit_rectification_cases': ['INSERT'],
   'adex.sale_locations': ['INSERT'],
   'adex.revoked_sessions': ['INSERT'],
   'adex.route_capital_controller_events': ['INSERT'],

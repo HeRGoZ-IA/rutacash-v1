@@ -114,8 +114,9 @@ describe('Ronda 33 · RLS con contexto evaluado una vez (0020)', () => {
     // descarta) y no se comparan las tablas que 0028/0029 cambiaron a propósito.
     // Ronda 73: igual con la lectura del historial de rectificaciones (0030).
     await asOwner(['client_locations', 'sale_locations', 'payment_locations'].map((t) => `drop policy ${t}_read on adex.${t};`).join(' ')
-      + ' drop policy credit_rectifications_ctx on adex.credit_rectifications;');
-    const LATER = [':client_locations', ':sale_locations', ':payment_locations', ':credit_rectifications'];
+      + ' drop policy credit_rectifications_ctx on adex.credit_rectifications;'
+      + ' drop policy credit_rectification_cases_ctx on adex.credit_rectification_cases; drop policy credit_rectification_cases_insert on adex.credit_rectification_cases;');
+    const LATER = [':client_locations', ':sale_locations', ':payment_locations', ':credit_rectifications', ':credit_rectification_cases'];
     const changedLater = (k: string) => LATER.some((t) => k.endsWith(t)) || (k.endsWith(':sale_requests') && k.startsWith('superadmin/'));
     await asOwner(withoutPartnerCash(ROLLBACK).replace(/^(begin|commit|set local role adex_owner);$/gm, ''));
     const previous = await visibility();
