@@ -7,6 +7,7 @@
 // Ronda 65-C1, marcado: el COBRADOR sin servidor al alcance ve el aviso «Operación no disponible sin
 // internet» en lugar del formulario (decisión del propietario: llama a la oficina).
 import { useState, useEffect } from 'react'
+import { useDataRevision } from '@/hooks/useDataRevision'
 import { DEFAULT_INSTALLMENTS } from '@/lib/saleDefaults'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useOpBase } from '@/hooks/useOpBase'
@@ -74,7 +75,9 @@ function NewClientForm() {
     paymentDays: [1, 2, 3, 4, 5, 6] as number[],
   })
 
-  useEffect(() => { load() }, [user])
+  // D73-01: si cambia la configuración de una ruta (tasa / «Tasa libre»), se relee y el formulario la aplica.
+  const routesRevision = useDataRevision(['routes'])
+  useEffect(() => { load() }, [user, routesRevision])
 
   async function load() {
     if (!user) return
