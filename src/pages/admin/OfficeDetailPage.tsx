@@ -16,6 +16,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { useDataRevision } from '@/hooks/useDataRevision'
 import { can, ROLE_LABELS, canManageUser, carteraClientsOnly } from '@/lib/permissions'
 import { formatCurrency } from '@/lib/formatters'
+import { formatPersonName } from '@/lib/displayName'
 import { NO_OFFICE_LABEL } from '@/lib/officeGrouping'
 import { officeSummaryCsvRows, officeRoutesCsvRows } from '@/lib/officeExecutive'
 import { officeFileTag } from '@/components/ui/OfficeSelector'
@@ -550,7 +551,7 @@ export default function OfficeDetailPage() {
                       return (
                         <p className="text-xs text-gray-600 leading-snug">
                           <span className="font-medium text-gray-500">Equipo: </span>
-                          {enRuta.slice(0, 3).map(u => u.nombre).join(', ')}
+                          {enRuta.slice(0, 3).map(u => formatPersonName(u.nombre)).join(', ')}
                           {enRuta.length > 3 && <span className="text-gray-400"> +{enRuta.length - 3} más</span>}
                         </p>
                       )
@@ -592,7 +593,7 @@ export default function OfficeDetailPage() {
               <div key={u.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   <Users className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" />
-                  <span className="text-sm font-medium text-gray-800 truncate">{u.nombre}</span>
+                  <span className="text-sm font-medium text-gray-800 truncate">{formatPersonName(u.nombre)}</span>
                   <Badge variant="gray" size="sm">{ROLE_LABELS[u.rol]}</Badge>
                 </div>
                 <span className="text-xs text-gray-500 truncate hidden sm:block flex-1 text-right">
@@ -620,7 +621,7 @@ export default function OfficeDetailPage() {
                 <div className="min-w-0">
                   <p className="text-sm text-gray-700 truncate">{a.descripcion}</p>
                   <p className="text-xs text-gray-500">
-                    {a.routeNombre ?? '—'}{a.actorNombre ? ` · ${a.actorNombre}` : ''}
+                    {a.routeNombre ?? '—'}{a.actorNombre ? ` · ${formatPersonName(a.actorNombre)}` : ''}
                   </p>
                 </div>
                 <span className="text-xs text-gray-500 flex-shrink-0">{formatDateTime(a.createdAt)}</span>
@@ -689,7 +690,7 @@ export default function OfficeDetailPage() {
         <div className="space-y-4">
           <Select label="Usuario" value={assignUserId}
             onChange={e => { setAssignUserId(e.target.value); setAssignSelected(selectionFor(e.target.value)) }}
-            options={assignableUsers.filter(u => canManageUser(user, u)).map(u => ({ value: u.id, label: `${u.nombre} · ${ROLE_LABELS[u.rol]}` }))}
+            options={assignableUsers.filter(u => canManageUser(user, u)).map(u => ({ value: u.id, label: `${formatPersonName(u.nombre)} · ${ROLE_LABELS[u.rol]}` }))}
             placeholder="Selecciona un usuario" />
 
           <div>

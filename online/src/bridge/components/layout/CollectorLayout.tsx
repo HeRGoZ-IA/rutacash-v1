@@ -21,6 +21,7 @@ import { getAuthorizedRouteIds } from '@/lib/roles'
 import { countPendingDisbursements } from '@/services/saleRequestService'
 import { db } from '@/lib/db'
 import { cn } from '@/lib/utils'
+import { formatPersonName } from '@/lib/displayName'
 import { CountBadge } from '@/components/ui/CountBadge'
 import type { Route } from '@/models/types'
 import { BrandLogo } from '@/components/ui/BrandLogo'
@@ -151,7 +152,7 @@ export function CollectorLayout() {
                 {routes.length > 1 && <ChevronDown className="w-3 h-3 flex-shrink-0" />}
               </button>
             ) : (
-              <p className="text-primary-200 text-xs leading-tight truncate">{user?.nombre}</p>
+              <p className="text-primary-200 text-xs leading-tight truncate">{formatPersonName(user?.nombre)}</p>
             )}
           </div>
         </div>

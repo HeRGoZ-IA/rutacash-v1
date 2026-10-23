@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import { formatPersonName } from '@/lib/displayName'
 import { useOpBase } from '@/hooks/useOpBase'
 import { ChangePasswordCard } from '@/components/auth/ChangePasswordCard'
 import { ROLE_LABELS } from '@/lib/permissions'
@@ -20,7 +21,7 @@ export default function OperationalAccountPage() {
       </button>
       <div>
         <h1 className="text-xl font-bold text-gray-900">Mi cuenta</h1>
-        <p className="text-sm text-gray-500 mt-0.5">{user?.nombre} · {user ? ROLE_LABELS[user.rol] : ''}</p>
+        <p className="text-sm text-gray-500 mt-0.5">{formatPersonName(user?.nombre)} · {user ? ROLE_LABELS[user.rol] : ''}</p>
       </div>
       <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4">
         <p className="text-xs text-gray-500">Correo</p>

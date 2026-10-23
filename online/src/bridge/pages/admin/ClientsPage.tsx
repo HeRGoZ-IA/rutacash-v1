@@ -25,6 +25,7 @@ import { useRouteCapital } from '@/hooks/useRouteCapital'
 import { ClientCreditHistory } from '@/components/ui/ClientCreditHistory'
 import { generateId } from '@/lib/utils'
 import { nowISO, formatDate, today, formatCurrency, normalizeDoc } from '@/lib/formatters'
+import { formatBusinessName, formatClientName } from '@/lib/displayName'
 import { logAction } from '@/services/auditService'
 import { createDirectSale } from '@/services/saleRequestService'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute, can } from '@/lib/permissions'
@@ -365,8 +366,8 @@ export default function ClientsPage() {
                   <tr key={c.id} onClick={() => openDetail(c)} className="hover:bg-primary-50/40 cursor-pointer transition-colors">
                     <td className="px-4 py-3">
                       <div>
-                        <p className="text-sm font-medium text-gray-900">{c.nombre}</p>
-                        {c.negocio && <p className="text-xs text-gray-500 truncate max-w-xs">{c.negocio}</p>}
+                        <p className="text-sm font-medium text-gray-900">{formatClientName(c.nombre)}</p>
+                        {c.negocio && <p className="text-xs text-gray-500 truncate max-w-xs">{formatBusinessName(c.negocio)}</p>}
                       </div>
                     </td>
                     <td className="px-4 py-3 hidden sm:table-cell">
@@ -429,7 +430,7 @@ export default function ClientsPage() {
               <div className="text-xs text-red-700">
                 <p className="font-semibold">Este documento ya está registrado en esta empresa.</p>
                 <p className="mt-0.5">
-                  <span className="font-medium">{dupClient.nombre}</span>
+                  <span className="font-medium">{formatClientName(dupClient.nombre)}</span>
                   {' · '}Ruta: {getRouteName(dupClient.routeId)}
                 </p>
               </div>
@@ -515,7 +516,7 @@ export default function ClientsPage() {
                     <div className="bg-primary-50 rounded-xl p-4 grid grid-cols-2 gap-3">
                       <div><p className="text-xs text-gray-500">Interés total</p><p className="font-bold text-primary-700">{formatCurrency(saleCalc.valorInteres, currency)}</p></div>
                       <div><p className="text-xs text-gray-500">Total a pagar</p><p className="font-bold text-primary-700">{formatCurrency(saleCalc.valorTotal, currency)}</p></div>
-                      <div><p className="text-xs text-gray-500">Valor cuota</p><p className="font-bold text-primary-700">{formatCurrency(saleCalc.valorCuota, currency)}</p></div>
+                      <div><p className="text-xs text-gray-500">Valor parcela</p><p className="font-bold text-primary-700">{formatCurrency(saleCalc.valorCuota, currency)}</p></div>
                       <div><p className="text-xs text-gray-500">Fecha estimada fin</p><p className="font-bold text-primary-700">{formatDate(saleCalc.fechaFinal)}</p></div>
                     </div>
                   )}
@@ -545,7 +546,7 @@ export default function ClientsPage() {
                   {selected.nombre.charAt(0)}
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-lg font-bold text-gray-900 leading-tight">{selected.nombre}</h3>
+                  <h3 className="text-lg font-bold text-gray-900 leading-tight">{formatClientName(selected.nombre)}</h3>
                   <p className="text-sm text-gray-500">Doc: {selected.documento}</p>
                   <div className="mt-1"><ClientStatusBadge status={selected.status} /></div>
                 </div>
@@ -563,7 +564,7 @@ export default function ClientsPage() {
                   {selected.telefonoSecundario && <ContactRow icon={<Phone className="w-4 h-4 text-gray-400" />} label="Teléfono adicional" value={selected.telefonoSecundario} />}
                   <ContactRow icon={<MapPin className="w-4 h-4 text-gray-400" />} label="Residencia" value={selected.direccionPrincipal} />
                   {selected.direccionSecundaria && <ContactRow icon={<MapPin className="w-4 h-4 text-gray-400" />} label="Cobro / negocio" value={selected.direccionSecundaria} />}
-                  {selected.negocio && <ContactRow icon={<Building2 className="w-4 h-4 text-gray-400" />} label="Negocio" value={selected.negocio} />}
+                  {selected.negocio && <ContactRow icon={<Building2 className="w-4 h-4 text-gray-400" />} label="Negocio" value={formatBusinessName(selected.negocio)} />}
                   {selected.notas && <ContactRow icon={<FileText className="w-4 h-4 text-gray-400" />} label="Observaciones" value={selected.notas} />}
                 </div>
               </div>
@@ -643,7 +644,7 @@ export default function ClientsPage() {
             <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
             <p className="text-sm text-red-700">Esta acción eliminará el registro de forma permanente. ¿Deseas continuar?</p>
           </div>
-          <p className="text-sm text-gray-600">Cliente: <span className="font-semibold">{deleteTarget?.nombre}</span></p>
+          <p className="text-sm text-gray-600">Cliente: <span className="font-semibold">{formatClientName(deleteTarget?.nombre)}</span></p>
         </div>
       </Modal>
 

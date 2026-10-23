@@ -168,8 +168,14 @@ async function rectifyDisbursedSaleOnline(saleId: string, _actor: User, input: C
 /** D73-03: comprobación previa sin efectos (`GET /v1/credits/:id/rectification-check`). */
 async function checkSaleRectificationOnline(saleId: string): Promise<Clean.RectificationCheck> {
   return asSaleError(async () => {
-    const r = await api().get<{ blockers: string[]; maxIncreaseMinor: number; rectificationCount: number }>(`/v1/credits/${encodeURIComponent(saleId)}/rectification-check`);
-    return { blockers: r.blockers, maxIncrease: toMajor(r.maxIncreaseMinor), rectificationCount: r.rectificationCount };
+    const r = await api().get<{ blockers: string[]; capitalBlockers?: string[]; maxIncreaseMinor: number; rectificationCount: number; minTotalMinor?: number;
+      payments?: { active: number; reversed: number; reapplied: number; netPaidMinor: number; principalRecognizedMinor: number; interestRecognizedMinor: number; lastPaymentDate: string | null } }>(
+      `/v1/credits/${encodeURIComponent(saleId)}/rectification-check`);
+    const p = r.payments;
+    return { blockers: r.blockers, capitalBlockers: r.capitalBlockers ?? [], maxIncrease: toMajor(r.maxIncreaseMinor), rectificationCount: r.rectificationCount,
+      minTotal: toMajor(r.minTotalMinor ?? 0),
+      payments: { active: p?.active ?? 0, reversed: p?.reversed ?? 0, reapplied: p?.reapplied ?? 0, netPaid: toMajor(p?.netPaidMinor ?? 0),
+        principalRecognized: toMajor(p?.principalRecognizedMinor ?? 0), interestRecognized: toMajor(p?.interestRecognizedMinor ?? 0), lastPaymentDate: p?.lastPaymentDate ?? null } };
   });
 }
 

@@ -68,7 +68,7 @@ export function SetupChecklist() {
         },
         { id: 'usuario', label: 'Agrega Supervisor / Cobrador / Socio / Secretario', description: 'Equipo operativo de la empresa', path: '/admin/users', cta: 'Crear Usuario', done: otherOps },
         { id: 'cliente', label: 'Registra tu primer Cliente', description: 'Persona o negocio al que prestarás', path: '/admin/clients', cta: 'Crear Cliente', done: clients > 0 },
-        { id: 'venta', label: 'Crea tu primera Venta', description: 'Préstamo con cuotas y tasa de interés', path: '/admin/active-sales', cta: 'Crear Venta', done: sales > 0 },
+        { id: 'venta', label: 'Crea tu primera Venta', description: 'Venta con parcelas y tasa de interés', path: '/admin/active-sales', cta: 'Crear Venta', done: sales > 0 },
       // Ronda 67: sin pasos de cartera para quien no puede registrar clientes ni ventas (SuperAdmin).
       ].filter(s => (s.id !== 'cliente' || can(user, 'client.create')) && (s.id !== 'venta' || can(user, 'sale.createDirect') || can(user, 'sale.createRequest'))))
     } finally {

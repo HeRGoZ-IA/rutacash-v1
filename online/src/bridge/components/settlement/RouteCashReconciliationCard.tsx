@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useDataRevision } from '@/hooks/useDataRevision'
 import { formatCurrency } from '@/lib/formatters'
+import { formatPersonName } from '@/lib/displayName'
 import {
   canViewRouteReconciliation, getRouteCashReconciliation, type RouteCashReconciliation,
 } from '@/services/routeCashReconciliation'
@@ -61,11 +62,11 @@ export function RouteCashReconciliationCard({ routeId }: { routeId: string }) {
       <Linea label="Base de la ruta" value={money(r.libro.saldo)} strong />
       {r.personas.filter(p => p.posicion !== 0 || p.baseRecibida > 0).map(p => (
         <Linea key={p.userId}
-          label={`En manos de ${p.nombre}${p.baseRecibida ? ` (${central.activo ? 'capital recibido neto' : 'Base entregada'} ${money(p.baseRecibida - p.baseDevuelta)})` : ''}`}
+          label={`En manos de ${formatPersonName(p.nombre)}${p.baseRecibida ? ` (${central.activo ? 'capital recibido neto' : 'Base entregada'} ${money(p.baseRecibida - p.baseDevuelta)})` : ''}`}
           value={money(p.posicion)} tone={p.posicion < 0 ? 'text-red-600' : 'text-gray-800'} />
       ))}
       {r.faltantes.map(f => (
-        <Linea key={f.settlementId} label={`Faltante pendiente · ${f.nombre}`} value={money(f.monto)} tone="text-amber-600" />
+        <Linea key={f.settlementId} label={`Faltante pendiente · ${formatPersonName(f.nombre)}`} value={money(f.monto)} tone="text-amber-600" />
       ))}
       {e.sobrantesRegistrados > 0 && (
         <Linea label="Sobrantes registrados (fuera del libro)" value={money(e.sobrantesRegistrados)} tone="text-amber-600" />

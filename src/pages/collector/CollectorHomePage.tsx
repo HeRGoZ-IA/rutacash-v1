@@ -15,6 +15,7 @@ import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { can } from '@/lib/permissions'
 import { usePendingRouteSaleRequests } from '@/hooks/usePendingBadges'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
+import { formatPersonName } from '@/lib/displayName'
 import { isSaleDueToday, isSaleDisbursed } from '@/services/installmentEngine'
 import { effectivePayments, pendingPaymentSyncCount } from '@/lib/paymentState'
 import type { Route } from '@/models/types'
@@ -91,7 +92,7 @@ export default function CollectorHomePage() {
       {/* Greeting + ruta activa */}
       <div className="bg-gradient-to-br from-primary-600 to-primary-800 rounded-2xl p-5 text-white">
         <p className="text-primary-200 text-sm">{greeting},</p>
-        <h1 className="text-xl font-bold mt-0.5 leading-tight">{user?.nombre}</h1>
+        <h1 className="text-xl font-bold mt-0.5 leading-tight">{formatPersonName(user?.nombre)}</h1>
         <div className="flex items-center justify-between mt-3">
           {route ? (
             <span className="inline-flex items-center gap-1.5 bg-white/15 rounded-full pl-2 pr-3 py-1 text-sm font-medium">

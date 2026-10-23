@@ -3,6 +3,7 @@ import { Users } from 'lucide-react'
 import { getRouteAssignmentsByRole, ASSIGNMENT_ROLE_ORDER, hasAnyAssignment } from '@/lib/routeAssignments'
 import { ROUTE_NO_COBRADOR_LABEL, routeCanOperateCollection } from '@/lib/cobradorRules'
 import type { User } from '@/models/types'
+import { formatPersonName } from '@/lib/displayName'
 
 /**
  * Resumen de USUARIOS ASIGNADOS a una ruta para la tarjeta general.
@@ -63,7 +64,7 @@ export function RouteAssignedUsers({ users, routeId, tenantId, responsibleCobrad
               <span className="text-gray-700">
                 {shown.map((u, i) => (
                   <span key={u.id}>
-                    {u.nombre}
+                    {formatPersonName(u.nombre)}
                     {/* Un usuario inactivo no sostiene responsabilidad operativa: se
                         marca para que la tarjeta no aparente un responsable efectivo
                         que las advertencias no cuentan. */}

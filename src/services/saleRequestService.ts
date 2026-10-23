@@ -111,8 +111,19 @@ export async function rectifyDisbursedSale(_saleId: string, _actor: User, _input
   throw new SaleRuleError('La corrección de ventas desembolsadas solo está disponible en ADEX Online.')
 }
 
-/** D73-03: comprobación previa del servidor (motivos de bloqueo y aumento máximo de capital). */
-export interface RectificationCheck { blockers: string[]; maxIncrease: number; rectificationCount: number }
+/**
+ * D73-03 + bloque A post-R73: comprobación previa del servidor. `blockers` impiden cualquier
+ * corrección; `capitalBlockers` solo impiden cambiar el capital entregado; `payments` resume los
+ * pagos (vigentes, anulados, pagado neto); el total corregido no puede bajar de `minTotal`.
+ */
+export interface RectificationCheck {
+  blockers: string[]
+  capitalBlockers: string[]
+  maxIncrease: number
+  rectificationCount: number
+  minTotal: number
+  payments: { active: number; reversed: number; reapplied: number; netPaid: number; principalRecognized: number; interestRecognized: number; lastPaymentDate: string | null }
+}
 
 export async function checkSaleRectification(_saleId: string): Promise<RectificationCheck> {
   throw new SaleRuleError('La corrección de ventas desembolsadas solo está disponible en ADEX Online.')

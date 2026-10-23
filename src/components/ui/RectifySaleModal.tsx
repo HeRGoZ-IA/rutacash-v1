@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, PencilLine } from 'lucide-react'
+import { AlertTriangle, PencilLine, Receipt } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { ApprovalInstallments } from '@/components/ui/ApprovalInstallments'
 import { toast } from '@/components/ui/Toast'
-import { formatCurrency } from '@/lib/formatters'
+import { formatCurrency, formatDate } from '@/lib/formatters'
 import { generateId } from '@/lib/utils'
+import { calculateTotalWithInterest } from '@/services/installmentEngine'
 import { checkSaleRectification, rectifyDisbursedSale, recordRectificationCase, type RectificationCheck } from '@/services/saleRequestService'
 import type { PaymentFrequency, Sale, User } from '@/models/types'
 
@@ -21,7 +22,11 @@ const WEEK_DAYS = [
 
 /** D73-03: por qué la corrección normal no se puede hacer (texto para el Administrador). */
 const BLOCKER_TEXT: Record<string, string> = {
-  CREDIT_HAS_COLLECTIONS: 'La venta ya tiene cobros registrados: corregirla cambiaría lo ya cobrado.',
+  CREDIT_HAS_COLLECTIONS: 'La venta ya tiene cobros registrados (regla anterior a esta versión).',
+  OVERPAYMENT: 'El total corregido quedaría por debajo de lo ya pagado: no hay política aprobada de sobrepagos ni devoluciones.',
+  PAYMENT_ADJUSTMENT_PENDING: 'Hay una solicitud de ajuste de pago pendiente en esta venta: resuélvala primero.',
+  LEGACY_PAYMENTS: 'La venta tiene pagos importados sin asiento en el libro: no se puede recalcular su imputación.',
+  LEDGER_INCONSISTENT: 'Los pagos y su imputación no concilian con la venta: revísela antes de corregirla.',
   DISBURSEMENT_SETTLED: 'El desembolso ya entró en un cuadre del trabajador: corregirlo alteraría un cuadre cerrado.',
   PERIOD_CLOSED: 'El periodo de la ruta está cerrado: no se registran movimientos en un periodo cerrado.',
   CUSTODIAN_CHANGED: 'El trabajador que entregó el dinero ya no tiene caja en esta ruta: no hay a quién cargar o devolver la diferencia.',
@@ -32,9 +37,15 @@ const BLOCKER_TEXT: Record<string, string> = {
   CREDIT_NOT_LEDGERED: 'La venta no tiene desembolso registrado en el libro.',
 }
 /** Motivos que se pueden registrar como caso excepcional (los demás no son casos de corrección). */
-const CASEABLE = new Set(['CREDIT_HAS_COLLECTIONS', 'DISBURSEMENT_SETTLED', 'PERIOD_CLOSED', 'CUSTODIAN_CHANGED', 'POOL_OF_ANOTHER_ADMIN', 'INSUFFICIENT_FUNDS', 'OFFLINE_PENDING'])
+const CASEABLE = new Set(['CREDIT_HAS_COLLECTIONS', 'DISBURSEMENT_SETTLED', 'PERIOD_CLOSED', 'CUSTODIAN_CHANGED', 'POOL_OF_ANOTHER_ADMIN', 'INSUFFICIENT_FUNDS', 'OFFLINE_PENDING',
+  'OVERPAYMENT', 'PAYMENT_ADJUSTMENT_PENDING', 'LEGACY_PAYMENTS', 'LEDGER_INCONSISTENT'])
 
 /**
+ * Bloque A post-R73 (0032): también con pagos registrados. Los pagos se conservan (importe, fecha y
+ * evidencia); las parcelas se recalculan con el pagado neto y la diferencia de imputación
+ * capital/interés es una reclasificación sin efectivo. Si cambia el capital entregado rigen además
+ * los controles de abajo (desembolso fuera de cuadre, custodio vigente, saldo).
+ *
  * Ronda 73 · SOC-09: el Administrador corrige una venta DESEMBOLSADA sin cobros ni cuadre
  * (p. ej. el trabajador entregó R$ 1.500 y registró R$ 1.400). El servidor conserva el
  * desembolso original y su fecha, registra la diferencia de capital como un asiento nuevo
@@ -74,11 +85,17 @@ export function RectifySaleModal({ sale, user, currency, open, onClose, onDone }
   const delta = Math.round((valor - sale.valorVenta) * 100) / 100
   const cambia = delta !== 0 || tasa !== sale.tasaInteres || cuotas !== sale.numeroCuotas || freq !== sale.frecuenciaPago
     || inicio !== sale.fechaInicio || JSON.stringify(dias) !== JSON.stringify(sale.paymentDays ?? [])
+  // Total corregido (mismo motor que el servidor) frente a lo ya pagado.
+  const nuevoTotal = calculateTotalWithInterest({ valorVenta: valor, tasaInteres: tasa }).valorTotal
   const bloqueos = [
     ...(check?.blockers ?? []),
-    ...(check && delta > check.maxIncrease ? ['INSUFFICIENT_FUNDS'] : []),
+    // Solo si cambia el capital entregado (mueve efectivo de la cuenta que pagó).
+    ...(check && delta !== 0 ? (check.capitalBlockers ?? []) : []),
+    ...(check && delta > 0 && (check.capitalBlockers ?? []).length === 0 && delta > check.maxIncrease ? ['INSUFFICIENT_FUNDS'] : []),
+    ...(check && nuevoTotal < (check.minTotal ?? 0) ? ['OVERPAYMENT'] : []),
     ...(offlinePending ? ['OFFLINE_PENDING'] : []),
   ]
+  const pagos = check?.payments
   const listo = cambia && valor > 0 && Number.isInteger(cuotas) && cuotas >= 1 && cuotas <= 1000 && dias.length > 0
     && motivo.trim().length >= 10 && evidencia.trim().length >= 10 && sinPendientes && check !== null && bloqueos.length === 0
   const caso = bloqueos.find(b => CASEABLE.has(b))
@@ -123,10 +140,29 @@ export function RectifySaleModal({ sale, user, currency, open, onClose, onDone }
       <div className="space-y-4">
         <div className="rounded-xl bg-amber-50 border border-amber-100 p-3 text-sm text-amber-800 flex gap-2">
           <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-          <p>Solo para ventas sin cobros cuyo desembolso no esté en un cuadre ni en un periodo cerrado. No se borra nada: el desembolso
-            original ({formatCurrency(sale.valorVenta, currency)}{sale.fechaDesembolso ? `, ${sale.fechaDesembolso}` : ''}) se conserva y la diferencia
-            se registra como un movimiento nuevo de la cuenta que pagó (custodia del trabajador o bolsa).</p>
+          <p>No se borra nada. El desembolso original ({formatCurrency(sale.valorVenta, currency)}{sale.fechaDesembolso ? `, ${formatDate(sale.fechaDesembolso)}` : ''}) y
+            cada pago se conservan con su fecha. Si cambia el valor entregado, la diferencia es un movimiento nuevo de la cuenta que pagó (custodia del
+            trabajador o bolsa). No se puede corregir en un periodo cerrado.</p>
         </div>
+        {pagos && (
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800 space-y-1.5" data-testid="rectify-payments">
+            <p className="font-semibold flex items-center gap-1.5"><Receipt className="w-4 h-4 text-gray-500" aria-hidden />Pagos de esta venta</p>
+            {pagos.active === 0 && pagos.reversed === 0
+              ? <p>No tiene pagos registrados.</p>
+              : <>
+                <p>{pagos.active} vigente{pagos.active === 1 ? '' : 's'} · {pagos.reversed} anulado{pagos.reversed === 1 ? '' : 's'}
+                  {pagos.reapplied > 0 ? ` · ${pagos.reapplied} reaplicado${pagos.reapplied === 1 ? '' : 's'}` : ''} ·
+                  pagado neto <span className="font-semibold">{formatCurrency(pagos.netPaid, currency)}</span>
+                  {pagos.lastPaymentDate ? ` (último ${formatDate(pagos.lastPaymentDate)})` : ''}</p>
+                <p className="text-xs text-gray-600">Los pagos no cambian. Las parcelas se recalculan con el pagado neto y, si cambia la tasa o el capital,
+                  la parte de lo ya cobrado que corresponde a capital e interés se reclasifica hoy, sin mover efectivo. El total corregido no puede quedar
+                  por debajo de {formatCurrency(check?.minTotal ?? 0, currency)}.</p>
+                {pagos.reversed > 0 && <p className="text-xs text-gray-600">Los pagos anulados que fueron reales pueden reaplicarse después desde el detalle
+                  de la venta (botón «Reaplicar»), con su fecha original si su semana sigue abierta.</p>}
+              </>}
+            {delta !== 0 && (check?.capitalBlockers ?? []).length === 0 && <p className="text-xs text-gray-600">Cambio de capital: se aplican los controles del desembolso.</p>}
+          </div>
+        )}
         {checkFailed && <p className="text-sm text-red-600">No se pudo comprobar la venta con el servidor. Cierre y vuelva a intentarlo.</p>}
         {!check && !checkFailed && <p className="text-sm text-gray-500">Comprobando la venta con el servidor…</p>}
         {bloqueos.length > 0 && (

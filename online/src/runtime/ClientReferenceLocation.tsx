@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { toast } from '@/components/ui/Toast';
 import { formatDate } from '@/lib/formatters';
+import { formatPersonName } from '@/lib/displayName';
 import { captureLocation, GEO_STATUS_LABEL } from '@/lib/geolocation';
 import { generateId } from '@/lib/utils';
 import { api } from './session.ts';
@@ -83,7 +84,7 @@ export function ClientReferenceLocation({ clientId, canSet }: { clientId: string
       {state === 'unavailable' && <p className="text-sm text-gray-500">Disponible con conexión a internet.</p>}
       {state === 'ready' && (current
         ? <p className="text-sm text-gray-700"><MapPin className="inline w-4 h-4 mr-1 text-emerald-600" />Registrada ({current.source === 'gps_on_site' ? 'GPS en el lugar' : 'marcada en el mapa'}
-            {current.setByName ? `, por ${current.setByName}` : ''}, {formatDate(current.setAt)}{current.accuracyM != null ? `, ±${current.accuracyM} m` : ''}).</p>
+            {current.setByName ? `, por ${formatPersonName(current.setByName)}` : ''}, {formatDate(current.setAt)}{current.accuracyM != null ? `, ±${current.accuracyM} m` : ''}).</p>
         : <p className="text-sm text-amber-700">Sin ubicación registrada.</p>)}
       {state === 'ready' && canSet && (
         <Button variant="secondary" size="sm" icon={<Crosshair className="w-3.5 h-3.5" />} onClick={() => setConfirm(true)} data-testid="client-location-set">
@@ -98,7 +99,7 @@ export function ClientReferenceLocation({ clientId, canSet }: { clientId: string
       {showHistory && (
         <ul className="text-xs text-gray-600 space-y-0.5" data-testid="client-location-history">
           {history.map((h, i) => (
-            <li key={i}>{formatDate(h.setAt)} · {h.source === 'gps_on_site' ? 'GPS en el lugar' : 'marcada en el mapa'}{h.accuracyM != null ? ` ±${h.accuracyM} m` : ''}{h.setByName ? ` · ${h.setByName}` : ''}</li>
+            <li key={i}>{formatDate(h.setAt)} · {h.source === 'gps_on_site' ? 'GPS en el lugar' : 'marcada en el mapa'}{h.accuracyM != null ? ` ±${h.accuracyM} m` : ''}{h.setByName ? ` · ${formatPersonName(h.setByName)}` : ''}</li>
           ))}
         </ul>
       )}

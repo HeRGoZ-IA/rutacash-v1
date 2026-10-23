@@ -10,6 +10,7 @@ import { useDataRevision } from '@/hooks/useDataRevision'
 import { getAuthorizedRouteIds } from '@/lib/roles'
 import { can } from '@/lib/permissions'
 import { formatCurrency } from '@/lib/formatters'
+import { formatPersonName } from '@/lib/displayName'
 import { isSaleDisbursed } from '@/services/installmentEngine'
 import { carteraEnCalleOf, getRouteAvailableCapital } from '@/services/cashboxEngine'
 import { groupRoutesByOffice } from '@/lib/officeGrouping'
@@ -86,7 +87,7 @@ export default function CollectorSelectRoutePage() {
   return (
     <div className="p-4 space-y-5">
       <div className="bg-gradient-to-r from-primary-600 to-primary-800 rounded-2xl p-5 text-white">
-        <p className="text-primary-200 text-sm">Hola, {user?.nombre}</p>
+        <p className="text-primary-200 text-sm">Hola, {formatPersonName(user?.nombre)}</p>
         <h1 className="text-xl font-bold mt-0.5">Selecciona tu ruta</h1>
         <p className="text-primary-200 text-xs mt-1">Elige la ruta que vas a trabajar hoy</p>
       </div>

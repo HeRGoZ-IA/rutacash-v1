@@ -163,6 +163,7 @@ export function paymentFrom(p: V): Payment {
     reversesPaymentId: p.reversesPaymentId ?? undefined, reversalPaymentId: p.reversalPaymentId ?? undefined,
     correctionReason: s(p.correctionReason), correctedBy: p.correctedBy ?? undefined, correctedAt: p.correctedAt ?? undefined,
     correctedByPaymentId: p.correctedByPaymentId ?? undefined, correctionOfPaymentId: p.correctionOfPaymentId ?? undefined,
+    reappliesPaymentId: p.reappliesPaymentId ?? undefined,
   };
 }
 

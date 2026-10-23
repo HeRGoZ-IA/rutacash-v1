@@ -1,6 +1,7 @@
 import { ShieldCheck, ShieldAlert } from 'lucide-react'
 import { routeCapitalController } from '@/lib/permissions'
 import type { Route, User } from '@/models/types'
+import { formatPersonName } from '@/lib/displayName'
 
 /**
  * Responsable de capital de una ruta (v16), visible donde se opera su caja para
@@ -27,7 +28,7 @@ export function CapitalControllerBadge({ route, users, currentUserId, className 
       <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
       {/* Un solo nodo de texto: dentro de inline-flex, el espacio entre dos hijos se
           pierde y "capital:Nombre" llegaría así a lectores de pantalla y al copiar. */}
-      <span>Responsable de capital: <span className="font-medium text-gray-700">{responsable.id === currentUserId ? 'Tú' : responsable.nombre}</span></span>
+      <span>Responsable de capital: <span className="font-medium text-gray-700">{responsable.id === currentUserId ? 'Tú' : formatPersonName(responsable.nombre)}</span></span>
     </span>
   )
 }

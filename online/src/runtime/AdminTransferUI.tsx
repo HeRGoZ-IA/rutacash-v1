@@ -12,6 +12,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
 import { toast } from '@/components/ui/Toast';
 import { formatCurrency, formatDateTime } from '@/lib/formatters';
+import { formatPersonName } from '@/lib/displayName';
 import { generateId } from '@/lib/utils';
 import {
   DECISION_LABEL, STATE_LABEL, adminDirectory, decideAdminTransfer, registerAdminTransfer,
@@ -26,7 +27,7 @@ export function TransferStateBadge({ t }: { t: AdminTransfer }) {
   return <Badge variant={STATE_VARIANT[t.state]} size="sm">{STATE_LABEL[t.state]}</Badge>;
 }
 
-const name = (p: AdminTransferParty) => p.name ?? 'Administrador';
+const name = (p: AdminTransferParty) => formatPersonName(p.name) || 'Administrador';
 
 function PartyLine({ label, p }: { label: string; p: AdminTransferParty }) {
   const ok = p.decision === 'confirmed' || p.decision === 'not_required';
@@ -56,7 +57,7 @@ export function TransferCard({ t, currency, onAction }: {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <TransferStateBadge t={t} />
-        <span className="text-xs text-gray-500">{t.mode === 'secretary' ? `Registró ${t.registeredBy.name ?? 'Secretaría'} (Secretario)` : 'Directa'} · {formatDateTime(t.createdAt)}</span>
+        <span className="text-xs text-gray-500">{t.mode === 'secretary' ? `Registró ${formatPersonName(t.registeredBy.name) || 'Secretaría'} (Secretario)` : 'Directa'} · {formatDateTime(t.createdAt)}</span>
       </div>
       <p className="text-xs text-gray-600 break-words">{t.reason}</p>
       <PartyLine label="Origen" p={t.origin} />
@@ -160,7 +161,7 @@ export function TransferRegisterModal({ open, onClose, onDone, currency, asSecre
       onDone();
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Error'); } finally { setSaving(false); }
   }
-  const destName = admins.find((a) => a.adminId === form.destination)?.name;
+  const destName = formatPersonName(admins.find((a) => a.adminId === form.destination)?.name) || undefined;
   return (
     <Modal open={open} onClose={() => { if (!saving) onClose(); }} guarded={dirty} title={asSecretary ? 'Registrar transferencia entre Administradores' : 'Transferir a otro Administrador'} size="md"
       footer={<><Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button><Button onClick={save} loading={saving} disabled={exceeds || (!asSecretary && available === 0)}>{asSecretary ? 'Registrar' : 'Transferir'}</Button></>}>
@@ -169,10 +170,10 @@ export function TransferRegisterModal({ open, onClose, onDone, currency, asSecre
         {!asSecretary && available === 0 && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2" role="status">No tienes capital disponible para transferir.</p>}
         {asSecretary && (
           <Select label="Administrador de origen" value={form.origin} onChange={(e) => setForm((f) => ({ ...f, origin: e.target.value, destination: f.destination === e.target.value ? '' : f.destination }))}
-            options={origins.map((a) => ({ value: a.adminId, label: a.name }))} placeholder="Seleccionar" required />
+            options={origins.map((a) => ({ value: a.adminId, label: formatPersonName(a.name) }))} placeholder="Seleccionar" required />
         )}
         <Select label="Administrador de destino" value={form.destination} onChange={(e) => setForm((f) => ({ ...f, destination: e.target.value }))} disabled={!!request}
-          options={destinations.map((a) => ({ value: a.adminId, label: a.name }))} placeholder={destinations.length ? 'Seleccionar' : 'No hay otros Administradores activos'} required />
+          options={destinations.map((a) => ({ value: a.adminId, label: formatPersonName(a.name) }))} placeholder={destinations.length ? 'Seleccionar' : 'No hay otros Administradores activos'} required />
         <MoneyInput label="Valor" currency={currency} value={form.amount} onValueChange={(v) => setForm((f) => ({ ...f, amount: v }))} required
           hint={!asSecretary && available != null ? `Disponible: ${formatCurrency(available, currency)}` : undefined}
           error={exceeds ? 'Supera tu capital disponible' : undefined} />

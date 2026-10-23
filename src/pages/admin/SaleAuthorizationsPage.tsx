@@ -12,6 +12,7 @@ import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatDate } from '@/lib/formatters'
+import { formatClientName, formatPersonName } from '@/lib/displayName'
 import { approveSaleRequest, rejectSaleRequest } from '@/services/saleRequestService'
 import { logAction } from '@/services/auditService'
 import { can, canAccessRoute, filterByAccessibleRoute } from '@/lib/permissions'
@@ -187,7 +188,7 @@ export default function SaleAuthorizationsPage() {
               <li key={r.id} className="bg-white rounded-2xl shadow-card border border-gray-100 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 [overflow-wrap:anywhere]">{c?.nombre ?? 'Cliente'}</p>
+                    <p className="text-sm font-semibold text-gray-900 [overflow-wrap:anywhere]">{formatClientName(c?.nombre) || 'Cliente'}</p>
                     <p className="text-xs text-gray-500">{c?.documento ?? '—'} · {routeMap.get(r.routeId)?.nombre ?? '—'}</p>
                   </div>
                   <Badge variant={meta.variant} size="sm">{meta.label}</Badge>
@@ -230,11 +231,11 @@ export default function SaleAuthorizationsPage() {
                       onMouseLeave={() => setTipPos(null)}
                       className="hover:bg-primary-50/40 cursor-pointer transition-colors">
                       <td className="px-4 py-3">
-                        <p className="text-sm font-medium text-gray-900">{c?.nombre ?? 'Cliente'}</p>
+                        <p className="text-sm font-medium text-gray-900">{formatClientName(c?.nombre) || 'Cliente'}</p>
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell text-sm text-gray-600">{c?.documento ?? '—'}</td>
                       <td className="px-4 py-3 hidden md:table-cell text-sm text-gray-600">{routeMap.get(r.routeId)?.nombre ?? '—'}</td>
-                      <td className="px-4 py-3 hidden lg:table-cell text-sm text-gray-600">{userMap.get(r.collectorId)?.nombre ?? '—'}</td>
+                      <td className="px-4 py-3 hidden lg:table-cell text-sm text-gray-600">{formatPersonName(userMap.get(r.collectorId)?.nombre) || '—'}</td>
                       <td className="px-4 py-3 text-right text-sm font-medium text-gray-900 whitespace-nowrap">{formatCurrency(r.amount, currency)}</td>
                       <td className="px-4 py-3 text-center hidden sm:table-cell text-sm text-gray-600">{r.installmentsCount}</td>
                       <td className="px-4 py-3 text-center"><Badge variant={meta.variant} size="sm">{meta.label}</Badge></td>
@@ -304,9 +305,9 @@ export default function SaleAuthorizationsPage() {
                 {(detailClient?.nombre ?? '?').charAt(0)}
               </div>
               <div>
-                <h3 className="text-base font-bold text-gray-900">{detailClient?.nombre ?? 'Cliente'}</h3>
+                <h3 className="text-base font-bold text-gray-900">{formatClientName(detailClient?.nombre) || 'Cliente'}</h3>
                 <p className="text-sm text-gray-500">{detailClient?.documento}</p>
-                <p className="text-xs text-gray-500">{routeMap.get(detail.routeId)?.nombre} · Cobrador: {userMap.get(detail.collectorId)?.nombre ?? '—'}</p>
+                <p className="text-xs text-gray-500">{routeMap.get(detail.routeId)?.nombre} · Cobrador: {formatPersonName(userMap.get(detail.collectorId)?.nombre) || '—'}</p>
               </div>
             </div>
 

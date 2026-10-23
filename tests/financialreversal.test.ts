@@ -196,7 +196,9 @@ await spec('FIN-REV-005', 'doble anulación rechazada', async () => {
   assert(/ya fue anulado/.test(segunda) && reversiones.length === 1 && await saldo(R1) === 0, 'la segunda anulación generó otra reversión')
 })
 
-await spec('FIN-REV-006', 'permisos: solo Admin/SuperAdmin con la capacidad del movimiento', async () => {
+// [MODIFICADO R74] Antes el SuperAdmin también anulaba movimientos de la caja de una ruta; ya no
+// (no es operador financiero de la ruta): solo el Admin responsable.
+await spec('FIN-REV-006', 'permisos: solo el Admin responsable con la capacidad del movimiento (R74: el SuperAdmin ya no)', async () => {
   await empresa()
   await registerCapital({ actor: ADMIN, tenantId: T, routeId: R1, valor: 300_000 })
   const cap = await registerCapital({ actor: ADMIN, tenantId: T, routeId: R1, valor: 1_000 })
@@ -215,12 +217,15 @@ await spec('FIN-REV-006', 'permisos: solo Admin/SuperAdmin con la capacidad del 
     assert(r.every(x => x !== 'ACEPTADO') && !ui, `${u.rol} pudo anular`)
   }
   const sinActor = await rechazo(() => reverseCapitalMovement({ actor: null, tenantId: T, movementId: cap.id, reason: MOTIVO }))
-  await reverseCapitalMovement({ actor: SUPER, tenantId: T, movementId: cap.id, reason: MOTIVO })
+  const porSuper = await rechazo(() => reverseCapitalMovement({ actor: SUPER, tenantId: T, movementId: cap.id, reason: MOTIVO }))
+  await reverseCapitalMovement({ actor: ADMIN, tenantId: T, movementId: cap.id, reason: MOTIVO })
   await reverseWithdrawal({ actor: ADMIN, tenantId: T, movementId: w.id, reason: MOTIVO })
   for (const r of res) metric('rol', r)
   metric('sin usuario', sinActor)
-  metric('SuperAdmin / Admin', 'anulan')
+  metric('SuperAdmin', porSuper)
+  metric('Admin', 'anula')
   assert(sinActor !== 'ACEPTADO', 'se anuló sin usuario')
+  assert(porSuper !== 'ACEPTADO', 'R74: el SuperAdmin anuló un movimiento de la ruta')
 })
 
 await spec('FIN-REV-007', 'movimientos históricos (sin campos nuevos)', async () => {
@@ -243,13 +248,14 @@ await spec('FIN-REV-007', 'movimientos históricos (sin campos nuevos)', async (
 await spec('FIN-REV-008', 'auditoría: quién, cuándo, motivo y vínculo', async () => {
   await empresa()
   const m = await registerCapital({ actor: ADMIN, tenantId: T, routeId: R1, valor: 10_000 })
-  const { original, reversal } = await reverseCapitalMovement({ actor: SUPER, tenantId: T, movementId: m.id, reason: 'Valor duplicado' })
+  // [MODIFICADO R74] Antes anulaba el SuperAdmin; ahora el Admin responsable.
+  const { original, reversal } = await reverseCapitalMovement({ actor: ADMIN, tenantId: T, movementId: m.id, reason: 'Valor duplicado' })
   const log = (await db.auditLogs.where('entityId').equals(m.id).toArray()).find(l => l.action === 'MOVEMENT_REVERSED')
   metric('original', `por ${original.reversedByUserId} · ${original.reversedAt} · "${original.reversalReason}" · → ${original.reversalId}`)
   metric('reversión', `por ${reversal.userId} · ${reversal.createdAt} · "${reversal.reversalReason}" · ← ${reversal.reversesId}`)
   metric('bitácora', log ? `${log.action} · ${log.motivo} · ${JSON.stringify(log.after)}` : 'SIN REGISTRO')
-  assert(original.reversedByUserId === SUPER.id && !!original.reversedAt && original.reversalReason === 'Valor duplicado', 'falta quién/cuándo/motivo')
-  assert(original.reversalId === reversal.id && reversal.reversesId === original.id && reversal.userId === SUPER.id, 'falta el vínculo original↔reversión')
+  assert(original.reversedByUserId === ADMIN.id && !!original.reversedAt && original.reversalReason === 'Valor duplicado', 'falta quién/cuándo/motivo')
+  assert(original.reversalId === reversal.id && reversal.reversesId === original.id && reversal.userId === ADMIN.id, 'falta el vínculo original↔reversión')
   assert(log && log.motivo === 'Valor duplicado' && (log.after as { reversalId: string }).reversalId === reversal.id, 'no quedó en la bitácora')
 })
 

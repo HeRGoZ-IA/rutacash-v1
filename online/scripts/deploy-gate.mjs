@@ -24,7 +24,9 @@ const API = process.env.ADEX_DEPLOY_GATE_API ?? 'https://adex-online-api.onrende
 // Ronda 73: parcelas en la autorización y corrección de ventas desembolsadas (`installmentsCount` al aprobar, /rectify; 0030 → API → frontend)
 //           y Consultas en tabla (`GET /v1/movements`, solo API).
 const REQUIRED = ['settlements-v1', 'clean-online-v1', 'access-links-v1', 'payment-location-v1', 'admin-transfers-v1', 'capital-requests-v1', 'offline-collector-v1', 'offline-disbursements-v1', 'route-map-v1',
-  'credit-rectification-v1', 'movements-v1'];
+  'credit-rectification-v1', 'movements-v1', 'movements-v2',
+  // Bloque A post-R73 (0032): rectificación con pagos y reaplicación de pagos anulados.
+  'rectification-payments-v1'];
 // Ronda 40: si este despliegue activa la Plataforma Owner (VITE_ADEX_CONTROL_URL), el
 // servicio Owner publicado tiene que servir la versión que usan las pantallas originales.
 const CONTROL = (process.env.VITE_ADEX_CONTROL_URL ?? '').replace(/\/$/, '');

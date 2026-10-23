@@ -14,6 +14,7 @@ import { Modal } from '@/components/ui/Modal';
 import { toast } from '@/components/ui/Toast';
 import { db } from '@/lib/db';
 import { formatCurrency } from '@/lib/formatters';
+import { formatPersonName } from '@/lib/displayName';
 import { generateId } from '@/lib/utils';
 import type { Route, User } from '@/models/types';
 import { adminDirectory, type AdminOption } from './adminTransfers.ts';
@@ -70,9 +71,9 @@ export function RequestModal({ open, onClose, onDone, currency, initialKind }: {
 
   const myRoutes = routes.filter((r) => r.capitalControllerAdminId === me?.membershipId && r.status !== 'inactiva');
   const workers = users.filter((u) => u.rol === 'cobrador' && u.status === 'activo' && (u.authorizedRouteIds ?? []).includes(f.routeId));
-  const holders: { value: string; label: string }[] = f.kind === 'admin_return' ? admins.map((a) => ({ value: a.adminId, label: a.name }))
-    : f.kind === 'admin_transfer' ? admins.filter((a) => !a.self).map((a) => ({ value: a.adminId, label: a.name }))
-      : f.kind === 'worker_return' ? workers.map((u) => ({ value: u.id, label: u.nombre })) : [];
+  const holders: { value: string; label: string }[] = f.kind === 'admin_return' ? admins.map((a) => ({ value: a.adminId, label: formatPersonName(a.name) }))
+    : f.kind === 'admin_transfer' ? admins.filter((a) => !a.self).map((a) => ({ value: a.adminId, label: formatPersonName(a.name) }))
+      : f.kind === 'worker_return' ? workers.map((u) => ({ value: u.id, label: formatPersonName(u.nombre) })) : [];
   const blocked = f.kind === 'worker_return' && myRoutes.length === 0 ? 'No eres responsable de capital de ninguna ruta.'
     : (f.kind === 'admin_transfer' || f.kind === 'admin_return') && holders.length === 0 && admins.length > 0 ? 'No hay otros Administradores activos.' : null;
 
@@ -254,7 +255,7 @@ export function CloseRequestModal({ target, currency, onClose, onDone }: {
 }
 
 export function RequestBanner({ r, currency }: { r: CapitalRequest; currency: string }) {
-  const who = r.mySide === 'requester' ? r.holder.name : r.requester.name;
+  const who = formatPersonName(r.mySide === 'requester' ? r.holder.name : r.requester.name);
   return (
     <div className="rounded-xl border border-primary-100 bg-primary-50 px-3 py-2 text-sm text-gray-800" data-testid="request-banner">
       <p><b>{formatCurrency(r.amount, currency)}</b>{r.concept ? ` · ${CONCEPT_LABEL[r.concept]}` : ''}{who ? ` · ${r.mySide === 'requester' ? 'a' : 'de'} ${who}` : ''}</p>

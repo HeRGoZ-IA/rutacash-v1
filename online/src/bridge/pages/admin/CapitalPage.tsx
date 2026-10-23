@@ -27,6 +27,7 @@ import { useDataRevision } from '@/hooks/useDataRevision'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import { formatCurrency, formatDateTime } from '@/lib/formatters'
+import { formatPersonName } from '@/lib/displayName'
 import { can, filterAccessibleRoutes, routeCapitalController } from '@/lib/permissions'
 import { validRouteAdmins } from '@/lib/capitalAllocation'
 import type { ExpenseCategory, Route, RouteCapitalControllerEvent, User } from '@/models/types'
@@ -182,7 +183,7 @@ export default function CapitalPage() {
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Error') } finally { setSaving(false) }
   }
 
-  const nombre = (id?: string) => (id ? users.find(u => u.id === id)?.nombre ?? id : '—')
+  const nombre = (id?: string) => (id ? formatPersonName(users.find(u => u.id === id)?.nombre ?? id) : '—')
   const routeName = (id?: string) => (id ? routes.find(r => r.id === id)?.nombre ?? id : '—')
   const admins = users.filter(u => u.rol === 'admin')
   const pools = summary?.admins ?? []
@@ -275,7 +276,7 @@ export default function CapitalPage() {
                   {adminRows.map(({ user: a, pool }) => (
                     <tr key={a.id} data-testid={`admin-row-${a.id}`}>
                       <td className="py-2.5 pr-3">
-                        <p className="font-medium text-gray-900">{a.nombre}</p>
+                        <p className="font-medium text-gray-900">{formatPersonName(a.nombre)}</p>
                         {a.status !== 'activo' && <Badge variant="gray" size="sm">Inactivo</Badge>}
                       </td>
                       <td className="py-2.5 pr-3 text-right font-semibold text-gray-900">{money(toMajor(pool?.allocatedNetMinor ?? 0))}</td>
@@ -311,7 +312,7 @@ export default function CapitalPage() {
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-gray-900 truncate">{r.nombre}</p>
                         {resp
-                          ? <p className="text-xs text-gray-500">Responsable: <span className="font-medium text-gray-700">{resp.nombre}</span>{otros.length > 0 ? ` · también asignados: ${otros.map(o => o.nombre).join(', ')}` : ''}</p>
+                          ? <p className="text-xs text-gray-500">Responsable: <span className="font-medium text-gray-700">{formatPersonName(resp.nombre)}</span>{otros.length > 0 ? ` · también asignados: ${otros.map(o => formatPersonName(o.nombre)).join(', ')}` : ''}</p>
                           : <p className="text-xs font-medium text-amber-700">Sin responsable de capital{otros.length ? '' : ' · sin Administradores asignados'}</p>}
                       </div>
                     </div>
@@ -352,7 +353,7 @@ export default function CapitalPage() {
             )}
             {(saOp.tipo === 'ADMIN_ALLOCATION' || saOp.tipo === 'ADMIN_RETURN') && (
               <Select label="Administrador" value={saOp.adminId} onChange={e => setSaOp(o => o && { ...o, adminId: e.target.value })} required placeholder="Seleccionar Administrador"
-                disabled={!!saOp.request} options={admins.filter(a => saOp.tipo === 'ADMIN_RETURN' || a.status === 'activo').map(a => ({ value: a.id, label: a.nombre }))} />
+                disabled={!!saOp.request} options={admins.filter(a => saOp.tipo === 'ADMIN_RETURN' || a.status === 'activo').map(a => ({ value: a.id, label: formatPersonName(a.nombre) }))} />
             )}
             <MoneyInput label="Valor" currency={currency} value={saOp.amount} onValueChange={v => setSaOp(o => o && { ...o, amount: v })} required
               hint={saOp.tipo === 'ADMIN_RETURN'
@@ -371,11 +372,11 @@ export default function CapitalPage() {
         {changing && changingRoute && (
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
-              Responsable actual: <span className="font-semibold">{routeCapitalController(changingRoute, users)?.nombre ?? 'ninguno'}</span>.
+              Responsable actual: <span className="font-semibold">{formatPersonName(routeCapitalController(changingRoute, users)?.nombre) || 'ninguno'}</span>.
               El efectivo a cargo de los trabajadores de la ruta pasa a responsabilidad del nuevo Administrador desde este momento.
             </p>
             <Select label="Nuevo responsable" value={changing.adminId} onChange={e => setChanging(c => c && { ...c, adminId: e.target.value })} required placeholder="Seleccionar Administrador asignado"
-              options={candidatos.map(a => ({ value: a.id, label: a.nombre }))}
+              options={candidatos.map(a => ({ value: a.id, label: formatPersonName(a.nombre) }))}
               hint="Solo Administradores activos asignados a esta ruta." />
             <Textarea label="Motivo" value={changing.motivo} onChange={e => setChanging(c => c && { ...c, motivo: e.target.value })} rows={2} required />
           </div>

@@ -842,7 +842,8 @@ await spec('CC-F01', 'asistente: en modo centralizado solo entregar/recibir capi
   assert(JSON.stringify(opsV16.sort()) === JSON.stringify(['colocar', 'devolver-base', 'entregar-base', 'retirar', 'ruta-ruta']), 'el modo v16 cambió')
   assert(availableOperations(JUAN, rs, us, T, modo).length === 0, 'el Cobrador puede mover capital')
   assert(JSON.stringify(availableOperations(LAURA, rs, us, T, modo)) === JSON.stringify(['devolver-capital']), 'la Supervisora tiene operaciones de más')
-  assert(availableOperations(SA, rs, us, T, modo).includes('devolver-capital') && !availableOperations(SA, rs, us, T, modo).includes('entregar-capital'), 'el SuperAdmin entrega capital a trabajadores')
+  // [MODIFICADO R74] Antes el SuperAdmin conservaba «devolver-capital» (recibir devoluciones); ya no opera la caja de ninguna ruta.
+  assert(availableOperations(SA, rs, us, T, modo).length === 0, 'el SuperAdmin opera la caja de una ruta')
   const p = previewTransferOperation({ kind: 'entregar-capital', importe: 300, ruta: { disponible: 0, sinAsignar: 0, posiciones: { [JUAN.id]: 200 } }, trabajadorId: JUAN.id, bolsa: 1000, nombres: {} })
   assert(p.origen.despues === 700 && p.destino.despues === 500 && p.limite === 1000 && !p.excede, 'vista previa de la entrega incorrecta')
 })

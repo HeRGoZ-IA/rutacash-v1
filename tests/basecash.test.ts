@@ -874,7 +874,7 @@ await spec('CASH-BOUNDARY-011', 'Fronteras', 'una entrega de Base simultánea al
 // ############################################################
 // DOMINGO — la operación administrativa no se bloquea
 // ############################################################
-await spec('SUNDAY-ADMIN-001', 'Domingo', 'en domingo Admin/SuperAdmin cuadran, entregan Base, retiran y aprueban', async () => {
+await spec('SUNDAY-ADMIN-001', 'Domingo', 'en domingo el Admin cuadra, entrega Base, retira y aprueba (R74: el SuperAdmin ya no cuadra)', async () => {
   const RealDate = Date
   const real = new RealDate()
   const offset = ((7 - real.getDay()) % 7) * 86_400_000
@@ -893,7 +893,8 @@ await spec('SUNDAY-ADMIN-001', 'Domingo', 'en domingo Admin/SuperAdmin cuadran, 
     const c = await cliente(R_NORTE)
     const req = await createSaleRequest(entrada(R_NORTE, c.id, JUAN, 300_000, { fechaInicio: today() }), JUAN)
     await approveSaleRequest(req.id, ADMIN)
-    const doc = await cerrar(JUAN.id, 300_000, SUPER)
+    // [MODIFICADO R74] Antes cuadraba el SuperAdmin; ahora cuadra el Admin (el SuperAdmin ya no cierra cuadres).
+    const doc = await cerrar(JUAN.id, 300_000, ADMIN)
     const w = await registerWithdrawal({ actor: ADMIN, tenantId: T, routeId: R_NORTE, valor: 100_000 })
     metric('día simulado (0 = domingo)', dia)
     metric('entrega de Base, aprobación, cuadre y retiro', `OK · cuadre ${doc.diferencia === 0 ? 'exacto' : doc.diferencia} · retiro ${w.valor}`)

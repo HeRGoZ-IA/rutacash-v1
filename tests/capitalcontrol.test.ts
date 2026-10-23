@@ -713,7 +713,8 @@ await spec('CAP-G-001', GG, 'matriz de autoridad sobre la caja de la ruta (antes
   const us = await users()
   const fila = (u: User, r: Route) => (['structural', 'settle', 'correct'] as RouteCashOperation[]).map(op => canOperateRouteCash(u, r, op, us) ? 'sí' : 'no').join('/')
   const esperado: [string, User, Route, string][] = [
-    ['SuperAdmin', SA, n, 'no/sí/sí'],
+    // [MODIFICADO R74] Antes el SuperAdmin cuadraba y corregía (no/sí/sí); ya no opera la caja de la ruta.
+    ['SuperAdmin', SA, n, 'no/no/no'],
     ['Admin responsable', JUAN, n, 'sí/sí/sí'],
     ['Admin secundario', CARLOS, n, 'no/no/no'],
     ['Admin de otra ruta', MARIA, n, 'no/no/no'],
@@ -855,7 +856,8 @@ await spec('CAP-H-003', GH, 'Ronda 1/6: el disponible de Transferencias es el de
 // ############################################################
 const GI = 'I · Regresiones'
 
-await spec('CAP-I-001', GI, 'cuadre por trabajador: responsable y Supervisor cierran; Admin secundario no; SuperAdmin reabre', async () => {
+// [MODIFICADO R74] Antes reabría el SuperAdmin; ahora el responsable (el SuperAdmin ya no reabre cuadres).
+await spec('CAP-I-001', GI, 'cuadre por trabajador: responsable y Supervisor cierran; Admin secundario no; el responsable reabre (R74: el SuperAdmin no)', async () => {
   await empresa()
   await registerCapital({ actor: JUAN, tenantId: T, routeId: NORTE, valor: 1 * M })
   await assignBaseToWorker({ actor: JUAN, tenantId: T, routeId: NORTE, recipientUserId: FABIO.id, amount: 200_000, motivo: 'Base' })
@@ -867,25 +869,33 @@ await spec('CAP-I-001', GI, 'cuadre por trabajador: responsable y Supervisor cie
   assert(sec !== 'ACEPTADO' && c1.status === 'cerrada' && c2.status === 'cerrada', 'autoridad de cuadre incorrecta')
   const { reopenCashSettlement } = await import('../src/services/cashSettlementService')
   const rLaura = await rechazo(() => reopenCashSettlement({ actor: LAURA, settlementId: c2.id, motivo: 'Error de conteo' }, db, noop))
-  const re = await reopenCashSettlement({ actor: SA, settlementId: c2.id, motivo: 'Error de conteo' }, db, noop)
-  assert(rLaura !== 'ACEPTADO' && re.status === 'reabierta', 'reapertura con autoridad incorrecta')
+  const rSa = await rechazo(() => reopenCashSettlement({ actor: SA, settlementId: c2.id, motivo: 'Error de conteo' }, db, noop))
+  const re = await reopenCashSettlement({ actor: JUAN, settlementId: c2.id, motivo: 'Error de conteo' }, db, noop)
+  metric('SuperAdmin reabre', rSa)
+  assert(rLaura !== 'ACEPTADO' && rSa !== 'ACEPTADO' && re.status === 'reabierta', 'reapertura con autoridad incorrecta')
 })
 
-await spec('CAP-I-002', GI, 'liquidación semanal: la cierra el responsable o el SuperAdmin; el Admin secundario no', async () => {
+// [MODIFICADO R74] Antes la cerraba también el SuperAdmin; ahora solo el responsable.
+await spec('CAP-I-002', GI, 'liquidación semanal: la cierra el responsable; el Admin secundario y el SuperAdmin no (R74)', async () => {
   await empresa()
   const sec = await rechazo(() => closeSettlement({ actor: CARLOS, tenantId: T, routeId: NORTE, semanaInicio: '2026-09-07', semanaFin: '2026-09-13' }, db as never, noop))
-  const ok = await closeSettlement({ actor: SA, tenantId: T, routeId: NORTE, semanaInicio: '2026-09-07', semanaFin: '2026-09-13' }, db as never, noop)
+  const sa = await rechazo(() => closeSettlement({ actor: SA, tenantId: T, routeId: NORTE, semanaInicio: '2026-09-07', semanaFin: '2026-09-13' }, db as never, noop))
+  const ok = await closeSettlement({ actor: JUAN, tenantId: T, routeId: NORTE, semanaInicio: '2026-09-07', semanaFin: '2026-09-13' }, db as never, noop)
   metric('Admin secundario', sec)
-  assert(sec !== 'ACEPTADO' && ok.capitalControllerAdminIdAtClose === JUAN.id, 'autoridad de liquidación incorrecta')
+  metric('SuperAdmin', sa)
+  assert(sec !== 'ACEPTADO' && sa !== 'ACEPTADO' && ok.capitalControllerAdminIdAtClose === JUAN.id, 'autoridad de liquidación incorrecta')
 })
 
-await spec('CAP-I-003', GI, 'anulaciones: SuperAdmin y responsable sí (a la bolsa del responsable ACTUAL); secundario no', async () => {
+// [MODIFICADO R74] Antes el SuperAdmin también anulaba; ahora solo el responsable ACTUAL.
+await spec('CAP-I-003', GI, 'anulaciones: el responsable sí (a la bolsa del responsable ACTUAL); secundario y SuperAdmin no (R74)', async () => {
   await empresa()
   const cap = await registerCapital({ actor: JUAN, tenantId: T, routeId: NORTE, valor: 3 * M })
   const w = await registerWithdrawal({ actor: JUAN, tenantId: T, routeId: NORTE, valor: 1 * M })
   const sec = await rechazo(() => reverseCapitalMovement({ actor: CARLOS, tenantId: T, movementId: cap.id, reason: 'Error' }))
   await setRouteCapitalController({ actor: SA, tenantId: T, routeId: NORTE, adminId: CARLOS.id, motivo: 'Cambio' })
-  const { reversal: rw } = await reverseWithdrawal({ actor: SA, tenantId: T, movementId: w.id, reason: 'Retiro duplicado' })
+  const saRev = await rechazo(() => reverseWithdrawal({ actor: SA, tenantId: T, movementId: w.id, reason: 'Retiro duplicado' }))
+  assert(saRev !== 'ACEPTADO', 'R74: el SuperAdmin anuló un retiro de la ruta')
+  const { reversal: rw } = await reverseWithdrawal({ actor: CARLOS, tenantId: T, movementId: w.id, reason: 'Retiro duplicado' })
   const { reversal: rc } = await reverseCapitalMovement({ actor: CARLOS, tenantId: T, movementId: cap.id, reason: 'Error' })
   const c = await bolsa(CARLOS.id)
   metric('secundario (antes del cambio)', sec)

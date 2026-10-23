@@ -757,12 +757,17 @@ await spec('ONBOARDING-CLEAN-002', 'Onboarding', 'el primer Super Admin configur
     ['crear Oficinas', can(su, 'office.create', { tenantId: su.tenantId })],
     ['crear Rutas', can(su, 'route.create', { tenantId: su.tenantId })],
     ['crear usuarios', can(su, 'user.create', { tenantId: su.tenantId })],
-    ['cerrar liquidaciones', can(su, 'settlement.close', { tenantId: su.tenantId })],
-    ['reabrir liquidaciones', can(su, 'settlement.reopen', { tenantId: su.tenantId })],
+    // [MODIFICADO R74] Antes también cerraba y reabría liquidaciones; ahora las CONSULTA (las cierra
+    // el Administrador responsable de cada ruta): el SuperAdmin no es operador financiero de la ruta.
+    ['asignar capital a Administradores', can(su, 'capital.allocateAdmins', { tenantId: su.tenantId })],
+    ['consultar cuadres', can(su, 'cashSettlement.view', { tenantId: su.tenantId })],
   ]
   for (const [que, puede] of capacidades) {
     metric(que, puede)
     assert(puede, `el Super Admin debe poder ${que}`)
+  }
+  for (const cap of ['settlement.close', 'settlement.reopen', 'cashSettlement.close', 'cashSettlement.reopen', 'cashCustody.manage'] as const) {
+    assert(!can(su, cap, { tenantId: su.tenantId }), `R74: el Super Admin ya no tiene ${cap}`)
   }
   // Y puede crear TODOS los perfiles de su empresa, incluido otro Super Admin.
   for (const rol of ['superadmin', 'admin', 'supervisor', 'cobrador', 'secretario', 'socio'] as const) {

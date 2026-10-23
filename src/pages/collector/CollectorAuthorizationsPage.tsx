@@ -13,6 +13,7 @@ import { useOpBase } from '@/hooks/useOpBase'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { can } from '@/lib/permissions'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/formatters'
+import { formatClientName, formatPersonName } from '@/lib/displayName'
 import {
   approveSaleRequest, rejectSaleRequest, listPendingSaleRequestsForRoute, logApprovalAudit,
   computeSaleFinancials, ALLOWED_INTEREST_RATES,
@@ -95,8 +96,8 @@ export default function CollectorAuthorizationsPage() {
 
   const { lista, clientes, usuarios, ruta } = datos
   const actual = lista.find(r => r.id === seleccion) ?? null
-  const nombreCliente = (id: string) => clientes.get(id)?.nombre ?? 'Cliente'
-  const solicitante = (r: SaleRequest) => usuarios.get(r.requestedBy ?? r.collectorId)?.nombre ?? '—'
+  const nombreCliente = (id: string) => formatClientName(clientes.get(id)?.nombre) || 'Cliente'
+  const solicitante = (r: SaleRequest) => formatPersonName(usuarios.get(r.requestedBy ?? r.collectorId)?.nombre) || '—'
 
   function abrir(r: SaleRequest) {
     setSeleccion(r.id)
@@ -158,7 +159,7 @@ export default function CollectorAuthorizationsPage() {
         </button>
 
         <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4 space-y-1">
-          <p className="font-bold text-gray-900">{cliente?.nombre ?? 'Cliente'}</p>
+          <p className="font-bold text-gray-900">{formatClientName(cliente?.nombre) || 'Cliente'}</p>
           <p className="text-xs text-gray-500">{cliente?.documento}{cliente?.telefonoPrincipal ? ` · ${cliente.telefonoPrincipal}` : ''}</p>
           <p className="text-xs text-gray-500">Ruta {ruta} · Solicitó {solicitante(actual)} · {formatDateTime(actual.requestedAt)}</p>
         </div>

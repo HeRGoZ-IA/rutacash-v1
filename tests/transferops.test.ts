@@ -110,7 +110,8 @@ await spec('OPS-001', GA, 'caso de referencia: R$ 100 de cali1 (sin asignar) a h
   await invariantes()
 })
 
-await spec('OPS-002', GA, 'recibir devolución de Base (Admin responsable y SuperAdmin)', async () => {
+// [MODIFICADO R74] Antes el SuperAdmin también recibía la devolución; ya no (no opera la caja de la ruta).
+await spec('OPS-002', GA, 'recibir devolución de Base (Admin responsable; R74: el SuperAdmin no)', async () => {
   await empresa()
   await assignBaseToWorker({ actor: ANA, tenantId: T, routeId: CALI1, recipientUserId: HELMER.id, amount: 100, motivo: 'Base' })
   const antes = await saldos(CALI1)
@@ -119,8 +120,9 @@ await spec('OPS-002', GA, 'recibir devolución de Base (Admin responsable y Supe
   const d = await saldos(CALI1)
   metric('helmer / sin asignar', `${pv.origen.despues}=${d.posiciones[HELMER.id]} / ${pv.destino.despues}=${d.sinAsignar}`)
   assert(pv.origen.despues === d.posiciones[HELMER.id] && pv.destino.despues === d.sinAsignar && pv.limite === 100, 'vista previa ≠ resultado')
-  await returnBaseFromWorker({ actor: SA, tenantId: T, routeId: CALI1, fromUserId: HELMER.id, amount: 10, motivo: 'Devolución al SuperAdmin' })
-  assert((await saldos(CALI1)).posiciones[HELMER.id] === 50, 'el SuperAdmin no pudo recibir la devolución (nivel settle)')
+  const sa = await rechazo(() => returnBaseFromWorker({ actor: SA, tenantId: T, routeId: CALI1, fromUserId: HELMER.id, amount: 10, motivo: 'Devolución al SuperAdmin' }))
+  metric('SuperAdmin recibe', sa)
+  assert(sa !== 'ACEPTADO' && (await saldos(CALI1)).posiciones[HELMER.id] === 60, 'R74: el SuperAdmin recibió la devolución')
   await invariantes()
 })
 
@@ -199,7 +201,8 @@ await spec('OPS-007', GB, 'permisos: lo que la UI ofrece = lo que el servicio ac
   for (const [k, x] of Object.entries(v)) metric(k, x)
   assert(v.ana === 'entregar-base,devolver-base,ruta-ruta,colocar,retirar', 'Ana (responsable) no tiene sus operaciones')
   assert(v.carlos === '—', 'el Admin secundario obtiene control de caja')
-  assert(v.sa === 'devolver-base', 'el SuperAdmin obtiene operaciones estructurales')
+  // [MODIFICADO R74] Antes el SuperAdmin conservaba «devolver-base» (nivel settle); ya no tiene ninguna.
+  assert(v.sa === '—', 'el SuperAdmin obtiene operaciones de caja de ruta')
   assert(v.helmer === '—' && v.socio === '—' && v.secre === '—', 'un rol operativo o de consulta obtiene operaciones')
   assert(v.laura === 'devolver-base', 'el Supervisor obtiene algo más que recibir devoluciones (regla vigente)')
   assert(!routesForOperation('ruta-ruta', ANA, RUTAS, TODOS, T).some(r => r.id === PALMIRA), 'se ofrece la ruta de otro responsable')
@@ -209,6 +212,7 @@ await spec('OPS-007', GB, 'permisos: lo que la UI ofrece = lo que el servicio ac
     'Carlos entrega Base en cali1': () => assignBaseToWorker({ actor: CARLOS, tenantId: T, routeId: CALI1, recipientUserId: HELMER.id, amount: 1, motivo: 'x x' }),
     'Carlos coloca en cali1': () => registerCapital({ actor: CARLOS, tenantId: T, routeId: CALI1, valor: 1 }),
     'SuperAdmin entrega Base': () => assignBaseToWorker({ actor: SA, tenantId: T, routeId: CALI1, recipientUserId: HELMER.id, amount: 1, motivo: 'x x' }),
+    'SuperAdmin recibe devolución (R74)': () => returnBaseFromWorker({ actor: SA, tenantId: T, routeId: CALI1, fromUserId: HELMER.id, amount: 1, motivo: 'x x' }),
     'SuperAdmin transfiere': () => registerTransfer({ actor: SA, tenantId: T, origen: { type: 'route', id: CALI1 }, destino: { type: 'route', id: CALI2 }, valor: 1 }),
     'Supervisor entrega Base': () => assignBaseToWorker({ actor: LAURA, tenantId: T, routeId: CALI1, recipientUserId: HELMER.id, amount: 1, motivo: 'x x' }),
     'Cobrador entrega Base': () => assignBaseToWorker({ actor: HELMER, tenantId: T, routeId: CALI1, recipientUserId: LAURA.id, amount: 1, motivo: 'x x' }),

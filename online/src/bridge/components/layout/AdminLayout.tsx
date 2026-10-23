@@ -24,6 +24,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { cn } from '@/lib/utils'
 import { initials } from '@/lib/formatters'
+import { formatPersonName } from '@/lib/displayName'
 import { CountBadge } from '@/components/ui/CountBadge'
 import { usePendingSaleRequests, usePendingAdjustmentRequests } from '@/hooks/usePendingBadges'
 import { hasOperationalRoutes, ROLE_LABELS } from '@/lib/permissions'
@@ -177,7 +178,7 @@ export function AdminLayout() {
             {initials(user?.nombre ?? 'U')}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-white text-xs font-medium truncate">{user?.nombre}</p>
+            <p className="text-white text-xs font-medium truncate">{formatPersonName(user?.nombre)}</p>
             <p className="text-gray-400 text-xs">{roleLabel}</p>
           </div>
         </div>

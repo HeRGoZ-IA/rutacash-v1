@@ -17,6 +17,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { useTenant } from '@/hooks/useTenant';
 import { useDataRevision } from '@/hooks/useDataRevision';
 import { formatCurrency, formatDateTime } from '@/lib/formatters';
+import { formatPersonName } from '@/lib/displayName';
 import { useRuntime } from './session.ts';
 import { CONCEPT_LABEL, REQUEST_STATE_LABEL, fetchInbox, getRequest, requestTitle, type CapitalRequest, type Inbox, type Notice } from './capitalRequests.ts';
 import { CloseRequestModal, DeliverCashModal, RequestModal } from './MoneyForms.tsx';
@@ -61,7 +62,7 @@ export default function NotificationsPage() {
   const reload = () => { void fetchInbox().then(setInbox).catch(() => { /* se reintenta con el refresco */ }); };
 
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-4xl" data-testid="notifications-page">
+    <div className="p-4 md:p-6 space-y-5 max-w-6xl mx-auto w-full" data-testid="notifications-page">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-bold text-gray-900">Notificaciones</h1>
         <div className="flex flex-wrap gap-2 sm:justify-end">
@@ -94,8 +95,8 @@ export default function NotificationsPage() {
                         </>} />
                     ) : n.type === 'transfer-confirmation' ? (
                       <Row icon={<Clock3 className="w-4 h-4 text-amber-600" />} amount={money(n.transfer.amount)}
-                        title={n.transfer.mode === 'secretary' ? `Confirmar transferencia registrada por ${n.transfer.registeredBy.name ?? 'Secretaría'}` : 'Confirmar transferencia recibida'}
-                        detail={`${n.transfer.origin.name ?? 'Administrador'} → ${n.transfer.destination.name ?? 'Administrador'} · ${n.transfer.reason}`} at={n.at}
+                        title={n.transfer.mode === 'secretary' ? `Confirmar transferencia registrada por ${formatPersonName(n.transfer.registeredBy.name) || 'Secretaría'}` : 'Confirmar transferencia recibida'}
+                        detail={`${formatPersonName(n.transfer.origin.name) || 'Administrador'} → ${formatPersonName(n.transfer.destination.name) || 'Administrador'} · ${n.transfer.reason}`} at={n.at}
                         actions={<>
                           <Button size="sm" onClick={() => { void decide(n.transfer.id, 'confirm'); }}>{n.transfer.mySide === 'destination' ? 'Confirmar recepción' : 'Confirmar envío'}</Button>
                           <Button size="sm" variant="secondary" onClick={() => { void decide(n.transfer.id, 'reject'); }}>Rechazar</Button>
@@ -177,19 +178,19 @@ function RequestRow({ r, money, actions }: { r: CapitalRequest; money: (n: numbe
 }
 
 const OP_TEXT: Record<string, (o: { actor: { name: string | null }; workerName: string | null; adminName: string | null }) => string> = {
-  'capital-received': (o) => `Capital recibido de ${o.actor.name ?? 'el SuperAdmin'}`,
-  'capital-collected': (o) => `${o.actor.name ?? 'El SuperAdmin'} recogió capital de tu caja`,
-  'cash-delivered': (o) => `Entrega de efectivo de ${o.actor.name ?? 'un Cobrador'}`,
-  'capital-returned': (o) => `${o.actor.name ?? 'Un Administrador'} devolvió capital`,
-  'capital-delivered': (o) => `Capital recibido de ${o.actor.name ?? 'tu Administrador'}`,
-  'return-registered': (o) => `${o.actor.name ?? 'Tu Administrador'} registró una devolución tuya`,
+  'capital-received': (o) => `Capital recibido de ${formatPersonName(o.actor.name) || 'el SuperAdmin'}`,
+  'capital-collected': (o) => `${formatPersonName(o.actor.name) || 'El SuperAdmin'} recogió capital de tu caja`,
+  'cash-delivered': (o) => `Entrega de efectivo de ${formatPersonName(o.actor.name) || 'un Cobrador'}`,
+  'capital-returned': (o) => `${formatPersonName(o.actor.name) || 'Un Administrador'} devolvió capital`,
+  'capital-delivered': (o) => `Capital recibido de ${formatPersonName(o.actor.name) || 'tu Administrador'}`,
+  'return-registered': (o) => `${formatPersonName(o.actor.name) || 'Tu Administrador'} registró una devolución tuya`,
 };
 
 function InfoRow({ n, money, consultas }: { n: Notice; money: (n: number) => string; consultas: boolean }) {
   if (n.type === 'request-resolved') {
     const r = n.request;
     const icon = r.state === 'fulfilled' ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <XCircle className="w-4 h-4 text-red-500" />;
-    const by = r.resolvedBy?.name;
+    const by = formatPersonName(r.resolvedBy?.name);
     const title = r.mySide === 'requester'
       ? `Tu solicitud: ${REQUEST_STATE_LABEL[r.state].toLowerCase()}${by ? ` por ${by}` : ''}`
       : `Solicitud ${REQUEST_STATE_LABEL[r.state].toLowerCase()}${by ? ` por ${by}` : ''}`;
@@ -198,7 +199,7 @@ function InfoRow({ n, money, consultas }: { n: Notice; money: (n: number) => str
   }
   if (n.type === 'transfer-received' || n.type === 'transfer-closed') {
     const t = n.transfer;
-    const title = n.type === 'transfer-received' ? `Transferencia recibida de ${t.origin.name ?? 'otro Administrador'}`
+    const title = n.type === 'transfer-received' ? `Transferencia recibida de ${formatPersonName(t.origin.name) || 'otro Administrador'}`
       : `Transferencia ${t.state === 'rejected' ? 'rechazada' : t.state === 'cancelled' ? 'cancelada' : 'aplicada'}`;
     return <Row icon={<ArrowDownLeft className="w-4 h-4 text-emerald-600" />} title={title} detail={[t.reason, t.closeReason ? `Motivo: ${t.closeReason}` : null].filter(Boolean).join(' · ')}
       amount={money(t.amount)} at={n.at} />;

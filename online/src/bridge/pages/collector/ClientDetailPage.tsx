@@ -12,6 +12,7 @@ import { useDataRevision } from '@/hooks/useDataRevision'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
+import { formatBusinessName, formatClientName } from '@/lib/displayName'
 import { calculateCurrentInstallment, getLastPaidInstallmentNumber } from '@/services/installmentEngine'
 import { buildWhatsAppMessage } from '@/lib/utils'
 import { resolveWhatsAppRecipient, whatsAppLink } from '@/lib/whatsapp'
@@ -140,8 +141,8 @@ export default function ClientDetailPage() {
             {client.nombre.charAt(0)}
           </div>
           <div>
-            <h1 className="text-white font-bold">{client.nombre}</h1>
-            <p className="text-primary-200 text-sm">{client.negocio}</p>
+            <h1 className="text-white font-bold">{formatClientName(client.nombre)}</h1>
+            <p className="text-primary-200 text-sm">{formatBusinessName(client.negocio)}</p>
           </div>
         </div>
       </div>

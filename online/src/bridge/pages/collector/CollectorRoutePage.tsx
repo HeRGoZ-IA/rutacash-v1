@@ -22,6 +22,7 @@ import { useDataRevision } from '@/hooks/useDataRevision'
 import { effectivePayments } from '@/lib/paymentState'
 import { compareByCreation } from '@/lib/eventOrder'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
+import { formatClientName } from '@/lib/displayName'
 import {
   calculateCurrentInstallment, getLastPaidInstallmentNumber, isSaleDueToday, isSaleDisbursed,
   getCollectionStatus, countOverdueInstallments, getMaxOverdueDays,
@@ -243,7 +244,7 @@ function ClientCard({ item, currency, pending, onPayment, onNoPayment, onView }:
           <div className="flex items-center gap-2 min-w-0">
             <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${st.dot}`} />
             <div className="min-w-0">
-              <p className="font-semibold text-gray-900 text-sm truncate">{client.nombre}</p>
+              <p className="font-semibold text-gray-900 text-sm truncate">{formatClientName(client.nombre)}</p>
               <p className="text-xs text-gray-500">{client.documento}</p>
             </div>
           </div>

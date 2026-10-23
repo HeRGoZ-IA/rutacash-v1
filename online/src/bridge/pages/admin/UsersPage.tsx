@@ -29,6 +29,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { generateId, generateTemporaryPassword } from '@/lib/utils'
 import { validateEmail, sameEmail } from '@/lib/email'
 import { nowISO, initials } from '@/lib/formatters'
+import { formatPersonName } from '@/lib/displayName'
 import { logAction } from '@/services/auditService'
 import { getAssignedRouteIds } from '@/lib/roles'
 import { groupRoutesByOffice } from '@/lib/officeGrouping'
@@ -410,7 +411,7 @@ export default function UsersPage() {
                   <div className="flex items-center gap-3 w-56 flex-shrink-0 min-w-0">
                     <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center text-primary-700 font-bold text-sm flex-shrink-0">{initials(u.nombre)}</div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{u.nombre}</p>
+                      <p className="text-sm font-medium text-gray-900 truncate">{formatPersonName(u.nombre)}</p>
                       <p className="text-xs text-gray-500 truncate">{u.email}</p>
                     </div>
                   </div>
@@ -505,7 +506,7 @@ export default function UsersPage() {
       <Modal open={!!resetTarget} onClose={() => setResetTarget(null)} title="Acceso del usuario"
         footer={<Button variant="secondary" onClick={() => setResetTarget(null)}>Cerrar</Button>}>
         <div className="space-y-3">
-          <p className="text-sm text-gray-600">Usuario: <span className="font-semibold">{resetTarget?.nombre}</span></p>
+          <p className="text-sm text-gray-600">Usuario: <span className="font-semibold">{formatPersonName(resetTarget?.nombre)}</span></p>
           {accessLink.status === 'idle' && (
             <>
               <p className="text-sm text-gray-600">La contraseña la elige cada persona. Si todavía no ha entrado, genera un enlace de primer acceso y entrégaselo por un canal privado.</p>
@@ -545,7 +546,7 @@ export default function UsersPage() {
             <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
             <p className="text-sm text-red-700">Solo se permite eliminar usuarios SIN movimientos. Los históricos financieros nunca se borran.</p>
           </div>
-          <p className="text-sm text-gray-600">Usuario: <span className="font-semibold">{deleteTarget?.nombre}</span> ({deleteTarget?.email})</p>
+          <p className="text-sm text-gray-600">Usuario: <span className="font-semibold">{formatPersonName(deleteTarget?.nombre)}</span> ({deleteTarget?.email})</p>
         </div>
       </Modal>
 

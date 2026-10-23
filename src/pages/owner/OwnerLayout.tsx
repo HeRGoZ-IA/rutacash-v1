@@ -4,6 +4,7 @@ import { LayoutDashboard, Building2, Receipt, Settings, LogOut, Info, Menu, X } 
 import { useOwnerAuth } from '@/hooks/useOwnerAuth'
 import { CONTROL_PLANE_IS_SHARED, CONTROL_PLANE_SCOPE_NOTICE } from '@/platform/controlPlane'
 import { BrandLogo } from '@/components/ui/BrandLogo'
+import { formatPersonName } from '@/lib/displayName'
 
 /**
  * MARCO DEL PORTAL OWNER.
@@ -68,7 +69,7 @@ export function OwnerLayout() {
 
         <div className="hidden lg:flex items-center gap-3">
           <div className="text-right">
-            <p className="text-sm font-medium text-gray-800 leading-tight">{owner?.nombre}</p>
+            <p className="text-sm font-medium text-gray-800 leading-tight">{formatPersonName(owner?.nombre)}</p>
             <p className="text-xs text-gray-500">Owner</p>
           </div>
           <button type="button" onClick={salir} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800">
@@ -93,7 +94,7 @@ export function OwnerLayout() {
             <nav className="flex flex-col gap-1" aria-label="Menú del Owner">{links}</nav>
             <div className="flex items-center justify-between gap-3 border-t border-gray-100 pt-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-gray-800 leading-tight truncate">{owner?.nombre}</p>
+                <p className="text-sm font-medium text-gray-800 leading-tight truncate">{formatPersonName(owner?.nombre)}</p>
                 <p className="text-xs text-gray-500">Owner</p>
               </div>
               <button type="button" onClick={salir} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm text-gray-600 hover:bg-gray-100">

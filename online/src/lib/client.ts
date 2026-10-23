@@ -273,10 +273,13 @@ export class OnlineClient {
    *   3. si tampoco se puede consultar, `UncertainOperation`: la UI ofrece «Comprobar».
    * Nunca se repite con un id nuevo: eso sí podría duplicar el movimiento.
    */
-  async command<T = Record<string, unknown>>(method: string, path: string, body: unknown, operationId: string = crypto.randomUUID()): Promise<T> {
-    const membership = this.activeMembershipId;
+  async command<T = Record<string, unknown>>(method: string, path: string, body: unknown, operationId: string = crypto.randomUUID(),
+    opts: { membership?: string } = {}): Promise<T> {
+    // R74: una captura sin conexión viaja con la membresía con la que se REGISTRÓ (`opts.membership`),
+    // nunca con la que esté activa al sincronizar.
+    const membership = opts.membership ?? this.activeMembershipId;
     try {
-      return (await this.request(method, path, { body, operationId })) as T;
+      return (await this.request(method, path, { body, operationId, membership: membership ?? undefined })) as T;
     } catch (err) {
       if (!isUnconfirmed(err)) throw err;
       return this.resolveUncertain<T>(new UncertainOperation(operationId, method, path, body, membership));

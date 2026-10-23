@@ -286,7 +286,8 @@ await spec('WORKER-XFER-012', 'valor 0 / negativo / NaN / vacío / decimal: rech
 await spec('WORKER-XFER-013', 'permisos: solo quien tiene cashCustody.manage sobre la ruta', async () => {
   await escenario()
   const quien: [string, User, boolean][] = [
-    ['Super Admin', SUPER, true], ['Admin', ADMIN, true], ['Supervisor de la ruta', LAURA, true],
+    // [MODIFICADO R74] El Super Admin ya no traspasa efectivo entre trabajadores (antes sí).
+    ['Super Admin', SUPER, false], ['Admin', ADMIN, true], ['Supervisor de la ruta', LAURA, true],
     ['Supervisor de otra ruta', OSCAR, false], ['Secretario', SECRE, false], ['Socio', SOCIO, false],
     ['Cobrador (tercero)', ANDRES, false], ['Fabio (reduce su propia responsabilidad)', FABIO, false],
   ]

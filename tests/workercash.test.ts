@@ -655,15 +655,18 @@ await spec('CASH-SETTLEMENT-013', 'Permisos', 'el Supervisor NO autocierra', asy
   assert(/propio cuadre/.test(r), 'el Supervisor pudo cerrar su propio cuadre')
 })
 
-await spec('CASH-SETTLEMENT-014', 'Permisos', 'el Admin cierra (y el Super Admin también)', async () => {
+// [MODIFICADO R74] Regla anterior: el Super Admin también cerraba cuadres. Regla aprobada: el
+// SuperAdmin supervisa (consulta) y el cuadre lo cierra el Admin responsable (o el Supervisor).
+await spec('CASH-SETTLEMENT-014', 'Permisos', 'el Admin cierra; el Super Admin ya no (R74)', async () => {
   await empresa()
   await pagar(JUAN, await venta(R_NORTE), 100_000)
   await pagar(LAURA, await venta(R_NORTE), 50_000)
   const a = await cerrar(JUAN.id, 100_000, { actor: ADMIN })
-  const s = await cerrar(LAURA.id, 50_000, { actor: SUPER })
+  const s = await rechazo(() => closeCashSettlement({ actor: SUPER, tenantId: T, routeId: R_NORTE, userId: LAURA.id, entregado: 50_000 }))
   metric('Admin → Juan', `${a.closedByUserId} · dif ${a.diferencia}`)
-  metric('SuperAdmin → Laura', `${s.closedByUserId} · dif ${s.diferencia}`)
-  assert(a.closedByUserId === ADMIN.id && s.closedByUserId === SUPER.id, 'Admin/SuperAdmin no pudieron cerrar')
+  metric('SuperAdmin → Laura', s)
+  assert(a.closedByUserId === ADMIN.id, 'el Admin no pudo cerrar')
+  assert(/no autorizada|cashSettlement\.close/i.test(s), 'el SuperAdmin pudo cerrar un cuadre')
 })
 
 await spec('CASH-SETTLEMENT-015', 'Permisos', 'el Supervisor cierra a OTRO trabajador autorizado, no fuera de su ruta', async () => {
@@ -898,7 +901,9 @@ await spec('CASH-SETTLEMENT-032', 'Permisos', 'capacidades nuevas por rol', () =
   const tiene = (u: User, c: Parameters<typeof can>[1]) => can(u, c, { routeId: R_NORTE, tenantId: T })
   const fila = (u: User) => ['view', 'viewOwn', 'close', 'reopen'].map(c => tiene(u, `cashSettlement.${c}` as never) ? 'S' : '·').join('')
   for (const u of [SUPER, ADMIN, LAURA, JUAN, SECRE]) metric(`${u.rol.padEnd(10)} view/own/close/reopen`, fila(u))
-  assert(fila(SUPER) === 'S·SS' && fila(ADMIN) === 'S·SS', 'Admin/SuperAdmin: ver, cerrar y reabrir')
+  // [MODIFICADO R74] El SuperAdmin ya no cierra ni reabre cuadres: solo los consulta.
+  assert(fila(ADMIN) === 'S·SS', 'Admin: ver, cerrar y reabrir')
+  assert(fila(SUPER) === 'S···', 'SuperAdmin: solo ver (R74)')
   assert(fila(LAURA) === 'SSS·', 'Supervisor: ver, propio y cerrar a otros; NO reabrir')
   assert(fila(JUAN) === '·S··', 'Cobrador: solo su propio ciclo')
   assert(fila(SECRE) === '····', 'Secretario: nada')

@@ -12,6 +12,7 @@ import {
   hasOperationalRoutes, isRouteUnrestricted, filterByAccessibleRoute, filterAccessibleRoutes,
   isCapabilityCompatible, sanitizeGrantedCapabilities, delegableCapabilitiesFor,
   isPartnerInScope, isTransferInScope, type Capability, CARTERA_WRITE_CAPS, carteraClientsOnly,
+  SUPERADMIN_NOT_FINANCIAL_OPERATOR,
 } from '../src/lib/permissions'
 import { CAPABILITY_METADATA, CATEGORY_ORDER } from '../src/lib/capabilityCatalog'
 import { getEffectiveCompanyStatus, isCompanyBlocked } from '../src/lib/company'
@@ -85,7 +86,13 @@ check('R67 — superadmin consulta clientes, créditos y pagos', can(superadmin,
 check('R67 — superadmin sin ninguna escritura de cartera', CARTERA_WRITE_CAPS.every(c => !can(superadmin, c, { routeId: 'r1' })))
 check('R67 — tampoco por delegación (capacidades incompatibles)', CARTERA_WRITE_CAPS.every(c => !isCapabilityCompatible('superadmin', c)))
 check('R67 — admin conserva las escrituras de cartera en su ruta', CARTERA_WRITE_CAPS.filter(c => c !== 'client.editLimited' && c !== 'authorization.phoneConfirm').every(c => can(admin, c, { routeId: 'r1' })))
-check('R67 — superadmin conserva capital, gastos y cuadres', ['capital.manage', 'capital.allocateAdmins', 'capital.assignController', 'cashCustody.manage', 'expense.register', 'expense.correct', 'settlement.close', 'cashSettlement.close', 'user.create', 'route.create'].every(c => can(superadmin, c as Capability)))
+// [MODIFICADO R74 — SuperAdmin supervisor, no operador financiero] Regla anterior: conservaba
+// también custodia (`cashCustody.manage`), cuadres y cierres. Regla aprobada: capital de la empresa,
+// gasto de empresa, estructura y consulta; ninguna operación de caja de ruta, ni por delegación.
+check('R67/R74 — superadmin conserva capital, gasto de empresa, estructura y consulta de cuadres', ['capital.manage', 'capital.allocateAdmins', 'capital.assignController', 'expense.register', 'expense.correct', 'cashSettlement.view', 'user.create', 'route.create'].every(c => can(superadmin, c as Capability)))
+check('R74 — superadmin sin custodia, cuadres ni cierres', SUPERADMIN_NOT_FINANCIAL_OPERATOR.every(c => !can(superadmin, c, { routeId: 'r1' })))
+check('R74 — tampoco por delegación', SUPERADMIN_NOT_FINANCIAL_OPERATOR.every(c => !isCapabilityCompatible('superadmin', c)))
+check('R74 — el admin conserva custodia, cuadres y cierres en su ruta', SUPERADMIN_NOT_FINANCIAL_OPERATOR.every(c => can(admin, c, { routeId: 'r1' })))
 check('R67 — solo la cartera del superadmin se limita a Clientes', carteraClientsOnly('superadmin') && !carteraClientsOnly('admin'))
 check('admin puede venta directa (ruta autorizada)', can(admin, 'sale.createDirect', { routeId: 'r1' }))
 check('cobrador NO puede venta directa', !can(cobrador, 'sale.createDirect', { routeId: 'r1' }))

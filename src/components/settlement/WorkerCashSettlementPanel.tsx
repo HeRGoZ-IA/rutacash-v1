@@ -11,6 +11,7 @@ import { useDataRevision } from '@/hooks/useDataRevision'
 import { can, canOperateRouteCash } from '@/lib/permissions'
 import { CapitalControllerBadge } from '@/components/ui/CapitalControllerBadge'
 import { formatCurrency, formatDateTime } from '@/lib/formatters'
+import { formatPersonName } from '@/lib/displayName'
 import { settlementOutcome, reopenCashBlockedReason, MIN_CASH_REASON } from '@/lib/cashSettlementRules'
 import {
   closeCashSettlement, getPendingShortagesForUser, listCashSettlementsForUser, listSettleableWorkers,
@@ -195,7 +196,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
   useEffect(() => { if (guiaVisible) guiaRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }, [guiaVisible])
   const motivoRequerido = Boolean(outcome && outcome.diferencia !== 0)
   const motivoValido = !motivoRequerido || motivo.trim().length >= MIN_CASH_REASON
-  const nombreDe = (id: string) => nombres.get(id) ?? id
+  const nombreDe = (id: string) => formatPersonName(nombres.get(id) ?? id)
 
   async function cerrar() {
     if (!preview) return
@@ -205,7 +206,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
         actor: user, tenantId, routeId, userId, entregado, motivo, esperadoVisto: preview.esperado,
       })
       toast.success(doc.diferencia === 0
-        ? `Cuadre de ${preview.userName} cerrado: exacto.`
+        ? `Cuadre de ${formatPersonName(preview.userName)} cerrado: exacto.`
         : doc.diferencia < 0
           ? `Cuadre cerrado con FALTANTE de ${money(doc.faltante)}. Continúa pendiente.`
           : `Cuadre cerrado con SOBRANTE de ${money(doc.sobrante)}.`)
@@ -239,16 +240,16 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
     try {
       if (central.activo && baseAccion === 'entregar') {
         await deliverCapitalToWorker({ actor: user, tenantId, routeId, recipientUserId: userId, amount: baseMonto, motivo: baseMotivo })
-        toast.success(`Capital entregado a ${seleccionado?.user.nombre ?? 'la persona'}.`)
+        toast.success(`Capital entregado a ${formatPersonName(seleccionado?.user.nombre) || 'la persona'}.`)
       } else if (central.activo) {
         await returnCapitalFromWorker({ actor: user, tenantId, routeId, fromUserId: userId, amount: baseMonto, motivo: baseMotivo })
-        toast.success(`Devolución de ${seleccionado?.user.nombre ?? 'la persona'} registrada en la bolsa del responsable.`)
+        toast.success(`Devolución de ${formatPersonName(seleccionado?.user.nombre) || 'la persona'} registrada en la bolsa del responsable.`)
       } else if (baseAccion === 'entregar') {
         await assignBaseToWorker({ actor: user, tenantId, routeId, recipientUserId: userId, amount: baseMonto, motivo: baseMotivo })
-        toast.success(`Base entregada a ${seleccionado?.user.nombre ?? 'la persona'}.`)
+        toast.success(`Base entregada a ${formatPersonName(seleccionado?.user.nombre) || 'la persona'}.`)
       } else {
         await returnBaseFromWorker({ actor: user, tenantId, routeId, fromUserId: userId, amount: baseMonto, motivo: baseMotivo })
-        toast.success(`Devolución de ${seleccionado?.user.nombre ?? 'la persona'} registrada.`)
+        toast.success(`Devolución de ${formatPersonName(seleccionado?.user.nombre) || 'la persona'} registrada.`)
       }
       setBaseAccion(null)
       setBaseMonto(0)
@@ -265,7 +266,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
       await transferBaseBetweenWorkers({
         actor: user, tenantId, routeId, fromUserId: userId, toUserId: traspasoDestino, amount: traspasoMonto, motivo: traspasoMotivo,
       })
-      toast.success(`Traspaso de ${money(traspasoMonto)} de ${seleccionado?.user.nombre ?? ''} a ${nombreDe(traspasoDestino)} registrado.`)
+      toast.success(`Traspaso de ${money(traspasoMonto)} de ${formatPersonName(seleccionado?.user.nombre)} a ${nombreDe(traspasoDestino)} registrado.`)
       setTraspaso(null)
       setTraspasoDestino('')
       setTraspasoMonto(0)
@@ -305,7 +306,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
         onChange={e => { setUserId(e.target.value); setEntregado(0); setMotivo(''); setGuiaEntregarBase(false) }}
         options={workers.map(w => ({
           value: w.user.id,
-          label: `${w.user.nombre} · ${w.user.rol === 'supervisor' ? 'Supervisor' : 'Cobrador'}${w.esPropio ? ' (tú)' : ''}${w.user.status !== 'activo' ? ' · inactivo' : ''}`,
+          label: `${formatPersonName(w.user.nombre)} · ${w.user.rol === 'supervisor' ? 'Supervisor' : 'Cobrador'}${w.esPropio ? ' (tú)' : ''}${w.user.status !== 'activo' ? ' · inactivo' : ''}`,
         }))}
         placeholder={workers.length ? 'Selecciona a quién cuadrar' : 'Esta ruta no tiene trabajadores con efectivo'}
       />
@@ -317,7 +318,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
           <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden divide-y divide-gray-50">
             <div className="px-4 py-3 bg-gray-50 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
               <span className="flex items-center gap-1 text-sm font-semibold text-gray-800">
-                <UserRound className="w-4 h-4 text-gray-400" /> {preview.userName}
+                <UserRound className="w-4 h-4 text-gray-400" /> {formatPersonName(preview.userName)}
               </span>
               <span>Ruta {preview.routeName}</span>
               <span>
@@ -341,7 +342,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
           {guiaEntregarBase && seleccionado && (
             <p ref={guiaRef} className="text-sm text-primary-800 bg-primary-50 border border-primary-100 rounded-xl px-3 py-2" data-testid="guia-entregar-base">
               {puedeEntregarBase
-                ? <>Vienes de Transferencias: pulsa <b>«{central.activo ? 'Entregar capital' : 'Entregar Base'}»</b> para registrar la entrega a {seleccionado.user.nombre}.</>
+                ? <>Vienes de Transferencias: pulsa <b>«{central.activo ? 'Entregar capital' : 'Entregar Base'}»</b> para registrar la entrega a {formatPersonName(seleccionado.user.nombre)}.</>
                 : <>Solo el Administrador responsable de capital de esta ruta puede entregar Base.</>}
             </p>
           )}
@@ -500,7 +501,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
         </div>}>
         {preview && outcome && (
           <div className="space-y-2 text-sm">
-            <p>Trabajador: <b>{preview.userName}</b></p>
+            <p>Trabajador: <b>{formatPersonName(preview.userName)}</b></p>
             <p>Esperado: <b>{money(preview.esperado)}</b></p>
             <p>Entregado: <b>{money(entregado)}</b></p>
             {outcome.resultado === 'exacto' && <p className="text-emerald-700 font-semibold">Cuadre exacto.</p>}
@@ -523,7 +524,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
 
       {/* ---------- REAPERTURA ---------- */}
       <Modal open={Boolean(baseAccion)} onClose={() => setBaseAccion(null)}
-        title={baseAccion === 'entregar' ? `${central.activo ? 'Entregar capital' : 'Entregar Base'} a ${seleccionado?.user.nombre ?? ''}` : `Devolución de ${seleccionado?.user.nombre ?? ''}`}
+        title={baseAccion === 'entregar' ? `${central.activo ? 'Entregar capital' : 'Entregar Base'} a ${formatPersonName(seleccionado?.user.nombre)}` : `Devolución de ${formatPersonName(seleccionado?.user.nombre)}`}
         footer={<>
           <Button variant="secondary" onClick={() => setBaseAccion(null)}>Cancelar</Button>
           <Button onClick={guardarBase} loading={baseGuardando} disabled={baseMonto <= 0 || baseMotivo.trim().length < 3}>Registrar</Button>
@@ -536,7 +537,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
             </div>
           ) : preview && preview.userId === userId ? (
             <div className="flex items-center justify-between gap-2 rounded-xl bg-primary-50 px-3 py-2 text-sm" data-testid="return-modal-position">
-              <span className="text-gray-600">A cargo de {preview.userName}</span>
+              <span className="text-gray-600">A cargo de {formatPersonName(preview.userName)}</span>
               <span className="font-bold text-primary-700">{money(Math.max(0, preview.esperado))}</span>
             </div>
           ) : null}
@@ -551,7 +552,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
 
       {/* ---------- TRASPASO ENTRE TRABAJADORES (misma ruta) ---------- */}
       <Modal open={Boolean(traspaso)} onClose={() => setTraspaso(null)}
-        title={traspaso === 'confirmar' ? 'Confirmar traspaso' : `Traspasar efectivo de ${seleccionado?.user.nombre ?? ''}`}
+        title={traspaso === 'confirmar' ? 'Confirmar traspaso' : `Traspasar efectivo de ${formatPersonName(seleccionado?.user.nombre)}`}
         footer={traspaso === 'confirmar' ? <>
           <Button variant="secondary" onClick={() => setTraspaso('form')} disabled={traspasoGuardando}>Volver</Button>
           <Button onClick={guardarTraspaso} loading={traspasoGuardando}>Confirmar traspaso</Button>
@@ -562,22 +563,22 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
         {traspaso === 'confirmar' ? (
           <div className="space-y-2 text-sm">
             <p className="text-lg font-bold text-gray-900">Traspasar {money(traspasoMonto)}</p>
-            <p className="text-gray-700">De <b>{seleccionado?.user.nombre}</b> a <b>{nombreDe(traspasoDestino)}</b></p>
+            <p className="text-gray-700">De <b>{formatPersonName(seleccionado?.user.nombre)}</b> a <b>{nombreDe(traspasoDestino)}</b></p>
             <p className="text-gray-500">Ruta {preview?.routeName ?? ''} · {traspasoMotivo.trim()}</p>
             <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">{central.activo ? 'No cambia la Base ni la bolsa: solo quién tiene el efectivo.' : 'No cambia la Base ni la caja sin asignar de la ruta: solo quién tiene el efectivo.'}</p>
           </div>
         ) : (
           <div className="space-y-3">
             <div className="flex items-center justify-between rounded-xl bg-primary-50 px-3 py-2 text-sm">
-              <span className="text-gray-600">En manos de {seleccionado?.user.nombre}</span>
+              <span className="text-gray-600">En manos de {formatPersonName(seleccionado?.user.nombre)}</span>
               <span className="font-bold text-primary-700">{disponibleTraspaso == null ? '…' : money(disponibleTraspaso)}</span>
             </div>
             <Select label="Entregar a" value={traspasoDestino} onChange={e => setTraspasoDestino(e.target.value)}
-              options={destinosTraspaso.map(w => ({ value: w.user.id, label: `${w.user.nombre} · ${w.user.rol === 'supervisor' ? 'Supervisor' : 'Cobrador'}${w.esPropio ? ' (tú)' : ''}` }))}
+              options={destinosTraspaso.map(w => ({ value: w.user.id, label: `${formatPersonName(w.user.nombre)} · ${w.user.rol === 'supervisor' ? 'Supervisor' : 'Cobrador'}${w.esPropio ? ' (tú)' : ''}` }))}
               placeholder="Selecciona quién recibe" />
             <MoneyInput label="Valor" value={traspasoMonto} onValueChange={setTraspasoMonto} currency={currency} min={0} />
             {disponibleTraspaso != null && traspasoMonto > disponibleTraspaso && (
-              <p className="text-xs text-red-600">Supera el efectivo en manos de {seleccionado?.user.nombre} ({money(disponibleTraspaso)}).</p>
+              <p className="text-xs text-red-600">Supera el efectivo en manos de {formatPersonName(seleccionado?.user.nombre)} ({money(disponibleTraspaso)}).</p>
             )}
             <div>
               <label className="block text-xs text-gray-500 mb-1.5">Motivo</label>
@@ -661,7 +662,7 @@ export function PendingShortagesNotice() {
         <p className="font-medium">{filas.length} trabajador(es) con faltante pendiente</p>
         <ul className="mt-1 space-y-0.5 text-xs text-red-700">
           {filas.map(f => (
-            <li key={f.s.id}>{f.nombre} · {f.ruta} — Faltante pendiente: <b>{formatCurrency(f.s.faltante, currency)}</b></li>
+            <li key={f.s.id}>{formatPersonName(f.nombre)} · {f.ruta} — Faltante pendiente: <b>{formatCurrency(f.s.faltante, currency)}</b></li>
           ))}
         </ul>
       </div>

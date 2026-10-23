@@ -1,6 +1,7 @@
 import { ShieldAlert } from 'lucide-react'
 import { ChangePasswordCard } from '@/components/auth/ChangePasswordCard'
 import { useAuth } from '@/hooks/useAuth'
+import { formatPersonName } from '@/lib/displayName'
 
 /**
  * Pantalla informativa para un Administrador SIN rutas autorizadas (FAIL CLOSED).
@@ -20,7 +21,7 @@ export function AdminNoRoutes() {
           Un Administrador solo opera sobre las rutas que tenga asignadas. Mientras no
           tengas ninguna, no se muestran clientes, ventas, caja ni reportes.
         </p>
-        <p className="text-xs text-gray-500 mt-3">Sesión: {user?.nombre} · {user?.email}</p>
+        <p className="text-xs text-gray-500 mt-3">Sesión: {formatPersonName(user?.nombre)} · {user?.email}</p>
       </div>
 
       {/* Camino de salida explícito: sin esto el usuario no sabe qué falta. */}

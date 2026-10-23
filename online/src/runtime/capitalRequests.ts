@@ -11,6 +11,7 @@ import { money } from './commands.ts';
 import { serverView, subscribe } from './projection.ts';
 import { toMajor, toMinor } from './mappers.ts';
 import { useRuntime } from './session.ts';
+import { formatPersonName } from '@/lib/displayName';
 
 export type RequestKind = 'admin_return' | 'admin_allocation' | 'admin_transfer' | 'worker_return';
 export type RequestState = 'pending' | 'fulfilled' | 'rejected' | 'cancelled';
@@ -34,8 +35,8 @@ export const CONCEPT_LABEL = { recaudo: 'Recaudo', base: 'Devolución de base' }
 
 /** Título de la solicitud visto por quien la recibe (holder) o por quien la hizo (requester). */
 export function requestTitle(r: CapitalRequest): string {
-  const from = r.requester.name ?? (r.requester.role === 'superadmin' ? 'El SuperAdmin' : 'Un Administrador');
-  const to = r.holder.name ?? (r.holder.role === 'superadmin' ? 'el SuperAdmin' : 'la otra parte');
+  const from = formatPersonName(r.requester.name) || (r.requester.role === 'superadmin' ? 'El SuperAdmin' : 'Un Administrador');
+  const to = formatPersonName(r.holder.name) || (r.holder.role === 'superadmin' ? 'el SuperAdmin' : 'la otra parte');
   if (r.mySide === 'requester') {
     switch (r.kind) {
       case 'admin_allocation': return 'Pediste capital al SuperAdmin';

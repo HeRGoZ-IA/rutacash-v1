@@ -24,6 +24,7 @@ import { getAuthorizedRouteIds } from '@/lib/roles'
 import { can } from '@/lib/permissions'
 import { ALLOWED_INTEREST_RATES, defaultOriginationRate, originationRateError, originationRatesFor, routeRatePolicyOf } from '@/lib/interestRatePolicy'
 import { generateId } from '@/lib/utils'
+import { formatClientName } from '@/lib/displayName'
 import { nowISO, normalizeDoc, formatCurrency, formatDate, today } from '@/lib/formatters'
 import { computeSaleFinancials, createDirectSale, createSaleRequest, directSaleLimit, type SaleInputs } from '@/services/saleRequestService'
 import { useCapitalGuard } from '@/hooks/useCapitalGuard'
@@ -249,7 +250,7 @@ function NewClientForm() {
             <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
             <div className="text-xs text-red-700">
               <p className="font-semibold">Este documento ya está registrado en esta empresa.</p>
-              <p className="mt-0.5"><span className="font-medium">{dup.nombre}</span> · Ruta: {dupRouteName}</p>
+              <p className="mt-0.5"><span className="font-medium">{formatClientName(dup.nombre)}</span> · Ruta: {dupRouteName}</p>
             </div>
           </div>
         )}

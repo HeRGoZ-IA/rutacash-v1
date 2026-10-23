@@ -14,6 +14,7 @@ import { hasPersonalCashbox } from '@/lib/collectorAttribution'
 import { expenseAttribution, isExpenseOf } from '@/lib/expenseAttribution'
 import { can } from '@/lib/permissions'
 import { generateId } from '@/lib/utils'
+import { formatPersonName } from '@/lib/displayName'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { formatCurrency, formatCurrencyInput, parseCurrencyInput, getCurrencySymbol, formatDate, today } from '@/lib/formatters'
@@ -134,7 +135,7 @@ export default function CollectorExpensesPage() {
   const pendientes = useMemo(() => offlineOps.filter(o => o.kind === 'expense' && o.routeId === routeId && isOpen(o)), [offlineOps, routeId])
   const todayTotal = mios.filter(e => e.fecha === today()).reduce((s, e) => s + e.valor, 0)
   const getCatName = (id: string) => categories.find(c => c.id === id)?.nombre ?? id
-  const nombreDe = (id?: string) => team.find(u => u.id === id)?.nombre ?? 'Trabajador'
+  const nombreDe = (id?: string) => formatPersonName(team.find(u => u.id === id)?.nombre) || 'Trabajador'
   /** Para el Supervisor: a quién se cargó cada gasto. */
   const etiqueta = (e: Expense) => {
     const a = expenseAttribution(e)
@@ -186,7 +187,7 @@ export default function CollectorExpensesPage() {
               >
                 {pagaConSuEfectivo && <option value={user!.id}>Mi efectivo</option>}
                 {team.filter(u => u.id !== user!.id).map(u => (
-                  <option key={u.id} value={u.id}>Efectivo de {u.nombre}</option>
+                  <option key={u.id} value={u.id}>Efectivo de {formatPersonName(u.nombre)}</option>
                 ))}
                 {pagaCajaRuta && <option value={CAJA_RUTA}>Caja de la ruta (sin trabajador)</option>}
               </select>

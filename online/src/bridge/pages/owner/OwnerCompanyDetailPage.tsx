@@ -27,6 +27,7 @@ import type { CompanyControlRecord, ControlEvent, SaaSPayment, SaaSPaymentStatus
 import { companyDetail, type ServerLocale, type ServerSuperadmin } from '@/platform/controlPlane'
 import { changeSuperadminEmail, issueSuperadminAccessLink, type AccessLinkResult } from '@/platform/companyControlService'
 import { AccessLinkPanel } from '@/pages/owner/AccessLinkPanel'
+import { formatPersonName } from '@/lib/displayName'
 
 /**
  * FICHA COMERCIAL DE UNA EMPRESA.
@@ -253,7 +254,7 @@ export default function OwnerCompanyDetailPage() {
             {superadmins.map(sa => (
               <div key={sa.id} className="px-5 py-3 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{sa.displayName}</p>
+                  <p className="text-sm font-medium text-gray-900 truncate">{formatPersonName(sa.displayName)}</p>
                   <p className="text-xs text-gray-500 truncate">{sa.email}</p>
                 </div>
                 <Badge variant={sa.status === 'activo' ? 'success' : 'gray'} size="sm">{sa.status}</Badge>
@@ -324,7 +325,7 @@ export default function OwnerCompanyDetailPage() {
         footer={<Button onClick={() => setAcceso(null)}>Listo</Button>}>
         {acceso && (
           <div className="space-y-3">
-            <p className="text-sm text-gray-600">Super Admin: <span className="font-semibold text-gray-900">{acceso.nombre}</span></p>
+            <p className="text-sm text-gray-600">Super Admin: <span className="font-semibold text-gray-900">{formatPersonName(acceso.nombre)}</span></p>
             <AccessLinkPanel result={acceso.result} />
           </div>
         )}
@@ -339,7 +340,7 @@ export default function OwnerCompanyDetailPage() {
         {emailTarget && (
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
-              Super Admin: <span className="font-semibold text-gray-900">{emailTarget.displayName}</span>. Sigue siendo la misma
+              Super Admin: <span className="font-semibold text-gray-900">{formatPersonName(emailTarget.displayName)}</span>. Sigue siendo la misma
               persona: conserva su contraseña, sus permisos y toda la información de la empresa. Desde ahora entra con el correo nuevo.
             </p>
             <Input label="Correo nuevo" type="email" autoComplete="off" value={newEmail}

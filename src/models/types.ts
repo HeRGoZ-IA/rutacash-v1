@@ -578,6 +578,8 @@ export interface Payment {
   reversalPaymentId?: string
   /** En el pago corregido: id del pago original al que corrige. */
   correctionOfPaymentId?: string
+  /** ADEX Online (0032): en un pago REAPLICADO, id del pago anulado cuyo efectivo vuelve a registrar. */
+  reappliesPaymentId?: string
   /** Motivo de la corrección (obligatorio al corregir). */
   correctionReason?: string
   /** Usuario que ejecutó la corrección/reversión. */

@@ -23,6 +23,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, nowISO } from '@/lib/formatters'
+import { formatPersonName } from '@/lib/displayName'
 import { logAction } from '@/services/auditService'
 import { createRouteWithAdmins, updateRouteWithAssignments } from '@/services/routeService'
 import { cobradorRemovalBlock, validateCobradorInvariant, COBRADOR_REMOVAL_MESSAGE, routeAssignmentWarnings, routeCanOperateCollection, ROUTE_NO_COBRADOR_LABEL, ROUTE_NO_COBRADOR_OPERATION_MESSAGE } from '@/lib/cobradorRules'
@@ -613,7 +614,7 @@ export default function RoutesPage() {
               </label>
               {lockAdminToSelf ? (
                 <div className="flex items-center gap-2 rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-700">
-                  <Users className="w-4 h-4" /> {user?.nombre} <span className="text-xs text-primary-400">(se asigna automáticamente)</span>
+                  <Users className="w-4 h-4" /> {formatPersonName(user?.nombre)} <span className="text-xs text-primary-400">(se asigna automáticamente)</span>
                 </div>
               ) : selectableAdmins.length === 0 ? (
                 <p className="text-xs text-gray-500">No hay Administradores activos. La ruta se creará sin Administrador; podrás asignarle uno más adelante.</p>
@@ -624,7 +625,7 @@ export default function RoutesPage() {
                     return (
                       <button key={a.id} type="button" onClick={() => toggleAdmin(a.id)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${active ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
-                        {a.nombre}
+                        {formatPersonName(a.nombre)}
                       </button>
                     )
                   })}
@@ -641,7 +642,7 @@ export default function RoutesPage() {
               asignados. Solo lista cobradores válidos. */}
           <div>
             <Select label="Cobrador responsable" value={form.cobradorId} onChange={e => setResponsible(e.target.value)}
-              options={responsibleOptions.map(c => ({ value: c.id, label: c.status === 'activo' ? c.nombre : `${c.nombre} (inactivo)` }))}
+              options={responsibleOptions.map(c => ({ value: c.id, label: c.status === 'activo' ? formatPersonName(c.nombre) : `${formatPersonName(c.nombre)} (inactivo)` }))}
               placeholder={`${ROUTE_NO_COBRADOR_LABEL} (opcional)`}
               hint={responsibleOptions.length === 0 ? 'No hay Cobradores activos. La ruta se creará sin Cobrador; podrás asignarle uno más adelante.' : undefined} />
           </div>
@@ -685,7 +686,7 @@ export default function RoutesPage() {
                           <button key={u.id} type="button" onClick={() => toggleAssignUser(u.id)}
                             className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-left transition-colors ${member ? 'bg-primary-50 border-primary-200' : 'bg-white border-gray-200 hover:bg-gray-50'}`}>
                             <div className="min-w-0">
-                              <p className="text-sm font-medium text-gray-800 truncate">{u.nombre}</p>
+                              <p className="text-sm font-medium text-gray-800 truncate">{formatPersonName(u.nombre)}</p>
                               <p className="text-xs text-gray-500">{ROLE_LABELS[u.rol]}{g.rol === 'cobrador' && member ? ` · ${isResp ? 'Responsable' : 'Asignado'}` : ''}{u.status !== 'activo' ? ' · inactivo' : ''}</p>
                             </div>
                             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${isResp ? 'bg-amber-500 text-white' : member ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
@@ -707,7 +708,7 @@ export default function RoutesPage() {
               {puedeElegirResponsable ? (
                 <Select label="Responsable de capital" value={responsableQueda ? form.capitalControllerAdminId : ''}
                   onChange={e => setForm(f => ({ ...f, capitalControllerAdminId: e.target.value }))}
-                  options={adminsEfectivos.map(a => ({ value: a.id, label: a.nombre }))}
+                  options={adminsEfectivos.map(a => ({ value: a.id, label: formatPersonName(a.nombre) }))}
                   placeholder={adminsEfectivos.length ? 'Seleccionar Administrador' : 'Sin Administradores asignados'}
                   hint="Solo uno maneja el capital y la caja de la ruta. Al cambiarlo, el capital colocado pasa a su bolsa." />
               ) : (

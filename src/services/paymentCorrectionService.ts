@@ -575,3 +575,37 @@ export async function annulPayment(
 
   return { original, reversal }
 }
+
+
+// ============================================================
+// Bloque A post-R73 · reaplicar un pago ANULADO (solo ADEX Online, 0032)
+// ------------------------------------------------------------
+// El mismo efectivo vuelve a la misma cuenta que lo recibió, con la fecha original si su
+// semana sigue abierta, en una operación nueva enlazada al pago anulado. Solo el
+// Administrador. Las reglas (cuadre posterior, pago corregido, custodio, saldo) las decide el
+// servidor; CLEAN local no la ofrece.
+// ============================================================
+
+export interface PaymentReapplyCheck {
+  paymentId: string
+  amount: number
+  paymentDate: string
+  reapplyDate: string
+  receiverKind: 'custody' | 'admin' | null
+  blockers: string[]
+}
+
+/** ¿Puede este usuario ofrecer «Reaplicar» sobre este pago? (el servidor vuelve a decidir). */
+export function canReapplyPayment(actor: User | null | undefined, payment: Pick<Payment, 'state' | 'correctedByPaymentId' | 'routeId' | 'tenantId'>): boolean {
+  // Capacidad, no rol codificado: payment.reverse ya es solo del Administrador (R67/R74).
+  return !!actor && payment.state === 'reversed' && !payment.correctedByPaymentId
+    && can(actor, 'payment.reverse', { routeId: payment.routeId, tenantId: payment.tenantId })
+}
+
+export async function checkPaymentReapply(_paymentId: string): Promise<PaymentReapplyCheck> {
+  throw new PaymentAnnulmentError('Reaplicar un pago anulado solo está disponible en ADEX Online.')
+}
+
+export async function reapplyAnnulledPayment(_params: { paymentId: string; reason: string; operationId: string }): Promise<void> {
+  throw new PaymentAnnulmentError('Reaplicar un pago anulado solo está disponible en ADEX Online.')
+}

@@ -19,6 +19,7 @@ import { filterAccessibleRoutes } from '@/lib/permissions';
 import { listCustodyMovements } from '@/services/cashCustodyService';
 import { reverseCapitalDelivery } from '@/services/centralCapitalService';
 import { formatCurrency, formatDateTime } from '@/lib/formatters';
+import { formatPersonName } from '@/lib/displayName';
 import type { CashCustodyMovement, Route, User } from '@/models/types';
 import { listAdminTransfers, STATE_LABEL, type AdminTransfer } from './adminTransfers.ts';
 
@@ -63,9 +64,11 @@ export function TransfersHistory() {
     return () => { alive = false; };
   }, [tenantId, user, revision]);
 
-  const userName = (id?: string) => users.find((u) => u.id === id)?.nombre ?? '';
+  const userName = (id?: string) => formatPersonName(users.find((u) => u.id === id)?.nombre);
   const routeLabel = (id?: string) => routes.find((r) => r.id === id)?.nombre ?? '—';
-  const canReverse = (routeId: string) => user?.rol === 'superadmin' || routes.find((r) => r.id === routeId)?.capitalControllerAdminId === user?.id;
+  // R74: solo el Administrador responsable de la ruta anula sus entregas y devoluciones; el SuperAdmin
+  // ya no (no opera la caja de la ruta: la API y PostgreSQL también lo niegan).
+  const canReverse = (routeId: string) => user?.rol !== 'superadmin' && routes.find((r) => r.id === routeId)?.capitalControllerAdminId === user?.id;
 
   const rows = useMemo<MovementRow[]>(() => {
     const out: MovementRow[] = [];
@@ -88,9 +91,9 @@ export function TransfersHistory() {
     for (const t of transfers) {
       out.push({
         key: `t:${t.id}`, kind: 'administradores', createdAt: t.createdAt, amount: t.amount,
-        title: `${t.origin.name ?? 'Administrador'} → ${t.destination.name ?? 'Administrador'}`,
+        title: `${formatPersonName(t.origin.name) || 'Administrador'} → ${formatPersonName(t.destination.name) || 'Administrador'}`,
         participants: [t.origin.adminId, t.destination.adminId, t.registeredBy.membershipId], estado: STATE_LABEL[t.state], ref: t.id.slice(0, 8).toUpperCase(),
-        detail: [['Concepto', t.reason], ['Modalidad', t.mode === 'secretary' ? `Registrada por ${t.registeredBy.name ?? 'Secretaría'}` : 'Directa'],
+        detail: [['Concepto', t.reason], ['Modalidad', t.mode === 'secretary' ? `Registrada por ${formatPersonName(t.registeredBy.name) || 'Secretaría'}` : 'Directa'],
           ['Origen', `${DECISION(t.origin.decision)}${t.origin.reason ? ` · ${t.origin.reason}` : ''}`],
           ['Destino', `${DECISION(t.destination.decision)}${t.destination.reason ? ` · ${t.destination.reason}` : ''}`],
           ...(t.closeReason ? [['Motivo de cierre', t.closeReason] as [string, string]] : []), ['Referencia', t.id.slice(0, 8).toUpperCase()]],
@@ -124,7 +127,7 @@ export function TransfersHistory() {
         <Input label="Desde" type="date" value={f.desde} onChange={(e) => setF((x) => ({ ...x, desde: e.target.value }))} />
         <Input label="Hasta" type="date" value={f.hasta} onChange={(e) => setF((x) => ({ ...x, hasta: e.target.value }))} />
         <Select label="Ruta" value={f.ruta} onChange={(e) => setF((x) => ({ ...x, ruta: e.target.value }))} placeholder="Todas" options={routes.map((r) => ({ value: r.id, label: r.nombre }))} />
-        <Select label="Persona" value={f.persona} onChange={(e) => setF((x) => ({ ...x, persona: e.target.value }))} placeholder="Todas" options={personas.map((u) => ({ value: u.id, label: u.nombre }))} />
+        <Select label="Persona" value={f.persona} onChange={(e) => setF((x) => ({ ...x, persona: e.target.value }))} placeholder="Todas" options={personas.map((u) => ({ value: u.id, label: formatPersonName(u.nombre) }))} />
       </div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="relative flex-1">

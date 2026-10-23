@@ -18,6 +18,7 @@ import { money } from '../../../runtime/commands.ts'
 import { shouldCaptureOffline, useOffline } from '../../../offline/state.ts'
 import { adoptUncertainVisit, captureOfflineVisit, visitBody, type VisitInput } from '../../../offline/captures.ts'
 import { useReachable } from '../../../offline/ui.tsx'
+import { formatClientName } from '@/lib/displayName'
 
 const MOTIVOS = [
   { value: 'no_estaba', label: 'No estaba' },
@@ -97,7 +98,7 @@ export default function NoPaymentPage() {
   return (
     <div className="p-4 space-y-4">
       <div className="bg-red-50 rounded-2xl p-4">
-        <p className="font-bold text-red-900">{client.nombre}</p>
+        <p className="font-bold text-red-900">{formatClientName(client.nombre)}</p>
         <p className="text-sm text-red-500">Registrar visita sin pago</p>
       </div>
 

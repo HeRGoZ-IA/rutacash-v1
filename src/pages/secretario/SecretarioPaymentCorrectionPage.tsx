@@ -12,6 +12,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { filterByAccessibleRoute } from '@/lib/permissions'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
+import { formatClientName } from '@/lib/displayName'
 import { correctPayment, requestPaymentAdjustment, isPaymentInClosedPeriod } from '@/services/paymentCorrectionService'
 import type { Payment, Client } from '@/models/types'
 
@@ -91,13 +92,13 @@ export default function SecretarioPaymentCorrectionPage() {
   }, [payments, search, clientMap])
 
   return (
-    <div className="p-4 md:p-6 space-y-5">
+    <div className="p-4 md:p-6 space-y-5 max-w-7xl mx-auto w-full">
       <div>
         <h1 className="text-xl font-bold text-gray-900">Corrección de pagos</h1>
         <p className="text-sm text-gray-500 mt-0.5">Corrige pagos mediante reversión y reemplazo (no destructivo)</p>
       </div>
 
-      <div className="max-w-sm">
+      <div className="md:max-w-md">
         <Input placeholder="Buscar por cliente…" value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />
       </div>
 
@@ -110,7 +111,7 @@ export default function SecretarioPaymentCorrectionPage() {
           {filtered.map(p => (
             <div key={p.id} className="flex items-center gap-3 px-4 py-3">
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-gray-900 truncate">{clientName(p.clientId)}</p>
+                <p className="text-sm font-medium text-gray-900 truncate">{formatClientName(clientName(p.clientId))}</p>
                 <p className="text-xs text-gray-500">{formatDate(p.fecha)} · {p.tipo}</p>
               </div>
               <p className="text-sm font-semibold text-emerald-600 flex-shrink-0">{formatCurrency(p.valor, currency)}</p>
@@ -135,7 +136,7 @@ export default function SecretarioPaymentCorrectionPage() {
                 <p className="text-xs text-gray-500">Pago original (se conserva como histórico)</p>
                 <Badge variant="gray" size="sm"><Lock className="w-3 h-3 mr-1 inline" />Inalterable</Badge>
               </div>
-              <p className="text-sm font-semibold text-gray-800 mt-1">{clientName(target.clientId)} · {formatCurrency(target.valor, currency)} · {formatDate(target.fecha)}</p>
+              <p className="text-sm font-semibold text-gray-800 mt-1">{formatClientName(clientName(target.clientId))} · {formatCurrency(target.valor, currency)} · {formatDate(target.fecha)}</p>
             </div>
 
             {closed && (

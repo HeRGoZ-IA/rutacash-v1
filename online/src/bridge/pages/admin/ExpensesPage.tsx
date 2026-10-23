@@ -13,6 +13,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { useAuth } from '@/hooks/useAuth'
 import { useDataRevision } from '@/hooks/useDataRevision'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
+import { formatPersonName } from '@/lib/displayName'
 import { filterAccessibleRoutes, canAccessRoute, can } from '@/lib/permissions'
 import { EXPENSE_SCOPE_LABEL, expenseAttribution } from '@/lib/expenseAttribution'
 import { POOL_STATE_LABEL, expenseFundingOf, poolExpenseStateOf, refundedAmountOf } from '@/lib/expenseFunding'
@@ -121,12 +122,13 @@ export default function ExpensesPage() {
   const totalFiltered = filtered.reduce((s, e) => s + e.valor, 0)
 
   const tiposPermitidos = (['empresa', 'ruta', 'trabajador'] as ExpenseScope[])
-    .filter(s => s !== 'empresa' ? !!user && can(user, 'expense.register', { tenantId }) : canRegisterExpenseScope(user, 'empresa'))
+    // R74: gastos de ruta y de trabajador exigen custodia de la ruta; el SuperAdmin solo registra los de empresa.
+    .filter(s => s !== 'empresa' ? !!user && can(user, 'expense.register', { tenantId }) && can(user, 'cashCustody.manage', { tenantId }) : canRegisterExpenseScope(user, 'empresa'))
   const trabajadores = form.routeId
     ? users.filter(u => custodianBlockedReason(u, form.routeId, tenantId) === null).sort((a, b) => a.nombre.localeCompare(b.nombre))
     : []
 
-  const nombreDe = (id: string) => users.find(u => u.id === id)?.nombre ?? id
+  const nombreDe = (id: string) => formatPersonName(users.find(u => u.id === id)?.nombre ?? id)
   function abrirNuevo() {
     setForm(FORM_VACIO)
     setOperationId(generateId())
@@ -191,7 +193,7 @@ export default function ExpensesPage() {
 
   const getRouteName = (id?: string) => routes.find(r => r.id === id)?.nombre ?? id ?? ''
   const getCatName = (id: string) => categories.find(c => c.id === id)?.nombre ?? id
-  const getUserName = (id?: string) => users.find(u => u.id === id)?.nombre ?? id ?? ''
+  const getUserName = (id?: string) => formatPersonName(users.find(u => u.id === id)?.nombre ?? id ?? '')
   /** "Ruta Barreiro · Fabio" / "Ruta Barreiro" / "Empresa". */
   const atribucionDe = (e: Expense) => {
     const a = expenseAttribution(e, conCaja)
@@ -306,7 +308,7 @@ export default function ExpensesPage() {
                 hint={form.scope === 'ruta' ? 'Solo las rutas de las que eres responsable de capital: el gasto sale de su caja.' : undefined} />
               {form.scope === 'trabajador' && (
                 <Select label="Trabajador que pagó" value={form.collectorId} onChange={e => setForm(f => ({ ...f, collectorId: e.target.value }))}
-                  options={trabajadores.map(u => ({ value: u.id, label: u.nombre }))}
+                  options={trabajadores.map(u => ({ value: u.id, label: formatPersonName(u.nombre) }))}
                   placeholder={form.routeId ? (trabajadores.length ? 'Seleccionar trabajador' : 'La ruta no tiene trabajadores') : 'Elige primero la ruta'} required />
               )}
             </div>

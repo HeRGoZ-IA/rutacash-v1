@@ -14,10 +14,13 @@ import { useTenant } from '@/hooks/useTenant'
 import { useAccessibleRoutes } from '@/hooks/useAccessibleRoutes'
 import { can } from '@/lib/permissions'
 import { formatCurrency, formatDate } from '@/lib/formatters'
+import { formatClientName } from '@/lib/displayName'
 import { approveSaleRequest, getActiveCreditContext, rejectSaleRequest } from '@/services/saleRequestService'
 import type { ActiveCreditContext } from '@/lib/activeCreditContext'
 import { logAction } from '@/services/auditService'
 import type { SaleRequest, Client, Route, PaymentFrequency, Sale } from '@/models/types'
+
+const SALE_STATUS_LABEL: Record<string, string> = { activa: 'Activa', finalizada: 'Finalizada', perdida: 'Perdida', refinanciada: 'Refinanciada' }
 
 const FREQ_OPTIONS = [
   { value: 'diaria', label: 'Diaria' }, { value: 'semanal', label: 'Semanal' },
@@ -166,7 +169,7 @@ export default function SecretarioAuthorizationsPage() {
   const detailClient = detail ? clientMap.get(detail.clientId) : null
 
   return (
-    <div className="p-4 md:p-6 space-y-5">
+    <div className="p-4 md:p-6 space-y-5 max-w-7xl mx-auto w-full">
       <div>
         <h1 className="text-xl font-bold text-gray-900">Autorizaciones</h1>
         <p className="text-sm text-gray-500 mt-0.5">{pending.length} solicitud(es) pendiente(s) en tus rutas</p>
@@ -183,7 +186,7 @@ export default function SecretarioAuthorizationsPage() {
             return (
               <button key={r.id} onClick={() => openDetail(r)} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-primary-50/40 transition-colors">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-gray-900 truncate">{c?.nombre ?? 'Cliente'}</p>
+                  <p className="text-sm font-medium text-gray-900 truncate">{formatClientName(c?.nombre) || 'Cliente'}</p>
                   <p className="text-xs text-gray-500 truncate">{routeMap.get(r.routeId)?.nombre} · {formatDate(r.requestedAt)}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
@@ -197,7 +200,7 @@ export default function SecretarioAuthorizationsPage() {
         </div>
       )}
 
-      <Modal open={!!detail} onClose={() => setDetail(null)} title="Solicitud de venta" size="lg"
+      <Modal open={!!detail} onClose={() => setDetail(null)} title="Solicitud de venta" size="xl"
         footer={detail && (rejecting ? (
           <>
             <Button variant="secondary" onClick={() => setRejecting(false)} disabled={working}>Cancelar</Button>
@@ -210,9 +213,11 @@ export default function SecretarioAuthorizationsPage() {
           </>
         ))}>
         {detail && (
+          // Ronda 74 · bloque I: en escritorio, datos del cliente a la izquierda y condiciones a la derecha.
+          <div className="grid gap-5 lg:grid-cols-2">
           <div className="space-y-4">
             <div>
-              <h3 className="text-base font-bold text-gray-900">{detailClient?.nombre ?? 'Cliente'}</h3>
+              <h3 className="text-base font-bold text-gray-900">{formatClientName(detailClient?.nombre) || 'Cliente'}</h3>
               <p className="text-sm text-gray-500">{detailClient?.documento} · {routeMap.get(detail.routeId)?.nombre}</p>
             </div>
 
@@ -222,6 +227,21 @@ export default function SecretarioAuthorizationsPage() {
             </div>
 
             <ActiveCreditNotice context={creditContext} currency={currency} routeName={id => routeMap.get(id)?.nombre} />
+            {clientSales.length > 0 && (
+              <div>
+                <p className="text-sm font-semibold text-gray-700 mb-1.5">Historial del cliente ({clientSales.length})</p>
+                <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                  {clientSales.map(s => (
+                    <div key={s.id} className="flex justify-between text-xs px-3 py-2 rounded-lg bg-gray-50">
+                      <span className="text-gray-700">{formatCurrency(s.valorVenta, currency)} · {SALE_STATUS_LABEL[s.status] ?? s.status}</span>
+                      <span className="text-amber-600">Saldo {formatCurrency(s.saldo, currency)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="space-y-4">
 
             {!rejecting && (
               <>
@@ -253,20 +273,8 @@ export default function SecretarioAuthorizationsPage() {
             )}
 
             {rejecting && <Textarea label="Motivo del rechazo" rows={3} value={rejectReason} onChange={e => setRejectReason(e.target.value)} required />}
+          </div>
 
-            {clientSales.length > 0 && (
-              <div>
-                <p className="text-sm font-semibold text-gray-700 mb-1.5">Historial del cliente ({clientSales.length})</p>
-                <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                  {clientSales.map(s => (
-                    <div key={s.id} className="flex justify-between text-xs px-3 py-2 rounded-lg bg-gray-50">
-                      <span className="text-gray-700">{formatCurrency(s.valorVenta, currency)} · {s.status}</span>
-                      <span className="text-amber-600">Saldo {formatCurrency(s.saldo, currency)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </Modal>

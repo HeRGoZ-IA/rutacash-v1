@@ -10,6 +10,7 @@ import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { toast } from '@/components/ui/Toast'
 import { formatDateTime } from '@/lib/formatters'
+import { formatPersonName } from '@/lib/displayName'
 import { ENABLE_FACTORY_RESET } from '@/lib/featureFlags'
 import { FactoryResetDialog } from '@/components/owner/FactoryResetDialog'
 import { useOwnerAuth } from '@/hooks/useOwnerAuth'
@@ -92,7 +93,7 @@ export default function OwnerSettingsPage() {
               <div key={o.id} className="px-5 py-3 flex items-center gap-4">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">
-                    {o.nombre}
+                    {formatPersonName(o.nombre)}
                     {o.id === owner?.id && <span className="text-xs text-gray-500 font-normal"> · tú</span>}
                   </p>
                   <p className="text-xs text-gray-500 truncate">{o.email}</p>

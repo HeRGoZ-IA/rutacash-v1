@@ -12,6 +12,7 @@ import { effectivePayments, paymentDisplayStateOf, paymentHistoryRows } from '@/
 import { compareByCreation } from '@/lib/eventOrder'
 import { PaymentAnnulmentDetail, PaymentStateBadge } from '@/components/ui/PaymentAnnulment'
 import { formatCurrency, formatDate } from '@/lib/formatters'
+import { formatClientName } from '@/lib/displayName'
 import type { Client, Sale, Payment } from '@/models/types'
 
 /**
@@ -127,7 +128,7 @@ export default function CollectorPaymentHistoryPage() {
       </div>
 
       <Select label="Cliente" value={clientId} onChange={e => onSelectClient(e.target.value)}
-        options={clients.map(c => ({ value: c.id, label: `${c.nombre} - ${c.documento}` }))} placeholder="Seleccionar cliente" />
+        options={clients.map(c => ({ value: c.id, label: `${formatClientName(c.nombre)} - ${c.documento}` }))} placeholder="Seleccionar cliente" />
 
       {clientId && (
         <Select label="Venta" value={saleId} onChange={e => onSelectSale(e.target.value)}

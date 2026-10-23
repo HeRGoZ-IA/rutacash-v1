@@ -142,7 +142,8 @@ async function run(): Promise<void> {
           error: op.status === 'sending' ? op.error : undefined };
         await save(sending);
         try {
-          const r = await api().command<Record<string, unknown>>('POST', sending.path, sending.body, op.id);
+          // R74: con la membresía de la operación (la que la capturó), no con la activa en este momento.
+          const r = await api().command<Record<string, unknown>>('POST', sending.path, sending.body, op.id, { membership: op.membershipId });
           await save({ ...sending, status: 'confirmed', confirmedAt: now(), result: summarize(op, r), error: undefined });
           confirmed++;
         } catch (e) {

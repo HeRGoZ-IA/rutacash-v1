@@ -9,6 +9,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { can } from '@/lib/permissions'
 import { formatCurrency, formatDateTime } from '@/lib/formatters'
+import { formatPersonName } from '@/lib/displayName'
 import { generateId } from '@/lib/utils'
 import {
   availableOperations, confirmationSentence, operationDef, previewTransferOperation, routesForOperation, transferCategories,
@@ -90,7 +91,7 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial,
   const entregaKinds: TransferOperationKind[] = ['entregar-base', 'entregar-capital']
   const devolucionKinds: TransferOperationKind[] = ['devolver-base', 'devolver-capital']
   const destinos = kind === 'ruta-ruta' ? rutas.filter(r => r.id !== routeId) : []
-  const nombre = (id: string) => users.find(u => u.id === id)?.nombre ?? id
+  const nombre = (id: string) => formatPersonName(users.find(u => u.id === id)?.nombre ?? id)
   const rutaNombre = (id: string) => routes.find(r => r.id === id)?.nombre ?? id
   const rol = (u: User) => (u.rol === 'supervisor' ? 'Supervisor' : 'Cobrador')
 
@@ -218,7 +219,7 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial,
       })
       setResultado({
         id, createdAt, tipo: def(kind).titulo, origen: preview.origen.cuenta, destino: preview.destino.cuenta,
-        importe, concepto: concepto.trim(), responsable: user?.nombre ?? '', origenAhora: ahora.origen.antes, destinoAhora: ahora.destino.antes,
+        importe, concepto: concepto.trim(), responsable: formatPersonName(user?.nombre), origenAhora: ahora.origen.antes, destinoAhora: ahora.destino.antes,
       })
       setPaso('resultado')
       onDone?.()
@@ -281,7 +282,7 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial,
             {necesitaTrabajador && (
               <Select label={entregaKinds.includes(kind) ? 'Trabajador que recibe' : 'Trabajador que devuelve'} value={trabajadorId} required
                 onChange={e => setTrabajadorId(e.target.value)} disabled={!routeId}
-                options={trabajadores.map(u => ({ value: u.id, label: `${u.nombre} · ${rol(u)}` }))}
+                options={trabajadores.map(u => ({ value: u.id, label: `${formatPersonName(u.nombre)} · ${rol(u)}` }))}
                 placeholder={!routeId ? 'Primero elige la ruta' : trabajadores.length ? 'Seleccionar trabajador' : devolucionKinds.includes(kind) ? 'Nadie tiene efectivo a cargo en esta ruta' : 'Sin trabajadores activos en la ruta'} />
             )}
             {kind === 'entregar-capital' && solicitudes.length > 0 && (
@@ -292,7 +293,7 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial,
             {kind === 'ruta-ruta' && receptoresDestino.length > 0 && (
               <Select label="¿Quién recibe el efectivo en la ruta destino? (opcional)" value={trabajadorId}
                 onChange={e => setTrabajadorId(e.target.value)}
-                options={receptoresDestino.map(u => ({ value: u.id, label: `${u.nombre} · ${rol(u)}` }))}
+                options={receptoresDestino.map(u => ({ value: u.id, label: `${formatPersonName(u.nombre)} · ${rol(u)}` }))}
                 placeholder="Nadie: entra a la caja sin asignar" />
             )}
             <MoneyInput label="Importe" currency={currency} value={importe} onValueChange={setImporte} required />
@@ -338,7 +339,7 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial,
             <div className="flex justify-between gap-2 px-3 py-2"><span className="text-gray-500">{preview.origen.cuenta}</span><span>{cifra(preview.origen.antes)} → <b>{cifra(preview.origen.despues)}</b></span></div>
             <div className="flex justify-between gap-2 px-3 py-2"><span className="text-gray-500">{preview.destino.cuenta}</span><span>{cifra(preview.destino.antes)} → <b>{cifra(preview.destino.despues)}</b></span></div>
             <div className="flex justify-between gap-2 px-3 py-2"><span className="text-gray-500">Concepto</span><span className="text-right break-words">{concepto.trim()}</span></div>
-            <div className="flex justify-between gap-2 px-3 py-2"><span className="text-gray-500">Registra</span><span>{user?.nombre}</span></div>
+            <div className="flex justify-between gap-2 px-3 py-2"><span className="text-gray-500">Registra</span><span>{formatPersonName(user?.nombre)}</span></div>
           </div>
           <label className="flex items-start gap-2 text-sm text-gray-700">
             <input type="checkbox" className="mt-1" checked={confirmado} onChange={e => setConfirmado(e.target.checked)} data-testid="op-check" />

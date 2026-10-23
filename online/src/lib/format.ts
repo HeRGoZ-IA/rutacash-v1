@@ -24,6 +24,11 @@ const ERRORS: Record<string, string> = {
   REQUEST_NOT_DISBURSABLE: 'La solicitud ya no se puede desembolsar.',
   // Ronda 73 · corrección de ventas desembolsadas (SOC-09).
   CREDIT_HAS_COLLECTIONS: 'La venta ya tiene cobros registrados: no se puede corregir.',
+  OVERPAYMENT: 'El total corregido quedaría por debajo de lo ya pagado (o el pago superaría el saldo). No hay política de sobrepagos aprobada.',
+  LEGACY_PAYMENTS: 'La venta tiene pagos sin asiento en el libro: no se puede recalcular.',
+  PAYMENT_ADJUSTMENT_PENDING: 'Hay una solicitud de ajuste de pago pendiente en esta venta.',
+  PAYMENT_NOT_REAPPLICABLE: 'Ese pago no se puede reaplicar (no está anulado, fue corregido o ya se reaplicó).',
+  REVERSAL_SETTLED: 'La anulación ya entró en un cuadre: el pago no se reaplica sin una política de conciliación.',
   DISBURSEMENT_SETTLED: 'El desembolso ya está incluido en un cuadre: no se puede corregir.',
   CUSTODIAN_CHANGED: 'El trabajador que entregó el dinero ya no tiene caja en esta ruta: la corrección necesita una revisión aparte.',
   CREDIT_CHANGED: 'La venta cambió mientras la corregía. Vuelva a abrirla y revise los datos.',

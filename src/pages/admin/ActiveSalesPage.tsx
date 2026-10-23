@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { DEFAULT_INSTALLMENTS } from '@/lib/saleDefaults'
-import { Plus, CreditCard, Search, XCircle, DollarSign, AlertTriangle } from 'lucide-react'
+import { Plus, CreditCard, Search, XCircle, DollarSign, AlertTriangle, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -17,12 +17,14 @@ import { useDataRevision } from '@/hooks/useDataRevision'
 import { useRouteCapital } from '@/hooks/useRouteCapital'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
+import { formatClientName, formatPersonName } from '@/lib/displayName'
 import {
   generateInstallments, calculateTotalWithInterest,
   estimateFinalDate, calculateInstallmentValue,
   getLastPaidInstallmentNumber, installmentsCoveredBy, installmentRangeLabel,
 } from '@/services/installmentEngine'
-import { annulPayment, canAnnulPayment } from '@/services/paymentCorrectionService'
+import { annulPayment, canAnnulPayment, canReapplyPayment } from '@/services/paymentCorrectionService'
+import { ReapplyPaymentModal } from '@/components/ui/ReapplyPaymentModal'
 import { effectivePayments, paymentDisplayStateOf, paymentHistoryRows } from '@/lib/paymentState'
 import { compareByCreation } from '@/lib/eventOrder'
 import {
@@ -64,6 +66,8 @@ export default function ActiveSalesPage() {
   const [detailSale, setDetailSale] = useState<Sale | null>(null)
   // Ronda 73 · SOC-09: corrección de la venta desembolsada (Administrador, sin cobros).
   const [rectifyOpen, setRectifyOpen] = useState(false)
+  // Bloque A post-R73: pago anulado que se reaplica (mismo efectivo, misma cuenta).
+  const [reapplyTarget, setReapplyTarget] = useState<Payment | null>(null)
   const [detailInstallments, setDetailInstallments] = useState<Installment[]>([])
   // Pagos del crédito abierto (vigentes y anulados) y nombres para mostrarlos.
   const [detailPayments, setDetailPayments] = useState<Payment[]>([])
@@ -228,7 +232,7 @@ export default function ActiveSalesPage() {
         valorVenta: form.valorVenta, tasaInteres: form.tasaInteres, numeroCuotas: form.numeroCuotas,
         frecuenciaPago: form.frecuenciaPago, fechaInicio: form.fechaInicio, paymentDays: form.paymentDays,
       }, user)
-      toast.success('Venta creada con cuotas generadas')
+      toast.success('Venta creada con sus parcelas')
       setCreateOpen(false)
       setForm({ clientId: '', routeId: '', valorVenta: 0, tasaInteres: 20, numeroCuotas: DEFAULT_INSTALLMENTS, frecuenciaPago: 'diaria', fechaInicio: today(), paymentDays: [1, 2, 3, 4, 5, 6] })
       await load()
@@ -257,14 +261,14 @@ export default function ActiveSalesPage() {
     setDetailPayments(pays.sort(compareByCreation).reverse())
   }
 
-  const userName = (id?: string) => (id ? users.find(u => u.id === id)?.nombre : undefined)
+  const userName = (id?: string) => { const n = id ? users.find(u => u.id === id)?.nombre : undefined; return n ? formatPersonName(n) : undefined }
 
   function openAnnul(p: Payment) {
     if (!detailSale) return
     const parcelas = installmentRangeLabel(installmentsCoveredBy(detailInstallments, effectivePayments(detailPayments), p.id))
     setAnnulTarget({
       paymentId: p.id,
-      cliente: clientMap.get(detailSale.clientId)?.nombre ?? 'Cliente',
+      cliente: formatClientName(clientMap.get(detailSale.clientId)?.nombre) || 'Cliente',
       credito: `${formatCurrency(detailSale.valorVenta, currency)} · ${formatDate(detailSale.fechaInicio)}`,
       valor: p.valor, fecha: p.fecha,
       cobrador: userName(p.collectorId), ruta: routeMap.get(p.routeId)?.nombre,
@@ -379,7 +383,7 @@ export default function ActiveSalesPage() {
                 <button type="button" onClick={() => openDetail(s)} className="w-full text-left bg-white rounded-2xl shadow-card border border-gray-100 p-4 active:bg-primary-50/40">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 [overflow-wrap:anywhere]">{client?.nombre ?? 'N/A'}</p>
+                      <p className="text-sm font-semibold text-gray-900 [overflow-wrap:anywhere]">{formatClientName(client?.nombre) || 'N/A'}</p>
                       <p className="text-xs text-gray-500">{client?.documento ?? ''}</p>
                     </div>
                     <SaleStatusBadge status={s.status} />
@@ -391,7 +395,7 @@ export default function ActiveSalesPage() {
                     </div>
                     <div className="text-right text-xs text-gray-500 tabular-nums">
                       <p>Venta <span className="font-medium text-gray-800">{formatCurrency(s.valorVenta)}</span> · {s.tasaInteres}%</p>
-                      <p>Cuota <span className="font-medium text-gray-800">{formatCurrency(s.valorCuota)}</span> · {paidBySale[s.id] ?? 0}/{s.numeroCuotas}</p>
+                      <p>Parcela <span className="font-medium text-gray-800">{formatCurrency(s.valorCuota)}</span> · {paidBySale[s.id] ?? 0}/{s.numeroCuotas}</p>
                     </div>
                   </div>
                   <p className="mt-2 text-xs text-gray-500">{route?.nombre ?? '—'} · {formatDate(s.fechaInicio)}</p>
@@ -408,7 +412,7 @@ export default function ActiveSalesPage() {
                   <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Cliente</th>
                   <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden sm:table-cell">Venta</th>
                   <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Saldo</th>
-                  <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden md:table-cell">Cuota</th>
+                  <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden md:table-cell">Parcela</th>
                   <th className="text-center text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden sm:table-cell">Parcelas</th>
                   <th className="text-center text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Estado</th>
                   <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden lg:table-cell">Ruta</th>
@@ -422,7 +426,7 @@ export default function ActiveSalesPage() {
                   return (
                     <tr key={s.id} onClick={() => openDetail(s)} className="hover:bg-primary-50/40 cursor-pointer transition-colors">
                       <td className="px-4 py-3">
-                        <p className="text-sm font-medium text-gray-900">{client?.nombre ?? 'N/A'}</p>
+                        <p className="text-sm font-medium text-gray-900">{formatClientName(client?.nombre) || 'N/A'}</p>
                         <p className="text-xs text-gray-500">{client?.documento ?? ''}</p>
                       </td>
                       <td className="px-4 py-3 text-right hidden sm:table-cell">
@@ -462,7 +466,7 @@ export default function ActiveSalesPage() {
             <Select label="Ruta" value={form.routeId} onChange={e => handleRouteChange(e.target.value)}
               options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
             <Select label="Cliente" value={form.clientId} onChange={e => setForm(f => ({ ...f, clientId: e.target.value }))}
-              options={clientsForRoute.map(c => ({ value: c.id, label: `${c.nombre} - ${c.documento}` }))}
+              options={clientsForRoute.map(c => ({ value: c.id, label: `${formatClientName(c.nombre)} - ${c.documento}` }))}
               placeholder={form.routeId ? 'Seleccionar cliente' : 'Selecciona primero la ruta'} disabled={!form.routeId} required />
           </div>
           {form.routeId && clientsForRoute.length === 0 && (
@@ -522,7 +526,7 @@ export default function ActiveSalesPage() {
             <div className="bg-primary-50 rounded-xl p-4 grid grid-cols-2 gap-3">
               <div><p className="text-xs text-gray-500">Interés total</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorInteres, currency)}</p></div>
               <div><p className="text-xs text-gray-500">Total a pagar</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorTotal, currency)}</p></div>
-              <div><p className="text-xs text-gray-500">Valor cuota</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorCuota, currency)}</p></div>
+              <div><p className="text-xs text-gray-500">Valor parcela</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorCuota, currency)}</p></div>
               <div><p className="text-xs text-gray-500">Fecha estimada fin</p><p className="font-bold text-primary-700">{formatDate(calculated.fechaFinal)}</p></div>
             </div>
           )}
@@ -541,7 +545,8 @@ export default function ActiveSalesPage() {
               {detailSale.status === 'activa' && (
                 <Button variant="danger" onClick={() => { setLostSale(detailSale); setLostOpen(true) }} icon={<XCircle className="w-4 h-4" />}>Marcar perdida</Button>
               )}
-              {user?.rol === 'admin' && detailSale.status === 'activa' && detailSale.disbursementStatus === 'desembolsado' && detailPayments.length === 0 && (
+              {/* Bloque A post-R73: el diálogo se abre aunque haya pagos; el servidor explica si se puede corregir. */}
+              {user?.rol === 'admin' && detailSale.status === 'activa' && detailSale.disbursementStatus === 'desembolsado' && (
                 <Button variant="secondary" onClick={() => setRectifyOpen(true)}>Corregir venta</Button>
               )}
             </>
@@ -551,14 +556,14 @@ export default function ActiveSalesPage() {
               <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-500">Venta</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorVenta)}</p></div>
               <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-500">Total+interés</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorTotal)}</p></div>
               <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs text-gray-500">Saldo</p><p className="font-bold text-amber-600">{formatCurrency(detailSale.saldo)}</p></div>
-              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-500">Cuota</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorCuota)}</p></div>
+              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-500">Parcela</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorCuota)}</p></div>
             </div>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-sm">
               <p className="text-gray-500">Frecuencia: <span className="font-medium text-gray-800 capitalize">{detailSale.frecuenciaPago}</span></p>
               <div className="flex items-center gap-1.5 text-gray-500">Días de pago: <PaymentDaysBadges days={detailSale.paymentDays} size="sm" /></div>
             </div>
             <div>
-              <p className="text-sm font-semibold text-gray-700 mb-2">Cuotas ({detailInstallments.length})</p>
+              <p className="text-sm font-semibold text-gray-700 mb-2">Parcelas ({detailInstallments.length})</p>
               <div className="max-h-64 overflow-y-auto space-y-1.5">
                 {detailInstallments.map(inst => (
                   <div key={inst.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
@@ -593,6 +598,9 @@ export default function ActiveSalesPage() {
                             <span className={`text-sm font-bold ${estado === 'vigente' ? 'text-emerald-600' : 'text-gray-400 line-through'}`}>+{formatCurrency(p.valor, currency)}</span>
                             <PaymentStateBadge state={estado} />
                             {canAnnulPayment(user, p) && <AnnulPaymentButton onClick={() => openAnnul(p)} />}
+                            {canReapplyPayment(user, p) && !detailPayments.some(x => x.reappliesPaymentId === p.id) && (
+                              <Button size="sm" variant="secondary" onClick={() => setReapplyTarget(p)} icon={<RotateCcw className="w-3.5 h-3.5" />}>Reaplicar</Button>
+                            )}
                           </div>
                         </div>
                         {estado === 'anulado' && <PaymentAnnulmentDetail original={p} reversal={reversal} currency={currency} userName={userName} />}
@@ -608,6 +616,12 @@ export default function ActiveSalesPage() {
 
       <AnnulPaymentModal target={annulTarget} currency={currency}
         onCancel={() => setAnnulTarget(null)} onConfirm={confirmAnnul} />
+      {detailSale && (
+        <ReapplyPaymentModal payment={reapplyTarget} currency={currency}
+          cliente={formatClientName(clientMap.get(detailSale.clientId)?.nombre) || 'Cliente'}
+          onCancel={() => setReapplyTarget(null)}
+          onDone={async () => { setReapplyTarget(null); await refreshDetail(detailSale.id); await load(true) }} />
+      )}
 
       {/* Confirmación: segunda venta activa del mismo cliente */}
       <Modal open={confirmSecondOpen} onClose={() => setConfirmSecondOpen(false)} title="Cliente con venta activa"

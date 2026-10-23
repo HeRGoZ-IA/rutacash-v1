@@ -8,6 +8,7 @@ import { CountBadge } from '@/components/ui/CountBadge'
 import { usePendingSaleRequests } from '@/hooks/usePendingBadges'
 import { cn } from '@/lib/utils'
 import { initials } from '@/lib/formatters'
+import { formatPersonName } from '@/lib/displayName'
 import { BrandLogo } from '@/components/ui/BrandLogo'
 
 /**
@@ -52,7 +53,7 @@ export function SecretarioLayout() {
             <BrandLogo variant="on-dark" className="h-9 flex-shrink-0 -ml-1" />
             <div className="min-w-0">
               <p className="font-bold text-sm leading-tight">Secretario</p>
-              <p className="text-primary-300 text-xs truncate">{tenant?.nombre ?? user?.nombre}</p>
+              <p className="text-primary-300 text-xs truncate">{tenant?.nombre ?? formatPersonName(user?.nombre)}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">

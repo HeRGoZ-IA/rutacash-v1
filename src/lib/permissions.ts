@@ -103,7 +103,8 @@ export type Capability =
   // CERRAR una semana congela sus cifras y hace que los pagos de esas fechas dejen
   // de ser corregibles directamente (pasan por Solicitud de ajuste). REABRIR levanta
   // esa protección. Ambas son decisiones de gestión, no de operación diaria: por eso
-  // solo Super Admin y Administrador, y siempre sobre una ruta autorizada.
+  // solo el Administrador (responsable de la ruta), siempre sobre una ruta autorizada.
+  // R74: el Super Admin ya no cierra ni reabre (supervisa; consulta los cierres).
   | 'settlement.close'
   | 'settlement.reopen'
   // Cuadre real por trabajador (CashSettlement, v14). Separado de `settlement.*`
@@ -147,6 +148,15 @@ export function carteraClientsOnly(rol: UserRole | null | undefined): boolean {
   return rol === 'superadmin'
 }
 
+// R74 (decisión del propietario): operaciones de caja de RUTA que el SuperAdmin ya no tiene, ni por
+// rol base ni por delegación. Las hace el Administrador responsable de la ruta (o el Supervisor
+// asignado, cuando su rol lo permite). Capital de empresa y gasto de empresa se conservan.
+export const SUPERADMIN_NOT_FINANCIAL_OPERATOR: readonly Capability[] = [
+  'cashCustody.manage',
+  'cashSettlement.close', 'cashSettlement.reopen',
+  'settlement.close', 'settlement.reopen',
+]
+
 // SUPER ADMIN — MÁXIMA AUTORIDAD DE **UNA** EMPRESA, y nada por encima de eso.
 //
 // Perdió toda responsabilidad SaaS: ya no accede a la plataforma, no crea empresas y
@@ -170,12 +180,15 @@ const SUPERADMIN_CAPS: Capability[] = [
   'client.view',
   'sale.viewActive', 'sale.viewHistory',
   'payment.viewHistory',
+  // R74 (decisión del propietario): el SuperAdmin es dueño/supervisor, NO operador financiero.
+  // Conserva el gasto de EMPRESA (`expense.register`/`expense.correct` solo valen para ese alcance:
+  // el de ruta y el de trabajador exigen `cashCustody.manage` y autoridad sobre la ruta), consulta
+  // cuadres y cierres, pero no cuadra, no cierra ni reabre, no recibe devoluciones ni traspasa
+  // efectivo entre trabajadores. Ver SUPERADMIN_NOT_FINANCIAL_OPERATOR.
   'expense.register', 'expense.correct',
   'cashbox.viewRoute', 'cashbox.viewOwnCollection', 'cashbox.viewConsolidated', 'cashbox.dailyClose',
   'partnerCash.viewOwn', 'partnerCash.viewAll', 'partnerCash.registerMovement', 'transfer.create',
-  'settlement.close', 'settlement.reopen',
-  'cashSettlement.view', 'cashSettlement.close', 'cashSettlement.reopen',
-  'cashCustody.manage',
+  'cashSettlement.view',
   'report.view', 'report.export', 'report.viewPortfolio', 'report.viewConsolidated',
   'audit.view',
 ]
@@ -295,7 +308,8 @@ const INCOMPATIBLE_BY_ROLE: Record<UserRole, Capability[]> = {
   // El Super Admin es empresa, no plataforma. Estas tres capacidades son del Owner y
   // NINGÚN rol empresarial puede tenerlas, ni por rol base ni por delegación.
   // Ronda 67: tampoco ninguna escritura de CARTERA (su cartera es de solo lectura).
-  superadmin: ['platform.access', 'company.create', 'company.suspend', ...CARTERA_WRITE_CAPS],
+  // R74: tampoco las operaciones de caja de ruta (no es operador financiero).
+  superadmin: ['platform.access', 'company.create', 'company.suspend', ...CARTERA_WRITE_CAPS, ...SUPERADMIN_NOT_FINANCIAL_OPERATOR],
   admin: [
     // El Administrador no es plataforma ni gestiona empresas ni borra rutas.
     'platform.access', 'company.create', 'company.edit', 'company.suspend',
@@ -660,6 +674,9 @@ export function isRouteCapitalController(
   return !!user && !!route && route.capitalControllerAdminId === user.id && isValidCapitalController(user, route)
 }
 
+export const SUPERADMIN_ROUTE_CASH_MESSAGE =
+  'El SuperAdmin asigna capital a los Administradores; la caja de la ruta la maneja su Administrador responsable.'
+
 export const NO_CAPITAL_CONTROLLER_MESSAGE =
   'La ruta no tiene Administrador responsable de capital: sus operaciones de caja están bloqueadas hasta que el SuperAdmin asigne uno.'
 
@@ -678,14 +695,12 @@ export function routeCashAuthorityError(
   const controller = routeCapitalController(route, users)
   if (!controller) return NO_CAPITAL_CONTROLLER_MESSAGE
   if (controller.id === actor.id) return null
-  if (op === 'structural') {
-    return actor.rol === 'superadmin'
-      ? 'El SuperAdmin asigna capital a los Administradores; la caja de la ruta la maneja su Administrador responsable.'
-      : 'Solo el Administrador responsable del capital de esta ruta puede manejar su caja.'
-  }
-  if (actor.rol === 'superadmin') return null
+  // R74 (decisión del propietario): el SuperAdmin supervisa; no opera la caja de ninguna ruta
+  // (ni recibe devoluciones, ni traspasa, ni anula, ni cuadra, ni cierra periodos).
+  if (actor.rol === 'superadmin') return SUPERADMIN_ROUTE_CASH_MESSAGE
+  if (op === 'structural') return 'Solo el Administrador responsable del capital de esta ruta puede manejar su caja.'
   if (op === 'settle' && actor.rol === 'supervisor' && authorizedRouteIdsOf(actor).includes(route.id)) return null
-  return 'Solo el Administrador responsable del capital de esta ruta (o el SuperAdmin) puede hacerlo.'
+  return 'Solo el Administrador responsable del capital de esta ruta puede hacerlo.'
 }
 
 /** Versión booleana para la UI (el servicio revalida siempre). */

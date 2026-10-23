@@ -23,6 +23,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { getAssignedRouteIds } from '@/lib/roles'
 import { hasPersonalCashbox } from '@/lib/collectorAttribution'
 import type { User } from '@/models/types'
+import { formatPersonName } from '@/lib/displayName'
 
 interface Props {
   /** Ruta de la venta que se está cobrando. */
@@ -72,7 +73,7 @@ export function CollectorPicker({ routeId, value, onChange }: Props) {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
         <UserCheck className="w-3.5 h-3.5 flex-shrink-0" />
-        El dinero se registrará a nombre de <span className="font-semibold text-gray-800">{collectors[0].nombre}</span>
+        El dinero se registrará a nombre de <span className="font-semibold text-gray-800">{formatPersonName(collectors[0].nombre)}</span>
       </div>
     )
   }
@@ -83,7 +84,7 @@ export function CollectorPicker({ routeId, value, onChange }: Props) {
       required
       value={value}
       onChange={e => onChange(e.target.value)}
-      options={collectors.map(c => ({ value: c.id, label: c.nombre }))}
+      options={collectors.map(c => ({ value: c.id, label: formatPersonName(c.nombre) }))}
       placeholder="Selecciona el responsable"
       hint="Esta ruta tiene varios cobradores: el abono se cargará a la caja del que indiques."
     />

@@ -9,6 +9,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { useDataRevision } from '@/hooks/useDataRevision'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import { generateId } from '@/lib/utils'
+import { formatPersonName } from '@/lib/displayName'
 import { createExpense, payablePoolsFor } from '@/services/expenseService'
 import { getAdminAvailableCapital, getCompanyAvailableCapital } from '@/services/capitalControlService'
 import type { Expense, ExpenseCategory, User } from '@/models/types'
@@ -47,10 +48,10 @@ export function AdminExpenseModal({ open, onClose, onSaved, users, categories, b
   const [saving, setSaving] = useState(false)
   const [disponible, setDisponible] = useState<number | null | undefined>(undefined)
 
-  const nombreDe = (id: string) => users.find(u => u.id === id)?.nombre ?? id
+  const nombreDe = (id: string) => formatPersonName(users.find(u => u.id === id)?.nombre ?? id)
   const opciones = payablePoolsFor(user, users).map(b => ({
     value: encodeBolsa(b),
-    label: b.source === 'empresa' ? 'Bolsa de la empresa' : b.adminId === user?.id ? `Mi bolsa (${user?.nombre})` : `Bolsa de ${nombreDe(b.adminId)}`,
+    label: b.source === 'empresa' ? 'Bolsa de la empresa' : b.adminId === user?.id ? `Mi bolsa (${formatPersonName(user?.nombre)})` : `Bolsa de ${nombreDe(b.adminId)}`,
   }))
   const bolsaSel = decodeBolsa(form.bolsa)
   const bolsaNombre = opciones.find(o => o.value === form.bolsa)?.label ?? ''

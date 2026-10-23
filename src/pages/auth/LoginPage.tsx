@@ -71,7 +71,7 @@ export default function LoginPage() {
 
           <div className="space-y-4">
             {[
-              { icon: <TrendingUp className="w-5 h-5" />, title: 'Cartera activa en tiempo real', desc: 'Saldos, cuotas y mora siempre al día' },
+              { icon: <TrendingUp className="w-5 h-5" />, title: 'Cartera activa en tiempo real', desc: 'Saldos, parcelas y mora siempre al día' },
               { icon: <Smartphone className="w-5 h-5" />, title: 'App cobrador offline', desc: 'Funciona sin internet, sincroniza al conectar' },
               { icon: <Shield className="w-5 h-5" />, title: 'Roles y control de acceso', desc: 'Admin, supervisor y cobrador con permisos definidos' },
             ].map((f, i) => (

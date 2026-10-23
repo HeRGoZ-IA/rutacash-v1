@@ -18,7 +18,8 @@ import { protectingClosureFor } from '@clean/lib/settlementPeriods';
 import { db } from '@/lib/db';
 import { generateId } from '@/lib/utils';
 import { money, plain } from '../../runtime/commands.ts';
-import { paymentPeriodClosed, toMinor } from '../../runtime/mappers.ts';
+import { paymentPeriodClosed, toMajor, toMinor } from '../../runtime/mappers.ts';
+import { api } from '../../runtime/session.ts';
 import { table } from '../../runtime/projection.ts';
 
 export * from '@clean/services/paymentCorrectionService';
@@ -104,6 +105,28 @@ async function isPaymentInClosedPeriodOnline(payment: Pick<Payment, 'routeId' | 
 }
 
 // Firmas ORIGINALES de CLEAN (las pantallas y servicios originales las llaman así).
+/** Bloque A post-R73 (0032): comprobación previa sin efectos (`GET /v1/collections/:id/reapply-check`). */
+async function checkPaymentReapplyOnline(paymentId: string): Promise<Clean.PaymentReapplyCheck> {
+  try {
+    const r = await api().get<{ paymentId: string; amountMinor: number; paymentDate: string; reapplyDate: string; receiverKind: 'custody' | 'admin' | null; blockers: string[] }>(
+      `/v1/collections/${encodeURIComponent(paymentId)}/reapply-check`);
+    return { paymentId: r.paymentId, amount: toMajor(r.amountMinor), paymentDate: r.paymentDate, reapplyDate: r.reapplyDate, receiverKind: r.receiverKind, blockers: r.blockers };
+  } catch (e) {
+    throw new PaymentAnnulmentError(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** Bloque A post-R73 (0032): reaplicar un pago anulado (`POST /v1/collections/:id/reapply`), un id por intención. */
+async function reapplyAnnulledPaymentOnline(params: { paymentId: string; reason: string; operationId: string }): Promise<void> {
+  try {
+    await money('POST', `/v1/collections/${encodeURIComponent(params.paymentId)}/reapply`, { reason: params.reason.trim() }, params.operationId);
+  } catch (e) {
+    throw new PaymentAnnulmentError(e instanceof Error ? e.message : String(e));
+  }
+}
+
+export const checkPaymentReapply = checkPaymentReapplyOnline as unknown as typeof Clean.checkPaymentReapply;
+export const reapplyAnnulledPayment = reapplyAnnulledPaymentOnline as unknown as typeof Clean.reapplyAnnulledPayment;
 export const annulPayment = annulPaymentOnline as unknown as typeof Clean.annulPayment;
 export const correctPayment = correctPaymentOnline as unknown as typeof Clean.correctPayment;
 export const requestPaymentAdjustment = requestPaymentAdjustmentOnline as unknown as typeof Clean.requestPaymentAdjustment;

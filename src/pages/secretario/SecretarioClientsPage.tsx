@@ -14,6 +14,7 @@ import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import { logAction } from '@/services/auditService'
 import { nowISO } from '@/lib/formatters'
+import { formatClientName } from '@/lib/displayName'
 import type { Client } from '@/models/types'
 
 /**
@@ -110,7 +111,7 @@ export default function SecretarioClientsPage() {
   }, [clients, search, officeFilter])
 
   return (
-    <div className="p-4 md:p-6 space-y-5">
+    <div className="p-4 md:p-6 space-y-5 max-w-7xl mx-auto w-full">
       <div>
         <h1 className="text-xl font-bold text-gray-900">Clientes</h1>
         <p className="text-sm text-gray-500 mt-0.5">{filtered.length} cliente(s) · edición de datos operativos</p>
@@ -137,21 +138,30 @@ export default function SecretarioClientsPage() {
         <EmptyState icon={<Users className="w-8 h-8" />} title="Sin clientes" description="No hay clientes en tus rutas autorizadas." />
       ) : (
         <div className="bg-white rounded-2xl shadow-card border border-gray-100 divide-y divide-gray-50">
+          {/* Escritorio: columnas que aprovechan el ancho (Ronda 74, bloque I). Móvil: filas compactas. */}
+          <div className="hidden md:grid md:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto] gap-3 px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide" aria-hidden>
+            <span>Cliente</span><span>Documento</span><span>Teléfono</span><span>Ruta</span><span className="w-24" />
+          </div>
           {filtered.map(c => (
             <div key={c.id} className="flex items-center gap-2 px-4 py-3 hover:bg-primary-50/40 transition-colors">
-              <button onClick={() => openEdit(c)} className="flex items-center gap-3 text-left min-w-0 flex-1">
-                <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center text-primary-700 font-bold text-sm flex-shrink-0">{c.nombre.charAt(0)}</div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-gray-900 truncate">{c.nombre}</p>
-                  <p className="text-xs text-gray-500 truncate">{c.documento} · {c.telefonoPrincipal} · {routeName(c.routeId)}</p>
-                </div>
+              <button onClick={() => openEdit(c)} className="flex items-center gap-3 text-left min-w-0 flex-1 md:grid md:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)] md:gap-3">
+                <span className="flex items-center gap-3 min-w-0">
+                  <span className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center text-primary-700 font-bold text-sm flex-shrink-0" aria-hidden>{formatClientName(c.nombre).charAt(0)}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-gray-900 truncate" title={formatClientName(c.nombre)}>{formatClientName(c.nombre)}</span>
+                    <span className="block md:hidden text-xs text-gray-500 truncate">{c.documento} · {c.telefonoPrincipal} · {routeName(c.routeId)}</span>
+                  </span>
+                </span>
+                <span className="hidden md:block text-sm text-gray-700 truncate">{c.documento}</span>
+                <span className="hidden md:block text-sm text-gray-700 truncate">{c.telefonoPrincipal}</span>
+                <span className="hidden md:block text-sm text-gray-700 truncate">{routeName(c.routeId)}</span>
               </button>
               {/* CONSULTA DE HISTORIAL: créditos que ha tenido el cliente, con valor,
                   fecha de creación y fecha real de finalización. Solo consulta. */}
               <button
                 onClick={() => setHistoryClient(c)}
                 title="Ver historial de créditos"
-                aria-label={`Ver historial de créditos de ${c.nombre}`}
+                aria-label={`Ver historial de créditos de ${formatClientName(c.nombre)}`}
                 className="flex-shrink-0 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
               >
                 <History className="w-3.5 h-3.5" /> Historial
@@ -162,8 +172,8 @@ export default function SecretarioClientsPage() {
       )}
 
       {/* Historial de créditos (solo consulta) */}
-      <Modal open={!!historyClient} onClose={() => setHistoryClient(null)} size="lg"
-        title={historyClient ? `Historial de créditos · ${historyClient.nombre}` : 'Historial de créditos'}
+      <Modal open={!!historyClient} onClose={() => setHistoryClient(null)} size="xl"
+        title={historyClient ? `Historial de créditos · ${formatClientName(historyClient.nombre)}` : 'Historial de créditos'}
         footer={<Button variant="secondary" onClick={() => setHistoryClient(null)}>Cerrar</Button>}>
         {historyClient && (
           <div className="space-y-3">
@@ -173,7 +183,7 @@ export default function SecretarioClientsPage() {
         )}
       </Modal>
 
-      <Modal open={!!editing} onClose={() => setEditing(null)} title="Editar cliente"
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="Editar cliente" size="lg"
         footer={<><Button variant="secondary" onClick={() => setEditing(null)}>Cancelar</Button><Button onClick={handleSave} loading={saving}>Guardar</Button></>}>
         <div className="space-y-3">
           <div className="flex items-center gap-2 p-2.5 bg-gray-50 rounded-xl text-xs text-gray-500">
@@ -186,8 +196,10 @@ export default function SecretarioClientsPage() {
             <Input label="Teléfono principal" value={form.telefonoPrincipal} onChange={e => setForm(f => ({ ...f, telefonoPrincipal: e.target.value }))} />
             <Input label="Teléfono secundario" value={form.telefonoSecundario} onChange={e => setForm(f => ({ ...f, telefonoSecundario: e.target.value }))} />
           </div>
-          <Input label="Dirección" value={form.direccionPrincipal} onChange={e => setForm(f => ({ ...f, direccionPrincipal: e.target.value }))} />
-          <Input label="Dirección de negocio" value={form.direccionSecundaria} onChange={e => setForm(f => ({ ...f, direccionSecundaria: e.target.value }))} />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Input label="Dirección" value={form.direccionPrincipal} onChange={e => setForm(f => ({ ...f, direccionPrincipal: e.target.value }))} />
+            <Input label="Dirección de negocio" value={form.direccionSecundaria} onChange={e => setForm(f => ({ ...f, direccionSecundaria: e.target.value }))} />
+          </div>
           <Input label="Negocio" value={form.negocio} onChange={e => setForm(f => ({ ...f, negocio: e.target.value }))} />
           <Textarea label="Observaciones" rows={2} value={form.notas} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))} />
         </div>

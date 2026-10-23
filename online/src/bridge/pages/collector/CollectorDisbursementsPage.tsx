@@ -12,6 +12,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { formatCurrency, formatDate } from '@/lib/formatters'
+import { formatClientName } from '@/lib/displayName'
 import { confirmDisbursement, SaleRuleError } from '@/services/saleRequestService'
 import type { Sale, Client } from '@/models/types'
 // ADEX Online (Ronda 65): entrega sin conexión con el efectivo en custodia.
@@ -127,7 +128,7 @@ export default function CollectorDisbursementsPage() {
               <div key={s.id} className="bg-white rounded-2xl border border-amber-200 shadow-card p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <p className="font-semibold text-gray-900 text-sm">{client?.nombre ?? 'Cliente'}</p>
+                    <p className="font-semibold text-gray-900 text-sm">{formatClientName(client?.nombre) || 'Cliente'}</p>
                     <p className="text-xs text-gray-500">{client?.documento} · Inicio {formatDate(s.fechaInicio)}</p>
                   </div>
                   <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Por desembolsar</span>

@@ -16,6 +16,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useDataRevision } from '@/hooks/useDataRevision'
 import { formatCurrency, formatCompactCurrency, formatDate, today } from '@/lib/formatters'
+import { formatPersonName } from '@/lib/displayName'
 
 export default function DashboardPage() {
   const { user } = useAuth()
@@ -50,7 +51,7 @@ export default function DashboardPage() {
       <div>
         <h1 className="text-xl font-bold text-gray-900">Dashboard</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Bienvenido, {user?.nombre} — {formatDate(today())}
+          Bienvenido, {formatPersonName(user?.nombre)} — {formatDate(today())}
         </p>
       </div>
 

@@ -15,6 +15,7 @@ import { getAuthorizedRouteIds } from '@/lib/roles'
 import { can } from '@/lib/permissions'
 import { ALLOWED_INTEREST_RATES, defaultOriginationRate, originationRateError, originationRatesFor, routeRatePolicyOf } from '@/lib/interestRatePolicy'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
+import { formatClientName } from '@/lib/displayName'
 import { computeSaleFinancials, createDirectSale, createSaleRequest, findActiveSaleForClient, directSaleLimit, type SaleInputs } from '@/services/saleRequestService'
 import { useCapitalGuard } from '@/hooks/useCapitalGuard'
 import { decideSaleOrigination } from '@/lib/activeCredit'
@@ -207,7 +208,7 @@ export default function CollectorNewSalePage() {
             </button>
           </div>
           <Select value={form.clientId} onChange={e => setForm(f => ({ ...f, clientId: e.target.value }))}
-            options={clients.map(c => ({ value: c.id, label: `${c.nombre} - ${c.documento}` }))} placeholder="Seleccionar cliente" required />
+            options={clients.map(c => ({ value: c.id, label: `${formatClientName(c.nombre)} - ${c.documento}` }))} placeholder="Seleccionar cliente" required />
           {routeIds.length === 0 && <p className="mt-1 text-xs text-amber-600">No tienes rutas asignadas.</p>}
           {activeSale && (
             <div className="mt-2 flex items-start gap-2 p-3 bg-amber-50 rounded-xl border border-amber-200">

@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle, ChevronLeft, Clock, Loader2, PhoneCall, RefreshCw, Smartphone, Wifi, WifiOff, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatCurrency, formatDateTime } from '@/lib/formatters';
+import { formatClientName } from '@/lib/displayName';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { toMajor } from '../runtime/mappers.ts';
 import { ALERT_12H, ALERT_24H, alertLevel, isOpen, summary, useOffline, type OpStatus, type PendingOp } from './state.ts';
@@ -159,7 +160,7 @@ export function OfflineOperationBlocked({ onBack }: { onBack: () => void }) {
 /** Una operación en la lista de pendientes. */
 export function PendingOpRow({ op, name, onRetry, onReviewed }: { op: PendingOp; name?: string; onRetry?: () => void; onReviewed?: () => void }) {
   const amount = op.ref.amountMinor != null ? formatCurrency(toMajor(op.ref.amountMinor)) : null;
-  const who = op.kind === 'expense' ? op.ref.label : name ?? op.ref.clientName ?? 'Cliente';
+  const who = op.kind === 'expense' ? op.ref.label : formatClientName(name ?? op.ref.clientName) || 'Cliente';
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-3 space-y-2" data-testid="pending-op" data-op-id={op.id} data-op-status={op.status}>
       <div className="flex items-start justify-between gap-2">

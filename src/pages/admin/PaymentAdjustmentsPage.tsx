@@ -10,6 +10,7 @@ import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatDate } from '@/lib/formatters'
+import { formatClientName } from '@/lib/displayName'
 import { approvePaymentAdjustment, rejectPaymentAdjustment } from '@/services/paymentCorrectionService'
 import { filterByAccessibleRoute } from '@/lib/permissions'
 import type { PaymentAdjustmentRequest, Client, Route, PaymentAdjustmentStatus } from '@/models/types'
@@ -73,7 +74,7 @@ export default function PaymentAdjustmentsPage() {
     else toast.error(res.error ?? 'No se pudo rechazar')
   }
 
-  const clientName = (id: string) => clientMap.get(id)?.nombre ?? 'Cliente'
+  const clientName = (id: string) => formatClientName(clientMap.get(id)?.nombre) || 'Cliente'
   const pending = reqs.filter(r => r.status === 'pending')
 
   return (
