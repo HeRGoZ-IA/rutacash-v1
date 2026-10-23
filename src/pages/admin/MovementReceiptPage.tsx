@@ -8,6 +8,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/formatters'
 import { HISTORY_STATE_LABEL, accountLabel, type HistoryEntry } from '@/lib/movementHistory'
 import { getMovementEntry } from '@/services/movementHistoryService'
+// D74-C1: nombres de PERSONAS formateados solo para mostrar; la empresa y las razones sociales se muestran tal como se registraron.
+import { formatPersonName } from '@/lib/displayName'
 import type { ExpenseCategory, Route, User } from '@/models/types'
 
 /**
@@ -39,7 +41,7 @@ export default function MovementReceiptPage() {
     return () => { alive = false }
   }, [user, tenantId, fuente, id])
 
-  const userName = (uid?: string) => (uid ? uid.startsWith('system:') ? 'Migración del sistema' : users.find(u => u.id === uid)?.nombre ?? 'Usuario no identificado' : 'No registrado')
+  const userName = (uid?: string) => (uid ? uid.startsWith('system:') ? 'Migración del sistema' : formatPersonName(users.find(u => u.id === uid)?.nombre) || 'Usuario no identificado' : 'No registrado')
   const routeName = (rid?: string) => (rid ? routes.find(r => r.id === rid)?.nombre ?? rid : '—')
   const nombres = { user: userName, route: routeName }
   const cat = (cid: string) => categories.find(c => c.id === cid)?.nombre ?? cid
@@ -97,7 +99,7 @@ export default function MovementReceiptPage() {
           Este comprobante acredita que el movimiento quedó registrado en ADEX Soluciones con la referencia indicada.
           No acredita la entrega ni la recepción física del efectivo, y no incluye firmas ni autorizaciones distintas de las registradas.
         </p>
-        <p className="mt-1 text-[11px] text-gray-500">Generado el {formatDateTime(new Date().toISOString())} por {user?.nombre ?? ''}.</p>
+        <p className="mt-1 text-[11px] text-gray-500">Generado el {formatDateTime(new Date().toISOString())} por {formatPersonName(user?.nombre)}.</p>
         <div className="mt-6 flex flex-wrap gap-2 print:hidden">
           <button type="button" onClick={() => window.print()}
             className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-lg bg-primary-600 hover:bg-primary-700 text-white shadow-sm">

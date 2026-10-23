@@ -6,6 +6,9 @@
 //   H1 · alta y reactivación de una membresía propia → 403 SELF_ASSIGNMENT_FORBIDDEN / 42501.
 //   H2 · aprobar o rechazar el ajuste que pidió la misma persona → 403 SELF_APPROVAL_FORBIDDEN / AX505 / 42501.
 //   H3 · WORKER_DELIVERY a la custodia de la misma persona → 403 SELF_DELIVERY_FORBIDDEN / AX419.
+// Continuación R74 (decisiones aprobadas): D74-H1/O7 (DS-05 enmendada) — en una misma empresa solo el
+// Administrador acumula perfiles y nunca con SuperAdmin (AX313 / 409 ROLE_ACCUMULATION_FORBIDDEN); D74-H2 —
+// nadie traspasa efectivo a su propia custodia (AX419) ni amplía las rutas de OTRA membresía propia.
 // Los flujos legítimos con varias membresías (IDN-021, CRED-004, ONL-020) siguen en sus suites.
 
 import assert from 'node:assert/strict';
@@ -79,12 +82,15 @@ describe('R74 · H · autoasignación, autoaprobación y autoentrega', () => {
       await assert.rejects(insert(q, pedro.identityId, 'supervisor'), { code: '42501' }, 'la propia identidad');
       await q.query('rollback to savepoint s');
       await q.query('savepoint s');
-      await insert(q, identityOf('gabi'), 'cobrador');   // otra persona: la política no lo impide
+      // Otra persona: la política no lo impide (como Administradora, para no chocar con la regla de
+      // perfiles D74-H1: Gabi ya es Secretaria en c1).
+      await insert(q, identityOf('gabi'), 'admin');
       await q.query('rollback to savepoint s');
     });
     await asApi(db.api, { identityId: identityOf('bruno'), membershipId: M.brunoSa, companyId: c1 }, async (q) => {
       await q.query('savepoint s');
-      await assert.rejects(insert(q, identityOf('bruno'), 'admin'), { code: '42501' }, 'tampoco el SuperAdmin');
+      // Rechazo por la política (42501) o, antes, por la regla de perfiles D74-H1/O7 (AX313: SuperAdmin + Administrador).
+      await assert.rejects(insert(q, identityOf('bruno'), 'admin'), (e: { code?: string }) => ['42501', 'AX313'].includes(e.code ?? ''), 'tampoco el SuperAdmin');
       await q.query('rollback to savepoint s');
     });
   });
@@ -154,5 +160,55 @@ describe('R74 · H · autoasignación, autoaprobación y autoentrega', () => {
     assert.deepEqual([await balance(db.admin, c1, 'admin', M.anaAdmin), await custody(M.anaCob)], before, 'nada se movió');
     const other = await $ana('/v1/capital/deliveries', { routeId: r1, workerId: dora.membershipId, amountMinor: 10_000, reason: 'Base de Dora' });
     assert.equal(other.status, 201, `a otra persona sí: ${JSON.stringify(other.body)}`);
+  });
+
+  test('R74-H1-010 · D74-H1/O7: varios perfiles en la misma empresa solo si uno es Administrador; nunca con SuperAdmin; en otra empresa, libre', async () => {
+    // Cobradora que además quiere ser Supervisora (sin Administrador): rechazado.
+    const tere = await newPerson(api, issuer, provider.ids, bruno, { email: 'tere-r74@example.test', role: 'cobrador', displayName: 'Tere Cobradora', routeIds: [r1] });
+    const sup = await bruno('POST', '/v1/members', { email: 'tere-r74@example.test', role: 'supervisor', displayName: 'Tere Supervisora', routeIds: [r1] });
+    assert.deepEqual([sup.status, sup.body['error']], [409, 'ROLE_ACCUMULATION_FORBIDDEN']);
+    // Con Administrador sí (Sol ya es Administradora y Secretaria; ahora también Cobradora).
+    const sol3 = await bruno('POST', '/v1/members', { email: 'sol-r74@example.test', role: 'cobrador', displayName: 'Sol Cobradora', routeIds: [r1] });
+    assert.equal(sol3.status, 201, JSON.stringify(sol3.body));
+    // SuperAdmin + otro perfil en la misma empresa: rechazado.
+    const vera = await newPerson(api, issuer, provider.ids, bruno, { email: 'vera-r74@example.test', role: 'superadmin', displayName: 'Vera SA' });
+    const veraAdmin = await bruno('POST', '/v1/members', { email: 'vera-r74@example.test', role: 'admin', displayName: 'Vera Admin', routeIds: [r1] });
+    assert.deepEqual([veraAdmin.status, veraAdmin.body['error']], [409, 'ROLE_ACCUMULATION_FORBIDDEN']);
+    assert.ok(vera.membershipId && tere.membershipId);
+    // Por SQL tampoco (la regla vive en PostgreSQL), y la base no cambió.
+    await assert.rejects(db.admin.query(`insert into adex.memberships (id, company_id, identity_id, role, status, display_name, created_at, updated_at)
+      values ($1, $2, $3, 'supervisor', 'activo', 'Directo', now(), now())`, [randomUUID(), c1, tere.identityId]), (e: { code?: string }) => e.code === 'AX313');
+    assert.equal(await membershipsOf(tere.identityId), 1);
+    // Por empresa: en c2 Tere puede tener otra relación (Supervisora) sin ser Administradora.
+    await db.admin.query(`insert into adex.memberships (id, company_id, identity_id, role, status, display_name, created_at, updated_at)
+      values ($1, $2, $3, 'supervisor', 'activo', 'Tere en c2', now(), now())`, [randomUUID(), companyId('c2'), tere.identityId]);
+  });
+
+  test('R74-H2-010 · D74-H2: nadie amplía las rutas de OTRA membresía propia (API y PostgreSQL); quitar sí; otra persona sí', async () => {
+    const r2 = routeId('c1', 2);
+    // Ana Administradora intenta sumar una ruta a Ana Cobradora.
+    const own = await ana('PUT', `/v1/members/${M.anaCob}/routes`, { routeIds: [r1, r2] });
+    assert.deepEqual([own.status, own.body['error']], [403, 'SELF_ASSIGNMENT_FORBIDDEN']);
+    await asApi(db.api, { identityId: identityOf('ana'), membershipId: M.anaAdmin, companyId: c1 }, async (q) => {
+      await q.query('savepoint s');
+      await assert.rejects(q.query('insert into adex.membership_routes (company_id, membership_id, route_id) values ($1, $2, $3)', [c1, M.anaCob, r2]),
+        { code: '42501' }, 'política restrictiva');
+      await q.query('rollback to savepoint s');
+    });
+    // El SuperAdmin (otra persona) sí puede.
+    const byOther = await bruno('PUT', `/v1/members/${M.anaCob}/routes`, { routeIds: [r1, r2] });
+    assert.equal(byOther.status, 200, JSON.stringify(byOther.body));
+    // Quitar alcance a la membresía propia no es autoasignación.
+    const remove = await ana('PUT', `/v1/members/${M.anaCob}/routes`, { routeIds: [r1] });
+    assert.ok([200, 403].includes(remove.status));
+    assert.notEqual(remove.body['error'], 'SELF_ASSIGNMENT_FORBIDDEN');
+  });
+
+  test('R74-H2-011 · D74-H2: el Administrador no traspasa efectivo de otro trabajador a SU custodia de Cobrador', async () => {
+    assert.equal((await $ana('/v1/capital/deliveries', { routeId: r1, workerId: dora.membershipId, amountMinor: 5_000, reason: 'Base de Dora' })).status, 201);
+    const before = [await custody(dora.membershipId), await custody(M.anaCob)];
+    const r = await $ana('/v1/capital/worker-transfers', { routeId: r1, fromWorkerId: dora.membershipId, toWorkerId: M.anaCob, amountMinor: 5_000, reason: 'Hacia mi caja' });
+    assert.deepEqual([r.status, r.body['error']], [403, 'SELF_DELIVERY_FORBIDDEN']);
+    assert.deepEqual([await custody(dora.membershipId), await custody(M.anaCob)], before, 'nada se movió');
   });
 });

@@ -99,6 +99,12 @@ async function applyMemberRoutes(client: pg.PoolClient, ctx: ActiveContext, targ
   assertRoutesAssignable(ctx, [...added, ...removed]);
   await assertRoutesExist(client, ctx, added);
   if (added.length && target.status !== 'activo') throw new ApiError(400, 'MEMBER_INACTIVE');
+  // D74-H2: ampliar el alcance de otra membresía de la MISMA persona es autoasignación (quitar rutas, no).
+  if (added.length && target.membershipId !== ctx.membershipId) {
+    const own = await client.query('select 1 from adex.memberships where company_id = $1 and id = $2 and identity_id = $3',
+      [ctx.companyId, target.membershipId, ctx.claims.identityId]);
+    if (own.rowCount) throw new ApiError(403, 'SELF_ASSIGNMENT_FORBIDDEN', 'nobody assigns routes to their own membership');
+  }
   await lockRoutes(client, ctx, [...added, ...removed]);
   const description = (verb: string) => `Ruta ${verb}${scope ? ` (${scope})` : ''}`;
   for (const routeId of removed) {

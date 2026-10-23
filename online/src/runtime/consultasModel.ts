@@ -222,3 +222,20 @@ export function queryOf(f: Filters, today: string, offset: number, limit: number
   }
   return q.toString();
 }
+
+// ---------- Exportación CSV (D74-B1) ----------
+// Se arma en el navegador con las MISMAS páginas del servidor (mismos filtros, misma RLS): nada se
+// filtra aquí. Separador «;» y coma decimal (Excel en pt-BR y es-CO); nombres tal como se registraron.
+export const CSV_MAX_ROWS = 5000;
+const csvCell = (v: string | number | null | undefined) => {
+  const s = v == null ? '' : String(v);
+  return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+export function cashCsv(rows: CashRow[], minorUnits: number): string {
+  const amount = (minor: number) => (minor === 0 ? '' : (minor / 10 ** minorUnits).toFixed(minorUnits).replace('.', ','));
+  const head = ['Fecha', 'Hora', 'Movimiento', 'Estado', 'Cliente o persona', 'Concepto', 'Responsable', 'Ruta', 'Entrada', 'Salida', 'Interno', 'Referencia'];
+  const lines = rows.map((r) => [r.date, r.localTime, kindLabel(r.kind, r.reversesKind), STATUS_LABEL[r.status] ?? r.status,
+    r.client?.name ?? r.worker?.name ?? r.counterpart?.name ?? '', r.concept, r.actor?.name ?? '', r.route?.name ?? '',
+    amount(r.inMinor), amount(r.outMinor), amount(r.internalMinor), r.reference ?? r.id].map(csvCell).join(';'));
+  return '\uFEFF' + [head.join(';'), ...lines].join('\r\n') + '\r\n';
+}

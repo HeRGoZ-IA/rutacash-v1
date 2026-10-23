@@ -257,6 +257,10 @@ create or replace function adex.capital_post(
           perform adex.capital_raise('AX402', 'no authority over cash in this route');
         end if;
         if v_worker = v_counter then perform adex.capital_raise('AX411', 'origin and destination must differ'); end if;
+        -- D74-H2: nadie traspasa efectivo de otro trabajador a SU propia custodia (tampoco con otra membresía).
+        if exists (select 1 from adex.memberships where company_id = v_company and id = v_counter and identity_id = v_identity) then
+          perform adex.capital_raise('AX419', 'nobody transfers cash into their own custody');
+        end if;
         if not adex.route_operational(v_company, v_route) then perform adex.capital_raise('AX301', 'route is not operational'); end if;
         if not exists (select 1 from adex.memberships m join adex.membership_routes mr on mr.membership_id = m.id and mr.route_id = v_route and mr.company_id = m.company_id
                         where m.company_id = v_company and m.id = v_worker and m.role in ('cobrador', 'supervisor')) then
@@ -1121,3 +1125,49 @@ alter policy payment_adjustment_reject on adex.payment_adjustment_requests
   using (company_id = adex.ctx_company() and adex.ctx_route_allowed(route_id) and adex.ctx_can('payment.approveAdjustment') and status = 'pending')
   with check (company_id = adex.ctx_company() and status = 'rejected' and reviewed_by_membership_id = adex.ctx_membership()
               and not adex.same_person(company_id, adex.ctx_membership(), requested_by_membership_id));
+
+-- ---------- D74-H1 / O7 · varios perfiles solo para el Administrador (enmienda de DS-05) ----------
+-- En una MISMA empresa, una persona solo puede tener varias membresías activas si una de ellas es
+-- Administrador; SuperAdmin y cualquier otro perfil no se combinan. Por empresa: en otra empresa
+-- la misma persona puede tener otra relación. Se comprueba al dar de alta, reactivar, cambiar de
+-- rol o asignar una identidad (puestos de la Demo). Las membresías existentes no se tocan
+-- (consulta previa en ADEX-Staging: ninguna identidad con varias membresías activas).
+create function adex.memberships_profile_rule() returns trigger
+  language plpgsql security definer set search_path = pg_catalog, adex
+  as $$
+  declare v_roles text[];
+  begin
+    if new.identity_id is null or new.status is distinct from 'activo' then return new; end if;
+    if tg_op = 'UPDATE' and old.status = 'activo' and old.identity_id is not distinct from new.identity_id and old.role = new.role then
+      return new;
+    end if;
+    -- Una alta simultánea de dos perfiles de la misma persona en la misma empresa se serializa.
+    perform pg_advisory_xact_lock(hashtextextended('adex-membership-profile|' || new.company_id || '|' || new.identity_id::text, 0));
+    select array_agg(role) into v_roles from adex.memberships
+     where company_id = new.company_id and identity_id = new.identity_id and status = 'activo' and id <> new.id;
+    if v_roles is null then return new; end if;
+    v_roles := v_roles || new.role::text;
+    if 'superadmin' = any(v_roles) then
+      raise exception 'adex: the SuperAdmin does not hold other profiles in the same company' using errcode = 'AX313';
+    end if;
+    if not ('admin' = any(v_roles)) then
+      raise exception 'adex: only an administrator holds several profiles in the same company' using errcode = 'AX313';
+    end if;
+    return new;
+  end $$;
+revoke all on function adex.memberships_profile_rule() from public;
+create trigger memberships_profile_rule before insert or update of status, identity_id, role on adex.memberships
+  for each row execute function adex.memberships_profile_rule();
+
+-- ---------- D74-H2 · nadie se asigna rutas a OTRA membresía propia ----------
+-- Ampliar el alcance de una membresía de la MISMA persona es autoasignación. Quitar rutas no.
+create function adex.membership_routes_not_own(p_company text, p_membership text) returns boolean
+  language sql stable security definer set search_path = pg_catalog, adex
+  -- La membresía del CONTEXTO sí (el Administrador que crea una ruta queda asignado a ella, STR-020);
+  -- otra membresía de la misma persona, no.
+  as $$ select not exists (select 1 from adex.memberships m where m.company_id = p_company and m.id = p_membership
+                             and m.identity_id = adex.ctx_identity() and m.id <> adex.ctx_membership()) $$;
+revoke all on function adex.membership_routes_not_own(text, text) from public;
+grant execute on function adex.membership_routes_not_own(text, text) to adex_api;
+create policy membership_routes_no_self_scope on adex.membership_routes as restrictive for insert to adex_api
+  with check (adex.membership_routes_not_own(company_id, membership_id));

@@ -4,13 +4,14 @@
 // tarjetas en móvil. Filtros, totales y páginas vienen del servidor (`GET /v1/movements/cash`).
 
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeftRight, CheckCircle2, AlertTriangle, RotateCcw } from 'lucide-react';
+import { ArrowLeftRight, CheckCircle2, AlertTriangle, Download, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { toast } from '@/components/ui/Toast';
 import { cn } from '@/lib/utils';
 import { serverView } from './projection.ts';
 import { DayHeading, money, rowKeys } from './ConsultasParts.tsx';
 import {
-  STATUS_LABEL, counterpartOf, dayHeading, extraCount, groupLabel, kindLabel, person, queryOf,
+  CSV_MAX_ROWS, STATUS_LABEL, cashCsv, counterpartOf, dayHeading, extraCount, groupLabel, kindLabel, person, queryOf,
   type CashPage, type CashRow, type Filters,
 } from './consultasModel.ts';
 
@@ -135,6 +136,31 @@ export function ConsultasDinero({ filters, today, timezone, currency, minorUnits
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo cargar'); } finally { setMore(false); }
   }
 
+  // D74-B1: exportación con los mismos filtros del servidor (páginas de 200, tope CSV_MAX_ROWS).
+  const [exporting, setExporting] = useState(false);
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      const all: CashRow[] = [];
+      let offset = 0;
+      for (;;) {
+        const p = await serverView<CashPage>(`/v1/movements/cash?${queryOf(effective, today, offset, 200, minorUnits, 'cash')}`);
+        all.push(...p.rows);
+        offset += p.rows.length;
+        if (!p.hasMore || p.rows.length === 0 || all.length >= CSV_MAX_ROWS) break;
+      }
+      const blob = new Blob([cashCsv(all.slice(0, CSV_MAX_ROWS), minorUnits)], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `consultas-dinero-${page?.period.from ?? 'inicio'}-${page?.period.to ?? today}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      if (all.length >= CSV_MAX_ROWS) toast.warning(`Se exportaron los primeros ${CSV_MAX_ROWS} movimientos: acote el periodo o los filtros para el resto.`);
+      else toast.success(`CSV con ${all.length} movimientos, con los filtros vigentes.`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo exportar'); } finally { setExporting(false); }
+  }
+
   const listFiltered = Boolean(filters.group) || extraCount(filters) > 0;
   const days = byDay(rows);
   const hasMore = page?.hasMore ?? false;
@@ -158,6 +184,14 @@ export function ConsultasDinero({ filters, today, timezone, currency, minorUnits
           {page.summary.outside.count === 1 ? 'Una operación' : `${page.summary.outside.count} operaciones`} de esta ruta las pagó o recibió directamente la bolsa del
           Administrador (ventas o recaudos del Administrador). No cambian el efectivo en custodia; se ven eligiendo esa bolsa en «Caja o ruta».
         </p>
+      )}
+
+      {page && page.filtered.count > 0 && (
+        <div className="flex justify-end">
+          <Button variant="secondary" size="sm" onClick={() => { void exportCsv(); }} loading={exporting} icon={<Download className="w-4 h-4" />} data-testid="cash-export">
+            Exportar CSV
+          </Button>
+        </div>
       )}
 
       {listFiltered && page && (

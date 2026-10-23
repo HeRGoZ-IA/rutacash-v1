@@ -94,11 +94,14 @@ describe('Fase 2 · estructura de empresa, Oficinas, rutas y categorías', () =>
     assert.equal(audit.rows[0].route_id, null, 'el ciclo de vida estructural no convierte la ruta en historia');
     assert.match(audit.rows[0].description, /SIN Administrador ni Cobrador/);
 
-    const byAdmin = await ana('POST', '/v1/routes', { name: 'Ruta de Ana', interestRate: 10, freeRate: true, maxLoanMinor: 50000, collectorId: M.anaCob });
+    // D74-H2 (R74): Ana Administradora ya no asigna la ruta a SU membresía de Cobradora (autoasignación de alcance).
+    const self = await ana('POST', '/v1/routes', { name: 'Ruta de Ana', interestRate: 10, freeRate: true, maxLoanMinor: 50000, collectorId: M.anaCob });
+    assert.deepEqual([self.status, self.body['error']], [403, 'SELF_ASSIGNMENT_FORBIDDEN']);
+    const byAdmin = await ana('POST', '/v1/routes', { name: 'Ruta de Ana', interestRate: 10, freeRate: true, maxLoanMinor: 50000 });
     assert.equal(byAdmin.status, 201, JSON.stringify(byAdmin.body));
-    assert.deepEqual((byAdmin.body['memberIds'] as string[]).sort(), [M.anaAdmin, M.anaCob].sort());
+    assert.deepEqual((byAdmin.body['memberIds'] as string[]).sort(), [M.anaAdmin]);
     assert.equal(byAdmin.body['capitalControllerId'], M.anaAdmin);
-    assert.equal(byAdmin.body['collectorId'], M.anaCob);
+    assert.equal(byAdmin.body['collectorId'], null);
     const ev = byAdmin.body['controllerEvents'] as { kind: string; capitalTransferredMinor: number }[];
     assert.deepEqual(ev.map((e) => [e.kind, e.capitalTransferredMinor]), [['FIRST_ADMIN', 0]]);
     assert.equal((await ana('GET', `/v1/routes/${byAdmin.body['id']}`)).status, 200, 'la ve en la siguiente petición');

@@ -36,6 +36,8 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX202': return new ApiError(400, 'INVALID_DOCUMENT');
     case 'AX301': return new ApiError(409, 'ROUTE_NOT_OPERATIONAL');
     case 'AX302': return new ApiError(400, 'INVALID_COLLECTOR');
+    // D74-H1/O7 (DS-05 enmendada): varios perfiles en una empresa solo para el Administrador; nunca con SuperAdmin.
+    case 'AX313': return new ApiError(409, 'ROLE_ACCUMULATION_FORBIDDEN');
     // Fase 3 · `adex.capital_post` (segunda barrera, bajo bloqueo). Sin cifras de saldos.
     case 'AX401': return new ApiError(409, 'INSUFFICIENT_FUNDS');
     case 'AX402': return new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED');
@@ -58,7 +60,7 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX417': return new ApiError(409, 'REQUEST_NOT_PENDING');
     case 'AX418': return new ApiError(409, 'REQUEST_MISMATCH');
     // R74 (0033, DS-05): nadie entrega capital a su propia custodia, tampoco con otra membresía.
-    case 'AX419': return new ApiError(403, 'SELF_DELIVERY_FORBIDDEN');
+    case 'AX419': return new ApiError(403, 'SELF_DELIVERY_FORBIDDEN');   // entregar o traspasar efectivo a la propia custodia
     // Fase 4 · solicitudes y desembolsos.
     case 'AX501': return new ApiError(409, 'REQUEST_STATE_INVALID');
     case 'AX502': return new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED');

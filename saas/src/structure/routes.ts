@@ -102,6 +102,13 @@ async function applyAssignments(client: pg.PoolClient, ctx: ActiveContext, route
     await client.query('delete from adex.membership_routes where company_id = $1 and membership_id = $2 and route_id = $3', [ctx.companyId, id, routeId]);
     await audit(client, ctx, { action: 'UNASSIGN_ROUTE', entityType: 'membership', entityId: id, routeId, description: `Usuario retirado de ${routeName}` });
   }
+  // D74-H2: asignar la ruta a OTRA membresía de la misma persona es autoasignación de alcance
+  // (la membresía del contexto sí: el Administrador que crea la ruta queda asignado a ella).
+  const others = added.filter((id) => id !== ctx.membershipId);
+  if (others.length && (await client.query('select 1 from adex.memberships where company_id = $1 and id = any($2) and identity_id = $3',
+    [ctx.companyId, others, ctx.claims.identityId])).rowCount) {
+    throw new ApiError(403, 'SELF_ASSIGNMENT_FORBIDDEN', 'nobody assigns a route to another membership of their own');
+  }
   for (const id of added) {
     await client.query('insert into adex.membership_routes (company_id, membership_id, route_id) values ($1, $2, $3)', [ctx.companyId, id, routeId]);
     await audit(client, ctx, { action: 'ASSIGN_ROUTE', entityType: 'membership', entityId: id, routeId, description: `Usuario asignado a ${routeName}` });

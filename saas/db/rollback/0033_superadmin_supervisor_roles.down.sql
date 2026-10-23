@@ -11,6 +11,10 @@ begin;
 
 set local role adex_owner;
 
+drop policy membership_routes_no_self_scope on adex.membership_routes;
+drop function adex.membership_routes_not_own(text, text);
+drop trigger memberships_profile_rule on adex.memberships;
+drop function adex.memberships_profile_rule();
 drop trigger memberships_no_self_reactivation on adex.memberships;
 drop function adex.memberships_no_self_reactivation();
 drop policy memberships_no_self_insert on adex.memberships;

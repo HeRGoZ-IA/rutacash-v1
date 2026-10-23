@@ -25,6 +25,9 @@ describe('ADEX Online v1 · Empresa Demo y circuito en línea', { skip: SKIP }, 
   let operator: Person;
   let owner: Person;
   let partner: Person;
+  // D74-H1/O7 (DS-05 enmendada, R74): el SuperAdmin de la Demo es otra persona; el propietario
+  // acumula perfiles solo porque es Administrador (Administrador + Supervisor).
+  let director: Person;
   let stranger: Person;
   const slot = 'principal';
   let demoId = '';
@@ -48,6 +51,7 @@ describe('ADEX Online v1 · Empresa Demo y circuito en línea', { skip: SKIP }, 
     operator = await person(online, 'operador-demo@example.test');
     owner = await person(online, 'propietario@example.test');
     partner = await person(online, 'socio@example.test');
+    director = await person(online, 'direccion@example.test');
     stranger = await person(online, 'ajeno@example.test');
     await grantDemoOperator(db, operator.identityId, operator.email);
   });
@@ -82,15 +86,15 @@ describe('ADEX Online v1 · Empresa Demo y circuito en línea', { skip: SKIP }, 
     const put = (seatName: string, p: Person, displayName: string) =>
       online.call('PUT', `/demo/v1/slots/${slot}/participants/${seatName}`, { token: operator.token, body: { email: p.email, displayName } });
     assert.equal((await put('direccion', owner, 'X')).body['error'], 'SEAT_NOT_ASSIGNABLE');
-    for (const [s, p, n] of [['superadmin-invitado', owner, 'Propietario'], ['admin-centro', owner, 'Propietario'],
-      ['cobrador-centro', partner, 'Socio'], ['supervisor-centro', partner, 'Socio']] as const) {
+    for (const [s, p, n] of [['superadmin-invitado', director, 'Dirección'], ['admin-centro', owner, 'Propietario'],
+      ['cobrador-centro', partner, 'Socio'], ['supervisor-centro', owner, 'Propietario']] as const) {
       const r = await put(s, p, n);
       assert.equal(r.status, 200, JSON.stringify(r.body));
     }
     // Una persona no ocupa dos puestos del mismo rol en la misma empresa (DS-05).
     const dup = await online.call('PUT', `/demo/v1/slots/${slot}/participants/superadmin-invitado`, { token: operator.token, body: { email: partner.email, displayName: 'Socio' } });
     assert.equal(dup.status, 200);
-    const back = await put('superadmin-invitado', owner, 'Propietario');
+    const back = await put('superadmin-invitado', director, 'Dirección');
     assert.equal(back.status, 200);
     const s = await status();
     assert.equal((s['participants'] as unknown[]).length, 4);
@@ -128,9 +132,11 @@ describe('ADEX Online v1 · Empresa Demo y circuito en línea', { skip: SKIP }, 
 
   test('DEMO-011 · personas: ven la Demo (marcada) solo con sus membresías; las sintéticas no inician sesión', async () => {
     const mine = await memberships(owner);
-    assert.deepEqual(mine.filter((m) => (m['company'] as Body)['isDemo']).map((m) => m['role']).sort(), ['admin', 'superadmin']);
+    assert.deepEqual(mine.filter((m) => (m['company'] as Body)['isDemo']).map((m) => m['role']).sort(), ['admin', 'supervisor']);
     const theirs = await memberships(partner);
-    assert.deepEqual(theirs.filter((m) => (m['company'] as Body)['isDemo']).map((m) => m['role']).sort(), ['cobrador', 'supervisor']);
+    assert.deepEqual(theirs.filter((m) => (m['company'] as Body)['isDemo']).map((m) => m['role']).sort(), ['cobrador']);
+    const dir = await memberships(director);
+    assert.deepEqual(dir.filter((m) => (m['company'] as Body)['isDemo']).map((m) => m['role']).sort(), ['superadmin']);
     // Sin membresías la identidad ni siquiera está aprovisionada en ADEX: nada que listar.
     const none = await online.call('GET', '/v1/me/memberships', { token: stranger.token });
     assert.equal(none.status, 403);
@@ -146,9 +152,10 @@ describe('ADEX Online v1 · Empresa Demo y circuito en línea', { skip: SKIP }, 
   // ---------------------------------------------------------------- dos sesiones
   test('ONL-020 · dos sesiones independientes comparten los mismos registros: capital → solicitud → aprobación → desembolso', async () => {
     const ownerAdmin = as(owner, await seat(owner, 'admin'));
-    const ownerSa = as(owner, await seat(owner, 'superadmin'));
+    const ownerSa = as(director, await seat(director, 'superadmin'));
     const partnerCob = as(partner, await seat(partner, 'cobrador'));
-    const partnerSup = as(partner, await seat(partner, 'supervisor'));
+    // La misma persona con OTRA membresía: el propietario como Supervisor (Administrador + Supervisor).
+    const ownerSup = as(owner, await seat(owner, 'supervisor'));
     const routes = ((await ownerAdmin.get('/v1/routes')).body['routes'] as Body[]);
     const centro = routes.find((r) => String(r['name']).startsWith('Ruta Centro'))!;
     assert.ok(centro, 'admin sees Ruta Centro');
@@ -177,10 +184,9 @@ describe('ADEX Online v1 · Empresa Demo y circuito en línea', { skip: SKIP }, 
     assert.equal(created.status, 201, JSON.stringify(created.body));
     const requestId = created.body['id'] as string;
 
-    // Protección contra autoaprobación: la misma persona con OTRA membresía (Supervisor) no aprueba.
-    const self = await partnerSup.post(`/v1/credit-requests/${requestId}/approve`, {});
-    assert.equal(self.status, 403);
-    assert.equal(self.body['error'], 'SELF_APPROVAL_FORBIDDEN');
+    // R74: el Cobrador ya no acumula perfiles (D74-H1); la autoaprobación entre membresías de la misma
+    // persona la cubren CRED-004 y r74-roles. Aquí: el Supervisor (otra persona que el Cobrador) podría aprobar.
+    assert.ok(ownerSup);
 
     // 4. El propietario (Administrador) la ve en su bandeja y la aprueba con condiciones.
     const inbox = (await ownerAdmin.get('/v1/credit-requests?status=pending')).body['requests'] as Body[];
@@ -229,7 +235,7 @@ describe('ADEX Online v1 · Empresa Demo y circuito en línea', { skip: SKIP }, 
   });
 
   test('ONL-021 · aislamiento: la Demo no ve otras empresas y otra empresa no ve la Demo', async () => {
-    const ownerSa = as(owner, await seat(owner, 'superadmin'));
+    const ownerSa = as(director, await seat(director, 'superadmin'));
     const clients = (await ownerSa.get('/v1/clients')).body['clients'] as Body[];
     const ids = new Set((await db.admin.query<{ id: string }>('select id from adex.clients where company_id = $1', [demoId])).rows.map((r) => r.id));
     assert.ok(clients.length > 0 && clients.every((c) => ids.has(c['id'] as string)));
@@ -421,7 +427,7 @@ describe('ADEX Online v1 · Empresa Demo y circuito en línea', { skip: SKIP }, 
     assert.ok(!companies.includes(r.body['companyId'] as string));
     demoId = r.body['companyId'] as string;
     companies.push(demoId);
-    assert.equal((await memberships(partner)).filter((m) => (m['company'] as Body)['isDemo']).length, 2);
+    assert.equal((await memberships(owner)).filter((m) => (m['company'] as Body)['isDemo']).length, 2, 'Administrador + Supervisor');
   });
 
   // ---------------------------------------------------------------- protección y auditoría
@@ -509,7 +515,7 @@ describe('ADEX Online v1 · Empresa Demo y circuito en línea', { skip: SKIP }, 
   });
 
   test('ONL-062 · viajes a la base por petición: contexto en uno solo (0012)', async () => {
-    const sa = await seat(owner, 'superadmin');
+    const sa = await seat(director, 'superadmin');
     const proto = pg.Client.prototype as unknown as { query: (...a: unknown[]) => unknown };
     const original = proto.query;
     let n = 0;
@@ -518,7 +524,7 @@ describe('ADEX Online v1 · Empresa Demo y circuito en línea', { skip: SKIP }, 
       const counts: Record<string, number> = {};
       for (const path of ['/v1/capital/summary', '/v1/routes', '/v1/credit-requests?status=pending']) {
         n = 0;
-        const r = await online.call('GET', path, { token: owner.token, membership: sa });
+        const r = await online.call('GET', path, { token: director.token, membership: sa });
         assert.equal(r.status, 200);
         counts[path] = n;
       }
