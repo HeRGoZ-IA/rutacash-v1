@@ -4,7 +4,7 @@
 |---|---|
 | Creado | 2026-10-22 · Ronda 70 (solo documental) · base `main` @ `b44379b` |
 | Cubre | 2026-06-18 (`4b1c3c9`, primer commit) → 2026-10-22 (`b44379b`, cierre de la Ronda 67) |
-| Actualizado | 2026-10-22 · Ronda 73 (correcciones del socio; commits locales sin publicar, ver §B.2 y §C) |
+| Actualizado | 2026-10-23 · Ronda 73 **publicada** (0030/0031 en staging, API y web en `2fa7152`; ver §B.2, §C, §D) |
 | Carácter | **Índice** de la historia del producto. No sustituye a los documentos de cada ronda ni al historial de Git: los enlaza |
 | Fuentes | `git log` de `main` · `saas/db/migrations/` · documentos de `docs/` · consulta HTTPS de solo lectura a los servicios publicados (2026-10-22) |
 
@@ -101,8 +101,8 @@ Las rondas sin documento propio se indican con «—» en la referencia. La corr
 | 2026-10-22 | R71 | Auditoría de organización de archivos y plan por bloques (diagnóstico) | `6686c14` | — | Doc. | — | [Auditoría](./AUDITORIA_ORGANIZACION_PROYECTO_ADEX.md) |
 | 2026-10-22 | R72 | Bloques 1–3 de R71: limpieza local de regenerables (25 clústeres PostgreSQL de prueba, copias de compilaciones, `node_modules` del experimento; 5 675 → 767 MB, sin commit por ser archivos ignorados); 13 documentos antiguos a [`historico/clean-2026/`](./historico/clean-2026/); `README.md` de raíz; `.gitignore` con `.env*`, certificados, claves, `*.zip`, `.impeccable/`. Sin cambios funcionales; evidencias de `tmp/` conservadas (bloques 0 y 4 no autorizados) | commit que añade esta fila (`git log -1 -- docs/historico`) | — | Doc. / config. | Sin despliegue manual | [Auditoría §11](./AUDITORIA_ORGANIZACION_PROYECTO_ADEX.md) |
 
-| 2026-10-23 | R73 (cierre) | Decisiones D73-01…D73-06: tasa por ruta con «Tasa libre», reducción de parcelas (cuotas `sustituida`), excepciones bloqueadas con comprobación previa y casos registrables, retención Offline de sesiones desplazadas, reversiones de 0030/0031 probadas. **Puerta de recuperación NO superada** (plan Free, sin copias verificables) | `git log 72b6e1b..` (HEAD local) | 0030 ampliada, 0031 (**no aplicadas**) | Sí | **NO PUBLICADO** | [R73 §7](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
-| 2026-10-22 | R73 | Correcciones del socio SOC-01…SOC-09 (SOC-10 excluida): tasa autorizada en el puente (SOC-07), parcelas en la autorización (SOC-04), rectificación de ventas desembolsadas (SOC-09), venta directa con la bolsa (SOC-02), 20 parcelas propuestas (SOC-03), negocio obligatorio (SOC-05), Consultas en tabla (SOC-08), sesión única (SOC-01), ubicaciones confirmables (SOC-06) | `3c869b1` … último commit de la ronda (`git log 72b6e1b..`) | 0030, 0031 (**no aplicadas**) | Sí | **NO PUBLICADO** (sin `push` ni despliegue) | [R73](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
+| 2026-10-23 | R73 (cierre) | Decisiones D73-01…D73-06: tasa por ruta con «Tasa libre», reducción de parcelas (cuotas `sustituida`), excepciones bloqueadas con comprobación previa y casos registrables, retención Offline de sesiones desplazadas, reversiones de 0030/0031 probadas. Copia lógica cifrada verificada por restauración antes de migrar | `72b6e1b..2fa7152` | 0030 ampliada, 0031 (aplicadas 2026-10-23) | Sí | **PUBLICADO** 2026-10-23 (API Render + web `index-DyK4-kHp.js`) | [R73 §7](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
+| 2026-10-22 | R73 | Correcciones del socio SOC-01…SOC-09 (SOC-10 excluida): tasa autorizada en el puente (SOC-07), parcelas en la autorización (SOC-04), rectificación de ventas desembolsadas (SOC-09), venta directa con la bolsa (SOC-02), 20 parcelas propuestas (SOC-03), negocio obligatorio (SOC-05), Consultas en tabla (SOC-08), sesión única (SOC-01), ubicaciones confirmables (SOC-06) | `3c869b1` … `2fa7152` | 0030, 0031 | Sí | Publicado con el cierre (fila anterior) | [R73](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
 
 **Hitos registrados:** 14 de la etapa CLEAN y 29 de la etapa SaaS (43 en total).
 
@@ -110,7 +110,7 @@ Las rondas sin documento propio se indican con «—» en la referencia. La corr
 
 ## C. Registro de migraciones (`saas/db/migrations/`)
 
-Las 29 primeras migraciones existen en `main` @ `b44379b`; 0030 y 0031 (Ronda 73) solo en commits locales sin publicar. La columna «Staging» indica la **primera evidencia escrita** de aplicación en ADEX-Staging; no hay otro entorno de base de datos documentado. La huella aplicada se guarda en `adex_meta.schema_migrations` (SHA-256 por archivo). Reversiones disponibles en `saas/db/rollback/`: 0020, 0021, 0022 y 0029.
+Las 31 migraciones existen en `main` @ `2fa7152`. La columna «Staging» indica la **primera evidencia escrita** de aplicación en ADEX-Staging; no hay otro entorno de base de datos documentado. La huella aplicada se guarda en `adex_meta.schema_migrations` (SHA-256 por archivo). Reversiones disponibles en `saas/db/rollback/`: 0020, 0021, 0022 y 0029.
 
 | # | Archivo | Propósito | Cambios relevantes | Commit | Staging (evidencia) |
 |---|---|---|---|---|---|
@@ -143,10 +143,10 @@ Las 29 primeras migraciones existen en `main` @ `b44379b`; 0030 y 0031 (Ronda 73
 | 0027 | `offline_disbursements` | Desembolsos aprobados sin conexión | Corregida en 65-C1: solo desembolsos | `24ef149`, reescrita en `e71d5d0` | Aplicada 2026-10-21 (R65) |
 | 0028 | `superadmin_portfolio_read_only` | SuperAdmin sin escritura en cartera | `clients_manage_*` y `ctx_can` sin SuperAdmin | `9902795` | Aplicada 2026-10-22 (R67) |
 | 0029 | `route_map_locations` | Mapa de rutas | `client_locations` (referencia) y `sale_locations` (dispositivo), solo inserción | `9902795` | Aplicada 2026-10-22 (R67) |
-| 0030 | `credit_conditions_rectification` | Parcelas en la autorización; rectificación de créditos desembolsados; D73-01/02/03 (tasa por ruta en el guardián, cuotas `sustituida`, comprobación y casos) | Parcelas pedidas/aprobadas; `DISBURSEMENT_ADJUSTMENT`; `credit_rectifications` (append-only); `adex.credit_rectify`; ciclo y cifras de periodo con el ajuste | `6d8d520` | **NO aplicada** (creada en R73; solo bases locales de prueba) |
-| 0031 | `single_active_session` | Una sola sesión activa por identidad | `identity_active_sessions`; motivo `superseded`; `ctx_session_valid` exige la sesión vigente; `claim_session` | `4b4510c` | **NO aplicada** (creada en R73; solo bases locales de prueba) |
+| 0030 | `credit_conditions_rectification` | Parcelas en la autorización; rectificación de créditos desembolsados; D73-01/02/03 (tasa por ruta en el guardián, cuotas `sustituida`, comprobación y casos) | Parcelas pedidas/aprobadas; `DISBURSEMENT_ADJUSTMENT`; `credit_rectifications` (append-only); `adex.credit_rectify`; ciclo y cifras de periodo con el ajuste | `6d8d520` | 2026-10-23 (R73 §8.2) |
+| 0031 | `single_active_session` | Una sola sesión activa por identidad | `identity_active_sessions`; motivo `superseded`; `ctx_session_valid` exige la sesión vigente; `claim_session` | `4b4510c` | 2026-10-23 (R73 §8.2) |
 
-**Migraciones catalogadas:** 31 (29 aplicadas en staging; 0030 y 0031 pendientes de autorización). Los commits de las filas 0023 y 0027 provienen de `git log` del archivo.
+**Migraciones catalogadas:** 31, todas aplicadas en staging. `staging:migrate` vuelve a aplicar las contraseñas de los roles: si un despliegue de Render falla por autenticación justo después, reintentar (R73 §8.3). Los commits de las filas 0023 y 0027 provienen de `git log` del archivo.
 
 ---
 
@@ -170,10 +170,11 @@ El bundle de Vercel **cambia de nombre con cada commit**, aunque el código no c
 | 2026-10-21 | API + web | Web `e71d5d0`; API NO VERIFICADO | `index-DrYEAZLA.js` · `offline-disbursements-v1` | Lecturas; BlueLine intacta | [R65 §0](./ADEX_RONDA_65_OFFLINE_DESEMBOLSOS.md) |
 | 2026-10-22 | API + web | `54944b8` (ambos) | `index-NVUgseqU.js` · `route-map-v1` | Lecturas; BlueLine intacta | [R67 §6](./ADEX_RONDA_67_SUPERADMIN_Y_MAPA.md) |
 | 2026-10-22 | Web (despliegue automático del push documental) | `b44379b` | `index-XNxWREae.js` | Consulta R70 (abajo) | este registro |
+| 2026-10-23 | `adex-online-api` + `adex-owner-api` (Render) + web | `2fa7152` (los tres; Render según su panel) | `index-DyK4-kHp.js` · `credit-rectification-v1, movements-v1, single-session-v1` · Owner sin cambio de funciones | 401 en los endpoints nuevos sin sesión; recuentos idénticos; BlueLine y Owners intactos | [R73 §8](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
 
-**Ronda 73:** sin publicación (ni `push` ni despliegue manual); ver [R73 §6](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md).
+**Ronda 73:** publicada el 2026-10-23. El primer despliegue del Owner falló por autenticación tras migrar; el reintento quedó Live. Ver [R73 §8.3](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md).
 
-**Publicaciones con evidencia:** 14 filas. Seis rondas tienen bundle, funciones y verificación documentados (R39, R40, R59, R62, R65, R67); solo en R67 consta además el commit desplegado en Render. El resto es evidencia parcial.
+**Publicaciones con evidencia:** 15 filas (R73 con commit en los tres servicios). Seis rondas tienen bundle, funciones y verificación documentados (R39, R40, R59, R62, R65, R67); solo en R67 consta además el commit desplegado en Render. El resto es evidencia parcial.
 
 ### Estado publicado observado el 2026-10-22 (consulta de solo lectura de la Ronda 70)
 
@@ -233,7 +234,7 @@ Solo se listan decisiones con aprobación escrita. Donde una decisión sustituye
 
 ---
 
-## F. Estado vigente (2026-10-22)
+## F. Estado vigente (2026-10-23)
 
 | Componente | Desarrollo | Publicación | Última verificación | Pendiente de validación operativa |
 |---|---|---|---|---|
@@ -249,10 +250,10 @@ Solo se listan decisiones con aprobación escrita. Donde una decisión sustituye
 | Mapa del Administrador y GPS en ventas | Cerrado | Publicado | R67, 2026-10-22 | Uso en campo |
 | Plataforma Owner (`/owner`, `adex-owner-api`) | Cerrado | Publicado | Consulta R70 (`/healthz`) | — |
 | Empresa Demo | Retirada (R53) | No hay Demo activa | R53 | Recreación: decisión del propietario |
-| Empresa real BlueLine | Existe en ADEX-Staging (1 ruta, 6 membresías, 1 oficina, sin clientes ni movimientos) | — | R67 (huella de solo lectura) | Inicio de operación |
+| Empresa BlueLine (pruebas operativas del socio, en paralelo con Listos; registros posiblemente reales, se conservan íntegros) | En ADEX-Staging: 36 ventas, 640 parcelas, 48 pagos, 37 solicitudes, 92 operaciones de capital | — | R73 §8.4 (solo lectura, 2026-10-23) | Evaluación de R73 |
 | CLEAN local | Congelada | **Retirada** (404) | Consulta R70 | — |
-| R73: SOC-07 (tasa autorizada) y SOC-02 (venta con la bolsa) | Implementado y probado (solo frontend) | **No publicado** | Local, 2026-10-22 | Publicación autorizada; corrección de la venta real del incidente |
-| R73: parcelas al aprobar, rectificación (0030), Consultas en tabla, negocio obligatorio, sesión única (0031), ubicaciones | Implementado y probado en local (incluye D73-01…D73-04) | **No publicado**; 0030/0031 **sin aplicar** | Local, 2026-10-23 (E2E 52/52) | Respaldo previo (puerta de recuperación) → migraciones → API → frontend ([R73 §7.5](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md)) |
+| R73: SOC-07 (tasa autorizada) y SOC-02 (venta con la bolsa) | Cerrado | Publicado (`2fa7152`) | R73 §8, 2026-10-23 | Corrección de la venta real del incidente por el Administrador (D73-06) |
+| R73: parcelas al aprobar, rectificación (0030), Consultas en tabla, negocio obligatorio, sesión única (0031), ubicaciones | Cerrado (incluye D73-01…D73-04) | Publicado (`2fa7152`; 0030/0031 aplicadas) | R73 §8, 2026-10-23 (E2E local 52/52) | Evaluación del socio ([R73 §9](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md)); la tabla B requiere empresa de pruebas autorizada |
 
 ---
 
@@ -274,12 +275,11 @@ Registro, no plan de trabajo. «Confirmado» = pendiente vigente en el documento
 | Capacidad multiempresa | Sin prueba de carga multiempresa documentada; errores 500 intermitentes bajo carga vistos en pruebas (RND-010/011, repetidos sin fallo) | Confirmado (vacío) | [R40 §9](./ADEX_RONDA_40_OWNER_ONLINE.md) |
 | Proveedor | Supabase y Render operan Online, pero DS-02 y DS-03 siguen sin aprobación escrita y el proyecto se llama «ADEX-Staging» aunque aloja una empresa real (BlueLine) y los Owners reales. **Contradicción documental**, no de código: la decide el propietario | Confirmado | [Visión §16](./VISION_Y_PRINCIPIOS_SAAS_ADEX.md), [R59](./ADEX_RONDA_59_DINERO.md) |
 | Herramientas internas | `scripts/prod-smoke.mjs` y `verify:deploy` apuntan a la URL retirada de CLEAN | Confirmado (no bloqueante) | [R59 §5](./ADEX_RONDA_59_DINERO.md) |
-| Ronda 73 · publicación | Aplicar 0030 y 0031, desplegar las dos API y publicar el frontend (orden de [R73 §7.5](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md)) | Pendiente: puerta de recuperación | [R73](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
-| Ronda 73 · respaldo antes de migrar | Plan Free sin copias verificables ni PITR: elegir copia lógica previa (`pg_dump`, requiere aprobación), pasar a Pro o aceptar el riesgo por escrito; luego seguir [R73 §7.5](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) | **Bloquea la publicación de R73** | [R73 §7.4](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
+| Ronda 73 · evaluación | Pruebas del socio según [R73 §9](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md); empresa sintética para las pruebas con dinero (requiere autorización) | Pendiente | [R73 §9.3](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
 | Ronda 73 · después de publicar | Corregir la venta real del incidente SOC-07 desde la interfaz si cumple los requisitos (D73-06); procedimiento futuro para los casos excepcionales registrados (D73-03); proveedor de búsqueda por dirección (D73-05) | Pendiente | [R73 §7.6](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
 | Pruebas HIST-001/002/003 | Fallan igual en `72b6e1b` (antes de R73): escenario Demo fechado (AX413 el 2026-10-06). No es defecto productivo demostrado; el escenario histórico de la Demo debe revisarse | Confirmado (heredado de R72) | [R73 §4](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
 
-**Cerrados que ya no son pendientes:** SuperAdmin → Clientes solo lectura (pendiente en R65 §6, cerrado en R67); ubicación para el mapa (R65 §6, cerrado en R67); reintento del abono con id nuevo (R48 §4, cerrado en R48.1); recuperación ante `/healthz` incompleto en frío (R53, corregido en R59); Demo Online (retirada por decisión en R53).
+**Cerrados que ya no son pendientes:** publicación de R73 y su puerta de recuperación (copia cifrada verificada, R73 §8); SuperAdmin → Clientes solo lectura (pendiente en R65 §6, cerrado en R67); ubicación para el mapa (R65 §6, cerrado en R67); reintento del abono con id nuevo (R48 §4, cerrado en R48.1); recuperación ante `/healthz` incompleto en frío (R53, corregido en R59); Demo Online (retirada por decisión en R53).
 
 ### Vacíos históricos identificados
 

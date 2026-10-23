@@ -6,7 +6,7 @@
 | Base | `main` @ `72b6e1b` (= `origin/main` al empezar) |
 | Alcance | SOC-01 a SOC-09. **SOC-10 excluida y no tocada** (CPF/RG) |
 | Entorno de trabajo | Solo PostgreSQL **local** y aislado, empresas y personas **sintéticas**. Ninguna operación sobre ADEX-Staging, BlueLine ni las cuentas Owner |
-| Estado de publicación | **Nada publicado.** Commits locales sin `push`; migraciones 0030 y 0031 **creadas, no aplicadas**. Cierre: ver §7 (CERRADA EN LOCAL / PENDIENTE DE PUBLICACIÓN, puerta de recuperación no superada) |
+| Estado de publicación | **PUBLICADA Y DISPONIBLE PARA EVALUACIÓN OPERATIVA** (2026-10-23): copia cifrada verificada, 0030 y 0031 aplicadas, `origin/main` = `2fa7152`, las dos API en Render y la web en Vercel sirviendo `2fa7152`. Ver §8 (publicación) y §9 (guía de evaluación) |
 
 ## 0. Criterios de cierre definidos antes de implementar
 
@@ -179,7 +179,9 @@ Criterios de cierre del encargo (§10):
 | Sesiones existentes | Al aplicar 0031 ninguna sesión cae: la regla rige desde el primer inicio de sesión explícito de cada identidad |
 | Recuperación ante fallo | Un error durante una migración revierte su transacción. Los scripts de reversión `saas/db/rollback/0030_…down.sql` y `0031_…down.sql` se verificaron en local (`tmp/r73/rollback-check.mjs`, **9/9**): esquema idéntico al de 0029, datos intactos y migraciones reaplicables. El de 0030 **se niega** a ejecutarse si ya hubo rectificaciones, casos o parcelas cambiadas; en ese caso se corrige hacia adelante. **Un script de reversión no es una copia de seguridad de datos** |
 
-### 7.4 Puerta de recuperación previa a migraciones: **NO SUPERADA**
+### 7.4 Puerta de recuperación previa a migraciones: **NO SUPERADA** (situación al cierre del 2026-10-23 por la mañana)
+
+> **Actualización:** el propietario aprobó la alternativa 1. La copia lógica cifrada se hizo y se verificó con una restauración completa antes de migrar, así que la puerta quedó **superada**. Ver §8.1.
 
 | Punto | Evidencia | Resultado |
 |---|---|---|
@@ -250,3 +252,102 @@ Si la venta ya tiene cobros, esta función no permite corregirla (D73-03): regis
 | BlueLine y Owners | Ninguna operación ni lectura de sus datos. Solo se leyó la configuración local, sin mostrar secretos |
 | SOC-10 | **No tocada** |
 | Declaración | **CERRADA EN LOCAL / PENDIENTE DE PUBLICACIÓN.** Bloqueada por la puerta de recuperación (§7.4) hasta que el propietario elija una alternativa |
+
+Esta tabla describe el estado del cierre en local. El estado vigente está en §8.6.
+
+## 8. Publicación (2026-10-23)
+
+Encargo: «R73: desbloquear publicación para pruebas operativas». La copia previa se autorizó como **copia**. No incluye modificar, eliminar ni recrear registros, ni transferir la base a terceros.
+
+### 8.1 Copia de seguridad previa (puerta de recuperación superada)
+
+| Punto | Resultado |
+|---|---|
+| Método | Volcado lógico `pg_dump` 17 (formato personalizado) de los esquemas `adex`, `adex_control`, `adex_demo`, `adex_meta`, `auth` y `public`. Es solo lectura sobre la base gestionada |
+| Protección | Cifrado AES-256-GCM. La clave está protegida con DPAPI del usuario de Windows del propietario y solo puede descifrarse con ese usuario en ese equipo. Se guardó **fuera del repositorio**, en una carpeta con acceso restringido a ese usuario. El volcado en claro solo existió durante la verificación y se borró |
+| Tamaño | ~1,07 MB, 79 tablas con datos |
+| Verificación | (1) Se descifró y se comparó la huella SHA-256 con la del volcado original. (2) Se restauró completo en un PostgreSQL **local** aislado: **79 tablas y 2017 filas idénticas** a la fuente, tabla por tabla, migraciones hasta 0029. Único aviso: «schema public already exists», que es benigno |
+| No incluido | La configuración que gestiona Supabase: ajustes de Auth, claves JWT, SMTP, contraseñas de roles y parámetros del proyecto. Storage y Vault estaban vacíos |
+| Exposición | Ninguna. No se subió a servicios externos, logs, capturas ni carpetas compartidas. La ruta y los scripts no se versionan |
+
+### 8.2 Migraciones
+
+`npm run staging:migrate`, ejecutado por el propietario el **2026-10-23 hacia las 12:18 UTC**. Aplicó solo `0030_credit_conditions_rectification.sql` y `0031_single_active_session.sql` y omitió las 29 anteriores. Comprobación de solo lectura posterior: 31 migraciones registradas con las 31 huellas correctas.
+
+### 8.3 Despliegue
+
+| Paso | Resultado |
+|---|---|
+| `git push origin main` (propietario) | `72b6e1b..2fa7152`. Vercel canceló el build con la puerta («Ignored Build Step»), como se esperaba |
+| `adex-online-api` (Render, manual) | Live. `/healthz`: `ok` con las 11 funciones anteriores más **`credit-rectification-v1`, `movements-v1` y `single-session-v1`** |
+| `adex-owner-api` (Render, manual) | **Primer intento fallido** (12:27 UTC): `password authentication failed for user "adex_control"`. La versión anterior siguió activa. La URL de Render es correcta: el propietario la comparó con la vigente, y el mismo código arrancó en local contra la base real con esa credencial (12:31 y 12:41 UTC). Causa probable, no demostrada: `staging:migrate` vuelve a aplicar la contraseña de los roles, aunque sea la misma, y el pooler tarda unos minutos en reconocer el nuevo verificador. **Segundo intento: Live** en `2fa7152`. `/healthz`: `owner-v1, owner-clean-v1, owner-email-v1` (R73 no añade funciones al Owner) |
+| `adex-online` (Vercel, *Redeploy* de `2fa7152`) | Ready. Sirve **`index-DyK4-kHp.js`**, con `VITE_VERCEL_GIT_COMMIT_SHA` = `2fa7152ad0e2…`. Contiene la rectificación con comprobación previa, la retención Offline `SESSION_ENDED` y la tabla de movimientos. `sw.js` 200 |
+
+En el Owner, R73 solo cambia el inicio de sesión: deja vigente una sola sesión (SOC-01, aplicada también a los Owners).
+
+### 8.4 Comprobaciones posteriores (sin escribir nada)
+
+| Comprobación | Resultado |
+|---|---|
+| Endpoints nuevos sin sesión: `/v1/movements`, `/v1/sales/:id/rectification-check`, `/v1/rectification-cases`, `POST /v1/session/claim`, `POST /control/v1/session/start` | **401** en todos (protegidos) |
+| Web `https://adex-online.vercel.app/` | 200 |
+| Privilegios de `adex_control` | Sin USAGE sobre `adex`; ejecuta `claim_session` y `change_superadmin_email` |
+| Integridad (consulta de solo lectura, 12:52 UTC), idéntica a la previa a la migración | 1 empresa · 36 ventas · 640 parcelas (0 sustituidas) · 48 pagos · 37 solicitudes · 92 operaciones de capital (suma de asientos = 0) · 0 rectificaciones · 0 casos · 2 Owners · 9 usuarios de Auth |
+
+**BlueLine y Owners: intactos.** No se hizo ninguna operación sobre ellos. SOC-10 no se tocó. La búsqueda por dirección sigue pendiente (D73-05) y las correcciones excepcionales siguen bloqueadas (D73-03).
+
+### 8.5 Recuperación si algo sale mal
+
+- **Ante un fallo del código:** es preferible corregir hacia adelante. Volver a desplegar el commit anterior (`72b6e1b`) en Render y Vercel es posible, pero **no se probó** que la API anterior funcione sobre 0030/0031. Por ejemplo, el guardián de 0030 ya exige al Cobrador la tasa de su ruta.
+- **Para deshacer las migraciones:** `saas/db/rollback/0031_…down.sql` y luego `0030_…down.sql`. El de 0030 se niega a ejecutarse si ya hay rectificaciones o casos.
+- **Ante una pérdida de datos:** restaurar la copia de §8.1. Solo puede hacerlo el propietario, en su equipo.
+
+### 8.6 Estado
+
+**R73 PUBLICADA Y DISPONIBLE PARA EVALUACIÓN OPERATIVA.** Se cumplen los criterios 8–10 de §7.2: migraciones aplicadas, API con las funciones nuevas y Vercel sirviendo el código nuevo.
+
+## 9. Guía de evaluación para el propietario y el socio
+
+Regla: **en BlueLine no se crean operaciones financieras de prueba.** Todo lo de la tabla A se puede revisar en BlueLine sin modificar datos. Lo de la tabla B exige crear o mover dinero, así que se prueba en una empresa de pruebas aparte (§9.3). La única excepción es la corrección de la venta real del incidente (D73-06), porque es una corrección real y no una prueba.
+
+Antes de empezar, cerrar y volver a abrir la aplicación (o recargar con Ctrl+F5) para cargar la versión nueva.
+
+### 9.1 A · Se observa sin modificar datos (sirve en BlueLine)
+
+| Pedido | Dónde | Qué debe verse |
+|---|---|---|
+| SOC-08 Consultas | Consultas → tabla de movimientos | Una tabla con filtros en el encabezado de cada columna (fecha, tipo, ruta, persona, importe…). Sin filas duplicadas. Filtrar no cambia datos |
+| SOC-03 20 parcelas | Abrir el formulario de nueva venta o solicitud **sin guardar** | El campo de parcelas aparece con 20 y se puede cambiar |
+| SOC-05 Negocio | Abrir el formulario de nuevo cliente **sin guardar** | «Negocio» es obligatorio: al intentar continuar sin él, lo pide |
+| D73-01 Tasa por ruta | Formulario del Cobrador **sin guardar** | Si la ruta no tiene «Tasa libre», solo aparece la tasa de la ruta. Si la tiene, aparecen 10 % y 20 %. La ruta actual de BlueLine tiene 20 % y «Tasa libre» activa |
+| SOC-09 Comprobación previa | Ventas activas → abrir una venta → «Corregir venta». **Cerrar el diálogo sin registrar** | El servidor revisa si la venta se puede corregir. Si no se puede (cobros, cuadre, periodo cerrado…), lo explica en lenguaje claro. Abrir el diálogo no cambia nada |
+| SOC-06 Mapa | Administrador → Mapa | Clientes con ubicación de referencia. Mirar el mapa no modifica nada |
+| SOC-01 Sesión única | Entrar con la **misma cuenta** en dos navegadores o equipos | Al entrar en el segundo, el primero pide iniciar sesión de nuevo. No es una operación financiera. **Usar una cuenta sin trabajo pendiente sin conexión** (Administrador, Secretario u Owner), no el teléfono de un Cobrador con abonos por sincronizar |
+
+### 9.2 B · Necesita operaciones (solo en una empresa de pruebas)
+
+| Pedido | Qué hay que hacer para verlo |
+|---|---|
+| SOC-07 Tasa autorizada = tasa desembolsada | Crear una solicitud, autorizarla al 10 % y desembolsar. La venta debe quedar al 10 % |
+| SOC-04 Parcelas al autorizar | Autorizar cambiando el número de parcelas. La venta debe salir con ese número |
+| SOC-02 Venta directa del Administrador | Vender desde la bolsa del Administrador. Debe descontar de su bolsa, sin pedir caja de ruta |
+| SOC-09 / D73-02 Rectificar | Corregir una venta recién desembolsada y sin cobros: subir o bajar la tasa, aumentar o reducir parcelas. Las parcelas sobrantes quedan «sustituidas», no borradas, y el historial muestra el antes y el después |
+| D73-03 Caso bloqueado | Intentar corregir una venta con un cobro. Debe bloquearse y permitir registrar el caso sin mover dinero |
+| D73-04 Offline y sesión desplazada | Teléfono A sin conexión registra un abono. El mismo Cobrador entra en el teléfono B. Al volver la conexión, A no envía nada, pide entrar de nuevo y muestra el abono **para revisión**. Solo se aplica tras confirmarlo, y una sola vez |
+| SOC-06 Ubicación de referencia | Guardar o confirmar la ubicación de un cliente. Modifica la ficha del cliente: hacerlo en BlueLine solo con datos reales |
+
+### 9.3 Empresa de pruebas (propuesta, requiere autorización)
+
+Para la tabla B, propongo una empresa **sintética y aislada**, por ejemplo «ADEX Pruebas R73», creada desde el panel Owner:
+- con 1 oficina, 1 ruta y cuentas ficticias de Administrador, Secretario y Cobrador;
+- con capital ficticio, y sin clientes ni personas reales.
+
+**Ventaja:** queda separada de BlueLine por empresa. Cada consulta está limitada a su empresa, igual que entre clientes del SaaS.
+
+**Limitación:** vive en la misma base que BlueLine. No contamina los datos de BlueLine, pero sí deja registros de prueba en la base.
+
+Al terminar, la empresa se suspende. No se borra, porque el modelo no permite borrar movimientos. **No se ha creado: requiere autorización expresa del propietario.**
+
+### 9.4 Venta real del incidente SOC-07
+
+La corrige el Administrador desde la interfaz, siguiendo §7.6. Si el diálogo la bloquea, se registra el caso. No la corrige el equipo técnico.
