@@ -171,6 +171,16 @@ export async function routeBaseReady(pool: pg.Pool): Promise<boolean> {
   }
 }
 
+/** R74 (0035, D74-O4F): gastos generales con aportes de rutas o dinero propio, y reembolsos a Administradores. */
+export async function generalExpensesReady(pool: pg.Pool): Promise<boolean> {
+  try {
+    const r = await pool.query<{ ok: boolean }>("select to_regprocedure('adex.general_expense_post(uuid,text,text,bigint,text,text,text,jsonb)') is not null as ok");
+    return r.rows[0]?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Bloque A post-R73 (0032): rectificación con pagos y reaplicación de pagos anulados. */
 export async function rectificationPaymentsReady(pool: pg.Pool): Promise<boolean> {
   for (let i = 1; i <= 3; i++) {

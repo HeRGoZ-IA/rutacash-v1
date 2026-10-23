@@ -230,6 +230,7 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
     ],
     omitted: [], added: [
       { column: 'ledger_operation_id', reason: 'Fase 5: asiento del gasto (custodia, bolsa o empresa → cuenta de gastos) en el libro de capital del servidor' },
+      { column: 'responsible_admin_membership_id', reason: 'R74 (0035, D74-O4F): Administrador responsable de un gasto general financiado con aportes de rutas o con dinero propio (alcance administrador o empresa); CLEAN no tiene estas fuentes. Toda importación es NULL' },
     ],
   },
   {

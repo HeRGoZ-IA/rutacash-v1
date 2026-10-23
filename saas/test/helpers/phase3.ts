@@ -49,7 +49,7 @@ export async function reconcile(q: pg.Pool, company: string): Promise<{ mismatch
                and (select coalesce(sum(e.amount_minor), 0) <> 0 or count(*) < 2 from adex.capital_entries e where e.company_id = o.company_id and e.operation_id = o.id))::text unbalanced,
             -- Contrapartidas (externa, interés) pueden ser negativas; la custodia, solo
             -- por un gasto del trabajador (Fase 5, 73209ce), comprobado pata a pata.
-            ((select count(*) from adex.capital_accounts where company_id = $1 and kind not in ('external', 'income', 'custody', 'unidentified') and balance_minor < 0)
+            ((select count(*) from adex.capital_accounts where company_id = $1 and kind not in ('external', 'income', 'custody', 'unidentified', 'admin_payable') and balance_minor < 0)
              + (select count(*) from adex.capital_entries e join adex.capital_accounts a on a.company_id = e.company_id and a.id = e.account_id
                   join adex.capital_operations o on o.company_id = e.company_id and o.id = e.operation_id
                  where e.company_id = $1 and a.kind = 'custody' and e.amount_minor < 0 and e.balance_after_minor < 0 and o.kind <> 'WORKER_EXPENSE'))::text overdrawn,

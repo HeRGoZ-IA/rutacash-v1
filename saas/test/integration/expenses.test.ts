@@ -367,8 +367,9 @@ describe('Fase 5 · gastos', () => {
       if (role !== 'superadmin') { await assert.rejects(run, (e: { code?: string }) => e.code === '42501', role); continue; }
       const r = await run as Record<string, number>;
       // R74 Base por Ruta (0034): + adminInflowAfterCutover, routeConservation y routeScope.
-      assert.deepEqual(Object.keys(r).sort(), ['adminInflowAfterCutover', 'carriedDrift', 'closedDrift', 'mismatched', 'negativeCustody', 'routeConservation',
-        'routeScope', 'settlementDrift', 'surplusDrift', 'unbalanced']);
+      // R74 gastos generales (0035, D74-O4F): + adminPayableDrift y generalFundingDrift.
+      assert.deepEqual(Object.keys(r).sort(), ['adminInflowAfterCutover', 'adminPayableDrift', 'carriedDrift', 'closedDrift', 'generalFundingDrift', 'mismatched',
+        'negativeCustody', 'routeConservation', 'routeScope', 'settlementDrift', 'surplusDrift', 'unbalanced']);
       for (const [k, v] of Object.entries(r)) assert.equal(v, 0, k);
     }
   });

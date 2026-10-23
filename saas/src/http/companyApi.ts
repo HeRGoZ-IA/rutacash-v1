@@ -60,6 +60,7 @@ import { VISIT_FIELDS, listVisits, registerVisit } from '../collections/visits.t
 import { offlineKey } from '../offline/capture.ts';
 import { ADJUSTMENT_FIELDS, CORRECTION_FIELDS, approveAdjustment, correctCollection, createAdjustment, listAdjustments, rejectAdjustment } from '../collections/adjustments.ts';
 import { EXPENSE_FIELDS, createExpense, getExpense, listExpenses, refundExpense, reverseExpense } from '../expenses/service.ts';
+import { REIMBURSE_FIELDS, adminPayables, getReimbursement, listReimbursements, reimburseAdmin, reverseReimbursement } from '../capital/generalFunding.ts';
 import { CLIENT_LOCATION_FIELDS, getClientLocation, routeMap, setClientLocation } from '../map/service.ts';
 import { listMovements } from '../movements/service.ts';
 import { listActivity, listCashMovements, listPerspectives, movementDetail } from '../movements/consultas.ts';
@@ -225,6 +226,14 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'GET', pattern: /^\/v1\/capital\/handovers$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ handovers: await listHandovers(c, ctx, q) }) },
   { method: 'POST', pattern: new RegExp(`^/v1/capital/handovers/${ID}/confirm$`), fields: HANDOVER_FIELDS, idempotent: 'capital.handover_confirm', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => ok(await confirmHandover(c, ctx, id!, b, op)) },
+  // ---------- Gastos generales (R74, 0035): saldos a favor de Administradores (nunca efectivo) y reembolsos ----------
+  { method: 'GET', pattern: /^\/v1\/capital\/admin-payables$/, fields: null, handler: () => async (c, ctx) => ok(await adminPayables(c, ctx)) },
+  { method: 'GET', pattern: /^\/v1\/capital\/reimbursements$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ reimbursements: await listReimbursements(c, ctx, q) }) },
+  { method: 'POST', pattern: /^\/v1\/capital\/reimbursements$/, fields: REIMBURSE_FIELDS, idempotent: 'capital.admin_reimbursement', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await reimburseAdmin(c, ctx, b, op)) },
+  { method: 'GET', pattern: new RegExp(`^/v1/capital/reimbursements/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getReimbursement(c, ctx, id!)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/capital/reimbursements/${ID}/reverse$`), fields: ['reason'], idempotent: 'capital.admin_reimbursement_reverse',
+    requiresOperation: true, handler: ([id]) => async (c, ctx, b, _q, op) => created(await reverseReimbursement(c, ctx, id!, b, op)) },
   { method: 'GET', pattern: /^\/v1\/capital\/admin-directory$/, fields: null, handler: () => async (c, ctx) => ok({ admins: await adminDirectory(c, ctx) }) },
   { method: 'GET', pattern: /^\/v1\/capital\/admin-transfers$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ transfers: await listAdminTransfers(c, ctx, q) }) },
   { method: 'POST', pattern: /^\/v1\/capital\/admin-transfers$/, fields: REGISTER_FIELDS, idempotent: 'capital.admin_transfer_register', requiresOperation: true,

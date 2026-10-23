@@ -118,9 +118,12 @@ describe('Ronda 33 · RLS con contexto evaluado una vez (0020)', () => {
       + ' drop policy credit_rectification_cases_ctx on adex.credit_rectification_cases; drop policy credit_rectification_cases_insert on adex.credit_rectification_cases;'
       // R74 Base por Ruta (0034): actas de entrega, activaciones y la lectura ampliada de cuentas/operaciones de la ruta.
       + ' drop policy route_handover_records_ctx on adex.route_handover_records; drop policy capital_model_activations_ctx on adex.capital_model_activations;'
-      + ' drop policy capital_accounts_route_ctx on adex.capital_accounts; drop policy capital_operations_route_base_ctx on adex.capital_operations;');
+      + ' drop policy capital_accounts_route_ctx on adex.capital_accounts; drop policy capital_operations_route_base_ctx on adex.capital_operations;'
+      // R74 gastos generales (0035): lectura de aportes de rutas y de sus operaciones por quienes gestionan la ruta.
+      + ' drop policy general_funding_contributions_ctx on adex.general_funding_contributions;'
+      + ' drop policy capital_operations_general_funding_ctx on adex.capital_operations;');
     const LATER = [':client_locations', ':sale_locations', ':payment_locations', ':credit_rectifications', ':credit_rectification_cases',
-      ':route_handover_records', ':capital_model_activations'];
+      ':route_handover_records', ':capital_model_activations', ':general_funding_contributions', ':admin_reimbursements'];
     // 0034 amplía a propósito lo que el Administrador y el Supervisor ven de las cuentas de SUS rutas (cartera, interés,
     // gastos, control, Base) y, con ellas, sus patas: no se comparan esas lecturas.
     const route034 = (k: string) => (k.startsWith('admin/') || k.startsWith('supervisor/')) && (k.endsWith(':capital_accounts') || k.endsWith(':capital_entries'));

@@ -41,7 +41,9 @@ export type CapitalKind =
   | 'SETTLEMENT_RETURN' | 'SETTLEMENT_SURPLUS' | 'ADMIN_TRANSFER_HOLD' | 'ADMIN_TRANSFER_APPLY' | 'ADMIN_TRANSFER_RELEASE'
   | 'DISBURSEMENT_ADJUSTMENT' | 'PRINCIPAL_RECLASSIFICATION'
   // R74 Base por Ruta (0034): solo con `companies.capital_model = 'route_base'` (ver routeBase.ts).
-  | 'ROUTE_BASE_INJECTION' | 'ROUTE_BASE_WITHDRAWAL' | 'ROUTE_TRANSFER' | 'LEGACY_POOL_TO_ROUTE';
+  | 'ROUTE_BASE_INJECTION' | 'ROUTE_BASE_WITHDRAWAL' | 'ROUTE_TRANSFER' | 'LEGACY_POOL_TO_ROUTE'
+  // R74 (0035, D74-O4F): aportes de rutas a un gasto general, gasto con dinero propio y reembolso (generalFunding.ts).
+  | 'GENERAL_EXPENSE_CONTRIBUTION' | 'GENERAL_EXPENSE_OWN_MONEY' | 'ADMIN_REIMBURSEMENT';
 
 /** Operaciones de la Base (0034): se escriben y se anulan con `adex.route_base_post`. */
 export const ROUTE_BASE_KINDS: readonly string[] = ['ROUTE_BASE_INJECTION', 'ROUTE_BASE_WITHDRAWAL', 'ROUTE_TRANSFER', 'LEGACY_POOL_TO_ROUTE'];
@@ -51,7 +53,9 @@ export const ROUTE_BASE_KINDS: readonly string[] = ['ROUTE_BASE_INJECTION', 'ROU
  * comando (el cuadre, solo reabriéndolo), nunca por la anulación genérica.
  */
 const OWN_CORRECTION_KINDS: readonly string[] = ['COLLECTION', 'WORKER_EXPENSE', 'ROUTE_EXPENSE', 'COMPANY_EXPENSE', 'EXPENSE_REFUND',
-  'SETTLEMENT_RETURN', 'SETTLEMENT_SURPLUS', 'ADMIN_TRANSFER_HOLD', 'ADMIN_TRANSFER_APPLY', 'ADMIN_TRANSFER_RELEASE'];
+  'SETTLEMENT_RETURN', 'SETTLEMENT_SURPLUS', 'ADMIN_TRANSFER_HOLD', 'ADMIN_TRANSFER_APPLY', 'ADMIN_TRANSFER_RELEASE',
+  // R74 (0035): el gasto general se anula con /v1/expenses/:id/reverse; el reembolso, con /v1/capital/reimbursements/:id/reverse.
+  'GENERAL_EXPENSE_CONTRIBUTION', 'GENERAL_EXPENSE_OWN_MONEY', 'ADMIN_REIMBURSEMENT'];
 
 const COMPANY_KINDS: readonly string[] = ['COMPANY_DEPOSIT', 'COMPANY_WITHDRAWAL', 'ADMIN_ALLOCATION', 'ADMIN_RETURN'];
 
@@ -181,6 +185,7 @@ export const ACTIONS: Record<CapitalKind, string> = {
   DISBURSEMENT_ADJUSTMENT: 'RECTIFY_CREDIT', PRINCIPAL_RECLASSIFICATION: 'RECTIFY_CREDIT',
   ROUTE_BASE_INJECTION: 'ROUTE_BASE_INJECTED', ROUTE_BASE_WITHDRAWAL: 'ROUTE_BASE_WITHDRAWN', ROUTE_TRANSFER: 'ROUTE_BASE_TRANSFERRED',
   LEGACY_POOL_TO_ROUTE: 'UNASSIGNED_CAPITAL_ASSIGNED',
+  GENERAL_EXPENSE_CONTRIBUTION: 'CREATE_EXPENSE', GENERAL_EXPENSE_OWN_MONEY: 'CREATE_EXPENSE', ADMIN_REIMBURSEMENT: 'ADMIN_REIMBURSEMENT_PAID',
 };
 
 /** Escribe, audita (misma transacción) y responde con lo que el actor puede ver. */
@@ -575,7 +580,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
   const unbalanced = l('unbalanced');
   // Contrapartidas (externa, interés) miden lo que entró; la custodia solo puede
   // quedar negativa por un gasto del trabajador (73209ce), comprobado pata a pata.
-  const overdrawn = await q(`select count(*)::text n from adex.capital_accounts where company_id = $1 and kind not in ('external', 'income', 'custody', 'unidentified', 'route_funding') and balance_minor < 0`);
+  const overdrawn = await q(`select count(*)::text n from adex.capital_accounts where company_id = $1 and kind not in ('external', 'income', 'custody', 'unidentified', 'route_funding', 'admin_payable') and balance_minor < 0`);
   const negativeCustody = l('negativeCustody');
   const foreignCurrency = await q(
     `select count(*)::text n from adex.capital_operations o join adex.companies c on c.id = o.company_id
@@ -630,11 +635,17 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
                           and o.amount_minor = abs(p.amount_minor) and o.route_id = p.route_id and coalesce(o.reverses_kind, o.kind) = 'COLLECTION')`);
   // Fase 5 · gastos: cada gasto con asiento coincide con él, y la cuenta de gastos de
   // cada ruta (o de empresa) es la suma de sus gastos netos.
+  // R74 (0035): un gasto general con aportes de rutas tiene UNA operación por ruta (todas con su `expense_id`):
+  // su suma es el gasto y la primera es la enlazada (el detalle por aporte lo comprueba `generalFundingDrift`).
   const unmatchedExpenses = await q(
     `select count(*)::text n from adex.expenses x
       where x.company_id = $1 and x.ledger_operation_id is not null
-        and not exists (select 1 from adex.capital_operations o where o.company_id = x.company_id and o.id = x.ledger_operation_id and o.expense_id = x.id
-                          and o.amount_minor = abs(x.amount_minor) and o.route_id is not distinct from x.route_id)`);
+        and not (case when x.funding = 'routes'
+                      then exists (select 1 from adex.capital_operations o where o.company_id = x.company_id and o.id = x.ledger_operation_id and o.expense_id = x.id)
+                           and abs(x.amount_minor) = (select coalesce(sum(o.amount_minor), 0) from adex.capital_operations o
+                                                       where o.company_id = x.company_id and o.expense_id = x.id)
+                      else exists (select 1 from adex.capital_operations o where o.company_id = x.company_id and o.id = x.ledger_operation_id and o.expense_id = x.id
+                                     and o.amount_minor = abs(x.amount_minor) and o.route_id is not distinct from x.route_id) end)`);
   const expenseAccounts = await q(
     `select count(*)::text n from adex.capital_accounts a
       where a.company_id = $1 and a.kind = 'expense'
@@ -689,6 +700,12 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
     { name: 'legs-in-route-scope', ok: l('routeScope') === 0, detail: l('routeScope') },
     { name: 'no-admin-pool-inflow-after-cutover', ok: l('adminInflowAfterCutover') === 0, detail: l('adminInflowAfterCutover') },
     { name: 'route-conservation', ok: l('routeConservation') === 0, detail: l('routeConservation') },
+    // R74 (0035, D74-O4F): aportes de rutas y reembolsos cuadran con el libro; el saldo a favor de cada Administrador
+    // = Σ gastos con dinero propio − Σ reembolsos vigentes (nunca efectivo).
+    ...(ledger['generalFundingDrift'] === undefined ? [] : [
+      { name: 'general-funding-matches-contributions', ok: l('generalFundingDrift') === 0, detail: l('generalFundingDrift') },
+      { name: 'admin-payables-match-expenses-and-reimbursements', ok: l('adminPayableDrift') === 0, detail: l('adminPayableDrift') },
+    ]),
   ];
   return { ok: checks.every((c) => c.ok), checks };
 }

@@ -67,9 +67,14 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX423': return new ApiError(409, 'ROUTE_IN_HANDOVER');                // ruta «en entrega»: falta el conteo del nuevo responsable
     case 'AX424': return new ApiError(409, 'ROUTE_SCOPE_VIOLATION');            // una pata de otra ruta (segunda barrera)
     case 'AX425': return new ApiError(409, 'ACTIVATION_PREREQUISITES_FAILED');  // activar `route_base` sin cumplir requisitos
-    case 'AX426': return new ApiError(409, 'GENERAL_EXPENSE_FUNDING_PENDING');  // O4: financiación del gasto general sin decidir
+    case 'AX426': return new ApiError(409, 'GENERAL_EXPENSE_FUNDING_PENDING');  // route_base: gasto general con bolsa o cuenta de empresa (0035: usar fundingSource routes u own_money)
     case 'AX427': return new ApiError(409, 'HANDOVER_NOT_PENDING');
     case 'AX428': return new ApiError(409, 'ROUTE_BASE_NOT_ACTIVE');            // comando de Base en una empresa sin `route_base`
+    // R74 · financiación de gastos generales (0035, D74-O4F). Sin cifras de saldos.
+    case 'AX429': return new ApiError(400, 'CONTRIBUTIONS_INVALID');            // aportes mal formados, repetidos o que no suman el total
+    case 'AX430': return new ApiError(403, 'CONTRIBUTION_ROUTE_NOT_ALLOWED');   // la ruta aportante no es del actor (responsable válido)
+    case 'AX431': return new ApiError(409, 'REIMBURSEMENT_EXCEEDS_PENDING');    // el reembolso supera lo que la empresa le debe
+    case 'AX432': return new ApiError(409, 'PAYABLE_ALREADY_REIMBURSED');       // anular un gasto con dinero propio ya reembolsado
     // Fase 4 · solicitudes y desembolsos.
     case 'AX501': return new ApiError(409, 'REQUEST_STATE_INVALID');
     case 'AX502': return new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED');
