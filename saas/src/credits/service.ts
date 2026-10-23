@@ -403,9 +403,13 @@ function textOf(body: Record<string, unknown>, key: string, min: number, max: nu
 }
 
 /**
- * Decisión del propietario (Ronda 73): el ADMINISTRADOR corrige un crédito desembolsado SIN
- * recaudos, cuyo desembolso no entró en un cuadre ni en un periodo cerrado (capital
- * realmente entregado, interés, parcelas y calendario). Nunca se borra el crédito ni se toca
+ * Decisión del propietario (Ronda 73): el ADMINISTRADOR corrige un crédito desembolsado (capital
+ * realmente entregado, interés, parcelas y calendario) fuera de periodos cerrados.
+ * Bloque A post-R73 (0032): también con pagos registrados. Cuenta el efecto NETO de los pagos
+ * (anulados incluidos): las cuotas salen del pagado neto y la diferencia de imputación
+ * capital/interés es una reclasificación sin efectivo (`PRINCIPAL_RECLASSIFICATION`). El total
+ * corregido no puede quedar por debajo de lo ya pagado. Si cambia el capital, rigen además los
+ * controles de SOC-09 (desembolso fuera de cuadre, custodio vigente, saldo). Nunca se borra el crédito ni se toca
  * su asiento: la diferencia de capital es una operación nueva (`DISBURSEMENT_ADJUSTMENT`)
  * entre la cuenta que pagó y la cartera, y las cuotas se rehacen con el motor de CLEAN; lo
  * anterior queda completo en `adex.credit_rectifications`. Todo en `adex.credit_rectify`
@@ -442,14 +446,20 @@ export async function rectifyCredit(client: pg.PoolClient, ctx: ActiveContext, i
   await audit(client, ctx, { action: 'RECTIFY_CREDIT', entityType: 'sale', entityId: s.id, routeId: s.route_id,
     description: `Rectificación del crédito desembolsado (capital ${before.amountMinor} → ${c.amount})`, before, after, reason,
     metadata: { operationId: opId, rectificationId: r.rectification_id, adjustmentOperationId: r.adjustment_id, deltaMinor: Number(r.delta_minor), evidence } });
+  // (la reclasificación, si la hubo, queda en el historial de rectificaciones y en el libro)
+  const extra = (await client.query<{ net_paid_minor: string; principal_reclass_minor: string; reclass_operation_id: string | null }>(
+    'select net_paid_minor, principal_reclass_minor, reclass_operation_id from adex.credit_rectifications where company_id = $1 and id = $2',
+    [ctx.companyId, r.rectification_id])).rows[0];
   const credit = await getCredit(client, ctx, s.id);
-  return { ...credit, rectification: { id: r.rectification_id, adjustmentOperationId: r.adjustment_id, deltaMinor: Number(r.delta_minor) } };
+  return { ...credit, rectification: { id: r.rectification_id, adjustmentOperationId: r.adjustment_id, deltaMinor: Number(r.delta_minor),
+    netPaidMinor: Number(extra?.net_paid_minor ?? 0), principalReclassMinor: Number(extra?.principal_reclass_minor ?? 0),
+    reclassOperationId: extra?.reclass_operation_id ?? null } };
 }
 
 // ---------- D73-03 · diagnóstico previo y casos excepcionales ----------
 
 const CASE_BLOCKERS = ['INSUFFICIENT_FUNDS', 'CUSTODIAN_CHANGED', 'DISBURSEMENT_SETTLED', 'PERIOD_CLOSED', 'OFFLINE_PENDING', 'CREDIT_HAS_COLLECTIONS',
-  'POOL_OF_ANOTHER_ADMIN'] as const;
+  'POOL_OF_ANOTHER_ADMIN', 'OVERPAYMENT', 'PAYMENT_ADJUSTMENT_PENDING', 'LEGACY_PAYMENTS', 'LEDGER_INCONSISTENT'] as const;
 export const RECTIFICATION_CASE_FIELDS = ['blocker', 'proposed', 'reason', 'evidence'] as const;
 
 async function loadSaleForRectification(client: pg.PoolClient, ctx: ActiveContext, id: string): Promise<SaleRow> {
@@ -462,14 +472,25 @@ async function loadSaleForRectification(client: pg.PoolClient, ctx: ActiveContex
 }
 
 /**
- * Comprobación SIN efectos antes de rectificar: motivos que la bloquean hoy (mismas reglas que
- * `adex.credit_rectify`) y cuánto puede subir el capital sin sobregirar la cuenta que pagó.
+ * Comprobación SIN efectos antes de rectificar (mismas reglas que `adex.credit_rectify`):
+ *   · `blockers`: impiden cualquier corrección hoy;
+ *   · `capitalBlockers`: solo impiden cambiar el capital entregado (mueve efectivo);
+ *   · `payments`: resumen de pagos (vigentes, anulados, pagado neto, imputación);
+ *   · `minTotalMinor`: el total corregido no puede quedar por debajo de lo ya pagado;
+ *   · `maxIncreaseMinor`: cuánto puede subir el capital sin sobregirar la cuenta que pagó.
  */
 export async function rectifyCheck(client: pg.PoolClient, ctx: ActiveContext, id: string) {
   const s = await loadSaleForRectification(client, ctx, id);
-  const r = (await client.query<{ r: { blockers: string[]; payerKind: string | null; maxIncreaseMinor: number; rectificationCount: number } }>(
+  const r = (await client.query<{ r: { blockers: string[]; capitalBlockers?: string[]; payerKind: string | null; maxIncreaseMinor: number;
+    rectificationCount: number; minTotalMinor?: number; payments?: Record<string, number | string | null> } }>(
     'select adex.credit_rectify_check($1) r', [s.id])).rows[0]!.r;
-  return { saleId: s.id, blockers: r.blockers, payerKind: r.payerKind, maxIncreaseMinor: Number(r.maxIncreaseMinor), rectificationCount: Number(r.rectificationCount) };
+  const p = r.payments ?? {};
+  return { saleId: s.id, blockers: r.blockers, capitalBlockers: r.capitalBlockers ?? [], payerKind: r.payerKind,
+    maxIncreaseMinor: Number(r.maxIncreaseMinor), rectificationCount: Number(r.rectificationCount), minTotalMinor: Number(r.minTotalMinor ?? 0),
+    payments: { active: Number(p['active'] ?? 0), reversed: Number(p['reversed'] ?? 0), reversals: Number(p['reversals'] ?? 0),
+      reapplied: Number(p['reapplied'] ?? 0), netPaidMinor: Number(p['netPaidMinor'] ?? 0),
+      principalRecognizedMinor: Number(p['principalRecognizedMinor'] ?? 0), interestRecognizedMinor: Number(p['interestRecognizedMinor'] ?? 0),
+      lastPaymentDate: p['lastPaymentDate'] ? String(p['lastPaymentDate']).slice(0, 10) : null } };
 }
 
 /**
@@ -519,10 +540,13 @@ export async function listRectifications(client: pg.PoolClient, ctx: ActiveConte
   need(ctx, 'sale.viewActive');
   if (!(await client.query('select 1 from adex.sales where company_id = $1 and id = $2', [ctx.companyId, id])).rowCount) throw new ApiError(404, 'NOT_FOUND');
   const r = await client.query<{ id: string; sequence_no: number; adjustment_operation_id: string | null; delta_minor: string; before_state: Record<string, unknown>;
-    after_state: Record<string, unknown>; reason: string; evidence: string; actor_membership_id: string; business_date: string | Date; created_at: Date }>(
-    `select id, sequence_no, adjustment_operation_id, delta_minor, before_state, after_state, reason, evidence, actor_membership_id, business_date, created_at
+    after_state: Record<string, unknown>; reason: string; evidence: string; actor_membership_id: string; business_date: string | Date; created_at: Date;
+    net_paid_minor: string; principal_reclass_minor: string; reclass_operation_id: string | null }>(
+    `select id, sequence_no, adjustment_operation_id, delta_minor, before_state, after_state, reason, evidence, actor_membership_id, business_date, created_at,
+            net_paid_minor, principal_reclass_minor, reclass_operation_id
        from adex.credit_rectifications where company_id = $1 and sale_id = $2 order by sequence_no`, [ctx.companyId, id]);
   return r.rows.map((x) => ({ id: x.id, sequence: x.sequence_no, adjustmentOperationId: x.adjustment_operation_id, deltaMinor: Number(x.delta_minor),
+    netPaidMinor: Number(x.net_paid_minor), principalReclassMinor: Number(x.principal_reclass_minor), reclassOperationId: x.reclass_operation_id,
     before: x.before_state, after: x.after_state, reason: x.reason, evidence: x.evidence, actorId: x.actor_membership_id,
     businessDate: ymd(x.business_date), at: x.created_at.toISOString() }));
 }

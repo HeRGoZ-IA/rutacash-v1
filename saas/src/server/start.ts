@@ -27,7 +27,7 @@ import { createCompanyExecutor, createCompanyHandler } from '../http/companyApi.
 import { createDemoHandler } from '../http/demoApi.ts';
 import { createDemoService } from '../demo/service.ts';
 import { API_FEATURES, createOnlineServer } from './app.ts';
-import { adminTransfersReady, capitalRequestsReady, offlineCollectorReady, offlineDisbursementsReady, paymentLocationsReady, routeMapReady, creditRectificationReady, singleSessionReady } from '../collections/location.ts';
+import { adminTransfersReady, capitalRequestsReady, offlineCollectorReady, offlineDisbursementsReady, paymentLocationsReady, routeMapReady, creditRectificationReady, rectificationPaymentsReady, singleSessionReady } from '../collections/location.ts';
 
 /** Configuración común a los dos servicios (empresa y Owner): TLS, CORS, proveedor, límites. */
 export function readCommonConfig(env: NodeJS.ProcessEnv) {
@@ -107,6 +107,8 @@ export async function start(env: NodeJS.ProcessEnv = process.env) {
   if (!(await creditRectificationReady(apiPool))) missing.add('credit-rectification-v1');
   // Ronda 73: una sola sesión activa por identidad solo con 0031 aplicada.
   if (!(await singleSessionReady(apiPool))) missing.add('single-session-v1');
+  // Bloque A post-R73: rectificación con pagos y reaplicación solo con 0032 aplicada.
+  if (!(await rectificationPaymentsReady(apiPool))) missing.add('rectification-payments-v1');
   const features = API_FEATURES.filter((f) => !missing.has(f));
   const server = createOnlineServer({
     company: createCompanyHandler(companyOpts), demo, readinessPool: apiPool, allowedOrigins: cfg.origins, trustProxy: cfg.trustProxy, rateLimit: cfg.rateLimit,

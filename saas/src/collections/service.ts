@@ -31,6 +31,7 @@ interface PaymentRow {
   reverses_payment_id: string | null; reversal_payment_id: string | null; correction_reason: string | null; corrected_by_membership_id: string | null;
   corrected_at: Date | null; ledger_operation_id: string | null; principal_minor: string | null; interest_minor: string | null;
   corrected_by_payment_id?: string | null; correction_of_payment_id?: string | null; period_closed?: boolean;
+  reapplies_payment_id?: string | null;   // 0032
 }
 
 const ymd = (d: string | Date) => (typeof d === 'string' ? d.slice(0, 10)
@@ -53,6 +54,7 @@ function paymentView(p: PaymentRow) {
     correctedBy: p.corrected_by_membership_id, correctedAt: p.corrected_at?.toISOString() ?? null, ledgerOperationId: p.ledger_operation_id,
     principalMinor: num(p.principal_minor), interestMinor: num(p.interest_minor),
     correctedByPaymentId: p.corrected_by_payment_id ?? null, correctionOfPaymentId: p.correction_of_payment_id ?? null,
+    reappliesPaymentId: p.reapplies_payment_id ?? null,
     // ¿Su fecha cae en una semana CERRADA de la ruta? (decide corrección directa o solicitud de ajuste, D7).
     periodClosed: p.period_closed === true,
   };
@@ -194,6 +196,46 @@ export async function reverseCollection(client: pg.PoolClient, ctx: ActiveContex
     ...(await creditState(client, ctx, prev.sale_id)),
     entries: await visibleEntries(client, ctx, r['operationId'] as string),
   };
+}
+
+/**
+ * Bloque A post-R73 (0032): reaplicar un pago ANULADO. El mismo efectivo vuelve a la misma cuenta
+ * que lo recibió, con la fecha original si su semana sigue abierta, en una operación nueva enlazada
+ * al pago anulado. Solo el Administrador; bloqueos en `adex.collection_reapply`.
+ */
+export async function reapplyCollection(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Record<string, unknown>, operationId: string | null) {
+  const opId = requireOperationId(operationId);
+  const prev = await loadPayment(client, ctx, id);
+  need(ctx, 'payment.reverse', { routeId: prev.route_id });
+  if (ctx.role !== 'admin') throw new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED', 'only an administrator reapplies a reversed payment');
+  await routeOf(client, ctx, prev.route_id);
+  const reason = reqText(body, 'reason', 300).trim();
+  if (reason.length < 10) throw new ApiError(400, 'INVALID_INPUT', 'reason needs at least 10 characters', { field: 'reason' });
+  const r = (await client.query<{ r: Record<string, unknown> }>('select adex.collection_reapply($1, $2, $3) r', [opId, prev.id, reason])).rows[0]!.r;
+  await audit(client, ctx, {
+    action: 'REAPPLY_PAYMENT', entityType: 'Payment', entityId: r['paymentId'] as string, routeId: prev.route_id, reason,
+    description: `Pago anulado reaplicado (${Number(prev.amount_minor)}): ${reason}`,
+    before: { pagoAnulado: prev.id, valor: Number(prev.amount_minor), fecha: ymd(prev.payment_date) },
+    after: { pagoNuevo: r['paymentId'], fecha: r['paymentDate'], receptor: r['receiver'] },
+    metadata: { operationId: opId, saleId: prev.sale_id, collectorId: prev.collector_membership_id, reappliesPaymentId: prev.id },
+  });
+  return {
+    payment: paymentView(await loadPayment(client, ctx, r['paymentId'] as string)),
+    original: paymentView(await loadPayment(client, ctx, prev.id)),
+    ...(await creditState(client, ctx, prev.sale_id)),
+    entries: await visibleEntries(client, ctx, r['operationId'] as string),
+  };
+}
+
+/** ¿Se puede reaplicar este pago anulado? Sin efectos (diálogo del Administrador). */
+export async function reapplyCheck(client: pg.PoolClient, ctx: ActiveContext, id: string) {
+  const prev = await loadPayment(client, ctx, id);
+  need(ctx, 'payment.reverse', { routeId: prev.route_id });
+  if (ctx.role !== 'admin') throw new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED', 'only an administrator reapplies a reversed payment');
+  const r = (await client.query<{ r: Record<string, unknown> }>('select adex.collection_reapply_check($1) r', [prev.id])).rows[0]!.r;
+  return { paymentId: prev.id, saleId: prev.sale_id, amountMinor: Number(r['amountMinor']), paymentDate: String(r['paymentDate']).slice(0, 10),
+    reapplyDate: String(r['reapplyDate']).slice(0, 10), receiverKind: r['receiverKind'] ?? null, receiverId: r['receiverId'] ?? null,
+    blockers: (r['blockers'] as string[]) ?? [] };
 }
 
 /** Historial de abonos visible (`payment.viewHistory`, por ruta con RLS). */

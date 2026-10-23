@@ -159,7 +159,7 @@ export const SETTLEMENT_FIELDS = ['routeId', 'workerId', 'deliveredMinor', 'expe
 
 /**
  * CIERRE del cuadre (`closeCashSettlement`). Autoridad `cashSettlement.close` + `settle`
- * (responsable, SuperAdmin o Supervisor de la ruta); nunca la misma PERSONA que se cuadra.
+ * (responsable o Supervisor de la ruta; R74: ya no el SuperAdmin); nunca la misma PERSONA que se cuadra.
  * El esperado lo calcula PostgreSQL bajo bloqueo; el visto en pantalla solo detecta
  * cifras obsoletas (se rechaza) y la vista previa de partida (`previousSettlementId`)
  * impide que dos intentos del mismo cuadre creen dos ciclos.
@@ -284,7 +284,7 @@ export const PERIOD_CLOSE_FIELDS = ['routeId', 'weekStart', 'weekEnd', 'note'] a
 
 /**
  * CIERRE de periodo (`closeSettlement`): `settlement.close` + `correct` (responsable de
- * capital o SuperAdmin). D29 con el reloj del servidor y la zona de la empresa; sin
+ * capital; R74: ya no el SuperAdmin). D29 con el reloj del servidor y la zona de la empresa; sin
  * duplicados ni solapes; cifras del libro archivadas e inmutables.
  */
 export async function closePeriod(client: pg.PoolClient, ctx: ActiveContext, body: Json, operationId: string | null) {
@@ -354,7 +354,7 @@ export async function getClosure(client: pg.PoolClient, ctx: ActiveContext, id: 
 
 /**
  * REAPERTURA de un periodo cerrado (`reopenSettlement` de CLEAN, 0016): `settlement.reopen`
- * + autoridad `correct` (responsable de capital o SuperAdmin), motivo ≥ 10. No borra ni
+ * + autoridad `correct` (responsable de capital; R74: ya no el SuperAdmin), motivo ≥ 10. No borra ni
  * recalcula: el documento queda 'reabierta' y sus fechas vuelven a ser corregibles hasta el
  * siguiente cierre, que crea una versión nueva. El archivo de cifras no cambia.
  */

@@ -149,7 +149,8 @@ describe('Fase 5 · gastos', () => {
     assert.equal(d.status, 201, 'el Supervisor de la ruta sí (settle)');
     assert.deepEqual([(d.body['expense'] as Body)['registeredBy'], (d.body['expense'] as Body)['workerId']], [dora.membershipId, carlos.membershipId], 'registrar ≠ responder');
     assert.equal((await worker($ana, carlos.membershipId, 100)).status, 201, 'el responsable de capital sí');
-    assert.equal((await worker($bruno, carlos.membershipId, 100)).status, 201, 'el SuperAdmin sí');
+    // R74 (cambio de regla en esta intervención): el SuperAdmin ya no carga gastos a otros (antes sí).
+    assert.equal((await worker($bruno, carlos.membershipId, 100)).status, 403, 'el SuperAdmin ya no (R74)');
     assert.equal((await worker(xavier.money, carlos.membershipId, 100)).body['error'], 'CAPITAL_AUTHORITY_REQUIRED', 'Administrador asignado que no es responsable');
     assert.equal((await worker(money(gabi), carlos.membershipId, 100)).status, 403, 'la Secretaria no registra gastos');
     assert.equal((await worker(money(fabio), carlos.membershipId, 100)).status, 403, 'el Socio no registra gastos');
@@ -172,7 +173,8 @@ describe('Fase 5 · gastos', () => {
     assert.equal(await count(db.admin, `select 1 from adex.capital_accounts where company_id = $1 and route_id = $2 and kind not in ('custody', 'portfolio', 'income', 'expense')`, [c1, r1]), 0,
       'no existe ninguna caja de ruta');
     assert.equal((await spend(xavier.money, { scope: 'ruta', routeId: r1, amountMinor: 100 })).body['error'], 'CAPITAL_AUTHORITY_REQUIRED');
-    assert.equal((await spend($bruno, { scope: 'ruta', routeId: r1, amountMinor: 100 })).body['error'], 'CAPITAL_AUTHORITY_REQUIRED', 'el SuperAdmin asigna capital; la ruta la maneja su responsable');
+    // R74: sin `cashCustody.manage` el SuperAdmin ya recibe 403 antes de la autoridad sobre la ruta.
+    assert.equal((await spend($bruno, { scope: 'ruta', routeId: r1, amountMinor: 100 })).status, 403, 'el SuperAdmin asigna capital; la ruta la maneja su responsable');
     assert.equal((await spend(dora.money, { scope: 'ruta', routeId: r1, amountMinor: 100 })).body['error'], 'CAPITAL_AUTHORITY_REQUIRED');
     assert.equal((await spend(carlos.money, { scope: 'ruta', routeId: r1, amountMinor: 100 })).status, 403);
   });
@@ -263,7 +265,8 @@ describe('Fase 5 · gastos', () => {
     assert.equal((await $bruno(`/v1/expenses/${b['id']}/refunds`, { amountMinor: 5_001, reason: 'Demasiado' })).body['error'], 'REFUND_EXCEEDS_EXPENSE');
     assert.equal((await $bruno(`/v1/expenses/${b['id']}/reverse`, { reason: 'Con reintegros' })).body['error'], 'EXPENSE_HAS_REFUNDS');
     assert.equal(await companyAcc(), comp + 4_000);
-    // Gastos de trabajador y de ruta (F5-D02): los anula el responsable o el SuperAdmin, nunca quien los registró.
+    // Gastos de trabajador y de ruta (F5-D02): los anula el responsable, nunca quien los registró.
+    // R74 (cambio de regla en esta intervención): el SuperAdmin ya no los anula.
     const w = (await worker(carlos.money, carlos.membershipId, 700, { description: 'Mal cargado' })).body['expense'] as Body;
     const rr = (await spend($ana, { scope: 'ruta', routeId: r1, amountMinor: 1_200, description: 'Ruta' })).body['expense'] as Body;
     assert.equal((await dora.money(`/v1/expenses/${w['id']}/reverse`, { reason: 'Supervisor' })).status, 403, 'el Supervisor no corrige');
@@ -272,7 +275,7 @@ describe('Fase 5 · gastos', () => {
     assert.equal(await custody(carlos.membershipId), cash + 700);
     assert.equal((await $ana(`/v1/expenses/${rr['id']}/refunds`, { amountMinor: 100, reason: 'Parcial de ruta' })).body['error'], 'REFUND_NOT_ALLOWED', 'reintegros: solo gastos de bolsa (D12)');
     assert.equal((await $ana(`/v1/expenses/${rr['id']}/reverse`, { reason: 'Propio' })).body['error'], 'SELF_CORRECTION_FORBIDDEN', 'Ana lo registró');
-    assert.equal((await $bruno(`/v1/expenses/${rr['id']}/reverse`, { reason: 'Anulado por el SuperAdmin' })).status, 201);
+    assert.equal((await $bruno(`/v1/expenses/${rr['id']}/reverse`, { reason: 'Anulado por el SuperAdmin' })).body['error'], 'CAPITAL_AUTHORITY_REQUIRED', 'R74: el SuperAdmin tampoco');
     // Históricos sembrados (D9, sin asiento): no se corrigen por esta vía.
     const legacy = (await db.admin.query(`select id from adex.expenses where company_id = $1 and ledger_operation_id is null and reverses_id is null and refunds_expense_id is null and reversal_id is null and route_id is null limit 1`, [c1])).rows[0]?.id;
     if (legacy) assert.equal((await $bruno(`/v1/expenses/${legacy}/reverse`, { reason: 'Histórico' })).body['error'], 'NOT_CORRECTABLE_HERE');

@@ -166,6 +166,7 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
     ], added: [
       { column: 'ledger_operation_id', reason: 'Fase 4: asiento de desembolso del libro de capital del servidor (capital_operations); CLEAN no tiene libro de doble entrada' },
       { column: 'rectification_count', reason: 'Ronda 73 (0030): rectificaciones del crédito desembolsado (historial en credit_rectifications; concurrencia optimista)' },
+      { column: 'principal_reclassified_minor', reason: 'Ronda 74 (0032): capital reclasificado por rectificaciones con pagos; capital reconocido = Σ pagos.principal_minor + este valor' },
     ],
   },
   {
@@ -189,7 +190,10 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       id('correctionOfPaymentId', 'correction_of_payment_id'), f('correctionReason', 'correction_reason'),
       id('correctedBy', 'corrected_by_membership_id'), instant('correctedAt', 'corrected_at'),
     ],
-    omitted: [], added: [
+    omitted: [
+      { field: 'reappliesPaymentId', reason: 'Ronda 74 (0032): dato SOLO del servidor (pago reaplicado → pago anulado cuyo efectivo vuelve a registrar) que ADEX Online lee de la API; CLEAN local no reaplica pagos y no se importa' },
+    ], added: [
+      { column: 'reapplies_payment_id', reason: 'Ronda 74 (0032): enlace del pago reaplicado con el pago anulado (una sola reaplicación por pago, índice único)' },
       { column: 'ledger_operation_id', reason: 'Fase 5: asiento COLLECTION (o su anulación) del libro de capital del servidor; CLEAN no tiene libro de doble entrada' },
       { column: 'principal_minor', reason: 'Fase 5: parte del abono que reduce la cartera (capital), en la proporción capital/total del crédito, acumulada' },
       { column: 'interest_minor', reason: 'Fase 5: parte del abono que es interés cobrado (cuenta income de la ruta); el interés solo existe como dinero al cobrarse' },

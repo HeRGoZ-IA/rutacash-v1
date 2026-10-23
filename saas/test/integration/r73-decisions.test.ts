@@ -231,7 +231,9 @@ describe('Ronda 73 · decisiones D73-01, D73-02 y D73-03', () => {
     assert.equal(chk.body['maxIncreaseMinor'], await balance(db.admin, c1, 'custody', w.membershipId, routes.r20));
     assert.equal((await w.money('/v1/collections', { saleId: id, amountMinor: 1_000 })).status, 201);
     const chk2 = await ana('GET', `/v1/credits/${id}/rectification-check`);
-    assert.deepEqual(chk2.body['blockers'], ['CREDIT_HAS_COLLECTIONS'], JSON.stringify(chk2.body));
+    // Bloque A (0032): los cobros ya no bloquean; la comprobación los resume.
+    assert.deepEqual(chk2.body['blockers'], [], JSON.stringify(chk2.body));
+    assert.deepEqual([(chk2.body['payments'] as Body)['active'], (chk2.body['payments'] as Body)['netPaidMinor'], chk2.body['minTotalMinor']], [1, 1_000, 1_000]);
     assert.equal((await gabi('GET', `/v1/credits/${id}/rectification-check`)).status, 403, 'solo el Administrador');
     assert.equal((await hugo('GET', `/v1/credits/${id}/rectification-check`)).status, 404, 'otra empresa');
   });
@@ -245,7 +247,9 @@ describe('Ronda 73 · decisiones D73-01, D73-02 y D73-03', () => {
     const p = (await ana('GET', `/v1/settlements/preview?routeId=${routes.r20}&workerId=${w2.membershipId}`)).body;
     assert.equal((await $ana('/v1/settlements', { routeId: routes.r20, workerId: w2.membershipId, deliveredMinor: p['expectedPositionMinor'],
       expectedSeenMinor: p['expectedPositionMinor'], previousSettlementId: p['previousSettlementId'] ?? null })).status, 201);
-    assert.deepEqual((await ana('GET', `/v1/credits/${id}/rectification-check`)).body['blockers'], ['DISBURSEMENT_SETTLED']);
+    // Bloque A (0032): el desembolso en un cuadre solo impide CAMBIAR EL CAPITAL.
+    const chkS = (await ana('GET', `/v1/credits/${id}/rectification-check`)).body;
+    assert.deepEqual([chkS['blockers'], chkS['capitalBlockers']], [[], ['DISBURSEMENT_SETTLED']]);
     assert.equal((await rectify(id, { amountMinor: 55_000 })).body['error'], 'DISBURSEMENT_SETTLED', 'la corrección sigue bloqueada');
     const snapshot = async () => [await count(db.admin, 'select 1 from adex.capital_operations'), JSON.stringify((await db.admin.query('select * from adex.sales where id = $1', [id])).rows[0]),
       JSON.stringify(await installments(id))];
@@ -254,7 +258,7 @@ describe('Ronda 73 · decisiones D73-01, D73-02 y D73-03', () => {
     const body = { blocker: 'DISBURSEMENT_SETTLED', proposed: { valorVenta: 550 }, reason: 'Entregó más de lo registrado; ya estaba cuadrado', evidence: 'Llamada al cliente' };
     const r1 = await $ana(`/v1/credits/${id}/rectification-cases`, body, op);
     assert.equal(r1.status, 201, JSON.stringify(r1.body));
-    assert.deepEqual(((r1.body['check'] as Body)['blockers']), ['DISBURSEMENT_SETTLED'], 'el caso guarda la comprobación del servidor');
+    assert.deepEqual(((r1.body['check'] as Body)['capitalBlockers']), ['DISBURSEMENT_SETTLED'], 'el caso guarda la comprobación del servidor');
     assert.deepEqual((await $ana(`/v1/credits/${id}/rectification-cases`, body, op)).body, r1.body, 'idempotente');
     assert.deepEqual(await snapshot(), before, 'sin efecto en el libro, la venta ni las cuotas');
     assert.equal(((await ana('GET', `/v1/credits/${id}/rectification-cases`)).body['cases'] as Body[]).length, 1);

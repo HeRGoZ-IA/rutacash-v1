@@ -51,13 +51,14 @@ import {
   getCredit, getRequest, listCredits, listInstallments, listRectifications, listRequests, rectifyCredit, rejectRequest,
   RECTIFICATION_CASE_FIELDS, listRectificationCases, recordRectificationCase, rectifyCheck,
 } from '../credits/service.ts';
-import { COLLECTION_FIELDS, getCollection, listCollections, registerCollection, reverseCollection } from '../collections/service.ts';
+import { COLLECTION_FIELDS, getCollection, listCollections, reapplyCheck, reapplyCollection, registerCollection, reverseCollection } from '../collections/service.ts';
 import { VISIT_FIELDS, listVisits, registerVisit } from '../collections/visits.ts';
 import { offlineKey } from '../offline/capture.ts';
 import { ADJUSTMENT_FIELDS, CORRECTION_FIELDS, approveAdjustment, correctCollection, createAdjustment, listAdjustments, rejectAdjustment } from '../collections/adjustments.ts';
 import { EXPENSE_FIELDS, createExpense, getExpense, listExpenses, refundExpense, reverseExpense } from '../expenses/service.ts';
 import { CLIENT_LOCATION_FIELDS, getClientLocation, routeMap, setClientLocation } from '../map/service.ts';
 import { listMovements } from '../movements/service.ts';
+import { listActivity, listCashMovements, listPerspectives, movementDetail } from '../movements/consultas.ts';
 import {
   PERIOD_CLOSE_FIELDS, SETTLEMENT_FIELDS, closePeriod, closeSettlement, getClosure, getSettlement, liquidation, listClosures, listSettlements, reopenPeriod,
   periodCalendar, previewSettlement, reopenSettlement, settleableWorkers,
@@ -240,6 +241,11 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'GET', pattern: new RegExp(`^/v1/credits/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getCredit(c, ctx, id!)) },
   // Ronda 73 · SOC-08: Consultas como tabla (una fila por operación lógica + eventos sin dinero), paginada en el servidor.
   { method: 'GET', pattern: /^\/v1\/movements$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await listMovements(c, ctx, q)) },
+  // Ronda 74 · bloque B: Consultas v2 (Dinero por perspectiva con patas del libro, Actividad sin dinero y detalle).
+  { method: 'GET', pattern: /^\/v1\/movements\/perspectives$/, fields: null, handler: () => async (c, ctx) => ok(await listPerspectives(c, ctx)) },
+  { method: 'GET', pattern: /^\/v1\/movements\/cash$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await listCashMovements(c, ctx, q)) },
+  { method: 'GET', pattern: /^\/v1\/movements\/activity$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await listActivity(c, ctx, q)) },
+  { method: 'GET', pattern: /^\/v1\/movements\/detail$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await movementDetail(c, ctx, q)) },
   // Ronda 73 (0030): rectificación de un crédito desembolsado sin recaudos (Administrador) y su historial.
   { method: 'POST', pattern: new RegExp(`^/v1/credits/${ID}/rectify$`), fields: RECTIFY_FIELDS, idempotent: 'credits.rectify', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => ok(await rectifyCredit(c, ctx, id!, b, op)) },
@@ -260,6 +266,11 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'GET', pattern: new RegExp(`^/v1/collections/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getCollection(c, ctx, id!)) },
   { method: 'POST', pattern: new RegExp(`^/v1/collections/${ID}/reverse$`), fields: ['reason'], idempotent: 'collections.reverse', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => created(await reverseCollection(c, ctx, id!, b, op)) },
+  // Bloque A post-R73 (0032): reaplicar un pago anulado (Administrador) y su comprobación previa.
+  { method: 'GET', pattern: new RegExp(`^/v1/collections/${ID}/reapply-check$`), fields: null,
+    handler: ([id]) => async (c, ctx) => ok(await reapplyCheck(c, ctx, id!)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/collections/${ID}/reapply$`), fields: ['reason'], idempotent: 'collections.reapply', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => created(await reapplyCollection(c, ctx, id!, b, op)) },
   // Corrección de pagos y solicitudes de ajuste (ADEX Online, 0017).
   { method: 'POST', pattern: new RegExp(`^/v1/collections/${ID}/correct$`), fields: CORRECTION_FIELDS, idempotent: 'collections.correct', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => created(await correctCollection(c, ctx, id!, b, op)) },

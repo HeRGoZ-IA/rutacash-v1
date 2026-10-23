@@ -39,7 +39,7 @@ export type CapitalKind =
   | 'WORKER_DELIVERY' | 'WORKER_RETURN' | 'WORKER_TRANSFER' | 'ROUTE_REASSIGNMENT' | 'REVERSAL' | 'LOAN_DISBURSEMENT'
   | 'COLLECTION' | 'WORKER_EXPENSE' | 'ROUTE_EXPENSE' | 'COMPANY_EXPENSE' | 'EXPENSE_REFUND'
   | 'SETTLEMENT_RETURN' | 'SETTLEMENT_SURPLUS' | 'ADMIN_TRANSFER_HOLD' | 'ADMIN_TRANSFER_APPLY' | 'ADMIN_TRANSFER_RELEASE'
-  | 'DISBURSEMENT_ADJUSTMENT';
+  | 'DISBURSEMENT_ADJUSTMENT' | 'PRINCIPAL_RECLASSIFICATION';
 
 /**
  * Recaudos y gastos (Fase 5) y asientos de un cuadre (Fase 6): se corrigen por su propio
@@ -173,7 +173,7 @@ const ACTIONS: Record<CapitalKind, string> = {
   COLLECTION: 'REGISTER_PAYMENT', WORKER_EXPENSE: 'CREATE_EXPENSE', ROUTE_EXPENSE: 'CREATE_EXPENSE', COMPANY_EXPENSE: 'CREATE_EXPENSE',
   EXPENSE_REFUND: 'EXPENSE_REFUNDED', SETTLEMENT_RETURN: 'CASH_SETTLEMENT_CLOSED', SETTLEMENT_SURPLUS: 'CASH_SETTLEMENT_CLOSED',
   ADMIN_TRANSFER_HOLD: 'ADMIN_TRANSFER_REGISTERED', ADMIN_TRANSFER_APPLY: 'ADMIN_TRANSFER_APPLIED', ADMIN_TRANSFER_RELEASE: 'ADMIN_TRANSFER_RELEASED',
-  DISBURSEMENT_ADJUSTMENT: 'RECTIFY_CREDIT',
+  DISBURSEMENT_ADJUSTMENT: 'RECTIFY_CREDIT', PRINCIPAL_RECLASSIFICATION: 'RECTIFY_CREDIT',
 };
 
 /** Escribe, audita (misma transacción) y responde con lo que el actor puede ver. */
@@ -295,6 +295,10 @@ export async function deliverToWorker(client: pg.PoolClient, ctx: ActiveContext,
   const members = await loadMembers(client, ctx);
   requireAuthority(ctx, route, 'structural', members);
   const worker = requireCustodian(members, reqId(body, 'workerId'), routeId);
+  // R74 (DS-05): nadie se entrega capital a SU propia custodia, tampoco con otra membresía
+  // (p. ej. el Administrador responsable que además es Cobrador). PostgreSQL lo repite (AX419).
+  const self = (await client.query<{ s: boolean }>('select adex.same_person($1, $2, $3) s', [ctx.companyId, ctx.membershipId, worker.membershipId])).rows[0]!.s;
+  if (self) throw new ApiError(403, 'SELF_DELIVERY_FORBIDDEN', 'nobody delivers capital to their own custody');
   const saleRequestId = optId(body, 'saleRequestId');
   const amount = amountOf(body);
   return execute(client, ctx, operationId,
@@ -303,8 +307,8 @@ export async function deliverToWorker(client: pg.PoolClient, ctx: ActiveContext,
 }
 
 /**
- * Custodia del trabajador → bolsa del responsable. Autoridad `settle` (responsable,
- * SuperAdmin o Supervisor de la ruta); nadie registra su propia devolución. No supera
+ * Custodia del trabajador → bolsa del responsable. Autoridad `settle` (responsable o
+ * Supervisor de la ruta; R74: ya no el SuperAdmin); nadie registra su propia devolución. No supera
  * la custodia (la posición puede saldar el faltante arrastrado, como en CLEAN).
  */
 export async function returnFromWorker(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
@@ -385,7 +389,7 @@ export async function reverseOperation(client: pg.PoolClient, ctx: ActiveContext
   // Un crédito desembolsado no se «anula»: el dinero está en manos del cliente (cobros y castigo, fases 4–5).
   if (orig.kind === 'LOAN_DISBURSEMENT') throw new ApiError(409, 'REVERSAL_NOT_ALLOWED');
   // Ronda 73: el ajuste de una rectificación se corrige con otra rectificación del crédito.
-  if (orig.kind === 'DISBURSEMENT_ADJUSTMENT') throw new ApiError(409, 'REVERSAL_NOT_ALLOWED', 'rectify the credit again instead');
+  if (orig.kind === 'DISBURSEMENT_ADJUSTMENT' || orig.kind === 'PRINCIPAL_RECLASSIFICATION') throw new ApiError(409, 'REVERSAL_NOT_ALLOWED', 'rectify the credit again instead');
   // Un aporte histórico de socio (Ronda 53) ya no tiene contrapartida a la que volver.
   if (orig.kind === 'PARTNER_CONTRIBUTION') throw new ApiError(409, 'REVERSAL_NOT_ALLOWED', 'historical partner contributions cannot be reversed');
   // Un recaudo o un gasto se anula con su comando (recalcula el crédito o enlaza el gasto).
@@ -591,7 +595,10 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
         and a.balance_minor <> coalesce((select sum(s.sale_value_minor) from adex.sales s
                                           where s.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null), 0)
                              - coalesce((select sum(p.principal_minor) from adex.payments p join adex.sales s on s.company_id = p.company_id and s.id = p.sale_id
-                                          where p.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null), 0)`);
+                                          where p.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null), 0)
+                             -- Bloque A post-R73 (0032): capital reclasificado por rectificaciones con pagos.
+                             - coalesce((select sum(s.principal_reclassified_minor) from adex.sales s
+                                          where s.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null), 0)`);
   // Fase 5 · recaudos: cada crédito con asiento cumple, con sus pagos (originales y anulaciones),
   //   saldo = Σ cuotas = total − Σ pagos; capital reconocido = round(pagado × capital / total);
   //   y cada pago tiene su asiento COLLECTION (o su anulación) por el mismo importe y ruta.
@@ -602,7 +609,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
        left join lateral (select coalesce(sum(i.balance_minor), 0) bal from adex.installments i where i.company_id = s.company_id and i.sale_id = s.id) i on true
       where s.company_id = $1 and s.ledger_operation_id is not null
         and (s.balance_minor <> i.bal or s.balance_minor <> s.total_value_minor - p.paid
-             or p.principal <> adex.credit_principal_of(p.paid, s.sale_value_minor, s.total_value_minor))`);
+             or p.principal + s.principal_reclassified_minor <> adex.credit_principal_of(p.paid, s.sale_value_minor, s.total_value_minor))`);
   const unmatchedPayments = await q(
     `select count(*)::text n from adex.payments p
        join adex.sales s on s.company_id = p.company_id and s.id = p.sale_id
@@ -635,6 +642,15 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
   const transitDrift = await q(
     `select count(*)::text n from (select coalesce((select sum(balance_minor) from adex.capital_accounts where company_id = $1 and kind = 'transit'), 0)
         <> coalesce((select sum(amount_minor) from adex.admin_transfers where company_id = $1 and state = 'pending'), 0) bad) x where bad`);
+  // Bloque A post-R73: el interés reconocido de cada ruta = Σ interés de sus pagos − Σ capital
+  // reclasificado por rectificaciones (la cuenta de interés lleva saldo negativo).
+  const incomeDrift = await q(
+    `select count(*)::text n from adex.capital_accounts a
+      where a.company_id = $1 and a.kind = 'income' and a.route_id is not null
+        and -a.balance_minor <> coalesce((select sum(p.interest_minor) from adex.payments p join adex.sales s on s.company_id = p.company_id and s.id = p.sale_id
+                                           where p.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null), 0)
+                              - coalesce((select sum(s.principal_reclassified_minor) from adex.sales s
+                                           where s.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null), 0)`);
   const checks = [
     { name: 'positions-match-ledger', ok: mismatched === 0, detail: mismatched },
     { name: 'operations-balanced', ok: unbalanced === 0, detail: unbalanced },
@@ -655,6 +671,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
     { name: 'surplus-control-matches-settlements', ok: surplusDrift === 0, detail: surplusDrift },
     { name: 'closed-periods-unchanged', ok: closedDrift === 0, detail: closedDrift },
     { name: 'transit-matches-pending-transfers', ok: transitDrift === 0, detail: transitDrift },
+    { name: 'income-matches-interest', ok: incomeDrift === 0, detail: incomeDrift },
   ];
   return { ok: checks.every((c) => c.ok), checks };
 }

@@ -57,6 +57,8 @@ export function fromPgError(err: unknown): ApiError | null {
     // Ronda 59 · solicitudes de capital (no mueven dinero; se atienden con el comando ordinario).
     case 'AX417': return new ApiError(409, 'REQUEST_NOT_PENDING');
     case 'AX418': return new ApiError(409, 'REQUEST_MISMATCH');
+    // R74 (0033, DS-05): nadie entrega capital a su propia custodia, tampoco con otra membresía.
+    case 'AX419': return new ApiError(403, 'SELF_DELIVERY_FORBIDDEN');
     // Fase 4 · solicitudes y desembolsos.
     case 'AX501': return new ApiError(409, 'REQUEST_STATE_INVALID');
     case 'AX502': return new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED');
@@ -71,6 +73,12 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX522': return new ApiError(409, 'CUSTODIAN_CHANGED');
     case 'AX523': return new ApiError(409, 'CREDIT_CHANGED');
     case 'AX524': return new ApiError(400, 'NOTHING_TO_RECTIFY');
+    // Bloque A post-R73 (0032): rectificación con pagos y reaplicación de pagos anulados.
+    case 'AX525': return new ApiError(409, 'OVERPAYMENT');
+    case 'AX526': return new ApiError(409, 'LEGACY_PAYMENTS');
+    case 'AX527': return new ApiError(409, 'PAYMENT_ADJUSTMENT_PENDING');
+    case 'AX528': return new ApiError(409, 'PAYMENT_NOT_REAPPLICABLE');
+    case 'AX529': return new ApiError(409, 'REVERSAL_SETTLED');
     // Fase 5 · recaudos y gastos (0013). Sin cifras de saldos.
     case 'AX701': return new ApiError(409, 'CREDIT_NOT_ACTIVE');
     case 'AX702': return new ApiError(409, 'CREDIT_NOT_DISBURSED');

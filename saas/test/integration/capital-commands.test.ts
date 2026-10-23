@@ -136,11 +136,18 @@ describe('Fase 3 · comandos de capital y custodia', () => {
     assert.equal((await carlos.money('/v1/capital/returns', { routeId: r1, workerId: carlos.membershipId, amountMinor: 1, reason: 'Me devuelvo' })).status, 403);
     const over = await $ana('/v1/capital/returns', { routeId: r1, workerId: carlos.membershipId, amountMinor: 110_001, reason: 'Más de lo que tiene' });
     assert.deepEqual([over.status, over.body], [409, { error: 'INSUFFICIENT_FUNDS' }], 'sin cifras en el error');
-    // Ana (Administradora) entrega a Ana (Cobradora): es otra membresía, pero la MISMA persona
-    // no puede registrar la devolución de su propio efectivo. Otra persona sí.
-    assert.equal((await $ana('/v1/capital/deliveries', { routeId: r5, workerId: M.anaCob, amountMinor: 10_000, reason: 'Base de Ana cobradora' })).status, 201);
+    // R74 (cambio de regla en esta intervención, H3): Ana (Administradora) YA NO se entrega capital a
+    // Ana (Cobradora): es otra membresía de la MISMA persona. Antes se permitía.
+    assert.equal((await $ana('/v1/capital/deliveries', { routeId: r5, workerId: M.anaCob, amountMinor: 10_000, reason: 'Base de Ana cobradora' })).body['error'], 'SELF_DELIVERY_FORBIDDEN');
+    // El efectivo le llega por otro camino (entrega a Eva y traspaso a Ana cobradora); la MISMA persona
+    // no puede registrar la devolución de su propio efectivo. Otra persona sí: ya no el SuperAdmin
+    // (R74: no recibe devoluciones), sino Eva, Supervisora de la ruta.
+    assert.equal((await $ana('/v1/capital/deliveries', { routeId: r5, workerId: eva.membershipId, amountMinor: 10_000, reason: 'Base de Eva' })).status, 201);
+    assert.equal((await $ana('/v1/capital/worker-transfers', { routeId: r5, fromWorkerId: eva.membershipId, toWorkerId: M.anaCob, amountMinor: 10_000, reason: 'Eva entrega a Ana cobradora' })).status, 201);
     assert.equal((await $ana('/v1/capital/returns', { routeId: r5, workerId: M.anaCob, amountMinor: 10_000, reason: 'Autodevolución' })).body['error'], 'SELF_REDUCTION_FORBIDDEN');
-    assert.equal((await $bruno('/v1/capital/returns', { routeId: r5, workerId: M.anaCob, amountMinor: 10_000, reason: 'Recibida por el SuperAdmin' })).status, 201);
+    assert.equal((await $bruno('/v1/capital/returns', { routeId: r5, workerId: M.anaCob, amountMinor: 10_000, reason: 'Recibida por el SuperAdmin' })).status, 403, 'R74: el SuperAdmin ya no recibe devoluciones');
+    assert.equal((await eva.money('/v1/capital/returns', { routeId: r5, workerId: M.anaCob, amountMinor: 10_000, reason: 'Recibida por la Supervisora' })).status, 201);
+    assert.equal(await custody(eva.membershipId, r5), 0);
     assert.equal(await custody(M.anaCob, r5), 0);
     assert.equal(await pool(M.anaAdmin), 859_999, 'la devolución va a la bolsa del responsable');
   });
@@ -180,7 +187,8 @@ describe('Fase 3 · comandos de capital y custodia', () => {
   test('CAP3-007 · autoridad: solo el responsable entrega; roles sin capital y personas no elegibles se rechazan', async () => {
     const deliver = (m: Money, routeId: string, workerId: string) => m('/v1/capital/deliveries', { routeId, workerId, amountMinor: 1_000, reason: 'Intento' });
     assert.equal((await deliver(xavier.money, r1, carlos.membershipId)).body['error'], 'CAPITAL_AUTHORITY_REQUIRED', 'Admin asignado que no es responsable');
-    assert.equal((await deliver($bruno, r1, carlos.membershipId)).body['error'], 'CAPITAL_AUTHORITY_REQUIRED', 'el SuperAdmin asigna a bolsas, no entrega');
+    // R74 (cambio de regla en esta intervención): el SuperAdmin ya no tiene `cashCustody.manage` → 403 antes de la autoridad.
+    assert.equal((await deliver($bruno, r1, carlos.membershipId)).status, 403, 'el SuperAdmin asigna a bolsas, no entrega');
     for (const [who, label] of [[carlos.money, 'cobrador'], [money(caller(api, issuer, 'gabi', M.gabiSec)), 'secretaria'], [money(caller(api, issuer, 'fabio', M.fabioSec)), 'segundo secretario']] as const) {
       assert.equal((await deliver(who, r1, dora.membershipId)).status, 403, label);
     }
@@ -264,10 +272,12 @@ describe('Fase 3 · comandos de capital y custodia', () => {
     const alloc = (await db.admin.query(`select id from adex.capital_operations where kind = 'ADMIN_ALLOCATION' and admin_membership_id = $1`, [xavier.membershipId])).rows[0].id as string;
     assert.equal((await $bruno(`/v1/capital/operations/${alloc}/reverse`, { reason: 'Asignación duplicada' })).body['error'], 'INSUFFICIENT_FUNDS');
 
-    // Autoridad `correct`: responsable o SuperAdmin; otro Administrador, no.
+    // Autoridad `correct`: solo el responsable; otro Administrador, no. R74 (cambio de regla en esta
+    // intervención): el SuperAdmin tampoco anula operaciones de la ruta (antes sí).
     const d3 = await $ana('/v1/capital/deliveries', { routeId: r1, workerId: carlos.membershipId, amountMinor: 5_000, reason: 'Para anular' });
     assert.equal((await xavier.money(`/v1/capital/operations/${opOf(d3)['id']}/reverse`, { reason: 'No soy responsable' })).status, 403);
-    assert.equal((await $bruno(`/v1/capital/operations/${opOf(d3)['id']}/reverse`, { reason: 'Corrige el SuperAdmin' })).status, 201);
+    assert.equal((await $bruno(`/v1/capital/operations/${opOf(d3)['id']}/reverse`, { reason: 'Corrige el SuperAdmin' })).status, 403);
+    assert.equal((await $ana(`/v1/capital/operations/${opOf(d3)['id']}/reverse`, { reason: 'Corrige la responsable' })).status, 201);
 
     // Anular una devolución y una reasignación.
     const ret = (await db.admin.query(`select id from adex.capital_operations where kind = 'WORKER_RETURN' and worker_membership_id = $1`, [carlos.membershipId])).rows[0].id as string;

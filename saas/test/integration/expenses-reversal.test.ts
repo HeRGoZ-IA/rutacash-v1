@@ -1,7 +1,8 @@
 // FASE 5 · F5-D02 (aprobada 2026-10-17): anulación auditada de gastos de trabajador y de
-// ruta. Autoridad: el Administrador responsable de capital de la ruta o el SuperAdmin
-// (`expense.correct` + `correct`), nunca la PERSONA que registró el gasto (aunque use otra
-// membresía). D7: se asienta hoy, en un periodo abierto; si la semana del gasto está
+// ruta. Autoridad: el Administrador responsable de capital de la ruta (`expense.correct` +
+// `correct`), nunca la PERSONA que registró el gasto (aunque use otra membresía).
+// R74 (cambio de regla en esta intervención): el SuperAdmin ya no anula gastos de ruta ni de
+// trabajador ni carga gastos a otros; las pruebas que lo usaban pasan al responsable de la ruta. D7: se asienta hoy, en un periodo abierto; si la semana del gasto está
 // cerrada es un ajuste nuevo y exige autoridad de ajustes. El importe vuelve a la cuenta
 // que pagó (custodia del trabajador o bolsa que financió el gasto). PostgreSQL real.
 
@@ -66,7 +67,8 @@ describe('Fase 5 · F5-D02 · anulación de gastos de trabajador y de ruta', () 
       ['/v1/capital/allocations', { adminId: M.anaAdmin, amountMinor: 1_000_000, reason: 'Bolsa de Ana' }],
       ['/v1/capital/allocations', { adminId: olga.membershipId, amountMinor: 100_000, reason: 'Bolsa de Olga' }],
     ] as const) if ((await $bruno(path, body)).status !== 201) throw new Error(path);
-    for (const [r, w] of [[r1, carlos.membershipId], [rAna, M.anaCob], [rD7, tom.membershipId]] as const) {
+    // R74 (H3): Ana Administradora ya no entrega Base a Ana Cobradora (misma persona); su gasto no la necesita.
+    for (const [r, w] of [[r1, carlos.membershipId], [rD7, tom.membershipId]] as const) {
       if ((await $ana('/v1/capital/deliveries', { routeId: r, workerId: w, amountMinor: 10_000, reason: 'Base' })).status !== 201) throw new Error('entrega');
     }
   });
@@ -93,35 +95,44 @@ describe('Fase 5 · F5-D02 · anulación de gastos de trabajador y de ruta', () 
     assert.equal((await $ana(`/v1/expenses/${e}/reverse`, {})).body['error'], 'INVALID_INPUT', 'motivo obligatorio');
   });
 
-  test('REVX-002/010 · el SuperAdmin anula un gasto de ruta: vuelve a la bolsa que lo financió, aunque el responsable haya cambiado', async () => {
+  // R74 (cambio de regla en esta intervención): antes lo anulaba el SuperAdmin; ahora el nuevo responsable.
+  test('REVX-002/010 · el nuevo responsable anula un gasto de ruta: vuelve a la bolsa que lo financió, aunque el responsable haya cambiado', async () => {
     const e = idOf(await spend($ana, { scope: 'ruta', routeId: rB, amountMinor: 4_000 }));
     const anaAfterSpend = await pool(M.anaAdmin);
     assert.equal((await bruno('PUT', `/v1/routes/${rB}/capital-controller`, { membershipId: olga.membershipId, reason: 'Reorganización' })).status, 200);
     const olgaBefore = await pool(olga.membershipId);
-    const r = await reverse($bruno, e);
+    const $olga = money(caller(api, issuer, olga.identityId, olga.membershipId));
+    assert.equal((await reverse($bruno, e)).body['error'], 'CAPITAL_AUTHORITY_REQUIRED', 'R74: el SuperAdmin ya no anula gastos de ruta');
+    const r = await reverse($olga, e);
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assert.equal(await pool(M.anaAdmin), anaAfterSpend + 4_000, 'vuelve a la bolsa de Ana, que pagó');
     assert.equal(await pool(olga.membershipId), olgaBefore, 'sin transferencias a la bolsa del nuevo responsable');
-    // El nuevo responsable también puede anular gastos de su ruta registrados por otra persona.
-    const e2 = idOf(await spend(money(caller(api, issuer, olga.identityId, olga.membershipId)), { scope: 'ruta', routeId: rB, amountMinor: 1_000 }));
+    // Un gasto que registró la propia responsable: ni ella (misma persona), ni Ana (ya no es la
+    // responsable), ni el SuperAdmin (R74) lo anulan; nada cambia.
+    const e2 = idOf(await spend($olga, { scope: 'ruta', routeId: rB, amountMinor: 1_000 }));
     assert.equal((await reverse($ana, e2)).body['error'], 'CAPITAL_AUTHORITY_REQUIRED', 'Ana ya no es la responsable de esa ruta');
-    assert.equal((await reverse($bruno, e2)).status, 201);
-    assert.equal(await pool(olga.membershipId), olgaBefore, 'el gasto de Olga vuelve a la bolsa de Olga');
+    assert.equal((await reverse($olga, e2)).body['error'], 'SELF_CORRECTION_FORBIDDEN');
+    assert.equal((await reverse($bruno, e2)).status, 403);
+    assert.equal(await pool(olga.membershipId), olgaBefore - 1_000, 'el gasto de Olga sigue pagado por la bolsa de Olga');
   });
 
-  test('REVX-003 · la misma persona no anula lo que registró, aunque use otra membresía (DS-05); el SuperAdmin tampoco', async () => {
+  test('REVX-003 · la misma persona no anula lo que registró, aunque use otra membresía (DS-05)', async () => {
     const own = idOf(await workerExp($anaCob, M.anaCob, 500, rAna));   // Ana como Cobradora
     const r = await reverse($ana, own);                                 // Ana como Administradora responsable
     assert.deepEqual([r.status, r.body['error']], [403, 'SELF_CORRECTION_FORBIDDEN']);
-    const byBruno = idOf(await workerExp($bruno, carlos.membershipId, 400));   // el SuperAdmin carga un gasto a Carlos (settle)
-    assert.equal((await reverse($bruno, byBruno)).body['error'], 'SELF_CORRECTION_FORBIDDEN');
-    assert.equal((await reverse($ana, byBruno)).status, 201, 'otra persona autorizada sí');
+    // R74 (cambio de regla en esta intervención): el SuperAdmin ya no carga gastos a otros; lo hace
+    // la Supervisora de la ruta (`settle`), y lo anula otra persona autorizada (la responsable).
+    assert.equal((await workerExp($bruno, carlos.membershipId, 400)).status, 403, 'R74: el SuperAdmin no carga gastos a otros');
+    const byDora = idOf(await workerExp(dora.money, carlos.membershipId, 400));
+    assert.equal((await reverse(dora.money, byDora)).status, 403, 'la Supervisora no anula gastos');
+    assert.equal((await reverse($ana, byDora)).status, 201, 'otra persona autorizada sí');
     await asApi(db.api, { identityId: identityOf('ana'), membershipId: M.anaAdmin, companyId: c1 }, async (q) => {
       await q.query('savepoint s');
       await assert.rejects(q.query('select adex.expense_reverse(gen_random_uuid(), $1, $2)', [own, 'Por SQL directo']), { code: 'AX717' }, 'segunda barrera por persona');
       await q.query('rollback to savepoint s');
     });
-    assert.equal((await reverse(money(caller(api, issuer, sofia.identityId, sofia.membershipId)), own)).status, 201, 'otra SuperAdmin sí');
+    // R74: antes lo anulaba otra SuperAdmin; ahora solo la responsable de la ruta, que es la misma persona.
+    assert.equal((await reverse(money(caller(api, issuer, sofia.identityId, sofia.membershipId)), own)).body['error'], 'CAPITAL_AUTHORITY_REQUIRED', 'otra SuperAdmin tampoco (R74)');
   });
 
   test('REVX-004/005/006 · sin autoridad: Administrador no responsable, Supervisor, Cobrador, Secretaria, Owner y otra empresa', async () => {
@@ -190,7 +201,8 @@ describe('Fase 5 · F5-D02 · anulación de gastos de trabajador y de ruta', () 
   test('REVX-011/012/013 · simultáneas → una; mismo id → misma respuesta; mismo id con otros datos → 409', async () => {
     const e = idOf(await workerExp(carlos.money, carlos.membershipId, 900));
     const cash = await custody(carlos.membershipId);
-    const res = await parallel(5, (i) => reverse(i % 2 ? $bruno : $ana, e));
+    // R74: antes alternaba con el SuperAdmin; ya no anula gastos de trabajador.
+    const res = await parallel(5, () => reverse($ana, e));
     assert.equal(res.filter((r) => r.status === 201).length, 1, JSON.stringify(res.map((r) => r.body['error'] ?? r.status)));
     assert.ok(res.filter((r) => r.status !== 201).every((r) => r.body['error'] === 'ALREADY_REVERSED'));
     assert.equal(await custody(carlos.membershipId), cash + 900, 'una sola afectación');
@@ -208,8 +220,14 @@ describe('Fase 5 · F5-D02 · anulación de gastos de trabajador y de ruta', () 
   });
 
   test('REVX-014 · revocación de la membresía que anula, en paralelo: la anulación termina; después ya no opera', async () => {
-    const e = idOf(await workerExp(carlos.money, carlos.membershipId, 250));
-    const e2 = idOf(await workerExp(carlos.money, carlos.membershipId, 150));
+    // R74 (cambio de regla en esta intervención): antes anulaba una SuperAdmin (Sofía); ahora la
+    // responsable de una ruta propia (Pía), con una Cobradora (Rita) que registra sus gastos.
+    const pia = await newPerson(api, issuer, provider.ids, bruno, { email: 'pia-rev@example.test', role: 'admin', displayName: 'Pía', routeIds: [] });
+    const rRev = (await bruno('POST', '/v1/routes', { name: 'Ruta Revocación', interestRate: 20, freeRate: false, maxLoanMinor: 0, adminIds: [pia.membershipId] })).body['id'] as string;
+    const rita = await newPerson(api, issuer, provider.ids, bruno, { email: 'rita-rev@example.test', role: 'cobrador', displayName: 'Rita', routeIds: [rRev] });
+    const e = idOf(await workerExp(rita.money, rita.membershipId, 250, rRev));
+    const e2 = idOf(await workerExp(rita.money, rita.membershipId, 150, rRev));
+    const sofia = pia;
     let release!: () => void;
     let arrived!: () => void;
     let pausedOnce = false;

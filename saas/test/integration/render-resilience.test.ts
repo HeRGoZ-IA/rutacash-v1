@@ -139,7 +139,9 @@ describe('ADEX Online · resiliencia para Render Free (proceso real, TLS, reinic
     const health = await call('GET', '/healthz', { membership: null });
     assert.deepEqual([health.status, health.body], [200, { status: 'ok', features: ['collections-v1', 'settlements-v1', 'clean-online-v1', 'changes-v1', 'access-links-v1', 'payment-location-v1', 'admin-transfers-v1', 'capital-requests-v1', 'offline-collector-v1', 'offline-disbursements-v1', 'route-map-v1',
       // Ronda 73: con 0030 y 0031 aplicadas, más la consulta de movimientos (solo API).
-      'credit-rectification-v1', 'movements-v1', 'single-session-v1'] }]);
+      'credit-rectification-v1', 'movements-v1', 'single-session-v1',
+      // Post-R73: bloque A (0032, rectificación con pagos) y bloque B (Consultas v2, solo API).
+      'rectification-payments-v1', 'movements-v2'] }]);
     const ready = await call('GET', '/readyz', { membership: null });
     assert.deepEqual([ready.status, ready.body], [200, { status: 'ready' }], 'PostgreSQL over TLS with the CA file');
     assert.equal(health.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');

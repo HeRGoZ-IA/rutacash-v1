@@ -12,10 +12,11 @@ import { SUITES, TOTAL_CASES, parseSuiteTotals } from '../../src/contracts/suite
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 describe('banco de contratos · manifiesto', () => {
-  test('BENCH-001 · 27 suites, 1.637 casos (1.600 verificados en 0A.1 §19 + 37 de capital centralizado)', () => {
-    assert.equal(SUITES.length, 27);
-    assert.equal(TOTAL_CASES, 1637);
-    assert.equal(TOTAL_CASES - SUITES.find((x) => x.suite === 'centralcapital')!.cases, 1600);
+  // R74: + displayname (36 casos, presentación de nombres).
+  test('BENCH-001 · 28 suites, 1.673 casos (1.600 verificados en 0A.1 §19 + 37 de capital centralizado + 36 de nombres)', () => {
+    assert.equal(SUITES.length, 28);
+    assert.equal(TOTAL_CASES, 1673);
+    assert.equal(TOTAL_CASES - SUITES.find((x) => x.suite === 'centralcapital')!.cases - SUITES.find((x) => x.suite === 'displayname')!.cases, 1600);
   });
 
   test('BENCH-002 · el manifiesto lista exactamente los scripts que encadena `npm test` de CLEAN', () => {

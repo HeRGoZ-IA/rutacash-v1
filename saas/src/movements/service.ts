@@ -29,15 +29,18 @@ export const EVENT_KINDS = ['SALE_REQUEST', 'SALE_APPROVAL', 'SALE_REJECTION', '
 let rectificationsTable: boolean | null = null;
 
 /** Rectificaciones (0030) solo si la tabla existe: la API no depende del orden de despliegue. */
-async function hasRectifications(client: pg.PoolClient): Promise<boolean> {
+export async function hasRectifications(client: pg.PoolClient): Promise<boolean> {
   rectificationsTable ??= (await client.query<{ r: string | null }>(`select to_regclass('adex.credit_rectifications')::text r`)).rows[0]!.r !== null;
   return rectificationsTable;
 }
 
 function feedSql(withRectifications: boolean): string {
-  // Columnas comunes: id, money, kind, reverses_kind, at, entry_date, route_id, to_route_id, worker_id, counterpart_id,
-  // admin_id, client_id, amount_minor, concept, status, reference, actor_id, sale_id, payment_id, expense_id, settlement_id.
-  const tz = `(select c.timezone from adex.companies c where c.id = $1)`;
+  return `${moneyBranchSql()}
+    union all${eventBranchesSql(withRectifications)}`;
+}
+
+/** Rama de dinero del feed (una fila por `capital_operations`). */
+function moneyBranchSql(): string {
   return `
     select o.id, true as money, o.kind, o.reverses_kind, o.created_at as at, o.entry_date, o.route_id, o.to_route_id,
            o.worker_membership_id as worker_id, o.counterpart_membership_id as counterpart_id, o.admin_membership_id as admin_id,
@@ -49,8 +52,18 @@ function feedSql(withRectifications: boolean): string {
       from adex.capital_operations o
       left join adex.sales s on s.company_id = o.company_id and s.id = o.sale_id
       left join adex.payments p on p.company_id = o.company_id and p.id = o.payment_id
-     where o.company_id = $1
-    union all
+     where o.company_id = $1`;
+}
+
+/**
+ * Ramas SIN dinero del feed (solicitudes, decisiones, cuadres, cierres, rectificaciones sin diferencia).
+ * Mismas columnas que la rama de dinero. Ronda 74: la reutiliza la vista «Actividad» de Consultas.
+ */
+export function eventBranchesSql(withRectifications: boolean): string {
+  // Columnas comunes: id, money, kind, reverses_kind, at, entry_date, route_id, to_route_id, worker_id, counterpart_id,
+  // admin_id, client_id, amount_minor, concept, status, reference, actor_id, sale_id, payment_id, expense_id, settlement_id.
+  const tz = `(select c.timezone from adex.companies c where c.id = $1)`;
+  return `
     select 'req:' || r.id, false, 'SALE_REQUEST', null, r.requested_at, (r.requested_at at time zone ${tz})::date, r.route_id, null,
            coalesce(r.requested_by_membership_id, r.collector_membership_id), null, null, r.client_id, r.amount_minor,
            'Solicitud de venta al ' || coalesce(r.requested_interest_rate, r.interest_rate)::int || ' % en '
@@ -89,7 +102,7 @@ function feedSql(withRectifications: boolean): string {
      where cr.company_id = $1 and cr.adjustment_operation_id is null` : ''}`;
 }
 
-function list(q: URLSearchParams, key: string, re?: RegExp): string[] {
+export function list(q: URLSearchParams, key: string, re?: RegExp): string[] {
   const v = q.getAll(key).flatMap((x) => x.split(',')).map((x) => x.trim()).filter(Boolean);
   if (v.length > 50) throw new ApiError(400, 'INVALID_INPUT', `${key}: too many values`);
   for (const x of v) {
@@ -167,7 +180,7 @@ export async function listMovements(client: pg.PoolClient, ctx: ActiveContext, q
   return { movements: rows, hasMore: r.rows.length > limit, limit, offset };
 }
 
-function ymd(d: Date | string): string {
+export function ymd(d: Date | string): string {
   if (typeof d === 'string') return d.slice(0, 10);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }

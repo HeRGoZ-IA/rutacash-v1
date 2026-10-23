@@ -314,11 +314,15 @@ describe('Ronda 73 · bloque A: condiciones autorizadas, parcelas y rectificaci�
     assert.deepEqual(await snapshot(), before);
   });
 
-  test('R73-SOC09-005 · con recaudos: bloqueada (también si el recaudo se anuló)', async () => {
+  // Sustituido por el bloque A post-R73 (0032): con recaudos la venta SE corrige (pagos conservados,
+  // reclasificación sin efectivo). Detalle en r74-rectification.test.ts.
+  test('R73-SOC09-005 · con recaudos: ya no se bloquea por existir pagos (bloque A, 0032)', async () => {
     const w = await worker(); await fund(w, 60_000);
     const { credit } = await viaRequest(w);
     assert.equal((await w.money('/v1/collections', { saleId: credit['id'], amountMinor: 5_000 })).status, 201);
-    assert.equal((await rectify($ana, credit['id'] as string, { amountMinor: 45_000 })).body['error'], 'CREDIT_HAS_COLLECTIONS');
+    const r = await rectify($ana, credit['id'] as string, { amountMinor: 45_000 });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal((r.body['rectification'] as Body)['netPaidMinor'], 5_000);
   });
 
   test('R73-SOC09-006 · desembolso incluido en un cuadre: bloqueada', async () => {
@@ -405,7 +409,8 @@ describe('Ronda 73 · bloque A: condiciones autorizadas, parcelas y rectificaci�
     assert.equal(pay.status, 201, JSON.stringify(pay.body));
     const s = (await db.admin.query('select balance_minor::int b, total_value_minor::int t from adex.sales where id = $1', [id])).rows[0];
     assert.deepEqual([s.t, s.b], [72_000, 66_000]);
-    assert.equal((await rectify($ana, id, { amountMinor: 50_000, expectedRectifications: 1 })).body['error'], 'CREDIT_HAS_COLLECTIONS', 'y ya no se rectifica');
+    // Bloque A (0032): con el recaudo vigente se rectifica igual (antes: CREDIT_HAS_COLLECTIONS).
+    assert.equal((await rectify($ana, id, { amountMinor: 50_000, expectedRectifications: 1 })).status, 200, 'con recaudos se rectifica (0032)');
     assert.deepEqual(await reconcile(db.admin, c1), CLEAN);
     await ledgerChecks();
   });

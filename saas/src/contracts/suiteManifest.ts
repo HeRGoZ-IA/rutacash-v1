@@ -60,6 +60,8 @@ export const SUITES: readonly SuiteContract[] = [
   { suite: 'periodauthority', script: 'test:periodauthority', cases: 30, serverPhase: 6, commands: 'D7, D29, cierres y autoridad de caja', target: 'local' },
   // C1/C2 (2026-10-15): capital centralizado en el Administrador. Contrato del modelo que la Fase 3 implementa desde cero.
   { suite: 'centralcapital', script: 'test:centralcapital', cases: 37, serverPhase: 3, commands: 'capital centralizado: entrega, devolución, cuadre a la bolsa, aportes de socio, transición', target: 'local' },
+  { suite: 'displayname', script: 'test:displayname', cases: 36, serverPhase: 7, commands: 'presentación de nombres (solo la vista, R74 bloque C)', target: 'local',
+    note: 'Función pura de presentación sin comandos de servidor: formatea nombres escritos en mayúsculas al mostrarlos; nunca cambia el valor guardado. No tiene equivalente en el servidor' },
 ];
 
 export const TOTAL_CASES = SUITES.reduce((n, s) => n + s.cases, 0);

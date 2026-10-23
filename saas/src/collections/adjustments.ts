@@ -126,6 +126,16 @@ export async function listAdjustments(client: pg.PoolClient, ctx: ActiveContext,
   return r.rows.map(adjustmentView);
 }
 
+/**
+ * R74 (DS-05): quien resuelve (aprueba o rechaza) una solicitud de ajuste no es la PERSONA que la
+ * pidió, tampoco con otra membresía. PostgreSQL lo repite (`collection_correct` AX505 y la política
+ * `payment_adjustment_reject`, 0033).
+ */
+async function notOwnRequest(client: pg.PoolClient, ctx: ActiveContext, a: AdjustmentRow): Promise<void> {
+  const same = (await client.query<{ s: boolean }>('select adex.same_person($1, $2, $3) s', [ctx.companyId, ctx.membershipId, a.requested_by_membership_id])).rows[0]!.s;
+  if (same) throw new ApiError(403, 'SELF_APPROVAL_FORBIDDEN', 'nobody resolves their own adjustment request');
+}
+
 /** Aprobación (`approvePaymentAdjustment`): corrige y cierra la solicitud en la misma transacción. */
 export async function approveAdjustment(client: pg.PoolClient, ctx: ActiveContext, id: string, operationId: string | null) {
   const opId = requireOperationId(operationId);
@@ -133,6 +143,7 @@ export async function approveAdjustment(client: pg.PoolClient, ctx: ActiveContex
   await routeOf(client, ctx, a.route_id);
   need(ctx, 'payment.approveAdjustment', { routeId: a.route_id });
   if (a.status !== 'pending') throw new ApiError(409, 'REQUEST_STATE_INVALID');
+  await notOwnRequest(client, ctx, a);
   const r = (await client.query<{ r: Json }>('select adex.collection_correct($1, $2, $3, $4, $5, $6) r',
     [opId, a.payment_id, Number(a.new_amount_minor), a.reason, a.note, a.id])).rows[0]!.r;
   await audit(client, ctx, {
@@ -150,6 +161,7 @@ export async function rejectAdjustment(client: pg.PoolClient, ctx: ActiveContext
   await routeOf(client, ctx, a.route_id);
   need(ctx, 'payment.approveAdjustment', { routeId: a.route_id });
   if (a.status !== 'pending') throw new ApiError(409, 'REQUEST_STATE_INVALID');
+  await notOwnRequest(client, ctx, a);
   const reason = reasonOf(body);
   await client.query(`update adex.payment_adjustment_requests set status = 'rejected', reviewed_by_membership_id = $3, reviewed_at = now(), rejection_reason = $4
                        where company_id = $1 and id = $2`, [ctx.companyId, id, ctx.membershipId, reason]);

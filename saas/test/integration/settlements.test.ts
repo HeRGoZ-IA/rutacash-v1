@@ -364,7 +364,7 @@ describe('Fase 6 · cuadres y cierres', () => {
     const close = (m: Money, weekStart: string, weekEnd: string, op?: string) => m('/v1/periods/close', { routeId: r, weekStart, weekEnd, note: 'Cierre semanal' }, op);
     // D29: un periodo que no ha terminado (hoy, en Bogotá) no se cierra.
     assert.deepEqual([(await close($ana, today, today)).status, (await close($ana, today, today)).body['error']], [409, 'PERIOD_NOT_ENDED']);
-    // Autoridad: el responsable o el SuperAdmin; nadie más.
+    // Autoridad: solo el responsable (R74 (cambio de regla en esta intervención): el SuperAdmin ya no cierra periodos).
     assert.equal((await close(xavier.money, '2026-10-05', '2026-10-11')).status, 404, 'Administrador sin la ruta');
     assert.equal((await dora.money('/v1/periods/close', { routeId: routes['E'], weekStart: '2026-10-05', weekEnd: '2026-10-11' })).status, 403,
       'Supervisora: no cierra la semana (ni en su ruta)');
@@ -382,7 +382,8 @@ describe('Fase 6 · cuadres y cierres', () => {
     assert.deepEqual(week, { status: 'cerrada', version: 1, closing: String($(380_000)), ctrl: mm.ana });
     // Sin duplicados ni solapes; un cierre ya archivado no se reescribe.
     assert.equal((await close($ana, '2026-10-05', '2026-10-11')).body['error'], 'PERIOD_OVERLAP');
-    assert.equal((await close($sara, '2026-10-10', '2026-10-12')).body['error'], 'PERIOD_OVERLAP');
+    assert.equal((await close($sara, '2026-10-10', '2026-10-12')).status, 403, 'R74 (cambio de regla en esta intervención): el SuperAdmin ya no cierra periodos');
+    assert.equal((await close($ana, '2026-10-10', '2026-10-12')).body['error'], 'PERIOD_OVERLAP');
     await assert.rejects(db.admin.query(`update adex.period_closures set note = 'x' where id = $1`, [res.body['closureId']]));
     await assert.rejects(db.admin.query(`update adex.weekly_settlements set closing_balance_minor = 0 where id = $1`, [res.body['closureId']]));
     // Ajuste posterior: la anulación del gasto del 8 de octubre exige autoridad de ajuste y va HOY.
@@ -457,7 +458,11 @@ describe('Fase 6 · cuadres y cierres', () => {
 
   test('SEC6-002 · DS-05: la misma persona no se cuadra ni reabre su propio cuadre con otra membresía (comparación por identidad)', async () => {
     const r = routes['Own']!;
-    await deliver(r, mm.anaCob, $(5_000));
+    // R74 (cambio de regla en esta intervención): el SuperAdmin ya no cuadra; lo hace la Supervisora de la ruta. H3: Ana Administradora tampoco se entrega
+    // Base a sí misma como Cobradora, así que su efectivo viene de un cobro.
+    const paula = await newPerson(api, issuer, provider.ids, sara, { email: 'f6-paula@example.test', role: 'supervisor', displayName: 'Paula Supervisora', routeIds: [r] });
+    assert.equal((await $ana('/v1/capital/deliveries', { routeId: r, workerId: mm.anaCob, amountMinor: $(5_000), reason: 'Base propia' })).body['error'], 'SELF_DELIVERY_FORBIDDEN');
+    await collect($anaCob, await credit(r, $(100_000)), $(5_000));
     const p = await preview(sara, r, mm.anaCob);
     const res = await settle($ana, r, mm.anaCob, $(5_000), p);
     assert.deepEqual([res.status, res.body['error']], [403, 'SELF_SETTLEMENT_FORBIDDEN'], 'Ana administradora no cuadra a Ana cobradora');
@@ -466,7 +471,8 @@ describe('Fase 6 · cuadres y cierres', () => {
       await assert.rejects(q.query('select adex.custody_settle(gen_random_uuid(), $1, $2, $3, $3, null, null)', [r, mm.anaCob, $(5_000)]), { code: 'AX801' });
       await q.query('rollback to savepoint s');
     });
-    const s = (await settle($sara, r, mm.anaCob, $(5_000), p)).body['settlement'] as Body;
+    assert.equal((await settle($sara, r, mm.anaCob, $(5_000), p)).status, 403, 'R74 (cambio de regla en esta intervención): el SuperAdmin ya no cuadra');
+    const s = (await settle(paula.money, r, mm.anaCob, $(5_000), p)).body['settlement'] as Body;
     assert.equal(s['result'], 'exacto', 'otra persona autorizada sí');
     const re = await $ana(`/v1/settlements/${s['id']}/reopen`, { reason: 'Revisión del conteo del día' });
     assert.deepEqual([re.status, re.body['error']], [403, 'SELF_SETTLEMENT_FORBIDDEN']);
@@ -520,14 +526,16 @@ describe('Fase 6 · cuadres y cierres', () => {
     const poolBefore = await pool(mm.ana);
     assert.equal((await dora.money(`/v1/settlements/${s2['id']}/reopen`, { reason: 'Supervisor intenta reabrir' })).status, 404, 'Supervisora sin la ruta');
     assert.equal((await xavier.money(`/v1/settlements/${s1['id']}/reopen`, { reason: 'Administrador no responsable' })).status, 404);
-    assert.equal((await $sara(`/v1/settlements/${s1['id']}/reopen`, { reason: 'No es el último cuadre' })).body['error'], 'SETTLEMENT_NOT_REOPENABLE', 'solo el último');
-    assert.equal((await $sara(`/v1/settlements/${s2['id']}/reopen`, { reason: 'corto' })).body['error'], 'REASON_REQUIRED');
-    const re = await $sara(`/v1/settlements/${s2['id']}/reopen`, { reason: 'Conteo equivocado del día' });
+    // R74 (cambio de regla en esta intervención): el SuperAdmin ya no reabre cuadres (antes era quien reabría aquí); lo hace la responsable.
+    assert.equal((await $sara(`/v1/settlements/${s2['id']}/reopen`, { reason: 'Conteo equivocado del día' })).status, 403, 'el SuperAdmin ya no reabre');
+    assert.equal((await $ana(`/v1/settlements/${s1['id']}/reopen`, { reason: 'No es el último cuadre' })).body['error'], 'SETTLEMENT_NOT_REOPENABLE', 'solo el último');
+    assert.equal((await $ana(`/v1/settlements/${s2['id']}/reopen`, { reason: 'corto' })).body['error'], 'REASON_REQUIRED');
+    const re = await $ana(`/v1/settlements/${s2['id']}/reopen`, { reason: 'Conteo equivocado del día' });
     assert.equal(re.status, 201, JSON.stringify(re.body));
     assert.equal((re.body['settlement'] as Body)['status'], 'reabierta');
     assert.equal(await pool(mm.ana), poolBefore - $(10_000), 'el retorno se revierte desde la bolsa que lo recibió');
     assert.deepEqual([await custody(w.membershipId, r), await carried(w.membershipId, r)], [$(60_000), $(50_000)], 'arrastre de antes del cuadre reabierto');
-    assert.equal((await $sara(`/v1/settlements/${s2['id']}/reopen`, { reason: 'Segunda reapertura' })).body['error'], 'SETTLEMENT_NOT_REOPENABLE');
+    assert.equal((await $ana(`/v1/settlements/${s2['id']}/reopen`, { reason: 'Segunda reapertura' })).body['error'], 'SETTLEMENT_NOT_REOPENABLE');
     const p = await preview(ana, r, w.membershipId);
     assert.deepEqual([p['previousSettlementId'], p['expectedPositionMinor']], [s1['id'], $(60_000)]);
     const v2 = (await settle($ana, r, w.membershipId, $(60_000), p)).body['settlement'] as Body;
@@ -547,7 +555,8 @@ describe('Fase 6 · cuadres y cierres', () => {
     const s = await settleNow(olgaCall, $olga, r, w.membershipId, $(500_000));
     const all = await pool(olga.membershipId);
     assert.equal((await $sara('/v1/capital/admin-returns', { adminId: olga.membershipId, amountMinor: all, reason: 'Recogida de la bolsa' })).status, 201);
-    const re = await $sara(`/v1/settlements/${s['id']}/reopen`, { reason: 'Revisión del cuadre del día' });
+    // R74 (cambio de regla en esta intervención): el SuperAdmin ya no reabre; lo intenta la responsable (Olga).
+    const re = await $olga(`/v1/settlements/${s['id']}/reopen`, { reason: 'Revisión del cuadre del día' });
     assert.deepEqual([re.status, re.body['error']], [409, 'FUNDS_ALREADY_USED']);
     assert.equal((await db.admin.query('select status from adex.custody_settlements where id = $1', [s['id']])).rows[0].status, 'cerrada');
     await reconciliation();
@@ -558,7 +567,8 @@ describe('Fase 6 · cuadres y cierres', () => {
     await deliver(r, w.membershipId, $(40_000));
     const p = await preview(ana, r, w.membershipId);
     const poolBefore = await pool(mm.ana);
-    const two = await Promise.all([settle($ana, r, w.membershipId, $(40_000), p), settle($sara, r, w.membershipId, $(40_000), p)]);
+    // R74 (cambio de regla en esta intervención): el SuperAdmin ya no cuadra: el segundo intento simultáneo es de la Supervisora de la ruta.
+    const two = await Promise.all([settle($ana, r, w.membershipId, $(40_000), p), settle(dora.money, r, w.membershipId, $(40_000), p)]);
     assert.deepEqual(two.map((x) => x.status).sort(), [201, 409], JSON.stringify(two.map((x) => x.body)));
     assert.equal(await pool(mm.ana), poolBefore + $(40_000));
     await deliver(r, w.membershipId, $(7_000));
@@ -628,7 +638,7 @@ describe('Fase 6 · cuadres y cierres', () => {
     const pp = await preview(ana, r, w.membershipId);
     const [anaPool, xPool] = [await pool(mm.ana), await pool(xavier.membershipId)];
     const [st, chg] = await Promise.all([
-      settle($sara, r, w.membershipId, pp['expectedPositionMinor'] as number, pp),
+      settle(dora.money, r, w.membershipId, pp['expectedPositionMinor'] as number, pp),   // R74 (cambio de regla en esta intervención): el SuperAdmin ya no cuadra
       sara('PUT', `/v1/routes/${r}/capital-controller`, { membershipId: xavier.membershipId, reason: 'Rotación de responsable' }),
     ]);
     assert.equal(chg.status, 200, JSON.stringify(chg.body));
@@ -678,7 +688,7 @@ describe('Fase 6 · cuadres y cierres', () => {
     const r = routes['B']!;
     const [a, b] = await Promise.all([
       $ana('/v1/periods/close', { routeId: r, weekStart: '2026-09-28', weekEnd: '2026-10-04' }),
-      $sara('/v1/periods/close', { routeId: r, weekStart: '2026-09-28', weekEnd: '2026-10-04' }),
+      $ana('/v1/periods/close', { routeId: r, weekStart: '2026-09-28', weekEnd: '2026-10-04' }),   // R74 (cambio de regla en esta intervención): el SuperAdmin ya no cierra periodos
     ]);
     assert.deepEqual([a.status, b.status].sort(), [201, 409]);
     assert.equal(await count(db.admin, `select 1 from adex.weekly_settlements where route_id = $1 and week_start = '2026-09-28'`, [r]), 1);
@@ -713,7 +723,8 @@ describe('Fase 6 · cuadres y cierres', () => {
       const closed = await close();
       assert.equal(closed.status, 201, JSON.stringify(closed.body));
       // D7: el cuadre de ese día está en un periodo cerrado → no se reabre; se corrige en el abierto.
-      const re = await $bruno(`/v1/settlements/${settled['id']}/reopen`, { reason: 'Revisión posterior al cierre' });
+      // R74 (cambio de regla en esta intervención): el SuperAdmin ya no reabre cuadres: lo intenta la responsable.
+      const re = await $anaC1(`/v1/settlements/${settled['id']}/reopen`, { reason: 'Revisión posterior al cierre' });
       assert.deepEqual([re.status, re.body['error']], [409, 'PERIOD_CLOSED']);
       // Y lo de hoy (otro día en Kiritimati) sigue abierto: se cuadra con normalidad.
       assert.equal((await $anaC1('/v1/capital/deliveries', { routeId: r, workerId: w.membershipId, amountMinor: 500, reason: 'Base' })).status, 201);

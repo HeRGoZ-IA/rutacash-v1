@@ -133,8 +133,13 @@ describe('Ronda 67 · SuperAdmin: cartera de solo lectura', () => {
       for (const cap of CARTERA_WRITE_CAPS.filter((c) => !c.startsWith('client.') && c !== 'sale.editBeforeDisbursement' && c !== 'sale.adjustAfterDisbursement')) {
         assert.equal((await q.query('select adex.ctx_can($1) ok', [cap])).rows[0].ok, false, cap);
       }
-      for (const cap of ['payment.viewHistory', 'expense.correct', 'cashCustody.manage', 'settlement.close']) {
+      // R74 (cambio de regla en esta intervención): `cashCustody.manage` y `settlement.close` ya no se
+      // conservan (el SuperAdmin no es operador financiero de la ruta); el gasto de empresa y la consulta, sí.
+      for (const cap of ['payment.viewHistory', 'expense.correct', 'expense.register', 'cashSettlement.view']) {
         assert.equal((await q.query('select adex.ctx_can($1) ok', [cap])).rows[0].ok, true, `${cap} se conserva`);
+      }
+      for (const cap of ['cashCustody.manage', 'settlement.close', 'settlement.reopen', 'cashSettlement.close', 'cashSettlement.reopen']) {
+        assert.equal((await q.query('select adex.ctx_can($1) ok', [cap])).rows[0].ok, false, `${cap}: R74`);
       }
       await q.query('savepoint s');
       await assert.rejects(q.query(
@@ -188,8 +193,11 @@ describe('Ronda 67 · SuperAdmin: cartera de solo lectura', () => {
     assert.equal(exp.status, 201, JSON.stringify(exp.body));
     const ruta = await $ana('/v1/expenses', { scope: 'ruta', routeId: r1, categoryId: cat, amountMinor: 500, description: 'Gasto de ruta' });
     assert.equal(ruta.status, 201, JSON.stringify(ruta.body));
-    const rev = await $bruno(`/v1/expenses/${(ruta.body['expense'] as Body)['id']}/reverse`, { reason: 'Anulación de prueba' });
-    assert.equal(rev.status, 201, `el SuperAdmin sigue anulando gastos: ${JSON.stringify(rev.body)}`);
+    // R74 (cambio de regla en esta intervención): el SuperAdmin ya no anula gastos de RUTA; sí los de empresa.
+    const rutaRev = await $bruno(`/v1/expenses/${(ruta.body['expense'] as Body)['id']}/reverse`, { reason: 'Anulación de prueba' });
+    assert.equal(rutaRev.body['error'], 'CAPITAL_AUTHORITY_REQUIRED', JSON.stringify(rutaRev.body));
+    const rev = await $bruno(`/v1/expenses/${(exp.body['expense'] as Body)['id']}/reverse`, { reason: 'Anulación de prueba' });
+    assert.equal(rev.status, 201, `el SuperAdmin sigue anulando gastos de empresa: ${JSON.stringify(rev.body)}`);
     assert.equal((await bruno('GET', '/v1/capital/summary')).status, 200);
   });
 

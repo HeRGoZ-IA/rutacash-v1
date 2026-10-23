@@ -127,7 +127,8 @@ export async function createExpense(client: pg.PoolClient, ctx: ActiveContext, b
       workerName = worker.displayName;
       if (worker.membershipId !== ctx.membershipId) {
         // Cargarlo a otra persona es operar con su efectivo (nivel `settle`).
-        if (!ctx.role || !['superadmin', 'admin', 'supervisor'].includes(ctx.role)) throw new ApiError(403, 'PERMISSION_DENIED', 'expenses you register are yours');
+        // R74: el SuperAdmin ya no carga gastos a otros (no es operador financiero de la ruta).
+        if (!ctx.role || !['admin', 'supervisor'].includes(ctx.role)) throw new ApiError(403, 'PERMISSION_DENIED', 'expenses you register are yours');
         need(ctx, 'cashCustody.manage', { routeId: route.id });
         requireAuthority(ctx, route, 'settle', members);
       }
@@ -158,8 +159,8 @@ export async function createExpense(client: pg.PoolClient, ctx: ActiveContext, b
  * Anulación total (asiento espejo enlazado; el original queda ANULADO con quién, cuándo y
  * motivo; el importe vuelve a la cuenta que pagó).
  *   · gasto de bolsa (D12): el Administrador, su bolsa; el SuperAdmin, cualquiera;
- *   · gasto de trabajador o de ruta (F5-D02): autoridad `correct` (responsable de la ruta
- *     o SuperAdmin) y nunca la persona que lo registró, tampoco con otra membresía; con la
+ *   · gasto de trabajador o de ruta (F5-D02): autoridad `correct` (responsable de la ruta;
+ *     R74: ya no el SuperAdmin) y nunca la persona que lo registró, tampoco con otra membresía; con la
  *     semana del gasto cerrada, ajuste en el periodo abierto con autoridad de ajustes (D7).
  * PostgreSQL lo revalida todo bajo bloqueo (`adex.expense_reverse`).
  */

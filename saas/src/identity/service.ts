@@ -154,6 +154,9 @@ export async function createMember(client: pg.PoolClient, ctx: ActiveContext, in
   await assertRoutesExist(client, ctx, routeIds);
 
   const { identityId } = await provider.ensureIdentity(email);
+  // R74 (DS-05): nadie se da de alta a sí mismo otra membresía (otro perfil) en su empresa.
+  // Otra persona con autoridad debe hacerlo. PostgreSQL lo repite (política restrictiva, 0033).
+  if (identityId === ctx.claims.identityId) throw new ApiError(403, 'SELF_ASSIGNMENT_FORBIDDEN', 'nobody grants themselves another membership');
   await client.query('insert into adex.identities (id, email) values ($1, $2) on conflict do nothing', [identityId, email]);
   const membershipId = randomUUID();
   await client.query(
@@ -207,6 +210,10 @@ export async function setMemberStatus(client: pg.PoolClient, ctx: ActiveContext,
   await lockMembershipsForRevocation(client, [peek.membershipId]);
   await lockRoutes(client, ctx, peek.routeIds);
   const target = await loadMember(client, ctx, membershipId, true);
+  // R74 (DS-05): nadie reactiva una membresía propia (otro perfil de la misma persona).
+  if (status === 'activo' && target.status !== 'activo' && target.identityId === ctx.claims.identityId) {
+    throw new ApiError(403, 'SELF_ASSIGNMENT_FORBIDDEN', 'nobody reactivates their own membership');
+  }
   if (status === 'inactivo') {
     // Serializa las bajas de SuperAdmin de la empresa: dos bajas simultáneas no
     // pueden dejarla sin ninguno (LAST_SUPERADMIN_PROTECTION de CLEAN).

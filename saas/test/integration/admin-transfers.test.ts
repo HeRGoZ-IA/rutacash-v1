@@ -23,7 +23,7 @@ describe('Ronda 53/59 · traspasos entre Administradores', () => {
   const c1 = companyId('c1');
   let bruno: Caller, ana: Caller, gabi: Caller, fabio: Caller, carla: Caller, hugo: Caller;
   let $bruno: Money, $ana: Money, $gabi: Money, $fabio: Money, $hugo: Money;
-  let xavier: Person;
+  let xavier: Person, sara: Person;
 
   const pool = (m: string) => balance(db.admin, c1, 'admin', m);
   const transit = () => balance(db.admin, c1, 'transit', null);
@@ -42,6 +42,8 @@ describe('Ronda 53/59 · traspasos entre Administradores', () => {
     carla = caller(api, issuer, 'carla', M.carlaSa);
     hugo = caller(api, issuer, 'hugo', M.hugoAdmin); $hugo = money(hugo);
     xavier = await newPerson(api, issuer, provider.ids, bruno, { email: 'xavier-r53@example.test', role: 'admin', displayName: 'Xavier Admin', routeIds: [routeId('c1', 1)] });
+    // R74 (H3): Ana Administradora ya no entrega a Ana Cobradora (misma persona); trabajadora de otra persona.
+    sara = await newPerson(api, issuer, provider.ids, bruno, { email: 'sara-r53@example.test', role: 'supervisor', displayName: 'Sara Supervisora', routeIds: [routeId('c1', 1)] });
     for (const [path, body] of [
       ['/v1/capital/company/deposits', { amountMinor: 2_000_000, reason: 'Capital inicial sintético' }],
       ['/v1/capital/allocations', { adminId: M.anaAdmin, amountMinor: 1_000_000, reason: 'Bolsa de Ana' }],
@@ -97,7 +99,7 @@ describe('Ronda 53/59 · traspasos entre Administradores', () => {
     assert.equal(first.status, 201);
     const second = await register($ana, { destinationAdminId: xavier.membershipId, amountMinor: 400_000, reason: 'Segunda con el mismo dinero' });
     assert.deepEqual([second.status, second.body['error']], [409, 'INSUFFICIENT_FUNDS'], 'lo entregado no se usa dos veces');
-    const deliver = await $ana('/v1/capital/deliveries', { routeId: routeId('c1', 1), workerId: M.anaCob, amountMinor: 300_001, reason: 'Gastar lo entregado' });
+    const deliver = await $ana('/v1/capital/deliveries', { routeId: routeId('c1', 1), workerId: sara.membershipId, amountMinor: 300_001, reason: 'Gastar lo entregado' });
     assert.equal(deliver.body['error'], 'INSUFFICIENT_FUNDS', 'ni para entregar a un trabajador');
     assert.equal(await pool(M.anaAdmin), 300_000);
     assert.equal(await pool(xavier.membershipId), 900_000);
