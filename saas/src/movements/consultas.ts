@@ -34,7 +34,8 @@ import { allowed } from '../authz/cleanRules.ts';
 import { eventBranchesSql, hasRectifications, list, ymd } from './service.ts';
 
 /** Cuentas de EFECTIVO (las demás —cartera, intereses, gastos, externo, sin identificar— son contables). */
-export const CASH_ACCOUNT_KINDS = ['company', 'admin', 'custody', 'transit', 'suspense'] as const;
+// Base por Ruta (0034): `route_base` es efectivo de la ruta (la contrapartida `route_funding` no).
+export const CASH_ACCOUNT_KINDS = ['company', 'admin', 'custody', 'transit', 'suspense', 'route_base'] as const;
 
 /** Tipos de operación conocidos que mueven efectivo (base = tipo anulado si es una anulación). */
 export const CASH_KINDS = [
@@ -50,7 +51,8 @@ export const CASH_GROUPS: Record<string, readonly string[]> = {
   recaudos: ['COLLECTION'],
   gastos: ['WORKER_EXPENSE', 'ROUTE_EXPENSE', 'COMPANY_EXPENSE', 'EXPENSE_REFUND'],
   capital: ['COMPANY_DEPOSIT', 'COMPANY_WITHDRAWAL', 'ADMIN_ALLOCATION', 'ADMIN_RETURN', 'PARTNER_CONTRIBUTION', 'WORKER_DELIVERY',
-    'WORKER_RETURN', 'WORKER_TRANSFER', 'ROUTE_REASSIGNMENT', 'ADMIN_TRANSFER_HOLD', 'ADMIN_TRANSFER_APPLY', 'ADMIN_TRANSFER_RELEASE'],
+    'WORKER_RETURN', 'WORKER_TRANSFER', 'ROUTE_REASSIGNMENT', 'ADMIN_TRANSFER_HOLD', 'ADMIN_TRANSFER_APPLY', 'ADMIN_TRANSFER_RELEASE',
+    'ROUTE_BASE_INJECTION', 'ROUTE_BASE_WITHDRAWAL', 'ROUTE_TRANSFER', 'LEGACY_POOL_TO_ROUTE'],
   cuadres: ['SETTLEMENT_RETURN', 'SETTLEMENT_SURPLUS'],
 };
 /** Grupos de Actividad. `contables` = operaciones del libro sin efectivo y rectificaciones sin diferencia. */
@@ -127,7 +129,8 @@ export async function resolvePerspective(client: pg.PoolClient, ctx: ActiveConte
       const name = await routeName(client, ctx, routeId);
       if (name === null || (ctx.role !== 'superadmin' && !ctx.routeIds.includes(routeId))) throw new ApiError(404, 'PERSPECTIVE_NOT_FOUND');
       return { key, kind: 'route', label: name, routeId, membershipId: null,
-        accountIds: await accounts(`kind = 'custody' and route_id = $2`, [routeId]) };
+        // Ruta = custodias de la ruta + su Base (con Base por Ruta; en el modelo de bolsas no existe).
+        accountIds: await accounts(`kind in ('custody', 'route_base') and route_id = $2`, [routeId]) };
     }
     case 'admin': {
       const membershipId = idOrNotFound(a);
@@ -251,6 +254,7 @@ interface NamedRow {
   admin_id: string | null; admin_name: string | null; client_id: string | null; client_name: string | null;
   route_id: string | null; route_name: string | null; to_route_id: string | null; to_route_name: string | null; concept: string;
   expense_category: string | null;
+  via_base: boolean;   // la operación toca una cuenta `route_base` (Base por Ruta)
 }
 
 /**
@@ -260,7 +264,9 @@ interface NamedRow {
  * que es lo que R73 mostraba al revés.
  */
 export function parties(r: NamedRow): { from: Party | null; to: Party | null } {
-  const pool = (id: string | null, name: string | null): Party => ({ type: 'pool', id, name });
+  // Con Base por Ruta, lo que antes pagaba o recibía la bolsa lo paga o recibe la Base de la ruta.
+  const base = (routeId = r.route_id, routeName = r.route_name): Party => ({ type: 'route_base', routeId, routeName, name: routeName });
+  const pool = (id: string | null, name: string | null): Party => (r.via_base ? base() : { type: 'pool', id, name });
   const custody = (id: string | null, name: string | null, routeId = r.route_id, routeName = r.route_name): Party => ({ type: 'custody', id, name, routeId, routeName });
   const client: Party = { type: 'client', id: r.client_id, name: r.client_name };
   const company: Party = { type: 'company', name: 'Empresa' };
@@ -286,6 +292,10 @@ export function parties(r: NamedRow): { from: Party | null; to: Party | null } {
     case 'ADMIN_TRANSFER_HOLD': f = [pool(r.admin_id, r.admin_name), { type: 'transit', id: r.counterpart_id, name: r.counterpart_name }]; break;
     case 'ADMIN_TRANSFER_APPLY': f = [{ type: 'transit', id: r.counterpart_id, name: r.counterpart_name }, pool(r.admin_id, r.admin_name)]; break;
     case 'ADMIN_TRANSFER_RELEASE': f = [{ type: 'transit', id: r.counterpart_id, name: r.counterpart_name }, pool(r.admin_id, r.admin_name)]; break;
+    case 'ROUTE_BASE_INJECTION': f = [{ type: 'external', name: 'Aporte de Base' }, base()]; break;
+    case 'ROUTE_BASE_WITHDRAWAL': f = [base(), { type: 'external', name: 'Retiro de Base' }]; break;
+    case 'ROUTE_TRANSFER': f = [base(), base(r.to_route_id, r.to_route_name)]; break;
+    case 'LEGACY_POOL_TO_ROUTE': f = [{ type: 'pool', id: r.admin_id, name: r.admin_name }, base()]; break;
     default: f = [null, null];
   }
   return r.reversal ? { from: f[1], to: f[0] } : { from: f[0], to: f[1] };
@@ -326,13 +336,13 @@ function baseRow(x: Row) {
   };
 }
 
-function namedOf(x: Row, net: number): NamedRow {
+function namedOf(x: Row, net: number, viaBase?: boolean): NamedRow {
   return {
     kind: String(x['kind']), base: String(x['reverses_kind'] ?? x['kind']), reversal: x['kind'] === 'REVERSAL', net,
     worker_id: str(x['worker_id']), worker_name: str(x['worker_name']), counterpart_id: str(x['counterpart_id']), counterpart_name: str(x['counterpart_name']),
     admin_id: str(x['admin_id']), admin_name: str(x['admin_name']), client_id: str(x['client_id']), client_name: str(x['client_name']),
     route_id: str(x['route_id']), route_name: str(x['route_name']), to_route_id: str(x['to_route_id']), to_route_name: str(x['to_route_name']),
-    concept: str(x['concept']) ?? '', expense_category: str(x['expense_category']),
+    concept: str(x['concept']) ?? '', expense_category: str(x['expense_category']), via_base: viaBase ?? x['via_base'] === true,
   };
 }
 
@@ -375,6 +385,8 @@ export async function listCashMovements(client: pg.PoolClient, ctx: ActiveContex
       select o.id, o.kind, o.reverses_kind, coalesce(o.reverses_kind, o.kind) base, o.created_at at, o.entry_date, o.route_id, o.to_route_id,
              o.worker_membership_id worker_id, o.counterpart_membership_id counterpart_id, o.admin_membership_id admin_id,
              coalesce(s.client_id, pm.client_id) client_id, o.amount_minor, o.reason concept, o.operation_id::text reference,
+             exists (select 1 from adex.capital_entries be join adex.capital_accounts ba on ba.company_id = be.company_id and ba.id = be.account_id
+                      where be.company_id = o.company_id and be.operation_id = o.id and ba.kind = 'route_base') via_base,
              o.actor_membership_id actor_id, o.sale_id, o.payment_id, o.expense_id, o.settlement_id, o.reverses_operation_id,
              case when o.kind = 'REVERSAL' then 'anulacion'
                   when exists (select 1 from adex.capital_operations x where x.company_id = o.company_id and x.reverses_operation_id = o.id) then 'anulada'
@@ -628,7 +640,7 @@ export async function movementDetail(client: pg.PoolClient, ctx: ActiveContext, 
     movement: {
       ...baseRow(x), base, money: isOp && (CASH_KINDS as readonly string[]).includes(base), localAt: String(x['local_at']), timezone: ctx.company.timezone,
       amountMinor: x['amount_minor'] === null ? null : Number(x['amount_minor']),
-      ...(isOp ? parties(namedOf(x, cashNet)) : { from: null, to: null }),
+      ...(isOp ? parties(namedOf(x, cashNet, legs.some((l) => l['kind'] === 'route_base'))) : { from: null, to: null }),
       reversesOperationId: ops?.reverses_operation_id ?? null, reversedBy, actorRole: ops?.actor_role ?? str(x['actor_role']),
     },
     legs: legs.map((l) => ({

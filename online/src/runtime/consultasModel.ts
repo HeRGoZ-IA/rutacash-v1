@@ -100,6 +100,7 @@ export function partyLabel(p: Party | null | undefined): string {
   switch (p.type) {
     case 'pool': return `Bolsa de ${name || 'Administrador'}`;
     case 'custody': return name || 'Trabajador';
+    case 'route_base': return `Base de ${p.routeName ?? p.name ?? 'la ruta'}`;
     case 'company': return 'Empresa';
     case 'client': return formatClientName(p.name ?? '') || 'Cliente';
     case 'expense': return `Gasto · ${p.name ?? ''}`.trim();

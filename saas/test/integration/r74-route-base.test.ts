@@ -524,4 +524,19 @@ describe('R74 · Base por Ruta (0034)', () => {
     const neg = Number((await db.admin.query(`select count(*) n from adex.capital_accounts where company_id = $1 and kind = 'route_base' and balance_minor < 0`, [c1])).rows[0].n);
     assert.equal(neg, 0, 'ninguna Base negativa');
   });
+
+  test('RB-099 · Consultas (bloque B) con Base por Ruta: la perspectiva de la ruta incluye su Base; saldo final = Base + custodias; origen y destino legibles', async () => {
+    const r = await ana('GET', `/v1/movements/cash?perspective=route:${r1}&limit=200`);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const custodies = Number((await db.admin.query(`select coalesce(sum(balance_minor), 0) s from adex.capital_accounts where company_id = $1 and kind = 'custody' and route_id = $2`, [c1, r1])).rows[0].s);
+    const summary = r.body['summary'] as Body;
+    assert.equal(summary['closingMinor'], (await base(r1)) + custodies, 'saldo final = Base de la ruta + custodias');
+    assert.equal((summary['ledger'] as Body)['ok'], true, 'cuadra con el libro');
+    const rows = r.body['rows'] as Body[];
+    const inj = rows.find((x) => x['kind'] === 'ROUTE_BASE_INJECTION');
+    assert.ok(inj, 'la inyección aparece en Dinero');
+    assert.deepEqual([(inj!['to'] as Body)['type'], (inj!['from'] as Body)['type']], ['route_base', 'external']);
+    const del = rows.find((x) => x['kind'] === 'WORKER_DELIVERY');
+    if (del) assert.equal((del['from'] as Body)['type'], 'route_base', 'la entrega sale de la Base, no de una bolsa');
+  });
 });
