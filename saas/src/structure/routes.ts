@@ -23,6 +23,7 @@ import type pg from 'pg';
 import { computeRouteAssignmentDiff } from '@/lib/routeAssignmentDiff';
 import { validateCobradorInvariant } from '@/lib/cobradorRules';
 import { assignableRoles } from '@/lib/permissions';
+import { isAllowedRate } from '@/lib/interestRatePolicy';
 import { ApiError } from '../errors.ts';
 import type { ActiveContext } from '../authz/context.ts';
 import { mayManage, routeUnrestricted, toCleanUser, type MembershipFacts } from '../authz/cleanRules.ts';
@@ -119,10 +120,17 @@ function routeAdminIds(adminIds: string[], ctx: ActiveContext): string[] {
 export const CREATE_ROUTE_FIELDS = ['name', 'code', 'city', 'email', 'phone', 'interestRate', 'freeRate', 'maxLoanMinor', 'initialCapitalMinor',
   'officeId', 'adminIds', 'collectorId'] as const;
 
+/** D73-01: la tasa de una ruta es una de las admitidas (10 o 20): el Cobrador la usa al originar. */
+function routeRate(body: Record<string, unknown>): number {
+  const v = rate(body, 'interestRate');
+  if (!isAllowedRate(v)) throw new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED', 'the route rate must be 10 or 20', { field: 'interestRate' });
+  return v;
+}
+
 export async function createRoute(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>) {
   need(ctx, 'route.create');
   const name = reqText(body, 'name', 120);
-  const interestRate = rate(body, 'interestRate');
+  const interestRate = routeRate(body);
   const freeRate = bool(body, 'freeRate');
   const maxLoanMinor = minor(body, 'maxLoanMinor');
   if (has(body, 'initialCapitalMinor') && minor(body, 'initialCapitalMinor') > 0) {
@@ -195,7 +203,7 @@ export async function updateRoute(client: pg.PoolClient, ctx: ActiveContext, id:
     city: has(body, 'city') ? optText(body, 'city', 120) : prev.city,
     email: has(body, 'email') ? optText(body, 'email', 160) : prev.email,
     phone: has(body, 'phone') ? optText(body, 'phone', 40) : prev.phone,
-    interestRate: has(body, 'interestRate') ? rate(body, 'interestRate') : Number(prev.interest_rate),
+    interestRate: has(body, 'interestRate') ? routeRate(body) : Number(prev.interest_rate),
     freeRate: has(body, 'freeRate') ? bool(body, 'freeRate') : prev.free_rate,
     maxLoanMinor: has(body, 'maxLoanMinor') ? minor(body, 'maxLoanMinor') : Number(prev.max_loan_minor),
     officeId: has(body, 'officeId') ? optId(body, 'officeId') : prev.office_id,

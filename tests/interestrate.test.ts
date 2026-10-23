@@ -3,8 +3,8 @@
 // ------------------------------------------------------------
 //   npm run test:interestrate
 //
-// Ajuste del socio 2026-10-02, punto 1: el Cobrador solo origina créditos al 20%;
-// el 10% se aplica en la autorización (Secretario y demás autorizadores). Ejecuta
+// Ajuste del socio 2026-10-02, punto 1, SUSTITUIDO por D73-01 (Ronda 73): el Cobrador origina
+// con la tasa de su ruta o, con «Tasa libre», con 10% o 20%; el autorizador puede cambiarla. Ejecuta
 // los SERVICIOS DE PRODUCCIÓN sobre el singleton `db` (Dexie + fake-indexeddb).
 //
 // Semántica convencional: cualquier caso fallido → exit 1.
@@ -17,7 +17,7 @@ import {
   approveSaleRequest, computeSaleFinancials, createDirectSale, createSaleRequest, type SaleInputs,
 } from '../src/services/saleRequestService'
 import {
-  ALLOWED_INTEREST_RATES, COLLECTOR_INTEREST_RATE, canOriginateAtRate, originationRatesFor,
+  ALLOWED_INTEREST_RATES, canOriginateAtRate, originationRateError, originationRatesFor,
 } from '../src/lib/interestRatePolicy'
 import { today } from '../src/lib/formatters'
 import type { Client, Sale, User } from '../src/models/types'
@@ -135,20 +135,21 @@ await spec('TASA-002', 'Cobrador al 10% → RECHAZADO, nada persistido', async (
   assert(JSON.stringify(antes) === JSON.stringify(despues), 'se persistió algo con una tasa inválida')
 })
 
-await spec('TASA-003', 'UI del Cobrador no ofrece 10%', async () => {
-  const opciones = originationRatesFor('cobrador')
-  metric('tasas que origina el Cobrador', opciones.map(t => `${t}%`).join(', '))
-  assert(opciones.length === 1 && opciones[0] === 20 && COLLECTOR_INTEREST_RATE === 20, 'la política del Cobrador no es solo 20%')
+await spec('TASA-003', 'D73-01: el Cobrador usa la tasa de su ruta; con «Tasa libre», 10% o 20%', async () => {
+  const r20 = { tasaInteres: 20, tasaLibre: false }, r10 = { tasaInteres: 10, tasaLibre: false }, libre = { tasaInteres: 20, tasaLibre: true }
+  metric('ruta 20 / ruta 10 / tasa libre', `${originationRatesFor('cobrador', r20)} / ${originationRatesFor('cobrador', r10)} / ${originationRatesFor('cobrador', libre)}`)
+  assert(JSON.stringify(originationRatesFor('cobrador', r20)) === '[20]' && JSON.stringify(originationRatesFor('cobrador', r10)) === '[10]', 'sin tasa libre, la de la ruta')
+  assert(JSON.stringify(originationRatesFor('cobrador', libre)) === '[10,20]', 'con tasa libre, 10 o 20')
+  assert(originationRateError('cobrador', 15, libre) !== null && originationRateError('cobrador', 10, r20) !== null, 'otras tasas rechazadas')
+  assert(originationRatesFor('cobrador', null).length === 0, 'sin ruta conocida no se ofrece tasa')
   for (const p of ['src/pages/collector/CollectorNewSalePage.tsx', 'src/pages/collector/CollectorNewClientPage.tsx']) {
     const src = fs.readFileSync(p, 'utf8')
-    // Las opciones salen de la política por rol; con una sola tasa (Cobrador) se
+    // Las opciones salen de la política con la configuración de la ruta; con una sola tasa se
     // renderiza un campo fijo, no un <Select>. Ninguna lista 10/20 fija en la pantalla.
-    const fijo = src.includes('originationRatesFor(user.rol)')
-      && /tasas\.length === 1\s*\?\s*<Input label="Tasa de interés" value=\{`\$\{tasas\[0\]\}%`\} readOnly/.test(src)
-      && !/value: '10'/.test(src)
-    const valida = /originationRateError\(user\.rol,/.test(src)
-    metric(p.split('/').pop()!, `campo fijo ${fijo ? 'sí' : 'NO'} · validación por rol ${valida ? 'sí' : 'NO'}`)
-    assert(fijo && valida, `${p}: el Cobrador todavía puede elegir tasa`)
+    const fijo = src.includes('originationRatesFor(user.rol, ratePolicy)') && /tasas\.length <= 1\s*\?\s*<Input label="Tasa de interés"/.test(src) && !/value: '10'/.test(src)
+    const valida = /originationRateError\(user\.rol, [^)]*ratePolicy\)/.test(src)
+    metric(p.split('/').pop()!, `tasa por ruta ${fijo ? 'sí' : 'NO'} · validación por ruta ${valida ? 'sí' : 'NO'}`)
+    assert(fijo && valida, `${p}: la pantalla no aplica la política por ruta`)
   }
 })
 

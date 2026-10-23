@@ -21,7 +21,8 @@ import { ApiFailure, CONTEXT_LOST, NetworkFailure, SESSION_LOST, UncertainOperat
 import { errorText } from '../lib/format.ts';
 import { invalidate } from '../runtime/projection.ts';
 import { api, refreshContextFromServer, useRuntime } from '../runtime/session.ts';
-import { persist, reload, useOffline, type PendingOp } from './state.ts';
+import { currentScope, persist, persistInScope, reload, useOffline, type PendingOp } from './state.ts';
+import { holdForSessionReview } from './sessionReview.ts';
 import { refreshCustody, watchCustody } from './custody.ts';
 
 const now = () => new Date().toISOString();
@@ -90,12 +91,22 @@ async function run(): Promise<void> {
   useOffline.setState({ syncing: true });
   try {
     await withLock(async () => {
+      // D73-04: llave y cola de ESTA membresía antes de hablar con el servidor (si la sesión resulta
+      // revocada, el modo se desactiva al instante y ya no habría con qué guardar).
+      const sc = currentScope();
+      const before = useOffline.getState().ops;
+      const holdAll = async (ops: readonly PendingOp[]) => {
+        if (!sc) return;
+        for (const o of holdForSessionReview(ops, now())) await persistInScope(sc, o).catch(() => undefined);
+      };
       // 1. ¿Responde el servidor y sigue valiendo el contexto?
       try {
         await refreshContextFromServer();
-      } catch {
-        // Sin red: se intentará después. Sesión o membresía perdidas: el cliente ya volvió al
-        // acceso o al selector; los pendientes quedan guardados para esa membresía.
+      } catch (e) {
+        // Sin red: se intentará después. Membresía perdida: el cliente ya volvió al selector; los
+        // pendientes quedan guardados para esa membresía. Sesión terminada (D73-04): lo pendiente
+        // queda retenido para revisión explícita tras volver a iniciar sesión en este dispositivo.
+        if (e instanceof ApiFailure && SESSION_LOST.has(e.code)) await holdAll(before);
         return;
       }
       if (!useOffline.getState().enabled) return;
@@ -140,7 +151,12 @@ async function run(): Promise<void> {
             await save({ ...sending, error: { code: 'UNCERTAIN', message: 'Enviado sin respuesta del servidor: se comprobará con el mismo registro, sin duplicarlo.', at: now() } });
             break;
           }
-          if (e instanceof ApiFailure && (isBeforeOperation(e) || SESSION_LOST.has(e.code) || CONTEXT_LOST.has(e.code))) {
+          if (e instanceof ApiFailure && SESSION_LOST.has(e.code)) {
+            // D73-04: la sesión terminó a mitad de la sincronización: esta y las pendientes, a revisión.
+            await holdAll([...live.values()].map((o) => (o.id === sending.id ? { ...sending, status: prev } : o)));
+            break;
+          }
+          if (e instanceof ApiFailure && (isBeforeOperation(e) || CONTEXT_LOST.has(e.code))) {
             // El servidor no llegó a la operación (sesión, contexto, límite): queda como estaba.
             await save({ ...sending, status: prev, error: { code: e.code, message: errorText(e), at: now() } });
             break;

@@ -22,14 +22,16 @@
 import type { Client, Sale, SaleRequest, User } from '@clean/models/types';
 import { SaleRuleError, type SaleInputs } from '@clean/services/saleRequestService';
 import { money, plain } from '../../runtime/commands.ts';
-import { saleFrom, saleRequestFrom, toMinor } from '../../runtime/mappers.ts';
+import { saleFrom, saleRequestFrom, toMajor, toMinor } from '../../runtime/mappers.ts';
 import { clientId, createClientOnline } from '../../runtime/writeAdapters.ts';
 import { generateId } from '@/lib/utils';
-import { useRuntime } from '../../runtime/session.ts';
+import { api, useRuntime } from '../../runtime/session.ts';
 import { useOffline } from '../../offline/state.ts';
 import { OFFLINE_BLOCK_TEXT, OFFLINE_BLOCK_TITLE, disburseAsCollector, newClientsAndSalesBlocked } from '../../offline/sales.ts';
 import { saleDeviceLocation } from '../../runtime/deviceLocation.ts';
 import { approvalBody, approvedMismatch, type ApprovalChoice } from '../../runtime/approvalBody.ts';
+import { invalidate, table } from '../../runtime/projection.ts';
+import { originationRateError } from '@/lib/interestRatePolicy';
 
 export * from '@clean/services/saleRequestService';
 import * as Clean from '@clean/services/saleRequestService';
@@ -106,9 +108,24 @@ function refuseWithoutServer(): void {
   if (newClientsAndSalesBlocked()) throw new SaleRuleError(`${OFFLINE_BLOCK_TITLE}. ${OFFLINE_BLOCK_TEXT}`);
 }
 
+/**
+ * D73-01: antes de una solicitud del Cobrador se relee del SERVIDOR la configuración de tasa de la ruta
+ * (pudo cambiar desde que se cargó la pantalla). Si la tasa elegida ya no vale, no se envía y la pantalla
+ * se actualiza con la configuración vigente. El servidor lo vuelve a exigir dentro de su transacción.
+ */
+async function assertCurrentRouteRate(input: Conditions): Promise<void> {
+  if (useRuntime.getState().ctx?.role !== 'cobrador') return;
+  invalidate(['routes']);
+  const route = (await table('routes')).find((r) => r['id'] === input.routeId);
+  const error = originationRateError('cobrador', input.tasaInteres,
+    route ? { tasaInteres: Number(route['tasaInteres']), tasaLibre: route['tasaLibre'] === true } : null);
+  if (error) throw new SaleRuleError(`${error} La configuración de la ruta se actualizó en pantalla: revise la tasa y envíe de nuevo.`);
+}
+
 async function createSaleRequestOnline(input: Conditions, _actor: User, opts: { newClient?: Client } = {}): Promise<SaleRequest> {
   return asSaleError(async () => {
     refuseWithoutServer();
+    await assertCurrentRouteRate(input);
     const location = await saleDeviceLocation();
     const client = await clientFor(input, opts.newClient);
     try {
@@ -148,6 +165,21 @@ async function rectifyDisbursedSaleOnline(saleId: string, _actor: User, input: C
   }, input.operationId));
 }
 
+/** D73-03: comprobación previa sin efectos (`GET /v1/credits/:id/rectification-check`). */
+async function checkSaleRectificationOnline(saleId: string): Promise<Clean.RectificationCheck> {
+  return asSaleError(async () => {
+    const r = await api().get<{ blockers: string[]; maxIncreaseMinor: number; rectificationCount: number }>(`/v1/credits/${encodeURIComponent(saleId)}/rectification-check`);
+    return { blockers: r.blockers, maxIncrease: toMajor(r.maxIncreaseMinor), rectificationCount: r.rectificationCount };
+  });
+}
+
+/** D73-03: registro del caso excepcional (`POST /v1/credits/:id/rectification-cases`), sin efecto financiero. */
+async function recordRectificationCaseOnline(saleId: string, input: { blocker: string; proposed: Record<string, unknown>; motivo: string; evidencia?: string; operationId: string }): Promise<void> {
+  await asSaleError(() => money('POST', `/v1/credits/${encodeURIComponent(saleId)}/rectification-cases`, {
+    blocker: input.blocker, proposed: input.proposed, reason: input.motivo.trim(), ...(input.evidencia?.trim() ? { evidence: input.evidencia.trim() } : {}),
+  }, input.operationId));
+}
+
 // Firmas ORIGINALES de CLEAN (las pantallas y servicios originales las llaman así).
 export const approveSaleRequest = approveSaleRequestOnline as unknown as typeof Clean.approveSaleRequest;
 export const rejectSaleRequest = rejectSaleRequestOnline as unknown as typeof Clean.rejectSaleRequest;
@@ -156,3 +188,5 @@ export const markSaleLost = markSaleLostOnline as unknown as typeof Clean.markSa
 export const createSaleRequest = createSaleRequestOnline as unknown as typeof Clean.createSaleRequest;
 export const confirmDisbursement = confirmDisbursementOnline as unknown as typeof Clean.confirmDisbursement;
 export const rectifyDisbursedSale = rectifyDisbursedSaleOnline as unknown as typeof Clean.rectifyDisbursedSale;
+export const checkSaleRectification = checkSaleRectificationOnline as unknown as typeof Clean.checkSaleRectification;
+export const recordRectificationCase = recordRectificationCaseOnline as unknown as typeof Clean.recordRectificationCase;

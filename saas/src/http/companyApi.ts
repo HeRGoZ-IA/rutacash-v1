@@ -49,6 +49,7 @@ import {
 import {
   APPROVE_FIELDS, CREATE_REQUEST_FIELDS, DIRECT_FIELDS, DISBURSE_FIELDS, RECTIFY_FIELDS, approveRequest, cancelRequest, createRequest, directSale, disburseRequest,
   getCredit, getRequest, listCredits, listInstallments, listRectifications, listRequests, rectifyCredit, rejectRequest,
+  RECTIFICATION_CASE_FIELDS, listRectificationCases, recordRectificationCase, rectifyCheck,
 } from '../credits/service.ts';
 import { COLLECTION_FIELDS, getCollection, listCollections, registerCollection, reverseCollection } from '../collections/service.ts';
 import { VISIT_FIELDS, listVisits, registerVisit } from '../collections/visits.ts';
@@ -242,6 +243,13 @@ const ENDPOINTS: readonly Endpoint[] = [
   // Ronda 73 (0030): rectificación de un crédito desembolsado sin recaudos (Administrador) y su historial.
   { method: 'POST', pattern: new RegExp(`^/v1/credits/${ID}/rectify$`), fields: RECTIFY_FIELDS, idempotent: 'credits.rectify', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => ok(await rectifyCredit(c, ctx, id!, b, op)) },
+  // D73-03: comprobación previa sin efectos y casos excepcionales (sin efecto financiero).
+  { method: 'GET', pattern: new RegExp(`^/v1/credits/${ID}/rectification-check$`), fields: null,
+    handler: ([id]) => async (c, ctx) => ok(await rectifyCheck(c, ctx, id!)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/credits/${ID}/rectification-cases$`), fields: RECTIFICATION_CASE_FIELDS, idempotent: 'credits.rectification_case',
+    requiresOperation: true, handler: ([id]) => async (c, ctx, b, _q, op) => created(await recordRectificationCase(c, ctx, id!, b, op)) },
+  { method: 'GET', pattern: new RegExp(`^/v1/credits/${ID}/rectification-cases$`), fields: null,
+    handler: ([id]) => async (c, ctx) => ok({ cases: await listRectificationCases(c, ctx, id!) }) },
   { method: 'GET', pattern: new RegExp(`^/v1/credits/${ID}/rectifications$`), fields: null,
     handler: ([id]) => async (c, ctx) => ok({ rectifications: await listRectifications(c, ctx, id!) }) },
   { method: 'GET', pattern: /^\/v1\/installments$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ installments: await listInstallments(c, ctx, q) }) },

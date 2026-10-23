@@ -642,9 +642,9 @@ await spec('CC-D06', 'permisos de venta e interés sin cambios; solo la pantalla
   const ctx = { tenantId: T, routeId: R1 }
   metric('Cobrador · venta directa', can(JUAN, 'sale.createDirect', ctx))
   metric('Cobrador · solicitar', can(JUAN, 'sale.createRequest', ctx))
-  metric('tasas Cobrador / permitidas', `${originationRatesFor('cobrador')} / ${ALLOWED_INTEREST_RATES}`)
+  metric('tasas Cobrador (ruta 20, sin tasa libre) / permitidas', `${originationRatesFor('cobrador', { tasaInteres: 20, tasaLibre: false })} / ${ALLOWED_INTEREST_RATES}`)
   assert(!can(JUAN, 'sale.createDirect', ctx) && can(JUAN, 'sale.createRequest', ctx), 'permisos de venta alterados')
-  assert(JSON.stringify(originationRatesFor('cobrador')) === '[20]' && JSON.stringify(ALLOWED_INTEREST_RATES) === '[10,20]', 'política de interés alterada')
+  assert(JSON.stringify(originationRatesFor('cobrador', { tasaInteres: 20, tasaLibre: false })) === '[20]' && JSON.stringify(ALLOWED_INTEREST_RATES) === '[10,20]', 'política de interés alterada')
   const archivos: string[] = []
   const recorrer = (dir: string) => {
     for (const f of fs.readdirSync(dir, { withFileTypes: true })) {

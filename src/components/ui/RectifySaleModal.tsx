@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, PencilLine } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea } from '@/components/ui/Input'
@@ -7,7 +7,7 @@ import { ApprovalInstallments } from '@/components/ui/ApprovalInstallments'
 import { toast } from '@/components/ui/Toast'
 import { formatCurrency } from '@/lib/formatters'
 import { generateId } from '@/lib/utils'
-import { rectifyDisbursedSale } from '@/services/saleRequestService'
+import { checkSaleRectification, rectifyDisbursedSale, recordRectificationCase, type RectificationCheck } from '@/services/saleRequestService'
 import type { PaymentFrequency, Sale, User } from '@/models/types'
 
 const FREQ_OPTIONS = [
@@ -18,6 +18,21 @@ const WEEK_DAYS = [
   { value: 1, label: 'Lun' }, { value: 2, label: 'Mar' }, { value: 3, label: 'Mié' },
   { value: 4, label: 'Jue' }, { value: 5, label: 'Vie' }, { value: 6, label: 'Sáb' }, { value: 0, label: 'Dom' },
 ]
+
+/** D73-03: por qué la corrección normal no se puede hacer (texto para el Administrador). */
+const BLOCKER_TEXT: Record<string, string> = {
+  CREDIT_HAS_COLLECTIONS: 'La venta ya tiene cobros registrados: corregirla cambiaría lo ya cobrado.',
+  DISBURSEMENT_SETTLED: 'El desembolso ya entró en un cuadre del trabajador: corregirlo alteraría un cuadre cerrado.',
+  PERIOD_CLOSED: 'El periodo de la ruta está cerrado: no se registran movimientos en un periodo cerrado.',
+  CUSTODIAN_CHANGED: 'El trabajador que entregó el dinero ya no tiene caja en esta ruta: no hay a quién cargar o devolver la diferencia.',
+  POOL_OF_ANOTHER_ADMIN: 'El desembolso salió de la bolsa de otro Administrador: solo ese Administrador puede corregirlo.',
+  INSUFFICIENT_FUNDS: 'La cuenta que pagó el desembolso no tiene saldo suficiente para el capital adicional.',
+  OFFLINE_PENDING: 'Hay cobros guardados sin conexión que todavía no llegaron al servidor: el estado de la venta no es seguro.',
+  CREDIT_NOT_ACTIVE: 'La venta no está activa.',
+  CREDIT_NOT_LEDGERED: 'La venta no tiene desembolso registrado en el libro.',
+}
+/** Motivos que se pueden registrar como caso excepcional (los demás no son casos de corrección). */
+const CASEABLE = new Set(['CREDIT_HAS_COLLECTIONS', 'DISBURSEMENT_SETTLED', 'PERIOD_CLOSED', 'CUSTODIAN_CHANGED', 'POOL_OF_ANOTHER_ADMIN', 'INSUFFICIENT_FUNDS', 'OFFLINE_PENDING'])
 
 /**
  * Ronda 73 · SOC-09: el Administrador corrige una venta DESEMBOLSADA sin cobros ni cuadre
@@ -47,12 +62,39 @@ export function RectifySaleModal({ sale, user, currency, open, onClose, onDone }
   const [saving, setSaving] = useState(false)
   // Un id por intención (por apertura del formulario): un reintento nunca corrige dos veces.
   const operationId = useMemo(() => generateId(), [sale.id, open])
+  const caseOperationId = useMemo(() => generateId(), [sale.id, open])
+  // D73-03: comprobación del servidor (sin efectos) y cobros sin conexión declarados.
+  const [check, setCheck] = useState<RectificationCheck | null>(null)
+  const [checkFailed, setCheckFailed] = useState(false)
+  const [offlinePending, setOfflinePending] = useState(false)
+  const [caseSaved, setCaseSaved] = useState(false)
+  const loadCheck = () => { setCheckFailed(false); void checkSaleRectification(sale.id).then(setCheck, () => setCheckFailed(true)) }
+  useEffect(() => { if (open) loadCheck() }, [sale.id, open])
 
   const delta = Math.round((valor - sale.valorVenta) * 100) / 100
   const cambia = delta !== 0 || tasa !== sale.tasaInteres || cuotas !== sale.numeroCuotas || freq !== sale.frecuenciaPago
     || inicio !== sale.fechaInicio || JSON.stringify(dias) !== JSON.stringify(sale.paymentDays ?? [])
-  const listo = cambia && valor > 0 && Number.isInteger(cuotas) && cuotas >= sale.numeroCuotas && cuotas <= 1000 && dias.length > 0
-    && motivo.trim().length >= 10 && evidencia.trim().length >= 10 && sinPendientes
+  const bloqueos = [
+    ...(check?.blockers ?? []),
+    ...(check && delta > check.maxIncrease ? ['INSUFFICIENT_FUNDS'] : []),
+    ...(offlinePending ? ['OFFLINE_PENDING'] : []),
+  ]
+  const listo = cambia && valor > 0 && Number.isInteger(cuotas) && cuotas >= 1 && cuotas <= 1000 && dias.length > 0
+    && motivo.trim().length >= 10 && evidencia.trim().length >= 10 && sinPendientes && check !== null && bloqueos.length === 0
+  const caso = bloqueos.find(b => CASEABLE.has(b))
+
+  async function registrarCaso() {
+    if (!caso || motivo.trim().length < 10 || saving) return
+    setSaving(true)
+    try {
+      await recordRectificationCase(sale.id, { blocker: caso, motivo, evidencia, operationId: caseOperationId,
+        proposed: { valorVenta: valor, tasaInteres: tasa, numeroCuotas: cuotas, frecuenciaPago: freq, fechaInicio: inicio, paymentDays: dias } })
+      setCaseSaved(true)
+      toast.success('Caso registrado para revisión. La venta y el dinero no se modificaron.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo registrar el caso')
+    } finally { setSaving(false) }
+  }
 
   async function guardar() {
     if (!listo || saving) return
@@ -66,6 +108,7 @@ export function RectifySaleModal({ sale, user, currency, open, onClose, onDone }
       onDone()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo corregir la venta')
+      loadCheck()
     } finally { setSaving(false) }
   }
 
@@ -73,7 +116,9 @@ export function RectifySaleModal({ sale, user, currency, open, onClose, onDone }
     <Modal open={open} onClose={onClose} title="Corregir venta desembolsada" size="lg"
       footer={<>
         <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
-        <Button onClick={guardar} loading={saving} disabled={!listo} icon={<PencilLine className="w-4 h-4" />}>Registrar corrección</Button>
+        {caso
+          ? <Button variant="secondary" onClick={registrarCaso} loading={saving} disabled={caseSaved || motivo.trim().length < 10}>{caseSaved ? 'Caso registrado' : 'Registrar caso para revisión'}</Button>
+          : <Button onClick={guardar} loading={saving} disabled={!listo} icon={<PencilLine className="w-4 h-4" />}>Registrar corrección</Button>}
       </>}>
       <div className="space-y-4">
         <div className="rounded-xl bg-amber-50 border border-amber-100 p-3 text-sm text-amber-800 flex gap-2">
@@ -82,6 +127,15 @@ export function RectifySaleModal({ sale, user, currency, open, onClose, onDone }
             original ({formatCurrency(sale.valorVenta, currency)}{sale.fechaDesembolso ? `, ${sale.fechaDesembolso}` : ''}) se conserva y la diferencia
             se registra como un movimiento nuevo de la cuenta que pagó (custodia del trabajador o bolsa).</p>
         </div>
+        {checkFailed && <p className="text-sm text-red-600">No se pudo comprobar la venta con el servidor. Cierre y vuelva a intentarlo.</p>}
+        {!check && !checkFailed && <p className="text-sm text-gray-500">Comprobando la venta con el servidor…</p>}
+        {bloqueos.length > 0 && (
+          <div className="rounded-xl bg-red-50 border border-red-100 p-3 text-sm text-red-800 space-y-1" data-testid="rectify-blockers">
+            <p className="font-semibold">Esta venta no se puede corregir ahora:</p>
+            <ul className="list-disc pl-5 space-y-0.5">{bloqueos.map(b => <li key={b}>{BLOCKER_TEXT[b] ?? b}</li>)}</ul>
+            {caso && <p className="text-xs">Puede registrar el caso para revisión (con motivo y evidencia). No modifica la venta ni el dinero.</p>}
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Input label="Valor realmente entregado" type="number" inputMode="decimal" min={0} step="0.01" value={String(valor)}
             onChange={e => setValor(Number(e.target.value))} required />
@@ -99,7 +153,7 @@ export function RectifySaleModal({ sale, user, currency, open, onClose, onDone }
         )}
         <ApprovalInstallments amount={valor} rate={tasa} count={cuotas} onCount={setCuotas} currency={currency} requested={sale.numeroCuotas} />
         {cuotas < sale.numeroCuotas && (
-          <p className="text-xs text-red-600">No se puede reducir el número de parcelas de una venta desembolsada (decisión pendiente del propietario).</p>
+          <p className="text-xs text-gray-600">Las parcelas que sobran quedan como «sustituidas» en el historial: no se cobran ni cuentan como deuda.</p>
         )}
         <div>
           <p className="block text-sm font-medium text-gray-700 mb-1.5">Días de pago</p>
@@ -121,8 +175,12 @@ export function RectifySaleModal({ sale, user, currency, open, onClose, onDone }
         <Textarea label="Evidencia" rows={2} value={evidencia} onChange={e => setEvidencia(e.target.value)} required
           hint="Mínimo 10 caracteres. Ej.: confirmado por teléfono con el cliente el 22/10 a las 15:10." />
         <label className="flex items-start gap-2.5 cursor-pointer select-none text-sm text-gray-800">
-          <input type="checkbox" checked={sinPendientes} onChange={e => setSinPendientes(e.target.checked)} className="w-4 h-4 mt-0.5 rounded border-gray-300 text-primary-600" />
+          <input type="checkbox" checked={sinPendientes} onChange={e => { setSinPendientes(e.target.checked); if (e.target.checked) setOfflinePending(false) }} className="w-4 h-4 mt-0.5 rounded border-gray-300 text-primary-600" />
           Confirmé con el trabajador que no tiene cobros de esta venta guardados sin conexión pendientes de enviar.
+        </label>
+        <label className="flex items-start gap-2.5 cursor-pointer select-none text-sm text-gray-800">
+          <input type="checkbox" checked={offlinePending} onChange={e => { setOfflinePending(e.target.checked); if (e.target.checked) setSinPendientes(false) }} className="w-4 h-4 mt-0.5 rounded border-gray-300 text-primary-600" />
+          El trabajador tiene cobros sin conexión pendientes (no se puede corregir todavía).
         </label>
       </div>
     </Modal>

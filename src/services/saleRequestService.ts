@@ -111,6 +111,18 @@ export async function rectifyDisbursedSale(_saleId: string, _actor: User, _input
   throw new SaleRuleError('La corrección de ventas desembolsadas solo está disponible en ADEX Online.')
 }
 
+/** D73-03: comprobación previa del servidor (motivos de bloqueo y aumento máximo de capital). */
+export interface RectificationCheck { blockers: string[]; maxIncrease: number; rectificationCount: number }
+
+export async function checkSaleRectification(_saleId: string): Promise<RectificationCheck> {
+  throw new SaleRuleError('La corrección de ventas desembolsadas solo está disponible en ADEX Online.')
+}
+
+/** D73-03: caso excepcional registrado para revisión futura (sin efecto financiero). */
+export async function recordRectificationCase(_saleId: string, _input: { blocker: string; proposed: Record<string, unknown>; motivo: string; evidencia?: string; operationId: string }): Promise<void> {
+  throw new SaleRuleError('La corrección de ventas desembolsadas solo está disponible en ADEX Online.')
+}
+
 export class SaleRuleError extends Error {
   constructor(message: string) {
     super(message)
@@ -197,13 +209,13 @@ async function assertSaleIntegrity(
 }
 
 /**
- * Tasa por ROL DE QUIEN ORIGINA (punto 1, ajustes del socio 2026-10-02): el Cobrador
- * solo origina al 20%; el 10% lo fija el autorizador al aprobar. Se valida aquí y no
- * en `assertSaleIntegrity` porque la aprobación revalida la integridad con el
- * Cobrador como `createdByUserId` y la tasa FINAL del autorizador (que sí puede ser 10%).
+ * Tasa de QUIEN ORIGINA (D73-01, Ronda 73): el Cobrador origina con la tasa de su ruta o, con
+ * «Tasa libre», con 10% o 20%. Se valida aquí y no en `assertSaleIntegrity` porque la
+ * aprobación revalida la integridad con la tasa FINAL del autorizador.
  */
-function assertOriginationRate(input: SaleInputs, actor: User): void {
-  const error = originationRateError(actor.rol, input.tasaInteres)
+async function assertOriginationRate(input: SaleInputs, actor: User): Promise<void> {
+  const route = await db.routes.get(input.routeId)
+  const error = originationRateError(actor.rol, input.tasaInteres, route ? { tasaInteres: route.tasaInteres, tasaLibre: route.tasaLibre } : null)
   if (error) throw new SaleRuleError(error)
 }
 
@@ -241,7 +253,7 @@ export async function createDirectSale(input: SaleInputs, actor: User, opts: { n
   if (!can(actor, 'sale.createDirect', ctx)) {
     throw new Error('No autorizado: este perfil no puede crear ventas directas. La venta debe enviarse como solicitud.')
   }
-  assertOriginationRate(input, actor)
+  await assertOriginationRate(input, actor)
   const { route } = await assertSaleIntegrity(input, { checkStartDate: true, newClient: opts.newClient })
   const limite = can(actor, 'route.edit', ctx) ? Infinity : directSaleLimit(route, actor)
   if (input.valorVenta > limite) {
@@ -317,7 +329,7 @@ export async function createSaleRequest(input: SaleInputs, actor: User, opts: { 
   await assertRouteOperationalContext(input.routeId)
   const ctx = { routeId: input.routeId, tenantId: input.tenantId }
   assertCan(actor, 'sale.createRequest', ctx)
-  assertOriginationRate(input, actor)
+  await assertOriginationRate(input, actor)
   const { route } = await assertSaleIntegrity(input, { checkStartDate: true, newClient: opts.newClient })
   const request = buildSaleRequest(input)
   await db.transaction('rw', [db.saleRequests, db.clients, db.sales], async () => {

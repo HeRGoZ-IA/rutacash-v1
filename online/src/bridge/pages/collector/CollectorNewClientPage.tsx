@@ -21,7 +21,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { getAuthorizedRouteIds } from '@/lib/roles'
 import { can } from '@/lib/permissions'
-import { ALLOWED_INTEREST_RATES, originationRateError, originationRatesFor } from '@/lib/interestRatePolicy'
+import { ALLOWED_INTEREST_RATES, defaultOriginationRate, originationRateError, originationRatesFor } from '@/lib/interestRatePolicy'
 import { generateId } from '@/lib/utils'
 import { nowISO, normalizeDoc, formatCurrency, formatDate, today } from '@/lib/formatters'
 import { computeSaleFinancials, createDirectSale, createSaleRequest, directSaleLimit, type SaleInputs } from '@/services/saleRequestService'
@@ -54,7 +54,6 @@ function NewClientForm() {
   const [params] = useSearchParams()
   const { user } = useAuth()
   // Tasas que ESTE usuario puede originar (Cobrador: solo 20%; el 10% se aplica al autorizar).
-  const tasas = user ? originationRatesFor(user.rol) : ALLOWED_INTEREST_RATES
   const { currency } = useTenant()
   const { activeRouteId } = useCollectorRoute()
   const [routes, setRoutes] = useState<Route[]>([])
@@ -101,6 +100,18 @@ function NewClientForm() {
   // Mismo límite que Nueva venta y que revalida el servicio: el menor entre el de la
   // RUTA y el del usuario (antes aquí solo se miraba el del usuario).
   const limiteDirecto = directSaleLimit(routes.find(r => r.id === form.routeId), user)
+  // D73-01: tasas que se pueden originar en la ruta elegida (Cobrador: la de la ruta, o 10%/20% con
+  // «Tasa libre»). El servidor vuelve a comprobarlo con la configuración vigente.
+  const rutaElegida = routes.find(r => r.id === form.routeId)
+  const ratePolicy = rutaElegida ? { tasaInteres: rutaElegida.tasaInteres, tasaLibre: rutaElegida.tasaLibre } : null
+  const tasas = user ? originationRatesFor(user.rol, ratePolicy) : ALLOWED_INTEREST_RATES
+  useEffect(() => {
+    if (!user || !ratePolicy) return
+    if (!originationRatesFor(user.rol, ratePolicy).includes(saleForm.tasaInteres)) {
+      setSaleForm(f => ({ ...f, tasaInteres: defaultOriginationRate(user.rol, ratePolicy) }))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, rutaElegida?.id, rutaElegida?.tasaInteres, rutaElegida?.tasaLibre])
   const maxAmount = Number.isFinite(limiteDirecto) ? limiteDirecto : null
   const withinLimit = !maxAmount || saleForm.valorVenta <= maxAmount
   const allowDirect = canDirect && withinLimit
@@ -138,7 +149,7 @@ function NewClientForm() {
     if (addSale) {
       if (saleForm.valorVenta <= 0) { toast.error('El valor de la venta debe ser mayor a 0'); return }
       if (saleForm.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return }
-      const errorTasa = user ? originationRateError(user.rol, saleForm.tasaInteres) : null
+      const errorTasa = user ? originationRateError(user.rol, saleForm.tasaInteres, ratePolicy) : null
       if (errorTasa) { toast.error(errorTasa); return }
       if (saleForm.fechaInicio < today()) { toast.error('La fecha de inicio no puede ser anterior a hoy'); return }
       if (saleForm.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
@@ -276,8 +287,8 @@ function NewClientForm() {
               <MoneyInput label="Valor de la venta" currency={currency} value={saleForm.valorVenta} onValueChange={v => setSaleForm(f => ({ ...f, valorVenta: v }))} required />
               <div className="grid grid-cols-2 gap-3">
                 {/* Una sola tasa posible → campo fijo; si no, selector (Supervisor: 10/20). */}
-                {tasas.length === 1
-                  ? <Input label="Tasa de interés" value={`${tasas[0]}%`} readOnly tabIndex={-1} className="bg-gray-50" />
+                {tasas.length <= 1
+                  ? <Input label="Tasa de interés" value={tasas[0] != null ? `${tasas[0]}%` : (rutaElegida ? 'Tasa de la ruta no válida' : 'Elija la ruta')} readOnly tabIndex={-1} className="bg-gray-50" />
                   : <Select label="Tasa interés" value={String(saleForm.tasaInteres)} onChange={e => setSaleForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={tasas.map(t => ({ value: String(t), label: `${t}%` }))} />}
                 <Select label="Forma de pago" value={saleForm.frecuenciaPago} onChange={e => setSaleForm(f => ({ ...f, frecuenciaPago: e.target.value as Sale['frecuenciaPago'] }))} options={FREQ_OPTIONS} />
               </div>

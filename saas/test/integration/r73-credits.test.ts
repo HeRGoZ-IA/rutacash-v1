@@ -410,12 +410,16 @@ describe('Ronda 73 · bloque A: condiciones autorizadas, parcelas y rectificaci�
     await ledgerChecks();
   });
 
-  test('R73-SOC09-012 · reducir el número de parcelas de un crédito desembolsado: bloqueado (las cuotas no se borran; decisión pendiente)', async () => {
+  // [MODIFICADO D73-02] Antes la reducción se bloqueaba (INSTALLMENTS_REDUCTION_BLOCKED); el propietario la aprobó.
+  test('R73-SOC09-012 · D73-02: reducir 12 → 10 parcelas: las sobrantes quedan «sustituidas» (sin borrar, sin deuda)', async () => {
     const w = await worker(); await fund(w, 60_000);
     const { credit } = await viaRequest(w);
     const r = await rectify($ana, credit['id'] as string, { installmentsCount: 10 });
-    assert.deepEqual([r.status, r.body['error']], [409, 'INSTALLMENTS_REDUCTION_BLOCKED']);
-    assert.equal(await count(db.admin, 'select 1 from adex.installments where sale_id = $1', [credit['id']]), 12);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal((r.body['installments'] as Body[]).length, 10, 'el calendario vigente tiene 10');
+    assert.deepEqual((await db.admin.query(`select count(*)::int n, count(*) filter (where status = 'sustituida')::int s from adex.installments where sale_id = $1`, [credit['id']])).rows,
+      [{ n: 12, s: 2 }], 'ninguna cuota se borró');
+    await ledgerChecks();
   });
 
   test('R73-SOC09-011 · trabajador que ya no custodia en la ruta: bloqueada (excepción de conciliación pendiente de decisión)', async () => {

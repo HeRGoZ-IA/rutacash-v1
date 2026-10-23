@@ -219,6 +219,20 @@ export async function persist(op: PendingOp): Promise<void> {
   channel?.postMessage({ t: 'changed', id: op.id });
 }
 
+/**
+ * D73-04: guarda con la llave y el ámbito CAPTURADOS antes (la sesión pudo cerrarse y desactivar el modo
+ * mientras se sincronizaba). Solo para la misma membresía; nada se borra.
+ */
+export async function persistInScope(sc: { scope: Scope; key: CryptoKey }, op: PendingOp): Promise<void> {
+  if (op.membershipId !== sc.scope.membershipId) throw new Error('OFFLINE_SCOPE_MISMATCH');
+  await putOperation(sc.scope, sc.key, op);
+  if (scope === sc.scope) {
+    useOffline.setState((st) => ({ ops: st.ops.filter((o) => o.id !== op.id).concat(op)
+      .sort((a, b) => a.capturedAt.localeCompare(b.capturedAt) || a.id.localeCompare(b.id)) }));
+  }
+  channel?.postMessage({ t: 'changed', id: op.id });
+}
+
 type Capture = Pick<PendingOp, 'kind' | 'path' | 'body' | 'routeId' | 'ref'> & { id: string; capturedAt: string; origin?: PendingOp['origin']; status?: OpStatus };
 
 /** Nueva operación capturada. Se guarda en disco ANTES de devolverla: si la app se cierra, sigue ahí. */

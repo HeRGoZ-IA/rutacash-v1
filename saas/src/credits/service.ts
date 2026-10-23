@@ -4,8 +4,8 @@
 // ya guardado y nunca desembolsa dos veces.
 //
 // Reglas de CLEAN reutilizadas SIN copiar (funciones puras de `src/lib` y del motor de
-// cuotas): `decideSaleOrigination` (segundo crédito), `originationRateError` (el
-// Cobrador solo origina al 20 %), `ALLOWED_INTEREST_RATES` (10 y 20), `directSaleLimit`
+// cuotas): `decideSaleOrigination` (segundo crédito), `originationRateError` (D73-01: el
+// Cobrador origina con la tasa de su ruta o, con «Tasa libre», al 10 o 20 %), `ALLOWED_INTEREST_RATES` (10 y 20), `directSaleLimit`
 // (por la ruta), `calculateTotalWithInterest`, `calculateInstallmentValue`,
 // `generateInstallments` y `estimateFinalDate`.
 //
@@ -18,6 +18,7 @@
 // (0010) y `adex.credit_disburse` como única vía de creación de créditos.
 
 import type pg from 'pg';
+import { randomUUID } from 'node:crypto';
 import { decideSaleOrigination } from '@/lib/activeCredit';
 import { ALLOWED_INTEREST_RATES, originationRateError } from '@/lib/interestRatePolicy';
 import { calculateInstallmentValue, calculateTotalWithInterest, generateInstallments } from '@/services/installmentEngine';
@@ -121,6 +122,13 @@ function financials(c: Conditions) {
   return { total: valorTotal, value, schedule };
 }
 
+/** D73-01: configuración de tasa VIGENTE de la ruta (se lee en cada originación, nunca de la pantalla). */
+async function routeRatePolicy(client: pg.PoolClient, ctx: ActiveContext, routeId: string) {
+  const r = (await client.query<{ rate: string; free: boolean; max: string }>(
+    'select interest_rate rate, free_rate free, max_loan_minor max from adex.routes where company_id = $1 and id = $2', [ctx.companyId, routeId])).rows[0]!;
+  return { tasaInteres: Number(r.rate), tasaLibre: r.free, maxLoanMinor: Number(r.max) };
+}
+
 async function companyToday(client: pg.PoolClient, ctx: ActiveContext): Promise<string> {
   // Fecha contable de la empresa (0018: una sola fuente para todo el servidor).
   return (await client.query<{ d: string }>('select adex.business_today($1)::text d', [ctx.companyId])).rows[0]!.d;
@@ -182,12 +190,13 @@ export async function createRequest(client: pg.PoolClient, ctx: ActiveContext, b
   const route = await routeOf(client, ctx, reqId(body, 'routeId'));
   need(ctx, 'sale.createRequest', { routeId: route.id });
   const cond: Conditions = { amount: amountOf(body), rate: rateOf(body), count: countOf(body), frequency: frequencyOf(body), start: startOf(body), days: daysOf(body) };
-  const rateError = originationRateError(ctx.role, cond.rate);
-  if (rateError) throw new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED', rateError);
+  const policy = await routeRatePolicy(client, ctx, route.id);
+  const rateError = originationRateError(ctx.role, cond.rate, policy);
+  if (rateError) throw new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED', rateError, { routeInterestRate: policy.tasaInteres, freeRate: policy.tasaLibre });
   if (cond.start < await companyToday(client, ctx)) throw new ApiError(400, 'INVALID_CONDITIONS', 'start date before today');
   const cl = await activeClient(client, ctx, reqId(body, 'clientId'), route.id);
   const active = await activeCredits(client, ctx, cl.id);
-  const routeRow = (await client.query<{ max: string }>('select max_loan_minor max from adex.routes where company_id = $1 and id = $2', [ctx.companyId, route.id])).rows[0]!;
+  const routeRow = { max: String(policy.maxLoanMinor) };
   const canDirect = allowed(ctx, 'sale.createDirect', { routeId: route.id });
   const decision = decideSaleOrigination({ actor: { rol: ctx.role }, canCreateDirect: canDirect, canCreateRequest: true,
     activeCredits: active.sales.length + active.approvedRequests.length });
@@ -362,7 +371,7 @@ export async function directSale(client: pg.PoolClient, ctx: ActiveContext, body
   const route = await routeOf(client, ctx, reqId(body, 'routeId'));
   need(ctx, 'sale.createDirect', { routeId: route.id });
   const c: Conditions = { amount: amountOf(body), rate: rateOf(body), count: countOf(body), frequency: frequencyOf(body), start: startOf(body), days: daysOf(body) };
-  const rateError = originationRateError(ctx.role, c.rate);
+  const rateError = originationRateError(ctx.role, c.rate, await routeRatePolicy(client, ctx, route.id));
   if (rateError) throw new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED', rateError);
   if (c.start < await companyToday(client, ctx)) throw new ApiError(400, 'INVALID_CONDITIONS', 'start date before today');
   const cl = await activeClient(client, ctx, reqId(body, 'clientId'), route.id);
@@ -435,6 +444,73 @@ export async function rectifyCredit(client: pg.PoolClient, ctx: ActiveContext, i
     metadata: { operationId: opId, rectificationId: r.rectification_id, adjustmentOperationId: r.adjustment_id, deltaMinor: Number(r.delta_minor), evidence } });
   const credit = await getCredit(client, ctx, s.id);
   return { ...credit, rectification: { id: r.rectification_id, adjustmentOperationId: r.adjustment_id, deltaMinor: Number(r.delta_minor) } };
+}
+
+// ---------- D73-03 · diagnóstico previo y casos excepcionales ----------
+
+const CASE_BLOCKERS = ['INSUFFICIENT_FUNDS', 'CUSTODIAN_CHANGED', 'DISBURSEMENT_SETTLED', 'PERIOD_CLOSED', 'OFFLINE_PENDING', 'CREDIT_HAS_COLLECTIONS',
+  'POOL_OF_ANOTHER_ADMIN'] as const;
+export const RECTIFICATION_CASE_FIELDS = ['blocker', 'proposed', 'reason', 'evidence'] as const;
+
+async function loadSaleForRectification(client: pg.PoolClient, ctx: ActiveContext, id: string): Promise<SaleRow> {
+  pathId(id);
+  const s = (await client.query<SaleRow>('select * from adex.sales where company_id = $1 and id = $2', [ctx.companyId, id])).rows[0];
+  if (!s) throw new ApiError(404, 'NOT_FOUND');
+  need(ctx, 'sale.cancel', { routeId: s.route_id });
+  if (ctx.role !== 'admin') throw new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED', 'only an administrator rectifies a disbursed credit');
+  return s;
+}
+
+/**
+ * Comprobación SIN efectos antes de rectificar: motivos que la bloquean hoy (mismas reglas que
+ * `adex.credit_rectify`) y cuánto puede subir el capital sin sobregirar la cuenta que pagó.
+ */
+export async function rectifyCheck(client: pg.PoolClient, ctx: ActiveContext, id: string) {
+  const s = await loadSaleForRectification(client, ctx, id);
+  const r = (await client.query<{ r: { blockers: string[]; payerKind: string | null; maxIncreaseMinor: number; rectificationCount: number } }>(
+    'select adex.credit_rectify_check($1) r', [s.id])).rows[0]!.r;
+  return { saleId: s.id, blockers: r.blockers, payerKind: r.payerKind, maxIncreaseMinor: Number(r.maxIncreaseMinor), rectificationCount: Number(r.rectificationCount) };
+}
+
+/**
+ * Registro de un caso que la rectificación normal NO puede resolver (D73-03). No mueve dinero ni
+ * cambia el crédito: guarda el motivo, las condiciones propuestas, la comprobación del servidor en
+ * ese momento, el Administrador y la evidencia, para un procedimiento excepcional futuro.
+ */
+export async function recordRectificationCase(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Record<string, unknown>, operationId: string | null) {
+  const opId = requireOperationId(operationId);
+  const s = await loadSaleForRectification(client, ctx, id);
+  const blocker = body['blocker'];
+  if (typeof blocker !== 'string' || !(CASE_BLOCKERS as readonly string[]).includes(blocker)) {
+    throw new ApiError(400, 'INVALID_INPUT', 'blocker is invalid', { field: 'blocker' });
+  }
+  const proposed = body['proposed'];
+  if (typeof proposed !== 'object' || proposed === null || Array.isArray(proposed) || JSON.stringify(proposed).length > 2000) {
+    throw new ApiError(400, 'INVALID_INPUT', 'proposed is invalid', { field: 'proposed' });
+  }
+  const reason = textOf(body, 'reason', 10, 300);
+  const evidence = optText(body, 'evidence', 500);
+  const check = await rectifyCheck(client, ctx, s.id);
+  const caseId = randomUUID();
+  await client.query(
+    `insert into adex.credit_rectification_cases (id, company_id, sale_id, route_id, operation_id, blocker, proposed, check_snapshot, reason, evidence,
+                                                 actor_membership_id, actor_identity_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    [caseId, ctx.companyId, s.id, s.route_id, opId, blocker, JSON.stringify(proposed), JSON.stringify(check), reason, evidence, ctx.membershipId, ctx.claims.identityId]);
+  await audit(client, ctx, { action: 'RECORD_RECTIFICATION_CASE', entityType: 'sale', entityId: s.id, routeId: s.route_id,
+    description: `Caso de rectificación excepcional registrado (${blocker}); sin efecto financiero`, reason, metadata: { operationId: opId, caseId, blocker } });
+  return { id: caseId, saleId: s.id, blocker, check };
+}
+
+export async function listRectificationCases(client: pg.PoolClient, ctx: ActiveContext, id: string) {
+  pathId(id);
+  need(ctx, 'sale.viewActive');
+  if (!(await client.query('select 1 from adex.sales where company_id = $1 and id = $2', [ctx.companyId, id])).rowCount) throw new ApiError(404, 'NOT_FOUND');
+  const r = await client.query<{ id: string; blocker: string; proposed: unknown; check_snapshot: unknown; reason: string; evidence: string | null; actor_membership_id: string; created_at: Date }>(
+    `select id, blocker, proposed, check_snapshot, reason, evidence, actor_membership_id, created_at from adex.credit_rectification_cases
+      where company_id = $1 and sale_id = $2 order by created_at, id`, [ctx.companyId, id]);
+  return r.rows.map((x) => ({ id: x.id, blocker: x.blocker, proposed: x.proposed, check: x.check_snapshot, reason: x.reason, evidence: x.evidence,
+    actorId: x.actor_membership_id, at: x.created_at.toISOString() }));
 }
 
 /** Historial de rectificaciones del crédito (Administrador y SuperAdmin de la ruta, por RLS). */
@@ -548,7 +624,7 @@ export async function listInstallments(client: pg.PoolClient, ctx: ActiveContext
   const r = await client.query<{ sale_id: string; number: number; due_date: string | Date; amount_minor: string; paid_minor: string; balance_minor: string; status: string; days_overdue: number }>(
     `select i.sale_id, i.number, i.due_date, i.amount_minor, i.paid_minor, i.balance_minor, i.status, i.days_overdue
        from adex.installments i join adex.sales s on s.company_id = i.company_id and s.id = i.sale_id
-      where ${where} order by i.sale_id, i.number limit 50001`, params);
+      where ${where} and i.status <> 'sustituida' order by i.sale_id, i.number limit 50001`, params);
   if (r.rows.length > 50000) throw new ApiError(400, 'INVALID_INPUT', 'too many installments: filter by saleId');
   return r.rows.map((i) => ({ saleId: i.sale_id, number: i.number, dueDate: ymd(i.due_date), amountMinor: Number(i.amount_minor),
     paidMinor: Number(i.paid_minor), balanceMinor: Number(i.balance_minor), status: i.status, daysOverdue: i.days_overdue }));
@@ -561,7 +637,8 @@ export async function getCredit(client: pg.PoolClient, ctx: ActiveContext, id: s
   const s = (await client.query<SaleRow>('select * from adex.sales where company_id = $1 and id = $2', [ctx.companyId, id])).rows[0];
   if (!s) throw new ApiError(404, 'NOT_FOUND');
   const installments = (await client.query<{ number: number; due_date: string | Date; amount_minor: string; paid_minor: string; balance_minor: string; status: string }>(
-    'select number, due_date, amount_minor, paid_minor, balance_minor, status from adex.installments where company_id = $1 and sale_id = $2 order by number',
+    // D73-02: las cuotas sustituidas por una rectificación no son parte del calendario vigente.
+    `select number, due_date, amount_minor, paid_minor, balance_minor, status from adex.installments where company_id = $1 and sale_id = $2 and status <> 'sustituida' order by number`,
     [ctx.companyId, id])).rows.map((i) => ({ number: i.number, dueDate: ymd(i.due_date), amountMinor: Number(i.amount_minor),
     paidMinor: Number(i.paid_minor), balanceMinor: Number(i.balance_minor), status: i.status }));
   const ledger = s.ledger_operation_id ? (await client.query<{ kind: string; membership_id: string | null; route_id: string | null; amount_minor: string }>(

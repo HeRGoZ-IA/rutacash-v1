@@ -70,7 +70,7 @@ async function creditState(client: pg.PoolClient, ctx: ActiveContext, saleId: st
     'select id, route_id, client_id, status, balance_minor, total_value_minor, finished_on from adex.sales where company_id = $1 and id = $2', [ctx.companyId, saleId])).rows[0];
   if (!s) throw new ApiError(404, 'NOT_FOUND');
   const installments = (await client.query<{ number: number; due_date: string | Date; amount_minor: string; paid_minor: string; balance_minor: string; status: string; days_overdue: number }>(
-    'select number, due_date, amount_minor, paid_minor, balance_minor, status, days_overdue from adex.installments where company_id = $1 and sale_id = $2 order by number',
+    `select number, due_date, amount_minor, paid_minor, balance_minor, status, days_overdue from adex.installments where company_id = $1 and sale_id = $2 and status <> 'sustituida' order by number`,
     [ctx.companyId, saleId])).rows.map((i) => ({ number: i.number, dueDate: ymd(i.due_date), amountMinor: Number(i.amount_minor), paidMinor: Number(i.paid_minor),
     balanceMinor: Number(i.balance_minor), status: i.status, daysOverdue: i.days_overdue }));
   return {

@@ -71,7 +71,6 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX522': return new ApiError(409, 'CUSTODIAN_CHANGED');
     case 'AX523': return new ApiError(409, 'CREDIT_CHANGED');
     case 'AX524': return new ApiError(400, 'NOTHING_TO_RECTIFY');
-    case 'AX525': return new ApiError(409, 'INSTALLMENTS_REDUCTION_BLOCKED');
     // Fase 5 · recaudos y gastos (0013). Sin cifras de saldos.
     case 'AX701': return new ApiError(409, 'CREDIT_NOT_ACTIVE');
     case 'AX702': return new ApiError(409, 'CREDIT_NOT_DISBURSED');

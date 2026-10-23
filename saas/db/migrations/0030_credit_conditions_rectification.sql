@@ -6,6 +6,9 @@
 -- Solo AÑADE: columnas nullable, una tabla, un tipo de operación, funciones y políticas.
 -- No modifica ni borra ninguna fila existente.
 --
+-- D73-01 · El Cobrador origina con la tasa de su ruta o, con «Tasa libre», con 10 o 20 % (el
+--    guardián de solicitudes lo exige con la configuración VIGENTE de la ruta).
+--
 -- A. SOC-04 · El autorizador puede cambiar el NÚMERO DE PARCELAS antes de aprobar (con
 --    `authorization.modifyConditions`, igual que la tasa, la frecuencia y los días). La
 --    solicitud conserva lo pedido (`requested_installments_count`) y lo aprobado
@@ -27,8 +30,10 @@
 --      · El crédito conserva id, fecha y hora del desembolso, asiento y solicitud.
 --      · Las cuotas (sin pagos) toman el calendario corregido EN SU MISMA FILA y las que
 --        falten se añaden; las condiciones anteriores quedan COMPLETAS en la rectificación
---        (`before_state`). Ninguna cuota se borra (0002): REDUCIR el número de parcelas de
---        un crédito desembolsado queda bloqueado (AX525) hasta que el propietario decida.
+--        (`before_state`). Ninguna cuota se borra (0002). D73-02 (decisión del propietario):
+--        al REDUCIR parcelas, las que sobran pasan al estado nuevo `sustituida` con importe y
+--        saldo 0: no son deuda, no se cobran, el motor de recaudos (`credit_recompute`) las
+--        ignora y las vistas de la API no las listan; la fila y su historia se conservan.
 --      · `adex.credit_rectifications` (append-only) guarda antes, después, Δ, motivo,
 --        evidencia, Administrador, fecha contable y transacción.
 --    No se implementa ninguna excepción de conciliación ni anulación (fuera de alcance).
@@ -86,8 +91,12 @@ create or replace function adex.sale_requests_guard() returns trigger
             is distinct from (new.interest_rate, new.frequency, new.payment_days) then
         raise exception 'adex: a new request is pending and made by its requester' using errcode = '42501';
       end if;
-      -- El Cobrador solo origina al 20 % (`originationRatesFor`).
-      if v_role = 'cobrador' and new.interest_rate <> 20 then raise exception 'adex: the Cobrador originates only at 20%%' using errcode = 'AX502'; end if;
+      -- D73-01 (sustituye «el Cobrador solo origina al 20 %»): sin «Tasa libre», la tasa de su ruta;
+      -- con «Tasa libre», cualquiera de las admitidas (10 o 20, ya comprobado arriba).
+      if v_role = 'cobrador' and not exists (select 1 from adex.routes r where r.company_id = new.company_id and r.id = new.route_id
+                                                and (r.free_rate or r.interest_rate = new.interest_rate)) then
+        raise exception 'adex: the Cobrador originates with the rate of the route' using errcode = 'AX502';
+      end if;
       if new.start_date < adex.business_today(new.company_id) then
         raise exception 'adex: start date before today' using errcode = 'AX503';
       end if;
@@ -340,9 +349,6 @@ create function adex.credit_rectify(
       perform adex.capital_raise('AX503', 'invalid credit conditions');
     end if;
     if p_rate not in (10, 20) then perform adex.capital_raise('AX502', 'interest rate must be 10 or 20'); end if;
-    -- Las cuotas no se borran (0002): reducir su número exige una decisión del propietario
-    -- (p. ej. un estado «anulada» que el motor de recaudos ignore). Bloqueado en esta ronda.
-    if p_count < s.installments_count then perform adex.capital_raise('AX525', 'fewer installments than the disbursed credit needs an owner decision'); end if;
     if (p_amount, p_rate, p_count, p_frequency, p_start, p_payment_days)
        is not distinct from (s.sale_value_minor, s.interest_rate, s.installments_count, s.payment_frequency, s.start_date, s.payment_days) then
       perform adex.capital_raise('AX524', 'nothing to rectify');
@@ -399,6 +405,9 @@ create function adex.credit_rectify(
         values (gen_random_uuid()::text, v_company, s.id, i.n, i.d, i.a, 0, i.a, 'pendiente', 0);
       end if;
     end loop;
+    -- D73-02: las que quedan fuera del calendario vigente se SUSTITUYEN (nunca se borran).
+    update adex.installments set amount_minor = 0, paid_minor = 0, balance_minor = 0, status = 'sustituida', days_overdue = 0
+     where company_id = v_company and sale_id = s.id and number > p_count and status <> 'sustituida';
 
     -- Crédito: condiciones corregidas; fecha, hora, asiento y solicitud del desembolso intactos.
     update adex.sales set sale_value_minor = p_amount, interest_rate = p_rate, interest_value_minor = v_total - p_amount, total_value_minor = v_total,
@@ -431,6 +440,147 @@ create function adex.credit_rectify(
 
 revoke all on function adex.credit_rectify(uuid, text, integer, bigint, numeric, integer, text, date, smallint[], jsonb, text, text, boolean) from public;
 grant execute on function adex.credit_rectify(uuid, text, integer, bigint, numeric, integer, text, date, smallint[], jsonb, text, text, boolean) to adex_api;
+
+-- ---------- D73-03 · diagnóstico previo y casos excepcionales (sin efecto en el libro) ----------
+-- Decisión del propietario: las correcciones excepcionales siguen BLOQUEADAS (sin saldo, custodio
+-- cambiado, desembolso en un cuadre, periodo cerrado, cobros sin conexión pendientes). Se explica el
+-- motivo antes de intentar y el Administrador puede registrar el caso para un procedimiento futuro.
+
+-- Mismas comprobaciones que `credit_rectify`, sin escribir nada. Solo el Administrador de la ruta.
+create function adex.credit_rectify_check(p_sale text) returns jsonb
+  language plpgsql stable security definer set search_path = pg_catalog, adex
+  as $$
+  declare
+    v_company text := adex.ctx_company();
+    v_actor   text := adex.ctx_membership();
+    v_today   date;
+    s         adex.sales;
+    v_orig    adex.capital_operations;
+    v_payer   text; v_pkind text; v_powner text; v_pseq bigint;
+    v_bal     bigint; v_carried bigint;
+    v_blockers text[] := array[]::text[];
+  begin
+    if adex.ctx_role() is distinct from 'admin' then perform adex.capital_raise('AX402', 'only an administrator rectifies a disbursed credit'); end if;
+    select * into s from adex.sales where company_id = v_company and id = p_sale;
+    if not found or not adex.ctx_route_allowed(s.route_id) then perform adex.capital_raise('AX412', 'credit not found'); end if;
+    v_today := adex.business_today(v_company);
+    if s.status <> 'activa' then v_blockers := array_append(v_blockers, 'CREDIT_NOT_ACTIVE'); end if;
+    if exists (select 1 from adex.payments p where p.company_id = v_company and p.sale_id = s.id)
+       or exists (select 1 from adex.installments x where x.company_id = v_company and x.sale_id = s.id and x.paid_minor <> 0) then
+      v_blockers := array_append(v_blockers, 'CREDIT_HAS_COLLECTIONS');
+    end if;
+    select * into v_orig from adex.capital_operations where company_id = v_company and id = s.ledger_operation_id;
+    if found then
+      select e.account_id, a.kind, a.membership_id, e.seq into v_payer, v_pkind, v_powner, v_pseq
+        from adex.capital_entries e join adex.capital_accounts a on a.company_id = e.company_id and a.id = e.account_id
+       where e.company_id = v_company and e.operation_id = v_orig.id and e.amount_minor < 0;
+      if v_pkind = 'custody' and exists (select 1 from adex.custody_settlements cs where cs.company_id = v_company and cs.custody_account_id = v_payer
+                                           and cs.status = 'cerrada' and cs.to_seq >= v_pseq) then
+        v_blockers := array_append(v_blockers, 'DISBURSEMENT_SETTLED');
+      end if;
+      if adex.capital_period_closed(v_company, s.route_id, v_orig.entry_date) or adex.capital_period_closed(v_company, s.route_id, s.disbursement_date)
+         or adex.capital_period_closed(v_company, s.route_id, s.start_date) or adex.capital_period_closed(v_company, s.route_id, v_today) then
+        v_blockers := array_append(v_blockers, 'PERIOD_CLOSED');
+      end if;
+      if v_pkind = 'custody' and not adex.capital_custodian_ok(v_company, s.route_id, v_powner) then v_blockers := array_append(v_blockers, 'CUSTODIAN_CHANGED'); end if;
+      if v_pkind = 'admin' and v_powner is distinct from v_actor then v_blockers := array_append(v_blockers, 'POOL_OF_ANOTHER_ADMIN'); end if;
+      select balance_minor, carried_minor into v_bal, v_carried from adex.capital_accounts where company_id = v_company and id = v_payer;
+    else
+      v_blockers := array_append(v_blockers, 'CREDIT_NOT_LEDGERED');
+    end if;
+    return jsonb_build_object('blockers', to_jsonb(v_blockers), 'payerKind', v_pkind,
+      -- Lo que se puede subir el capital sin sobregirar la cuenta que pagó (sin faltante arrastrado, D25).
+      'maxIncreaseMinor', greatest(coalesce(v_bal, 0) - coalesce(v_carried, 0), 0), 'rectificationCount', s.rectification_count);
+  end $$;
+revoke all on function adex.credit_rectify_check(text) from public;
+grant execute on function adex.credit_rectify_check(text) to adex_api;
+
+-- Casos excepcionales registrados por el Administrador (append-only). No mueven dinero ni cambian el
+-- crédito: son evidencia para definir más adelante un procedimiento excepcional.
+create table adex.credit_rectification_cases (
+  id                    adex.eid primary key,
+  company_id            adex.eid not null references adex.companies(id),
+  sale_id               adex.eid not null,
+  route_id              adex.eid not null,
+  operation_id          uuid not null,
+  blocker               text not null check (blocker in ('INSUFFICIENT_FUNDS', 'CUSTODIAN_CHANGED', 'DISBURSEMENT_SETTLED', 'PERIOD_CLOSED', 'OFFLINE_PENDING',
+                                                         'CREDIT_HAS_COLLECTIONS', 'POOL_OF_ANOTHER_ADMIN')),
+  proposed              jsonb not null,
+  check_snapshot        jsonb not null,
+  reason                text not null check (length(btrim(reason)) >= 10 and length(reason) <= 300),
+  evidence              text check (evidence is null or length(evidence) <= 500),
+  actor_membership_id   adex.eid not null,
+  actor_identity_id     uuid not null,
+  created_at            timestamptz not null default now(),
+  unique (company_id, id),
+  unique (company_id, operation_id),
+  foreign key (company_id, sale_id) references adex.sales(company_id, id),
+  foreign key (company_id, actor_membership_id) references adex.memberships(company_id, id)
+);
+alter table adex.credit_rectification_cases enable row level security;
+alter table adex.credit_rectification_cases force row level security;
+create trigger credit_rectification_cases_immutable before update or delete on adex.credit_rectification_cases
+  for each row execute function adex.reject_mutation();
+create trigger credit_rectification_cases_no_truncate before truncate on adex.credit_rectification_cases
+  for each statement execute function adex.reject_mutation();
+create policy credit_rectification_cases_ctx on adex.credit_rectification_cases for select to adex_api
+  using (company_id = adex.ctx_company() and (select adex.ctx_membership_active())
+         and (select adex.ctx_is(array['superadmin', 'admin']))
+         and adex.route_in_scope(route_id, (select adex.ctx_routes_all()), (select adex.ctx_route_ids())));
+-- Alta solo por el Administrador de la ruta, a su nombre.
+create policy credit_rectification_cases_insert on adex.credit_rectification_cases for insert to adex_api
+  with check (company_id = adex.ctx_company() and (select adex.ctx_membership_active()) and (select adex.ctx_role()) = 'admin'
+              and actor_membership_id = adex.ctx_membership() and actor_identity_id = adex.ctx_identity()
+              and adex.route_in_scope(route_id, (select adex.ctx_routes_all()), (select adex.ctx_route_ids()))
+              and exists (select 1 from adex.sales s where s.company_id = credit_rectification_cases.company_id and s.id = credit_rectification_cases.sale_id
+                          and s.route_id = credit_rectification_cases.route_id));
+grant select, insert on adex.credit_rectification_cases to adex_api;
+revoke all on adex.credit_rectification_cases from public;
+
+-- ---------- D73-02 · cuotas sustituidas ----------
+-- Estado nuevo (solo lo asigna `credit_rectify`): la fila queda como historia con importe 0.
+alter table adex.installments drop constraint installments_status_check;
+alter table adex.installments add constraint installments_status_check
+  check (status in ('pendiente', 'parcial', 'pagada', 'vencida', 'adelantada', 'sustituida'));
+alter table adex.installments add constraint installments_substituted_zero
+  check (status <> 'sustituida' or (amount_minor = 0 and paid_minor = 0 and balance_minor = 0));
+
+-- `credit_recompute` de 0013 con UNA diferencia: las cuotas `sustituida` no entran en la cascada
+-- de pagos ni se recalculan (no son deuda). Sin cuotas sustituidas el resultado es idéntico.
+create or replace function adex.credit_recompute(p_company text, p_sale text, p_today date, p_paid_on date) returns bigint
+  language plpgsql
+  as $$
+  declare v_paid bigint; v_balance bigint; s adex.sales;
+  begin
+    select * into s from adex.sales where company_id = p_company and id = p_sale;
+    select coalesce(sum(amount_minor), 0) into v_paid from adex.payments where company_id = p_company and sale_id = p_sale;
+    update adex.installments i
+       set paid_minor = x.paid, balance_minor = x.amount_minor - x.paid, status = x.status,
+           days_overdue = case when x.status = 'pagada' then 0 else greatest(0, p_today - x.due_date) end
+      from (select y.id, y.amount_minor, y.due_date, y.paid,
+                   case when y.amount_minor - y.paid = 0 and v_paid > y.before then 'pagada'
+                        when y.paid = 0 and p_today > y.due_date then 'vencida'
+                        when y.paid > 0 and y.amount_minor - y.paid > 0 then 'parcial'
+                        when y.amount_minor - y.paid = 0 then 'pagada'
+                        else 'pendiente' end as status
+              from (select z.id, z.amount_minor, z.due_date, z.before, least(z.amount_minor, greatest(0, v_paid - z.before)) as paid
+                      from (select id, amount_minor, due_date,
+                                   coalesce(sum(amount_minor) over (order by number rows between unbounded preceding and 1 preceding), 0) as before
+                              from adex.installments where company_id = p_company and sale_id = p_sale and status <> 'sustituida') z) y) x
+     where i.company_id = p_company and i.id = x.id;
+    select coalesce(sum(balance_minor), 0) into v_balance from adex.installments where company_id = p_company and sale_id = p_sale;
+    -- Una venta perdida o refinanciada nunca cambia de estado al recalcular (CLEAN).
+    update adex.sales
+       set balance_minor = v_balance,
+           status = case when s.status in ('activa', 'finalizada') then case when v_balance <= 0 then 'finalizada' else 'activa' end else s.status end,
+           -- Fecha real de finalización: se sella con la fecha contable del pago que salda;
+           -- se limpia si una anulación reabre el crédito (`resolveSealedCompletionDate`).
+           finished_on = case when s.status in ('activa', 'finalizada') and v_balance <= 0 then coalesce(s.finished_on, p_paid_on)
+                              when s.status in ('activa', 'finalizada') then null else s.finished_on end,
+           updated_at = now()
+     where company_id = p_company and id = p_sale;
+    return v_balance;
+  end $$;
 
 -- ---------- Cuadres y periodos: el ajuste cuenta como desembolso (no como «otros») ----------
 -- Solo cambia la clasificación de las cifras: la posición de la custodia ya suma todas las
