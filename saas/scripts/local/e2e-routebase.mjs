@@ -266,6 +266,18 @@ try {
   const rowClick = (rowTestid, btn) => page.evaluate((r, b) => { const e = document.querySelector(`[data-testid="${r}"] [data-testid="${b}"]`); if (!e || e.disabled) return false; e.click(); return true; }, rowTestid, btn);
   const toPanel = async () => { await go('/admin/capital'); await waitTestid('ge-panel'); await page.waitForFunction(() => !document.querySelector('[data-testid="ge-panel"] .animate-pulse'), { timeout: 20_000 }).catch(() => undefined); await sleep(800); };
   const tab = async (k) => { await tap(`ge-tab-${k}`); await sleep(500); };
+  /** 0037: «Reembolsos pendientes» lista UNA obligación por gasto con dinero propio; abre el pago de esa obligación. */
+  const openObligation = async (expenseId) => {
+    await toPanel(); await tab('pendientes');
+    await page.waitForSelector(`[data-testid="ge-obligation-${expenseId}"]`, { timeout: 20_000 }).catch(() => undefined);
+    const opened = await rowClick(`ge-obligation-${expenseId}`, 'ge-obligation-pay');
+    return opened && await waitTestid('ge-reimb-obligation', 15_000);
+  };
+  /** Pendiente de una obligación (o null si ya no aparece en la lista). */
+  const obligationPending = (expenseId) => page.evaluate((id) => document.querySelector(`[data-testid="ge-obligation-${id}"] [data-testid="ge-obligation-pending"]`)?.innerText ?? null, expenseId).then(minorOf);
+  /** Diálogo de corrección (0037): espera a que cargue la vista previa del servidor. */
+  const corrReady = async () => (await waitTestid('corr-dialog', 15_000))
+    && await page.waitForFunction(() => { const d = document.querySelector('[data-testid="corr-dialog"]'); return d && !d.querySelector('.animate-pulse'); }, { timeout: 20_000 }).then(() => true, () => false);
   /** Abre «Diferencias», la diferencia de una fuente y elige una resolución. */
   const openDifference = async (sourceId, routeFilter) => {
     await go(`/admin/diferencias${routeFilter ? `?ruta=${routeFilter}` : ''}`);
@@ -546,26 +558,43 @@ try {
     await both('C-06-gasto-C2', () => waitTestid('ge-form'));
     await tap('ge-save');
     ok('C-06', ['C-01', 'C-08'], 'C2 con dinero propio (R$ 120): crea saldo a favor (obligación, NO efectivo) y ninguna Base cambia', await gone('ge-form') && await waitToast('saldo a favor') && (await payable(M.ad1)) === pay1 + 12_000 && (await base(C1)) === g1 && (await base(C2)) === g2, `pendiente ${pay1} → ${await payable(M.ad1)}`);
-    // Reembolso parcial a sí mismo (RB-D8) desde Centro 1, luego total desde Centro 2.
-    await sleep(800); await tab('pendientes');
+    // 0037: «Reembolsos pendientes» lista una obligación POR GASTO. Autorreembolso parcial (RB-D8) de la obligación
+    // nueva desde Centro 1; después se paga el resto de cada obligación del Admin 1 desde Centro 2.
+    const eOwn = await one(`select id from adex.expenses where company_id = $1 and description = 'Pagado con mi dinero E2E (C2)'`, [N]);
+    const eRent = await one(`select id from adex.expenses where company_id = $1 and funding = 'own_money' and description = 'Arriendo de la oficina pagado por el Administrador Norte Uno'`, [N]);
+    await sleep(800);
     const pend0 = await payable(M.ad1);
-    await rowClick(`ge-payable-${M.ad1}`, 'ge-payable-reimburse'); await waitTestid('ge-reimb-form'); await sleep(500);
-    ok('C-07', ['C-08'], 'RB-D8: el reembolso a sí mismo se rotula «Autorreembolso» y muestra lo pendiente', !!(await testid('ge-self-note')) && minorOf(await testid('ge-reimb-pending')) === pend0, `${await testid('ge-reimb-pending')} vs ${pend0}`);
-    await setField('Aporte de Ruta Centro 1', major(pend0 + 1_000)); await setField('Motivo', 'Más que lo pendiente'); await sleep(400);
-    ok('C-08', ['C-08'], 'Reembolso mayor que lo pendiente: la pantalla lo impide', (await disabled('ge-reimb-save')) === true && (await text()).includes('supera lo pendiente'));
+    const opened0 = await openObligation(eOwn.id);
+    const rentRow = (await testid(`ge-obligation-${eRent.id}`)) ?? '';
+    ok('C-07', ['C-08'], 'RB-D8: «Reembolsos pendientes» muestra una fila por obligación del Admin 1; el pago de la nueva se rotula «Autorreembolso» y su tope es lo pendiente de ESA obligación (R$ 120)',
+      opened0 && !!(await testid('ge-self-note')) && minorOf(await testid('ge-reimb-pending')) === 12_000 && rentRow.includes('Arriendo'), `${await testid('ge-reimb-pending')} · total ${pend0} · arriendo: ${rentRow.replace(/\n/g, ' ').slice(0, 120)}`);
+    await setField('Aporte de Ruta Centro 1', major(12_000 + 1_000)); await setField('Motivo', 'Más que lo pendiente'); await sleep(400);
+    ok('C-08', ['C-08'], 'Reembolso mayor que lo pendiente de la obligación: la pantalla lo impide', (await disabled('ge-reimb-save')) === true && (await text()).includes('supera lo pendiente'));
     await setField('Aporte de Ruta Centro 1', '50'); await setField('Motivo', 'Autorreembolso parcial E2E'); await sleep(300);
     await both('C-09-autorreembolso', () => waitTestid('ge-reimb-form'));
     g1 = await base(C1);
     await tap('ge-reimb-save');
-    ok('C-09', ['C-01', 'C-08'], 'Autorreembolso parcial R$ 50 desde Centro 1: pendiente −50 y Base −50; el gasto no se registra otra vez', await gone('ge-reimb-form') && await waitToast('Reembolso registrado') && (await payable(M.ad1)) === pend0 - 5_000 && (await base(C1)) === g1 - 5_000);
-    await sleep(1000); await toPanel(); await tab('pendientes');
+    const linkedOwn = async () => Number((await one('select count(*)::int n from adex.admin_reimbursements where company_id = $1 and expense_id = $2 and reversed_at is null', [N, eOwn.id])).n);
+    ok('C-09', ['C-01', 'C-08'], 'Autorreembolso parcial R$ 50 desde Centro 1: pendiente −50, Base −50 y el pago queda enlazado a ESA obligación; el gasto no se registra otra vez',
+      await gone('ge-reimb-form') && await waitToast('Reembolso registrado') && (await payable(M.ad1)) === pend0 - 5_000 && (await base(C1)) === g1 - 5_000 && (await linkedOwn()) === 1);
+    await sleep(1000);
     const pend1 = await payable(M.ad1); g2 = await base(C2);
-    await rowClick(`ge-payable-${M.ad1}`, 'ge-payable-reimburse'); await waitTestid('ge-reimb-form'); await sleep(500);
-    await setField('Aporte de Ruta Centro 2', major(pend1)); await setField('Motivo', 'Autorreembolso total E2E'); await sleep(300);
-    await tap('ge-reimb-save');
-    ok('C-10', ['C-08'], `Reembolso total del resto (R$ ${pend1 / 100}) desde Centro 2: pendiente 0`, await gone('ge-reimb-form') && await waitToast('Reembolso registrado') && (await payable(M.ad1)) === 0 && (await base(C2)) === g2 - pend1);
-    await sleep(800); await toPanel();
-    ok('C-11', ['C-08'], 'Sin pendiente, «Pagar reembolso» queda deshabilitado (no se puede pagar dos veces)', (await disabled('ge-reimburse')) === true);
+    const paidRest = [];
+    for (const id of [eOwn.id, eRent.id]) {
+      if (!(await openObligation(id))) { paidRest.push(`${id}: no abre`); continue; }
+      const rest = minorOf(await testid('ge-reimb-pending'));
+      await setField('Aporte de Ruta Centro 2', major(rest)); await setField('Motivo', 'Autorreembolso del resto E2E'); await sleep(300);
+      await tap('ge-reimb-save');
+      paidRest.push(`${rest}:${await gone('ge-reimb-form') && await waitToast('Reembolso registrado')}`);
+      await sleep(1000);
+    }
+    ok('C-10', ['C-08'], `Pago del resto de cada obligación (total R$ ${pend1 / 100}) desde Centro 2: pendiente 0`, paidRest.every((x) => x.endsWith(':true')) && (await payable(M.ad1)) === 0 && (await base(C2)) === g2 - pend1, paidRest.join(' | '));
+    await toPanel(); await tab('pendientes'); await sleep(500);
+    const leftRows = await page.evaluate((ids) => ids.filter((id) => document.querySelector(`[data-testid="ge-obligation-${id}"]`)).length, [eOwn.id, eRent.id]);
+    const again = await (await apiAs('admin1.norte@example.test', M.ad1))('POST', '/v1/capital/reimbursements', { adminId: M.ad1, expenseId: eOwn.id, reason: 'Segundo pago de la misma obligación', contributions: [{ routeId: C1, amountMinor: 1_000 }] });
+    ok('C-11', ['C-08'], 'Saldadas, las obligaciones del Admin 1 salen de «Reembolsos pendientes» y la API rechaza pagar otra vez la misma (no se paga dos veces)', leftRows === 0 && refused(again) && (await payable(M.ad1)) === 0, `filas ${leftRows} · API ${again.status} ${again.text.slice(0, 120)}`);
+    // El inicio de sesión por la API cerró la sesión del navegador (una sola sesión activa por persona): se vuelve a entrar.
+    await login('admin1.norte@example.test'); await toPanel();
     await tab('reembolsos');
     ok('C-12', ['C-01'], 'Historial de reembolsos y lista de gastos visibles a 390 y 1280 px', await both('C-12-historial-reembolsos', () => waitTestid('ge-reimbursements')));
     // Gastos: el total del encabezado deja claro que no incluye los gastos generales.
@@ -643,8 +672,9 @@ try {
     ok('H-07', ['C-11'], 'SuperAdmin NO ejecuta operaciones de dinero de route_base (inyección, retiro, entrega, depósito, conciliación)', saOps.every((x) => refused(x)), saOps.map((x) => x.status).join('/'));
 
     // ======================================================================================================
-    // D · RB-D7: cambio de responsable (SuperAdmin, estructural), anulación por el nuevo responsable y operación
-    //     conjunta de dos responsables rechazada con JOINT_OPERATION_MIXED_CONTROLLERS.
+    // D · RB-D7 + 0037: cambio de responsable (SuperAdmin, estructural), anulación por el nuevo responsable (diálogo de
+    //     corrección) y operación conjunta de dos responsables por el procedimiento de ANULACIÓN CONJUNTA: uno propone,
+    //     el otro confirma su parte desde su pantalla y se asienta todo junto; quien propone puede cancelar. Nunca parcial.
     // ======================================================================================================
     stage = 'D';
     await login('sa.norte@example.test');
@@ -664,37 +694,86 @@ try {
     ok('D-05', ['C-01'], 'Admin 2 confirma el conteo con faltante de R$ 10 (acta con diferencia; la Base no se mueve)', hv.saved && (await controller(C2)).h === 'normal' && (await base(C2)) === bHand, JSON.stringify(hv));
     const hrec = await one(`select id, difference_minor::int d from adex.route_handover_records where route_id = $1 and status = 'confirmada' order by confirmed_at desc limit 1`, [C2]);
     ok('D-06', ['C-01'], 'PostgreSQL: acta confirmada de Centro 2', !!hrec, JSON.stringify(hrec));
-    // El nuevo responsable anula el gasto A solo de Centro 2 y el reembolso sembrado al Admin 1 desde Centro 2.
+    // El nuevo responsable anula el gasto A solo de Centro 2 y el reembolso sembrado al Admin 1 desde Centro 2 (diálogo de corrección).
     await toPanel(); await tab('gastos');
     const eOnlyC2 = await one(`select id from adex.expenses where company_id = $1 and description = 'Servicio solo de Centro 2 E2E (A)'`, [N]);
     let bc = await base(C2);
     const canRev = await rowClick(`ge-expense-${eOnlyC2.id}`, 'ge-expense-reverse');
-    if (canRev) { await waitTestid('ge-reverse-dialog'); await setField('Motivo de la anulación', 'Lo anula el nuevo responsable de Centro 2'); await sleep(300); await tap('ge-reverse-confirm'); }
-    ok('D-07', ['C-01', 'C-08'], 'RB-D7: el nuevo responsable (Admin 2) anula el gasto A de Centro 2 registrado por el Admin 1; el aporte vuelve a Centro 2', canRev && await gone('ge-reverse-dialog') && await waitToast('Gasto general anulado') && (await base(C2)) === bc + 4_000, `${bc} → ${await base(C2)}`);
+    const effRev = canRev && await corrReady() ? (await testid('corr-effects')) ?? '' : '';
+    if (canRev) { await setField('Motivo de la anulación', 'Lo anula el nuevo responsable de Centro 2'); await sleep(300); await tap('corr-confirm'); }
+    ok('D-07', ['C-01', 'C-08'], 'RB-D7: el nuevo responsable (Admin 2) anula el gasto A de Centro 2 registrado por el Admin 1 (vista previa: +R$ 40 a la Base de Centro 2); el aporte vuelve a Centro 2',
+      canRev && effRev.includes('Base de Ruta Centro 2') && await waitToast('Anulación registrada') && await gone('corr-dialog') && (await base(C2)) === bc + 4_000, `${effRev.replace(/\n/g, ' ')} · ${bc} → ${await base(C2)}`);
     await sleep(1000); await toPanel(); await tab('reembolsos');
     const seedReimb = await one(`select r.id, r.amount_minor::int a from adex.admin_reimbursements r where r.company_id = $1 and r.admin_membership_id = $2 and r.reason = 'Reembolso parcial del arriendo de la oficina'`, [N, M.ad1]);
     bc = await base(C2); const pA1 = await payable(M.ad1);
     const canRevR = await rowClick(`ge-reimb-${seedReimb.id}`, 'ge-reimb-reverse');
-    if (canRevR) { await waitTestid('ge-reverse-dialog'); await setField('Motivo de la anulación', 'Reembolso pagado por error desde Centro 2'); await sleep(300); await tap('ge-reverse-confirm'); }
-    ok('D-08', ['C-01', 'C-08'], 'RB-D7: el Admin 2 anula el reembolso al Admin 1 que salió de Centro 2: vuelve a la Base y la obligación queda pendiente otra vez', canRevR && await gone('ge-reverse-dialog') && await waitToast('Reembolso anulado') && (await base(C2)) === bc + seedReimb.a && (await payable(M.ad1)) === pA1 + seedReimb.a, JSON.stringify({ bc, after: await base(C2), pA1, pA1b: await payable(M.ad1) }));
-    // Operación conjunta: el gasto A de Centro 1 (Admin 1) + Centro 2 (ahora Admin 2).
-    await sleep(800); await toPanel(); await tab('gastos');
-    const canJ2 = await rowClick(`ge-expense-${eA.id}`, 'ge-expense-reverse');
-    if (canJ2) { await waitTestid('ge-reverse-dialog'); await setField('Motivo de la anulación', 'Intento de anular una operación conjunta'); await sleep(300); await tap('ge-reverse-confirm'); }
-    await page.waitForSelector('[data-testid="ge-joint-routes"]', { timeout: 20_000 }).catch(() => undefined);
-    const joint2 = (await testid('ge-joint-routes')) ?? '';
-    ok('D-09', ['C-08', 'C-10'], 'Operación conjunta (Centro 1 de Admin 1 + Centro 2 de Admin 2): el Admin 2 recibe el rechazo con las rutas y sus responsables', canJ2 && joint2.includes('Ruta Centro 1') && joint2.includes('Ruta Centro 2') && /Norte Uno/i.test(joint2), joint2.replace(/\n/g, ' | '));
-    await both('D-09-operacion-conjunta', () => waitTestid('ge-reverse-dialog'));
+    if (canRevR && await corrReady()) { await setField('Motivo de la anulación', 'Reembolso pagado por error desde Centro 2'); await sleep(300); await tap('corr-confirm'); }
+    ok('D-08', ['C-01', 'C-08'], 'RB-D7: el Admin 2 anula el reembolso al Admin 1 que salió de Centro 2: vuelve a la Base y la obligación queda pendiente otra vez',
+      canRevR && await waitToast('Anulación registrada') && await gone('corr-dialog') && (await base(C2)) === bc + seedReimb.a && (await payable(M.ad1)) === pA1 + seedReimb.a, JSON.stringify({ bc, after: await base(C2), pA1, pA1b: await payable(M.ad1) }));
+
+    // Operación conjunta: el gasto A con aportes de Centro 1 (Admin 1) y Centro 2 (ahora Admin 2).
+    const JOINT_REASON = 'Motivo de la anulación (lo verán los demás responsables)';
+    const proposalOf = async () => one(`select id, status, proposed_by_membership_id p from adex.joint_reversal_proposals where company_id = $1 and target_kind = 'expense' and target_id = $2 order by created_at desc limit 1`, [N, eA.id]);
+    const proposeJointUi = async (reason) => {
+      await toPanel(); await tab('gastos');
+      const opened = await rowClick(`ge-expense-${eA.id}`, 'ge-expense-reverse') && await corrReady();
+      const jointTxt = opened ? (await testid('corr-joint')) ?? '' : '';
+      const canPropose = !!(await page.$('[data-testid="corr-propose"]'));
+      await setField(JOINT_REASON, reason); await sleep(300);
+      return { opened, jointTxt, canPropose };
+    };
+    await sleep(800);
+    let [j1, j2] = [await base(C1), await base(C2)];
+    const pr1 = await proposeJointUi('Papelería conjunta registrada por error (se cancela)');
+    await both('D-09-propuesta-conjunta', () => waitTestid('corr-joint'));
+    await tap('corr-propose');
+    const proposed1 = await waitToast('Anulación conjunta propuesta');
+    const prop1 = await proposalOf();
+    ok('D-09', ['C-08', 'C-10'], 'Operación conjunta (Centro 1 de Admin 1 + Centro 2 de Admin 2): el diálogo explica la anulación conjunta con rutas y responsables; el Admin 2 la propone y nada se asienta todavía',
+      pr1.opened && pr1.canPropose && pr1.jointTxt.includes('Ruta Centro 1') && pr1.jointTxt.includes('Ruta Centro 2') && /Norte Uno/i.test(pr1.jointTxt)
+      && proposed1 && prop1?.status === 'pending' && prop1.p === M.ad2 && (await base(C1)) === j1 && (await base(C2)) === j2, `${pr1.jointTxt.replace(/\n/g, ' | ')} · ${JSON.stringify(prop1)}`);
+    // Quien propone la cancela desde su Caja principal: no se mueve dinero y el gasto sigue vigente.
+    await page.keyboard.press('Escape').catch(() => undefined);
+    await toPanel();
+    await page.waitForSelector('[data-testid="joint-panel"] [data-testid="joint-cancel"]', { timeout: 20_000 }).catch(() => undefined);
+    const panelOk = !!(await testid('joint-panel'));
+    await tap('joint-cancel'); await sleep(300);
+    await setField('Motivo de la cancelación', 'Se revisó: el gasto conjunto es correcto'); await sleep(300);
+    await tap('joint-cancel-confirm');
+    const cancelled = await waitToast('Propuesta cancelada');
+    const prop1b = await one('select status from adex.joint_reversal_proposals where id = $1', [prop1?.id]);
+    ok('D-09b', ['C-08'], 'El Admin 2 cancela su propuesta desde la Caja principal: «cancelled», ningún dinero se movió y el gasto conjunto sigue vigente (sin anulación parcial)',
+      panelOk && cancelled && prop1b?.status === 'cancelled' && (await base(C1)) === j1 && (await base(C2)) === j2 && !(await one('select reversal_id from adex.expenses where id = $1', [eA.id])).reversal_id, JSON.stringify(prop1b));
+    // Nueva propuesta del Admin 2; el Admin 1 la confirma desde Notificaciones y se asienta todo junto.
+    await sleep(800);
+    [j1, j2] = [await base(C1), await base(C2)];
+    const pr2 = await proposeJointUi('Papelería conjunta duplicada: se anula entera');
+    await tap('corr-propose');
+    const proposed2 = await waitToast('Anulación conjunta propuesta');
+    const prop2 = await proposalOf();
+    // Por la API directa, el Admin 1 tampoco anula su parte suelta: 409 con la propuesta pendiente que debe confirmar.
+    const jApi = await (await apiAs('admin1.norte@example.test', M.ad1))('POST', `/v1/expenses/${eA.id}/reverse`, { reason: 'Intento de anulación parcial por la API' });
     await login('admin1.norte@example.test');
-    await toPanel(); await tab('gastos');
-    const canJ1 = await rowClick(`ge-expense-${eA.id}`, 'ge-expense-reverse');
-    if (canJ1) { await waitTestid('ge-reverse-dialog'); await setField('Motivo de la anulación', 'Intento de anular una operación conjunta'); await sleep(300); await tap('ge-reverse-confirm'); }
-    await page.waitForSelector('[data-testid="ge-reverse-error"]', { timeout: 20_000 }).catch(() => undefined);
-    const jerr = (await testid('ge-reverse-error')) ?? '';
-    const joint1 = (await testid('ge-joint-routes')) ?? '';
-    const jApi = await (await apiAs('admin1.norte@example.test', M.ad1))('POST', `/v1/expenses/${eA.id}/reverse`, { reason: 'Intento por la API' });
-    ok('D-10', ['C-08', 'C-10'], 'El Admin 1 tampoco la anula: JOINT_OPERATION_MIXED_CONTROLLERS (409) y la pantalla muestra rutas y responsables', canJ1 && jerr.length > 0 && joint1.includes('Ruta Centro 2') && /Norte Dos/i.test(joint1) && jApi.status === 409 && jApi.text.includes('JOINT_OPERATION_MIXED_CONTROLLERS'), `${jerr.slice(0, 120)} | ${joint1.replace(/\n/g, ' | ')} | API ${jApi.status}`);
-    ok('D-11', ['C-08'], 'PostgreSQL: el gasto conjunto sigue vigente (sin anulación parcial)', !(await one('select reversal_id from adex.expenses where id = $1', [eA.id])).reversal_id);
+    await go('/admin/notificaciones');
+    await waitTestid('notifications-page');
+    await page.waitForSelector('[data-testid="joint-attend"]', { timeout: 30_000 }).catch(() => undefined);
+    const notified = !!(await testid('joint-attend'));
+    await both('D-10-aviso-conjunta', () => waitTestid('notifications-page'));
+    await tap('joint-attend');
+    await waitTestid('joint-confirm');
+    await tap('joint-confirm');
+    const posted = await waitToast('Anulación conjunta asentada');
+    const prop2b = await one('select status from adex.joint_reversal_proposals where id = $1', [prop2?.id]);
+    const revA = await one('select reversal_id from adex.expenses where id = $1', [eA.id]);
+    ok('D-10', ['C-08', 'C-10'], 'El Admin 2 propone otra vez; el Admin 1 recibe el aviso, confirma su parte y se asienta TODO junto: Centro 1 +R$ 60, Centro 2 +R$ 30, gasto anulado (la API rechaza la parte suelta con 409)',
+      pr2.canPropose && proposed2 && notified && posted && prop2b?.status === 'posted' && !!revA?.reversal_id && (await base(C1)) === j1 + 6_000 && (await base(C2)) === j2 + 3_000
+      && jApi.status === 409 && jApi.text.includes('JOINT_OPERATION_MIXED_CONTROLLERS'), JSON.stringify({ prop2b, revA, c1: [j1, await base(C1)], c2: [j2, await base(C2)], api: jApi.status }));
+    const consA = await consultasHas('Anulación · aporte de ruta a gasto general', C1);
+    await shot('D-11-consultas-anulacion-conjunta');
+    const rev = await one(`select count(*)::int n, count(distinct o.route_id)::int routes, coalesce(sum(o.amount_minor), 0)::int a from adex.capital_operations o
+      where o.company_id = $1 and o.reverses_operation_id in (select c.operation_id from adex.general_funding_contributions c where c.expense_id = $2)`, [N, eA.id]);
+    ok('D-11', ['C-08', 'C-04'], 'Consultas (Centro 1) muestra la anulación; PostgreSQL: los dos aportes se anularon juntos (R$ 90, dos rutas), sin anulación parcial',
+      consA && rev.n === 2 && rev.routes === 2 && rev.a === 9_000, JSON.stringify(rev));
 
     // ======================================================================================================
     // E · Diferencias (RB-D3) desde la pantalla «Diferencias»: el Administrador concilia sin aprobación superior
@@ -839,14 +918,23 @@ try {
     await both('F-03-reparto-sin-asignar', () => waitTestid('rb-form-assign'));
     ok('F-03', ['C-05', 'C-13'], `ADMIN_POOL_BALANCE: el Admin 2 reparte su saldo sin asignar (R$ ${un2 / 100}) a Oeste 2 desde Transferencias`, un2 > 0 && await saveOp('Reparto de saldo sin asignar registrada') && (await pool(M.ad2, N)) === 0 && (await base(O2)) === bO2 + un2);
     // F-04: PENDING_REIMBURSEMENT → el Admin 2 se reembolsa a sí mismo (RB-D8) desde Oeste 2 antes de entregar sus rutas.
-    // (Un Administrador solo ve SU saldo a favor en «Reembolsos pendientes»: el Admin 1 no puede pagar el del Admin 2 desde su pantalla.)
-    await toPanel(); await tab('pendientes');
+    // 0037: «Reembolsos pendientes» lista una obligación por gasto; el Admin 2 paga cada una de las SUYAS («Pagar mi reembolso»).
     const p2 = await payable(M.ad2); const bO2r = await base(O2);
-    await rowClick(`ge-payable-${M.ad2}`, 'ge-payable-reimburse'); await waitTestid('ge-reimb-form'); await sleep(500);
-    await setField('Aporte de Ruta Oeste 2', major(p2)); await setField('Motivo', 'Autorreembolso antes de entregar mis rutas'); await sleep(300);
-    await shot('F-04-autorreembolso-admin2-1280');
-    await tap('ge-reimb-save');
-    ok('F-04', ['C-05', 'C-08'], `PENDING_REIMBURSEMENT: el Admin 2 se reembolsa (R$ ${p2 / 100}) con aporte de Oeste 2 (RB-D8)`, await gone('ge-reimb-form') && await waitToast('Reembolso registrado') && (await payable(M.ad2)) === 0 && (await base(O2)) === bO2r - p2, `${p2} → ${await payable(M.ad2)} · ${(await toasts()).slice(0, 200)}`);
+    const own2 = (await q(`select e.id from adex.expenses e where e.company_id = $1 and e.funding = 'own_money' and e.responsible_admin_membership_id = $2 and e.reversal_id is null and e.reverses_id is null order by e.created_at`, [N, M.ad2])).map((x) => x.id);
+    const paid2 = [];
+    for (const id of own2) {
+      await toPanel(); await tab('pendientes');
+      if ((await obligationPending(id)) == null) continue; // ya saldada
+      if (!(await openObligation(id))) { paid2.push(`${id}: no abre`); continue; }
+      const rest = minorOf(await testid('ge-reimb-pending'));
+      await setField('Aporte de Ruta Oeste 2', major(rest)); await setField('Motivo', 'Autorreembolso antes de entregar mis rutas'); await sleep(300);
+      if (paid2.length === 0) await shot('F-04-autorreembolso-admin2-1280');
+      await tap('ge-reimb-save');
+      paid2.push(`${rest}:${await gone('ge-reimb-form') && await waitToast('Reembolso registrado')}`);
+      await sleep(1000);
+    }
+    ok('F-04', ['C-05', 'C-08'], `PENDING_REIMBURSEMENT: el Admin 2 paga cada obligación suya (total R$ ${p2 / 100}) con aporte de Oeste 2 (RB-D8)`,
+      paid2.length > 0 && paid2.every((x) => x.endsWith(':true')) && (await payable(M.ad2)) === 0 && (await base(O2)) === bO2r - p2, `${paid2.join(' | ')} · ${p2} → ${await payable(M.ad2)} · ${(await toasts()).slice(0, 200)}`);
     // F-05: CAPITAL_CONTROLLER → el SuperAdmin asigna Oeste 1/2 al Admin 1 y le cambia el responsable de las tres rutas del Admin 2.
     await login('sa.norte@example.test');
     const dMid = await toggleUserUi('admin2.norte@example.test');

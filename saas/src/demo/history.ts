@@ -76,6 +76,12 @@ function rng(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+/** Semilla de un flujo aleatorio: la semilla base mezclada con su clave (FNV-1a). */
+function seedFor(base: number, key: string) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 0x01000193) >>> 0;
+  return (base ^ h) >>> 0;
+}
 const COP = (pesos: number) => Math.round(pesos) * 100; // unidades menores (centavos)
 const round1000 = (pesos: number) => Math.round(pesos / 1000) * 1000;
 
@@ -100,8 +106,15 @@ interface CreditState {
 }
 
 export async function runHistoryScenario(call: StrictRunner, m: (seat: string) => string, opts: HistoryOptions) {
-  const rand = rng(20261018);
-  const pick = <T>(xs: readonly T[]) => xs[Math.floor(rand() * xs.length)]!;
+  // Un generador POR RUTA (semilla base + clave de la ruta). Las rutas de cada día se ejecutan en
+  // paralelo: un generador compartido repartiría los números según el orden en que llegan las
+  // respuestas y la historia cambiaría de una ejecución a otra. Así cada ruta consume siempre la
+  // misma secuencia, sea cual sea el paralelismo.
+  const SEED = 20261018;
+  const randOf: Record<RouteKey, () => number> = {
+    centro: rng(seedFor(SEED, 'centro')), norte: rng(seedFor(SEED, 'norte')), sur: rng(seedFor(SEED, 'sur')), expansion: rng(seedFor(SEED, 'expansion')),
+  };
+  const pickWith = <T>(rand: () => number, xs: readonly T[]) => xs[Math.floor(rand() * xs.length)]!;
   let calls = 0;
   // Si una ruta falla, las demás se detienen en su siguiente paso (la inicialización se aborta entera).
   let failed: unknown = null;
@@ -158,13 +171,14 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
   const addClient = async (route: RouteKey, day: string) => {
     n++;
     const name = `${FIRST[(n * 7) % FIRST.length]} ${LAST[(n * 3) % LAST.length]} ${LAST[(n * 11 + 5) % LAST.length]}`;
+    const rand = randOf[route];
     const r = rand();
     const profile: Profile = r < 0.55 ? 'puntual' : r < 0.86 ? 'irregular' : 'moroso';
     const weekly = rand() < 0.35;
     const created = await c({ seat: collector[route] ?? controller[route], method: 'POST', path: '/v1/clients', operation: true, day, body: {
       routeId: routes[route], name, documentType: 'CC', document: String(99_000_000 + n * 37), phonePrimary: `300 ${String(1_000_000 + n * 131).slice(0, 7)}`,
       addressPrimary: `Calle ${10 + (n % 80)} # ${n % 50}-${10 + (n % 60)}, Barrio Ficticio`, addressSecondary: `Carrera ${20 + (n % 40)} # ${n % 30}-${n % 90}, local ${n % 9 + 1}`,
-      business: `${pick(BUSINESS)} (ficticio)`, notes: 'Cliente ficticio de la Empresa Demo' } });
+      business: `${pickWith(rand, BUSINESS)} (ficticio)`, notes: 'Cliente ficticio de la Empresa Demo' } });
     const st: ClientState = { route, idx: n, id: str(created['id'], 'client'), name, profile, weekly, weekDay: 1 + (n % 6), credit: null, renewOn: null, credits: 0, rejectedOnce: false };
     clients.push(st);
     return st;
@@ -187,7 +201,7 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
   // ============================================================ 3. Día a día
   const summary = { days: total, credits: 0, collections: 0, visits: 0, requests: 0, rejected: 0, settlements: 0, closures: 0, expenses: 0 };
   const lastPayment: Record<RouteKey, { id: string; day: string }[]> = { centro: [], norte: [], sur: [], expansion: [] };
-  const amountFor = (cl: ClientState) => round1000((cl.credits === 0 ? 300_000 + rand() * 500_000 : 400_000 + rand() * 700_000) * (cl.profile === 'puntual' ? 1.1 : 1));
+  const amountFor = (cl: ClientState, rand = randOf[cl.route]) => round1000((cl.credits === 0 ? 300_000 + rand() * 500_000 : 400_000 + rand() * 700_000) * (cl.profile === 'puntual' ? 1.1 : 1));
   const conditions = (cl: ClientState, amount: number, day: string) => ({
     routeId: routes[cl.route], clientId: cl.id, amountMinor: COP(amount), interestRate: 20,
     installmentsCount: cl.weekly ? 8 : 24, frequency: cl.weekly ? 'semanal' : 'diaria', startDate: nextBusiness(day),
@@ -223,6 +237,8 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
     const col = collector[route];
     const ctl = controller[route];
     const mine = clients.filter((x) => x.route === route);
+    const rand = randOf[route];
+    const pick = <T>(xs: readonly T[]) => pickWith(rand, xs);
     // ---- Lunes: cierre de la semana anterior (lunes a sábado) por el responsable.
     if (wd === 1 && index >= 7) {
       const weekStart = addDays(day, -7);
@@ -392,6 +408,19 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
     if (i === m60) await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/company/withdrawals', operation: true, day, body: { amountMinor: COP(2_000_000), reason: 'Distribución parcial de utilidades' } });
     // ---- Cambio de responsable de Ruta Norte (Jorge → Marta) y baja de Jorge.
     if (i === norteChange) {
+      // RB-D1 (0036): ningún Administrador se desactiva con cuentas pendientes. Antes de entregar
+      // Ruta Norte, Jorge, todavía responsable de capital, concilia con su motivo los sobrantes de
+      // cuadre que quedaron en control a su nombre (los incorpora a la Base: el dinero vuelve a su
+      // bolsa y sale con la devolución de abajo). Es el camino normal de la API, como lo haría una
+      // persona. Los faltantes de cuadre de la ruta no son suyos: siguen con la ruta y los decide
+      // la nueva responsable.
+      const pending = ((await c({ seat: 'admin-anterior', method: 'GET', path: `/v1/capital/differences?routeId=${routes.norte}&status=pending`, day }))['items'] as Record<string, unknown>[]) ?? [];
+      for (const d of pending) {
+        if (d['sourceKind'] !== 'settlement_surplus' || d['holderId'] !== m('admin-anterior') || !(Number(d['pendingMinor']) > 0)) continue;
+        await c({ seat: 'admin-anterior', method: 'POST', path: '/v1/capital/differences/resolve', operation: true, day, body: {
+          sourceKind: 'settlement_surplus', sourceId: str(d['sourceId'], 'difference'), resolution: 'surplus_to_base', amountMinor: Number(d['pendingMinor']),
+          reason: 'Sobrante conciliado al entregar la ruta: se incorpora a la Base' } });
+      }
       await c({ seat: 'direccion', method: 'PUT', path: `/v1/routes/${routes.norte}/capital-controller`, day, body: { membershipId: m('admin-norte'), reason: 'Jorge deja la empresa; Marta asume Ruta Norte' } });
       controller.norte = 'admin-norte';
       const s = await c({ seat: 'direccion', method: 'GET', path: '/v1/capital/summary', day });
@@ -400,6 +429,16 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
         await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/admin-returns', operation: true, day, body: { adminId: m('admin-anterior'), amountMinor: jorge.availableMinor, reason: 'Devolución de la bolsa al retirarse' } });
       }
       await c({ seat: 'direccion', method: 'PUT', path: `/v1/members/${m('admin-anterior')}/routes`, day, body: { routeIds: [] } });
+      // Diagnóstico previo (el mismo que ve el SuperAdmin en pantalla). Un saldo que quede en la
+      // bolsa se devuelve; cualquier otra cuenta pendiente es un error del escenario y se informa.
+      const check = await c({ seat: 'direccion', method: 'GET', path: `/v1/members/${m('admin-anterior')}/deactivation-check`, day });
+      for (const b of ((check['blockers'] as Record<string, unknown>[]) ?? [])) {
+        if (b['code'] === 'ADMIN_POOL_BALANCE' && Number(b['amountMinor']) > 0) {
+          await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/admin-returns', operation: true, day, body: { adminId: m('admin-anterior'), amountMinor: Number(b['amountMinor']), reason: 'Devolución del saldo restante al retirarse' } });
+          continue;
+        }
+        throw new Error(`scenario v2: Jorge still has pending accounts before deactivation: ${JSON.stringify(b)}`);
+      }
       await c({ seat: 'direccion', method: 'POST', path: `/v1/members/${m('admin-anterior')}/deactivate`, day, body: {} });
     }
     // ---- Ruta Expansión (último tramo, sin Oficina ni Cobrador).

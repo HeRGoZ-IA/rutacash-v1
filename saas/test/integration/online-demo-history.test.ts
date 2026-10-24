@@ -68,6 +68,14 @@ describe('ADEX Online · Empresa Demo histórica (demo-v2-6m, compacta)', { skip
     assert.ok(await n(`select count(*) n from adex.sales where company_id = $1 and disbursement_status = 'desembolsado'`) >= 8);
     // Ningún cierre se hizo antes de que terminara su semana (D29 con el reloj simulado).
     assert.equal(await n(`select count(*) n from adex.period_closures where company_id = $1 and business_date <= week_end`), 0);
+    // RB-D1: Jorge (Adm. anterior) quedó desactivado SIN cuentas pendientes; los sobrantes que tenía en
+    // control se conciliaron con el servicio de conciliación antes de su salida.
+    const jorge = (await db.admin.query(`select id, status from adex.memberships where company_id = $1 and display_name like 'Jorge Restrepo%'`, [demoId])).rows[0];
+    assert.equal(jorge?.status, 'inactivo', JSON.stringify(jorge));
+    assert.deepEqual((await db.admin.query(`select adex.admin_pending_accounts_internal($1, $2) v`, [demoId, jorge.id])).rows[0].v, []);
+    assert.equal(await n(`select count(*) n from adex.difference_conciliations d join adex.custody_settlements s on s.company_id = d.company_id and s.id = d.settlement_id
+                           where d.company_id = $1 and d.source_kind = 'settlement_surplus' and s.receiver_admin_membership_id = $2 and d.actor_membership_id <> $2`, [demoId, jorge.id]), 0,
+      'los sobrantes de Jorge los concilió Jorge, como responsable vigente');
     // Los clientes son ficticios (cédulas 99…).
     assert.equal(await n(`select count(*) n from adex.clients where company_id = $1 and document not like '99%'`), 0);
   });
