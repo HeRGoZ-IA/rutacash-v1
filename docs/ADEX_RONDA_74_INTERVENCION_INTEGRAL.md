@@ -572,3 +572,55 @@ El mismo mecanismo puede servir para gastos generales del Administrador cuando s
 | RB-D7 | ¿Quién anula un gasto general o un reembolso si el Administrador que lo registró ya no es responsable? | El responsable vigente de las rutas, con procedimiento auditado |
 | RB-D8 | ¿Un Administrador puede reembolsarse a sí mismo desde sus propias rutas? | Sí (confianza entre socios), visible para el SuperAdmin |
 | RB-D9 | Reembolso desde la bolsa mientras la empresa esté en el modelo actual | Sí, hasta migrar a Base por Ruta |
+
+---
+
+## 15. Cierre funcional local de Base por Ruta (rama `r74-route-base`)
+
+Encargo: completar el sistema de Base y caja independiente por Ruta y dejarlo **íntegramente funcional para pruebas locales del propietario**, sin push, despliegues, migraciones gestionadas ni activación en empresas reales.
+
+### 15.1 Estado verificado al empezar (2026-10-23, 19:09)
+
+| Punto | Resultado |
+|---|---|
+| `main` | `25f3af0` (R74 preparada, 8 commits sobre `origin/main` = `2fa7152`, sin publicar) |
+| Rama `r74-route-base` | `249bb53`, `373cde3`, `a691082`, `8c782f5`, `56e3ec9` (como se informó); se le incorporó `main` (`66cf317`, solo documentación) |
+| Árbol | Limpio |
+| Migraciones de la rama | 0001–0035 (0034 Base por Ruta, 0035 gastos generales); en ADEX-Staging siguen 0001–0031 |
+| Procesos | Quedaban procesos de la sesión anterior (dos ejecuciones de pruebas colgadas desde las 13:40 y 13:58, y una base local de desarrollo de las 17:44). La herramienta no permitió detenerlos; no afectan a las pruebas (puertos dinámicos). Servidores `vite` del 15 y 20 de octubre: no se tocaron |
+
+### 15.2 Decisiones aprobadas por el propietario (2026-10-23)
+
+| Id | Decisión | Sustituye a |
+|---|---|---|
+| **Rectora** | **El Administrador es el máximo responsable del dinero.** Si una transacción de este sistema no tiene definido quién la autoriza, la autoridad financiera es del Administrador de las rutas afectadas. No requiere aprobación del SuperAdmin para resolver faltantes o sobrantes; una diferencia resuelta no mantiene la ruta bloqueada. No concede acceso a otras empresas ni a rutas ajenas. Se conservan las reglas aprobadas de transferencias inmediatas, independencia y no autoaprobación. El SuperAdmin conserva estructura, supervisión y activación estructural; no concilia en lugar del Administrador. No autoriza inventar operaciones de negocio nuevas | Cualquier propuesta anterior de aprobación superior o de bloqueo indefinido por diferencias |
+| RB-D1 | Ningún Administrador se desactiva con cuentas pendientes: antes salda y entrega cuentas con su socio principal o SuperAdmin (sin crear un rol «Socio» ni devolver facultades financieras al SuperAdmin). Diagnóstico y control previo; reasignación estructural de rutas después de la entrega; datos heredados incompatibles se reportan, no se ajustan solos | §14.1 RB-D1 (traspaso de saldo sin asignar de Administradores inactivos) |
+| RB-D2 | Cuenta de empresa **en cero** antes de activar, con operaciones explícitas; nunca puesta a cero ficticia ni apropiación por una ruta | Opción anterior de «documentar con una nota» |
+| RB-D3 | El Administrador concilia faltantes y sobrantes bajo su responsabilidad, sin autorización superior: esperado, contado, diferencia, resolución expresa, operaciones nuevas balanceadas y auditadas; sin reescribir asientos ni cierres; sin convertir por defecto un faltante en deuda del trabajador ni un sobrante en ganancia; al resolver, la ruta continúa | §14.1 RB-D3 (diferencias solo registradas; ruta bloqueada) |
+| RB-D4 | Se mantiene la solicitud de devolución al Cobrador; solicitar no mueve dinero; la entrega efectiva registra el movimiento una vez | — (confirma la recomendación) |
+| RB-D5 | En Base por Ruta, Transferencias del Secretario = solo historial | — (confirma) |
+| RB-D6 | «Migrando» no es obligatorio para una empresa sin movimientos y con saldos cero; se usa cuando hay saldos que repartir o posiciones que conciliar; la activación directa nunca omite validaciones; sin dobles escrituras entre modelos | — (precisa la recomendación) |
+| RB-D7 | Anulación cuando cambió el responsable: la hace el Administrador **vigente** de las rutas afectadas; si son de distintos Administradores, cada uno sobre su parte, sin débitos sobre rutas ajenas ni anulaciones parciales que dejen inconsistente la operación conjunta; no anular un gasto reembolsado como si el reembolso no existiera | §14.1 RB-D7 (recomendación genérica) |
+| RB-D8 | Reembolso al propio Administrador desde sus rutas: permitido hasta la obligación pendiente, con fondos, aportes explícitos por ruta, sin aprobación, visible al SuperAdmin y auditado. Excepción expresa; no elimina otras reglas de independencia | — (confirma) |
+| RB-D9 | Reembolso desde la bolsa propia mientras la empresa esté en `admin_pool`; con `route_base`, el circuito nuevo; nunca pagar dos veces la misma obligación | — (confirma) |
+
+### 15.3 Criterios de aceptación (seguimiento)
+
+| # | Criterio | Estado | Evidencia |
+|---|---|---|---|
+| C-01 | Todos los flujos autorizados se completan desde el navegador | ⏳ | |
+| C-02 | Ninguna pantalla esencial sustituida por «API disponible» | ⏳ | |
+| C-03 | El Administrador concilia diferencias sin aprobación superior | ⏳ | |
+| C-04 | Una conciliación resuelta no mantiene el bloqueo por esa diferencia | ⏳ | |
+| C-05 | Desactivar un Administrador con cuentas pendientes se rechaza con explicación; tras saldar y entregar, se permite | ⏳ | |
+| C-06 | Una ruta no consume fondos de otra | ⏳ | |
+| C-07 | Cajas y consolidado concilian sin duplicaciones | ⏳ | |
+| C-08 | Gastos y reembolsos no duplican gasto, efectivo ni obligaciones | ⏳ | |
+| C-09 | Reintentos y concurrencia no duplican operaciones | ⏳ | |
+| C-10 | API y PostgreSQL rechazan empresas o rutas ajenas | ⏳ | |
+| C-11 | El SuperAdmin supervisa sin ejecutar operaciones financieras del modelo nuevo | ⏳ | |
+| C-12 | Empresas en `admin_pool` conservan su comportamiento | ⏳ | |
+| C-13 | La transición conserva posiciones y trazabilidad, sin ingresos ficticios | ⏳ | |
+| C-14 | Offline: no crea clientes ni ventas y conserva sus operaciones permitidas | ⏳ | |
+| C-15 | Sin regresiones nuevas frente a una línea base reproducible | ⏳ | |
+| C-16 | Documentación, commits y pasos de prueba coinciden con el resultado | ⏳ | |
