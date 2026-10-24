@@ -29,7 +29,9 @@ export const API_FEATURES: readonly string[] = ['collections-v1', 'settlements-v
   // R74 Base por Ruta (0034): solo si 0034 está aplicada (start.ts). NO está en la puerta de Vercel todavía.
   'route-base-v1',
   // R74 (0035, D74-O4F): gastos generales con aportes de rutas o dinero propio y reembolsos. Fuera de la puerta de Vercel.
-  'general-expenses-v1'];
+  'general-expenses-v1',
+  // R74 (0036, §15): conciliación de diferencias por el Administrador y control de desactivación. Fuera de la puerta de Vercel.
+  'admin-authority-v1'];
 
 /** Módulos del servicio Owner (servicio aparte, ver controlStart.ts). */
 // Ronda 54: `owner-email-v1` (cambio del correo del SuperAdmin) solo si 0024 está aplicada (controlStart.ts).

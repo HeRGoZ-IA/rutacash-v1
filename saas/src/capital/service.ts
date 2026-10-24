@@ -43,7 +43,9 @@ export type CapitalKind =
   // R74 Base por Ruta (0034): solo con `companies.capital_model = 'route_base'` (ver routeBase.ts).
   | 'ROUTE_BASE_INJECTION' | 'ROUTE_BASE_WITHDRAWAL' | 'ROUTE_TRANSFER' | 'LEGACY_POOL_TO_ROUTE'
   // R74 (0035, D74-O4F): aportes de rutas a un gasto general, gasto con dinero propio y reembolso (generalFunding.ts).
-  | 'GENERAL_EXPENSE_CONTRIBUTION' | 'GENERAL_EXPENSE_OWN_MONEY' | 'ADMIN_REIMBURSEMENT';
+  | 'GENERAL_EXPENSE_CONTRIBUTION' | 'GENERAL_EXPENSE_OWN_MONEY' | 'ADMIN_REIMBURSEMENT'
+  // R74 (0036, RB-D3): conciliación de diferencias por el Administrador (conciliation.ts). No se anula.
+  | 'DIFFERENCE_CONCILIATION';
 
 /** Operaciones de la Base (0034): se escriben y se anulan con `adex.route_base_post`. */
 export const ROUTE_BASE_KINDS: readonly string[] = ['ROUTE_BASE_INJECTION', 'ROUTE_BASE_WITHDRAWAL', 'ROUTE_TRANSFER', 'LEGACY_POOL_TO_ROUTE'];
@@ -55,7 +57,9 @@ export const ROUTE_BASE_KINDS: readonly string[] = ['ROUTE_BASE_INJECTION', 'ROU
 const OWN_CORRECTION_KINDS: readonly string[] = ['COLLECTION', 'WORKER_EXPENSE', 'ROUTE_EXPENSE', 'COMPANY_EXPENSE', 'EXPENSE_REFUND',
   'SETTLEMENT_RETURN', 'SETTLEMENT_SURPLUS', 'ADMIN_TRANSFER_HOLD', 'ADMIN_TRANSFER_APPLY', 'ADMIN_TRANSFER_RELEASE',
   // R74 (0035): el gasto general se anula con /v1/expenses/:id/reverse; el reembolso, con /v1/capital/reimbursements/:id/reverse.
-  'GENERAL_EXPENSE_CONTRIBUTION', 'GENERAL_EXPENSE_OWN_MONEY', 'ADMIN_REIMBURSEMENT'];
+  'GENERAL_EXPENSE_CONTRIBUTION', 'GENERAL_EXPENSE_OWN_MONEY', 'ADMIN_REIMBURSEMENT',
+  // R74 (0036): una conciliación es definitiva (no se anula por la vía genérica).
+  'DIFFERENCE_CONCILIATION'];
 
 const COMPANY_KINDS: readonly string[] = ['COMPANY_DEPOSIT', 'COMPANY_WITHDRAWAL', 'ADMIN_ALLOCATION', 'ADMIN_RETURN'];
 
@@ -186,6 +190,7 @@ export const ACTIONS: Record<CapitalKind, string> = {
   ROUTE_BASE_INJECTION: 'ROUTE_BASE_INJECTED', ROUTE_BASE_WITHDRAWAL: 'ROUTE_BASE_WITHDRAWN', ROUTE_TRANSFER: 'ROUTE_BASE_TRANSFERRED',
   LEGACY_POOL_TO_ROUTE: 'UNASSIGNED_CAPITAL_ASSIGNED',
   GENERAL_EXPENSE_CONTRIBUTION: 'CREATE_EXPENSE', GENERAL_EXPENSE_OWN_MONEY: 'CREATE_EXPENSE', ADMIN_REIMBURSEMENT: 'ADMIN_REIMBURSEMENT_PAID',
+  DIFFERENCE_CONCILIATION: 'DIFFERENCE_CONCILIATED',
 };
 
 /** Escribe, audita (misma transacción) y responde con lo que el actor puede ver. */
@@ -580,7 +585,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
   const unbalanced = l('unbalanced');
   // Contrapartidas (externa, interés) miden lo que entró; la custodia solo puede
   // quedar negativa por un gasto del trabajador (73209ce), comprobado pata a pata.
-  const overdrawn = await q(`select count(*)::text n from adex.capital_accounts where company_id = $1 and kind not in ('external', 'income', 'custody', 'unidentified', 'route_funding', 'admin_payable') and balance_minor < 0`);
+  const overdrawn = await q(`select count(*)::text n from adex.capital_accounts where company_id = $1 and kind not in ('external', 'income', 'custody', 'unidentified', 'route_funding', 'admin_payable', 'route_difference') and balance_minor < 0`);
   const negativeCustody = l('negativeCustody');
   const foreignCurrency = await q(
     `select count(*)::text n from adex.capital_operations o join adex.companies c on c.id = o.company_id
@@ -705,6 +710,11 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
     ...(ledger['generalFundingDrift'] === undefined ? [] : [
       { name: 'general-funding-matches-contributions', ok: l('generalFundingDrift') === 0, detail: l('generalFundingDrift') },
       { name: 'admin-payables-match-expenses-and-reimbursements', ok: l('adminPayableDrift') === 0, detail: l('adminPayableDrift') },
+    ]),
+    // R74 (0036, RB-D3): cada conciliación con movimiento tiene su operación y viceversa; el «faltante/sobrante conciliado»
+    // de cada ruta = Σ faltantes reconocidos − Σ sobrantes incorporados (nunca efectivo).
+    ...(ledger['conciliationDrift'] === undefined ? [] : [
+      { name: 'differences-match-conciliations', ok: l('conciliationDrift') === 0, detail: l('conciliationDrift') },
     ]),
   ];
   return { ok: checks.every((c) => c.ok), checks };

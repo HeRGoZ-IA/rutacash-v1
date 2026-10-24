@@ -132,8 +132,9 @@ describe('Fase 0 · esquema completo frente a Dexie v16', () => {
       // Ronda 73 (0030): historial append-only de rectificaciones de créditos desembolsados; (0031) sesión vigente por identidad.
       // R74 Base por Ruta (0034): registro de activación del modelo de capital y actas de entrega de ruta.
       // R74 gastos generales (0035, D74-O4F): reembolsos a Administradores y aportes de rutas.
+      // R74 (0036, RB-D3): conciliaciones de diferencias por el Administrador.
       assert.deepEqual(extra, ['adex.admin_reimbursements', 'adex.admin_transfers', 'adex.capital_accounts', 'adex.capital_entries', 'adex.capital_model_activations', 'adex.capital_operations', 'adex.capital_requests', 'adex.client_locations', 'adex.correction_steps', 'adex.credit_rectification_cases', 'adex.credit_rectifications', 'adex.currencies', 'adex.custody_settlements',
-        'adex.document_types', 'adex.general_funding_contributions', 'adex.identities', 'adex.identity_active_sessions', 'adex.membership_routes', 'adex.offline_captures', 'adex.offline_keys', 'adex.operations', 'adex.payment_locations', 'adex.period_closures', 'adex.revoked_sessions', 'adex.route_handover_records', 'adex.sale_locations']);
+        'adex.difference_conciliations', 'adex.document_types', 'adex.general_funding_contributions', 'adex.identities', 'adex.identity_active_sessions', 'adex.membership_routes', 'adex.offline_captures', 'adex.offline_keys', 'adex.operations', 'adex.payment_locations', 'adex.period_closures', 'adex.revoked_sessions', 'adex.route_handover_records', 'adex.sale_locations']);
     });
 
     test('SCHEMA-006 · toda tabla operativa lleva company_id NOT NULL y clave (company_id, id)', async () => {

@@ -102,14 +102,15 @@ describe('Fase 2 · responsable de capital (v16) como restricción transaccional
     const before = await state();
     const totals = before.map(([a, u]) => a! + u!);
     assert.deepEqual(before[1], [20_000_000, -10_000_000], 'seed c3/r2: traslado +200.000 COP y ajuste previo a v16 de −100.000 COP sin bolsa');
+    // R74 (0036, RB-D1, decisión del propietario): ningún Administrador se desactiva con cuentas pendientes. El único
+    // responsable de dos rutas ya NO se desactiva (antes: RELEASE); primero se reasignan las rutas con la entrega estructural.
     const off = await diego('POST', `/v1/members/${irene}/deactivate`, {});
-    assert.equal(off.status, 200, JSON.stringify(off.body));
-    assert.deepEqual((off.body['controllerEvents'] as { kind: string }[]).map((e) => e.kind), ['RELEASE', 'RELEASE']);
-    for (const r of routes) assert.equal(await controllerOf(r), null);
-    assert.deepEqual(await state(), totals.map((t) => [0, t]), 'liberada: todo el capital de la ruta queda sin bolsa');
-    const on = await diego('POST', `/v1/members/${irene}/reactivate`, {});
-    assert.deepEqual((on.body['controllerEvents'] as { kind: string }[]).map((e) => e.kind), ['FIRST_ADMIN', 'FIRST_ADMIN']);
-    assert.deepEqual(await state(), totals.map((t) => [t, 0]), 'el nuevo responsable reconoce TODO el capital de la ruta, ni más ni menos');
+    assert.deepEqual([off.status, off.body['error']], [409, 'ADMIN_HAS_PENDING_ACCOUNTS'], JSON.stringify(off.body));
+    const blockers = (off.body['details'] as { blockers: { code: string; count?: number }[] }).blockers;
+    assert.deepEqual(blockers.find((b) => b.code === 'CAPITAL_CONTROLLER')?.count, 2);
+    for (const r of routes) assert.equal(await controllerOf(r), irene, 'nada cambia');
+    assert.deepEqual(await state(), before, 'el capital de cada ruta sigue igual');
+    assert.equal(totals.length, 2);
   });
 
   test('CAP-004 · responsable protegido: no se le retira ni desactiva mientras haya otro Administrador; el SuperAdmin elige al editar la ruta', async () => {
@@ -118,7 +119,8 @@ describe('Fase 2 · responsable de capital (v16) como restricción transaccional
     const carla = caller(api, issuer, 'carla', M.carlaSa);
     const other = (await carla('POST', '/v1/members', { email: 'admin-c2@example.test', role: 'admin', displayName: 'Admin C2', routeIds: [routeId('c2', 1)] })).body['membershipId'] as string;
     const deact = await carla('POST', `/v1/members/${hugo}/deactivate`, {});
-    assert.equal(deact.body['error'], 'CAPITAL_CONTROLLER_REQUIRED');
+    // R74 (0036, RB-D1): el responsable de capital no se desactiva (cuentas pendientes); antes: CAPITAL_CONTROLLER_REQUIRED.
+    assert.equal(deact.body['error'], 'ADMIN_HAS_PENDING_ACCOUNTS');
     assert.equal((await db.admin.query('select status from adex.memberships where id = $1', [hugo])).rows[0].status, 'activo', 'nada se guardó');
     const hugoCaller = caller(api, issuer, 'hugo', hugo);
     assert.equal((await hugoCaller('PATCH', `/v1/routes/${routeId('c2', 1)}`, { capitalControllerId: other })).status, 403, 'solo el SuperAdmin elige');
@@ -146,6 +148,8 @@ describe('Fase 2 · responsable de capital (v16) como restricción transaccional
       await tx.connect();
       try {
         await tx.query('begin');
+        // R74 (0036, RB-D1): desactivar al responsable se rechaza YA en la sentencia (disparador AX433), antes del COMMIT.
+        if (sql.includes(`status = 'inactivo'`)) { await assert.rejects(tx.query(sql, params), { code: 'AX433' }, sql); continue; }
         await tx.query(sql, params);
         await assert.rejects(tx.query('commit'), { code: 'AX101' }, sql);
       } finally {

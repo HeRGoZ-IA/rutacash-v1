@@ -244,8 +244,14 @@ describe('Fase 5 · F5-D02 · anulación de gastos de trabajador y de ruta', () 
       await sleep(300);
       release();
       assert.equal((await p).status, 201, 'autorizada al empezar: la revocación esperó (REVOKE-004)');
-      assert.equal((await revoke).status, 200);
+      // R74 (0036, RB-D1): la responsable de capital de una ruta no se desactiva (cuentas pendientes); la decisión se
+      // toma DESPUÉS de esperar a la anulación en curso.
+      assert.deepEqual([(await revoke).status, (await revoke).body['error']], [409, 'ADMIN_HAS_PENDING_ACCOUNTS']);
     } finally { await paused.close(); }
+    // Entrega estructural de la ruta a otro Administrador; entonces sí se desactiva.
+    const quino = await newPerson(api, issuer, provider.ids, bruno, { email: 'quino-rev@example.test', role: 'admin', displayName: 'Quino', routeIds: [rRev] });
+    assert.equal((await bruno('PUT', `/v1/routes/${rRev}/capital-controller`, { membershipId: quino.membershipId, reason: 'Pía deja la ruta' })).status, 200);
+    assert.equal((await bruno('POST', `/v1/members/${sofia.membershipId}/deactivate`, {})).status, 200);
     const after = await reverse(money(caller(api, issuer, sofia.identityId, sofia.membershipId)), e2);
     assert.deepEqual([after.status, after.body['error']], [403, 'MEMBERSHIP_INACTIVE']);
   });

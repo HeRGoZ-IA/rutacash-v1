@@ -157,6 +157,12 @@ describe('R74 · Base por Ruta (0034)', () => {
     if (r3ctrl !== edu.membershipId) {
       assert.equal((await bruno('PUT', `/v1/routes/${r3}/capital-controller`, { membershipId: edu.membershipId, reason: 'Responsable de r3' })).status, 200);
     }
+    // R74 (0036, RB-D6): con saldos (la bolsa de Ana, custodias, cartera) la activación directa se niega: primero `migrating`.
+    const direct = await bruno('GET', '/v1/capital/model/prerequisites');
+    assert.deepEqual((direct.body['checks'] as Body[]).filter((c) => !c['ok']).map((c) => c['name']), ['direct-activation-or-migrating'], JSON.stringify(direct.body));
+    expectCode(await $bruno('/v1/capital/model', { target: 'route_base', evidence: 'Activación directa con saldos', backupReference: 'bk-2026-10-23' }),
+      409, 'ACTIVATION_PREREQUISITES_FAILED', 'directa con saldos');
+    assert.equal((await $bruno('/v1/capital/model', { target: 'migrating', evidence: 'Congelamos bolsas para el corte definitivo' })).status, 200);
     const ok = await bruno('GET', '/v1/capital/model/prerequisites');
     assert.equal(ok.body['ok'], true, JSON.stringify(ok.body));
     const poolAna = await pool(M.anaAdmin);

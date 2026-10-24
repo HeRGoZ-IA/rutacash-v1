@@ -159,6 +159,12 @@ describe('Fase 3 · seguridad del capital: RLS y autorización', () => {
     assert.equal((await $ana('/v1/capital/deliveries', { routeId: r1, workerId: carlos.membershipId, amountMinor: 1, reason: 'A inactivo' })).body['error'], 'CUSTODIAN_INVALID');
     assert.equal((await $ana('/v1/capital/returns', { routeId: r1, workerId: carlos.membershipId, amountMinor: 100_000, reason: 'Entrega al salir' })).status, 201,
       'un trabajador inactivo devuelve su efectivo');
+    // R74 (0036, RB-D1): un Administrador con saldo en su bolsa no se desactiva; primero se recoge (y después, sí).
+    const refused = await bruno('POST', `/v1/members/${yara.membershipId}/deactivate`);
+    assert.deepEqual([refused.status, refused.body['error']], [409, 'ADMIN_HAS_PENDING_ACCOUNTS'], JSON.stringify(refused.body));
+    assert.ok((((refused.body['details'] as Body)['blockers']) as Body[]).some((b) => b['code'] === 'ADMIN_POOL_BALANCE'));
+    const yaraPool = Number((await db.admin.query(`select balance_minor from adex.capital_accounts where kind = 'admin' and membership_id = $1`, [yara.membershipId])).rows[0].balance_minor);
+    assert.equal((await $bruno('/v1/capital/admin-returns', { adminId: yara.membershipId, amountMinor: yaraPool, reason: 'Vaciar la bolsa antes de desactivar' })).status, 201);
     assert.equal((await bruno('POST', `/v1/members/${yara.membershipId}/deactivate`)).status, 200);
     assert.equal((await yara.call('GET', '/v1/capital/summary')).body['error'], 'MEMBERSHIP_INACTIVE');
     assert.equal((await $bruno('/v1/capital/allocations', { adminId: yara.membershipId, amountMinor: 1, reason: 'A inactivo' })).body['error'], 'MEMBER_INACTIVE');
@@ -166,7 +172,6 @@ describe('Fase 3 · seguridad del capital: RLS y autorización', () => {
       await rejects(q, 'COMPANY_DEPOSIT', {}, '42501', 'contexto inactivo en la segunda barrera');
       assert.equal(await count(q, 'select 1 from adex.capital_accounts'), 0, 'sin contexto válido no se ve nada');
     });
-    assert.equal((await $bruno('/v1/capital/admin-returns', { adminId: yara.membershipId, amountMinor: 50_000, reason: 'Vaciar bolsa inactiva' })).status, 201);
   });
 
   test('SEC3-007 · DS-05: la misma persona con otra membresía ve otra cosa; nunca la suma', async () => {

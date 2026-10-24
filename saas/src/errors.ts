@@ -75,6 +75,12 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX430': return new ApiError(403, 'CONTRIBUTION_ROUTE_NOT_ALLOWED');   // la ruta aportante no es del actor (responsable válido)
     case 'AX431': return new ApiError(409, 'REIMBURSEMENT_EXCEEDS_PENDING');    // el reembolso supera lo que la empresa le debe
     case 'AX432': return new ApiError(409, 'PAYABLE_ALREADY_REIMBURSED');       // anular un gasto con dinero propio ya reembolsado
+    // R74 · autoridad del Administrador y conciliación de diferencias (0036, §15). Sin cifras de saldos ajenos.
+    case 'AX433': return new ApiError(409, 'ADMIN_HAS_PENDING_ACCOUNTS');       // RB-D1: desactivar un Administrador con cuentas pendientes
+    case 'AX434': return new ApiError(409, 'JOINT_OPERATION_MIXED_CONTROLLERS'); // RB-D7: operación conjunta con rutas de distintos responsables
+    case 'AX435': return new ApiError(409, 'DIFFERENCE_NOT_PENDING');           // RB-D3: ya conciliada o sustituida
+    case 'AX436': return new ApiError(409, 'RESOLUTION_NOT_ALLOWED');           // RB-D3: resolución que no aplica a esa diferencia
+    case 'AX438': return new ApiError(409, 'DIFFERENCE_AMOUNT_MISMATCH');       // RB-D3: el importe no coincide con lo pendiente (cambió)
     // Fase 4 · solicitudes y desembolsos.
     case 'AX501': return new ApiError(409, 'REQUEST_STATE_INVALID');
     case 'AX502': return new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED');

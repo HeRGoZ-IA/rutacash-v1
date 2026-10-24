@@ -181,6 +181,16 @@ export async function generalExpensesReady(pool: pg.Pool): Promise<boolean> {
   }
 }
 
+/** R74 (0036, §15): conciliación de diferencias por el Administrador (RB-D3) y control de desactivación (RB-D1). */
+export async function adminAuthorityReady(pool: pg.Pool): Promise<boolean> {
+  try {
+    const r = await pool.query<{ ok: boolean }>("select to_regprocedure('adex.difference_resolve(uuid,text,text,text,bigint,text)') is not null as ok");
+    return r.rows[0]?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Bloque A post-R73 (0032): rectificación con pagos y reaplicación de pagos anulados. */
 export async function rectificationPaymentsReady(pool: pg.Pool): Promise<boolean> {
   for (let i = 1; i <= 3; i++) {

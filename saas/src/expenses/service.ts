@@ -27,6 +27,7 @@ import { loadMembers, need } from '../structure/common.ts';
 import { oneOf, optId, optText, PAGE_ORDER, pageFilters, pathId, reqId, reqText } from '../structure/input.ts';
 import { requireAuthority, requireCustodian, requireOperationId, routeOf } from '../capital/service.ts';
 import { parseOffline, requireOfflineActor, storeOfflineCapture } from '../offline/capture.ts';
+import { requireControlsAllRoutes } from '../capital/conciliation.ts';
 import { capitalModelOf, contributionRoutes, entriesOf, expenseContributions, parseContributions, requireGeneralFundingActor, sumOf } from '../capital/generalFunding.ts';
 
 /** Alcances de gasto: los de CLEAN más el general del Administrador (0035, solo API/servidor). */
@@ -277,6 +278,13 @@ export async function reverseExpense(client: pg.PoolClient, ctx: ActiveContext, 
       const same = (await client.query<{ s: boolean }>('select adex.same_person($1, $2, $3) s', [ctx.companyId, ctx.membershipId, prev.registered_by_membership_id])).rows[0]!.s;
       if (same) throw new ApiError(403, 'SELF_CORRECTION_FORBIDDEN');
     }
+  }
+  // R74 (0036, RB-D7): un gasto general con aportes de rutas lo anula el responsable VIGENTE de TODAS las rutas aportantes
+  // (aunque no lo registrara); con rutas de distintos responsables, 409 con la lista de rutas y responsables.
+  if (prev.funding === 'routes' && !prev.reverses_id && prev.ledger_operation_id) {
+    if (ctx.role !== 'admin') throw new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED', 'only an administrator reverses general expenses');
+    const routes = (await client.query<{ r: string[] }>('select adex.general_funding_routes($1, null) r', [prev.id])).rows[0]!.r;
+    await requireControlsAllRoutes(client, ctx, routes);
   }
   const reason = reqText(body, 'reason', 200);
   if (reason.length < 3) throw new ApiError(400, 'INVALID_INPUT', 'reason is required', { field: 'reason' });

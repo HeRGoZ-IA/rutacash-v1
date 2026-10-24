@@ -28,6 +28,7 @@ import { audit } from '../db/audit.ts';
 import { randomUUID } from 'node:crypto';
 import { lockMembershipsForRevocation, lockRoutes, reconcileControllers, type ControllerEvent } from '../structure/capitalGuard.ts';
 import { has, idList, optText, pathId, reqId, reqText } from '../structure/input.ts';
+import { requireNoPendingAccounts } from '../capital/conciliation.ts';
 
 export interface MemberView {
   membershipId: string;
@@ -226,6 +227,9 @@ export async function setMemberStatus(client: pg.PoolClient, ctx: ActiveContext,
     await client.query(`select pg_advisory_xact_lock(adex.lock_key('company-superadmins', $1))`, [ctx.companyId]);
     const block = lastSuperadminBlock(target, await companyMembers(client, ctx));
     if (block) throw new ApiError(409, block.code, block.message);
+    // R74 (0036, RB-D1): ningún Administrador se desactiva con cuentas pendientes (rutas a su cargo, bolsa, reembolsos,
+    // actas, diferencias, traspasos, solicitudes, sobrantes en control). Disparador AX433 como barrera final.
+    if (target.role === 'admin' && target.status === 'activo') await requireNoPendingAccounts(client, ctx, target.membershipId);
   }
   let events: ControllerEvent[] = [];
   if (target.status !== status) {

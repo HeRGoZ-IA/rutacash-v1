@@ -22,6 +22,7 @@ import { need } from '../structure/common.ts';
 import { pathId, reqId, reqText } from '../structure/input.ts';
 import { ID_RE } from '../authz/context.ts';
 import { requireOperationId, routeOf, visibleEntries } from './service.ts';
+import { requireControlsAllRoutes } from './conciliation.ts';
 
 type Body = Record<string, unknown>;
 
@@ -179,6 +180,11 @@ export async function reverseReimbursement(client: pg.PoolClient, ctx: ActiveCon
   const opId = requireOperationId(operationId);
   requireGeneralFundingActor(ctx);
   const prev = await loadReimbursement(client, ctx, id);
+  // R74 (0036, RB-D7): desde rutas, el responsable VIGENTE de TODAS las rutas aportantes (lista si son de varios).
+  if (prev.source === 'routes') {
+    const routes = (await client.query<{ r: string[] }>('select adex.general_funding_routes(null, $1) r', [prev.id])).rows[0]!.r;
+    await requireControlsAllRoutes(client, ctx, routes);
+  }
   const reason = reqText(body, 'reason', 300);
   if (reason.length < 3) throw new ApiError(400, 'INVALID_INPUT', 'reason is required', { field: 'reason' });
   const r = (await client.query<{ r: Record<string, unknown> }>('select adex.admin_reimbursement_reverse($1, $2, $3) r', [opId, prev.id, reason])).rows[0]!.r;

@@ -61,6 +61,7 @@ import { offlineKey } from '../offline/capture.ts';
 import { ADJUSTMENT_FIELDS, CORRECTION_FIELDS, approveAdjustment, correctCollection, createAdjustment, listAdjustments, rejectAdjustment } from '../collections/adjustments.ts';
 import { EXPENSE_FIELDS, createExpense, getExpense, listExpenses, refundExpense, reverseExpense } from '../expenses/service.ts';
 import { REIMBURSE_FIELDS, adminPayables, getReimbursement, listReimbursements, reimburseAdmin, reverseReimbursement } from '../capital/generalFunding.ts';
+import { RESOLVE_FIELDS, deactivationCheck, getConciliation, listConciliations, listDifferences, previewDifference, resolveDifference } from '../capital/conciliation.ts';
 import { CLIENT_LOCATION_FIELDS, getClientLocation, routeMap, setClientLocation } from '../map/service.ts';
 import { listMovements } from '../movements/service.ts';
 import { listActivity, listCashMovements, listPerspectives, movementDetail } from '../movements/consultas.ts';
@@ -150,6 +151,8 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'PATCH', pattern: new RegExp(`^/v1/members/${ID}$`), fields: ['displayName', 'phone'], handler: ([id]) => async (c, ctx, b) => ok(await updateMember(c, ctx, id!, b)) },
   { method: 'POST', pattern: new RegExp(`^/v1/members/${ID}/(deactivate|reactivate)$`), fields: [],
     handler: ([id, action]) => async (c, ctx) => ok(await setMemberStatus(c, ctx, id!, action === 'deactivate' ? 'inactivo' : 'activo')) },
+  // R74 (0036, RB-D1): diagnóstico de cuentas pendientes antes de desactivar a un Administrador.
+  { method: 'GET', pattern: new RegExp(`^/v1/members/${ID}/deactivation-check$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await deactivationCheck(c, ctx, id!)) },
   { method: 'PUT', pattern: new RegExp(`^/v1/members/${ID}/routes$`), fields: ['routeIds'], handler: ([id]) => async (c, ctx, b) => ok(await setMemberRoutes(c, ctx, id!, b['routeIds'])) },
   { method: 'PUT', pattern: new RegExp(`^/v1/members/${ID}/office-routes$`), fields: ['officeId', 'selectedRouteIds'],
     handler: ([id]) => async (c, ctx, b) => ok(await setMemberOfficeRoutes(c, ctx, id!, b)) },
@@ -234,6 +237,13 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'GET', pattern: new RegExp(`^/v1/capital/reimbursements/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getReimbursement(c, ctx, id!)) },
   { method: 'POST', pattern: new RegExp(`^/v1/capital/reimbursements/${ID}/reverse$`), fields: ['reason'], idempotent: 'capital.admin_reimbursement_reverse',
     requiresOperation: true, handler: ([id]) => async (c, ctx, b, _q, op) => created(await reverseReimbursement(c, ctx, id!, b, op)) },
+  // ---------- Conciliación de diferencias por el Administrador (R74, 0036, RB-D3) ----------
+  { method: 'GET', pattern: /^\/v1\/capital\/differences$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await listDifferences(c, ctx, q)) },
+  { method: 'GET', pattern: /^\/v1\/capital\/differences\/preview$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await previewDifference(c, ctx, q)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/differences\/resolve$/, fields: RESOLVE_FIELDS, idempotent: 'capital.difference_resolve', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await resolveDifference(c, ctx, b, op)) },
+  { method: 'GET', pattern: /^\/v1\/capital\/conciliations$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ conciliations: await listConciliations(c, ctx, q) }) },
+  { method: 'GET', pattern: new RegExp(`^/v1/capital/conciliations/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getConciliation(c, ctx, id!)) },
   { method: 'GET', pattern: /^\/v1\/capital\/admin-directory$/, fields: null, handler: () => async (c, ctx) => ok({ admins: await adminDirectory(c, ctx) }) },
   { method: 'GET', pattern: /^\/v1\/capital\/admin-transfers$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ transfers: await listAdminTransfers(c, ctx, q) }) },
   { method: 'POST', pattern: /^\/v1\/capital\/admin-transfers$/, fields: REGISTER_FIELDS, idempotent: 'capital.admin_transfer_register', requiresOperation: true,
