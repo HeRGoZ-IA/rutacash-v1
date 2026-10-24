@@ -50,6 +50,18 @@ export const fundingRoutesOf = (rows: PanelRoute[], me: string | undefined): Fun
 const routeBaseUi = (m: CapitalModel) => m === 'route_base';
 
 /**
+ * RB-D7 (0036): ¿se ofrece «Anular»? Con Base por Ruta, lo que salió de rutas lo corrige el responsable VIGENTE de
+ * esas rutas (aunque no lo registrara); se ofrece si controla al menos una y el servidor decide: si las rutas son de
+ * varios responsables, responde JOINT_OPERATION_MIXED_CONTROLLERS con la lista, que el diálogo muestra. Lo que no
+ * salió de rutas (dinero propio, bolsa) sigue siendo de su titular: el acreedor o quien pagó.
+ */
+const touchesMine = (contributions: { routeId: string | null }[], mine: ReadonlySet<string>) => contributions.some((c) => !!c.routeId && mine.has(c.routeId));
+export const canReverseExpense = (e: ServerExpense, me: string | undefined, mine: ReadonlySet<string>, rb: boolean) =>
+  !!me && e.state === 'vigente' && (rb && e.funding === 'routes' ? touchesMine(e.contributions, mine) : e.adminId === me);
+const canReverseReimbursement = (r: Reimbursement, me: string | undefined, mine: ReadonlySet<string>, rb: boolean) =>
+  !!me && r.state === 'vigente' && (rb && r.source === 'routes' ? touchesMine(r.contributions, mine) : r.payerId === me);
+
+/**
  * Panel completo: cifras, registro (Administrador), obligaciones y reembolsos. `panel` (route_base) aporta las
  * cifras del periodo y las Bases de las rutas; sin él (modelo de bolsas) el panel lee lo suyo.
  */
@@ -102,6 +114,7 @@ export function GeneralExpensesPanel({ model, panel, periodText }: { model: Capi
 
   const sourcePanel = panel ?? ownPanel;
   const fundingRoutes = rb ? fundingRoutesOf(sourcePanel?.routes ?? [], me?.membershipId) : [];
+  const myRouteIds = new Set(fundingRoutes.map((r) => r.routeId));
   const nameOf = (id: string | null | undefined) => (!id ? '—' : id === me?.membershipId ? 'Tú' : formatPersonName(users.find((u) => u.id === id)?.nombre ?? payables?.admins.find((a) => a.adminId === id)?.name ?? '') || 'Administrador');
   const catOf = (id: string) => categories.find((c) => c.id === id)?.name ?? 'Categoría';
   const originals = (expenses ?? []).filter((e) => !e.reversesId && !e.refundsExpenseId);
@@ -161,7 +174,7 @@ export function GeneralExpensesPanel({ model, panel, periodText }: { model: Capi
           <ul className="divide-y divide-gray-100" data-testid="ge-list">
             {originals.map((e) => (
               <ExpenseRow key={e.id} e={e} category={catOf(e.categoryId)} nameOf={nameOf}
-                canReverse={isAdmin && e.adminId === me?.membershipId && e.state === 'vigente'} onReverse={() => setReversing({ kind: 'expense', e })} />
+                canReverse={isAdmin && canReverseExpense(e, me?.membershipId, myRouteIds, rb)} onReverse={() => setReversing({ kind: 'expense', e })} />
             ))}
           </ul>
         )
@@ -197,7 +210,7 @@ export function GeneralExpensesPanel({ model, panel, periodText }: { model: Capi
           <ul className="divide-y divide-gray-100" data-testid="ge-reimbursements">
             {reimbursements.map((r) => (
               <ReimbursementRow key={r.id} r={r} nameOf={nameOf} me={me?.membershipId} rb={rb}
-                canReverse={isAdmin && r.payerId === me?.membershipId && r.state === 'vigente'} onReverse={() => setReversing({ kind: 'reimbursement', r })} />
+                canReverse={isAdmin && canReverseReimbursement(r, me?.membershipId, myRouteIds, rb)} onReverse={() => setReversing({ kind: 'reimbursement', r })} />
             ))}
           </ul>
         )
@@ -228,13 +241,20 @@ export function GeneralExpensesList({ scope, from, to }: { scope?: 'administrado
   const [categories, setCategories] = useState<ServerCategory[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [reversing, setReversing] = useState<{ kind: 'expense'; e: ServerExpense } | null>(null);
+  const [myRouteIds, setMyRouteIds] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     let alive = true;
-    Promise.all([fetchGeneralExpenses(), fetchCategories().catch(() => [] as ServerCategory[]), db.users.where('tenantId').equals(tenantId).toArray()])
-      .then(([e, c, u]) => { if (alive) { setRows(e); setCategories(c); setUsers(u); } })
+    Promise.all([fetchGeneralExpenses(), fetchCategories().catch(() => [] as ServerCategory[]), db.users.where('tenantId').equals(tenantId).toArray(),
+      db.routes.where('tenantId').equals(tenantId).toArray()])
+      .then(([e, c, u, r]) => {
+        if (!alive) return;
+        setRows(e); setCategories(c); setUsers(u);
+        // RB-D7: rutas de las que soy el responsable vigente (las que puedo corregir).
+        setMyRouteIds(new Set(r.filter((x) => x.status === 'activa' && !!me?.membershipId && x.capitalControllerAdminId === me.membershipId).map((x) => x.id)));
+      })
       .catch(() => { if (alive) setRows([]); });
     return () => { alive = false; };
-  }, [revision, tenantId]);
+  }, [revision, tenantId, me?.membershipId]);
   const nameOf = (id: string | null | undefined) => (!id ? '—' : id === me?.membershipId ? 'Tú' : formatPersonName(users.find((u) => u.id === id)?.nombre ?? '') || 'Administrador');
   const catOf = (id: string) => categories.find((c) => c.id === id)?.name ?? 'Categoría';
   const list = (rows ?? []).filter((e) => !e.reversesId && !e.refundsExpenseId && (!scope || e.scope === scope)
@@ -246,7 +266,7 @@ export function GeneralExpensesList({ scope, from, to }: { scope?: 'administrado
       <ul className="divide-y divide-gray-100">
         {list.map((e) => (
           <ExpenseRow key={e.id} e={e} category={catOf(e.categoryId)} nameOf={nameOf}
-            canReverse={me?.role === 'admin' && e.adminId === me?.membershipId && e.state === 'vigente'} onReverse={() => setReversing({ kind: 'expense', e })} />
+            canReverse={me?.role === 'admin' && canReverseExpense(e, me?.membershipId, myRouteIds, true)} onReverse={() => setReversing({ kind: 'expense', e })} />
         ))}
       </ul>
       <ReverseDialog target={reversing} onClose={() => setReversing(null)} money={money} catOf={catOf} nameOf={nameOf} />

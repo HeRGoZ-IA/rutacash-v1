@@ -262,7 +262,10 @@ export default function ExpensesPage() {
     <div className="p-4 md:p-6 space-y-6">
       <ModuleTabs tabs={EXPENSE_TABS} />
       <div className="flex items-center justify-between">
-        <div><h1 className="text-xl font-bold text-gray-900">Gastos</h1><p className="text-sm text-gray-500 mt-0.5">Total: {formatCurrency(totalFiltered, currency)}</p></div>
+        {/* R74: con Base por Ruta el total es de los gastos de ruta y de trabajador; los generales (aportes o dinero propio) van aparte. */}
+        <div><h1 className="text-xl font-bold text-gray-900">Gastos</h1><p className="text-sm text-gray-500 mt-0.5" data-testid="expenses-total">{rb
+          ? <>Total de ruta y de trabajador: {formatCurrency(totalFiltered, currency)} · no incluye los gastos generales, que se listan aparte</>
+          : <>Total: {formatCurrency(totalFiltered, currency)}</>}</p></div>
         <Button onClick={abrirNuevo} icon={<Plus className="w-4 h-4" />}>Nuevo gasto</Button>
       </div>
 
