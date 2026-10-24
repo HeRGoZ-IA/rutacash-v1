@@ -17,7 +17,10 @@
     "staging:check": "node --import ./scripts/register-alias.mjs scripts/staging.ts --check",
     "staging:migrate": "node --import ./scripts/register-alias.mjs scripts/staging.ts --migrate",
     "staging:test": "node --import ./scripts/register-alias.mjs scripts/staging.ts --test",
-    "bench": "node scripts/run-contract-bench.ts"
+    "bench": "node scripts/run-contract-bench.ts",
+    "local:start": "node --import ./scripts/register-alias.mjs scripts/local/start-local.mjs",
+    "local:smoke": "node --import ./scripts/register-alias.mjs scripts/local/smoke-local.mjs",
+    "e2e:routebase": "node --import ./scripts/register-alias.mjs scripts/local/e2e-routebase.mjs"
   },
   "dependencies": {
     "jose": "6.2.12",

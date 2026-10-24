@@ -185,7 +185,7 @@ export function ConsultasDinero({ filters, today, timezone, currency, minorUnits
         <p className="rounded-xl bg-primary-50 px-4 py-2.5 text-sm text-primary-900">
           {rb ? <>
             {page.summary.outside.count === 1 ? 'Una operación' : `${page.summary.outside.count} operaciones`} de esta ruta no tocan su Base ni sus custodias
-            (anteriores a Base por Ruta, pagadas o recibidas con el saldo anterior del Administrador). No cambian el efectivo de la ruta.
+            (anteriores a Base por Ruta o pagadas con el saldo anterior del Administrador, o sobrantes retenidos en control y su conciliación). No cambian el efectivo de la ruta.
           </> : <>
             {page.summary.outside.count === 1 ? 'Una operación' : `${page.summary.outside.count} operaciones`} de esta ruta las pagó o recibió directamente la bolsa del
             Administrador (ventas o recaudos del Administrador). No cambian el efectivo en custodia; se ven eligiendo esa bolsa en «Caja o ruta».
