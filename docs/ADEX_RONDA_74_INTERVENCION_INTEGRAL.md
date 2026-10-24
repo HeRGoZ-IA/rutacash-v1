@@ -675,3 +675,87 @@ Migraciones de la rama: 0001–0036 (0034, 0035 y 0036 solo en la rama; ADEX-Sta
 5. **Servicios:** desplegar la API (Render) y comprobar que `/healthz` anuncia `route-base-v1`, `general-expenses-v1` y `admin-authority-v1`; después la web (Vercel; la puerta exige `movements-v2` y `rectification-payments-v1`).
 6. **Comprobaciones:** humo de solo lectura en BlueLine (sin operaciones sintéticas ni destructivas); conciliación de empresa sin diferencias; las empresas en `admin_pool` muestran las mismas pantallas que antes.
 7. **Activación por empresa, por separado:** con autorización del propietario para cada empresa. SuperAdmin de esa empresa → Modelo de capital → requisitos en verde → con saldos, «Migrando» → reparto del saldo sin asignar con evidencia → activar con referencia de respaldo. Nunca activar BlueLine ni otra empresa real sin esa autorización.
+
+## 16. Publicación en Online y transición de BlueLine (2026-10-24)
+
+Encargo: terminar el despliegue de R74 y activar Base por Ruta en BlueLine. La publicación y la activación están **autorizadas** por el propietario. Online es el entorno de prelanzamiento; sus datos se conservan.
+
+### 16.1 Estado verificado al retomar (2026-10-24, 11:15 hora de Colombia)
+
+| Punto | Resultado |
+|---|---|
+| Git | `main` = `r74-route-base` = `origin/main` = `8d37c05`; árbol limpio |
+| Migraciones en ADEX-Staging | 0001–**0037** (0032–0037 aplicadas por `staging:migrate` a las 15:53 UTC, con checksums iguales a los del repositorio; `tmp/r74pub/staging-migrate.log`, `tmp/r74pub/rehearsal-report.json`) |
+| Render | `adex-online-api` y `adex-owner-api` **live en `8d37c05`** (despliegues manuales `dep-dbedelq9lscs73aq4qt0`, 16:05 UTC, y `dep-dbedg1d9fdbs73aob3eg`, 16:08 UTC). `/healthz` de la API: `movements-v2`, `rectification-payments-v1`, `route-base-v1`, `general-expenses-v1`, `admin-authority-v1`, `controller-authority-v1` (marcador de 0037). Owner: `owner-v1, owner-clean-v1, owner-email-v1` |
+| Vercel | El build de `8d37c05` (15:53 UTC) fue **cancelado por la puerta** porque la API aún no anunciaba `movements-v2`/`rectification-payments-v1`; seguía servido `index-DyK4-kHp.js` (R73) |
+| Vigilante de la sesión anterior | No se usó ni se asumió activo |
+
+### 16.2 Publicación del frontend
+
+`vercel redeploy` del despliegue cancelado (mismo commit `8d37c05`, destino producción). La puerta vio las funciones exigidas y construyó. **Servido:** `adex-online.vercel.app` → `index-C_tgH73z.js`, que incrusta `8d37c05fc578e8aba40fd4a1c1251bfa253040ad`. Los tres servicios quedan en el mismo commit.
+
+### 16.3 Respaldo vigente
+
+| Respaldo | Momento | Verificación |
+|---|---|---|
+| `adex-20261024T1408` | 14:08 UTC | Restauración aislada: 82 tablas, 2.233 filas idénticas (`tmp/r74pub/restore-check.log`); usado en el ensayo |
+| `adex-20261024T1551` | 15:51 UTC, justo antes de migrar | Restauración aislada: 82 tablas, 2.233 filas idénticas, 0 diferencias (`tmp/r74pub/restore-check-1551.log`). El único error de `pg_restore` es «schema public already exists», esperado |
+
+Vigencia: la foto de solo lectura de las 16:19 UTC (`tmp/r74p/pregate-ahora-1124.json`) y la de las 16:35 UTC (`tmp/r74/final/bl-antes.json`) coinciden con la tomada tras migrar: mismos saldos cuenta a cuenta y mismos recuentos (36 ventas, 68 pagos, 640 parcelas, 112 operaciones). **No hubo movimientos después del respaldo `adex-20261024T1551`**, así que sigue siendo la referencia para la activación.
+
+### 16.4 Regresión completa sobre `8d37c05`
+
+| Suite | Resultado | Evidencia |
+|---|---|---|
+| SaaS: tipos | Sin errores | `tmp/r74/final/saas-full.log` |
+| SaaS: unidad | 31/31 | ídem |
+| SaaS: PostgreSQL (suite completa, una sola ejecución) | **585 pruebas: 584 ✔, 0 ✖, 1 omitida** (RND-060, como en la línea base); 926 s | ídem |
+| CLEAN `npm test` | Todas las suites en verde. WORKER-XFER-017 (reactividad de la vista) falló una vez mientras corría en paralelo con la suite de PostgreSQL; aislado, 3/3 en verde. Las 14 suites que la cadena `&&` dejó sin correr se ejecutaron después: todas con salida 0 | `tmp/r74/final/clean-*.log` |
+| Online y CLEAN: tipos | Sin errores | `tmp/r74/final/online-typecheck.log`, `clean-tsc.log` |
+| E2E de navegador de Base por Ruta (3 partes) | **83/83, 41/41 y 25/25** (partes 1, 2 y 3). Dos intentos previos se interrumpieron porque PostgreSQL local terminó con `0xC000013A` (Ctrl+C de la consola) mientras se ejecutaban otros comandos en paralelo; repetidos sin interferencias, todo en verde. Registros de PostgreSQL: `tmp/local/logs/postgres-fin2.log`, `postgres-fin3.log` | `tmp/r74/final/e2e/` |
+
+Cobertura de las correcciones finales, comprobada en el código y en las pruebas: reversión de movimientos propios por el responsable de capital (0037, `controller-authority-v1`; pruebas r74 y E2E); otros Administradores con acceso operativo sin autoridad financiera (0037); indicador de Base del Supervisor (`7022642`); transición con custodias distintas de cero y devolución del sobrante desde la interfaz (E2E parte 3); reembolsos y reversiones conjuntas (propuesta, confirmación, cancelación) sin duplicaciones (E2E y suite r74). Herramientas reproducibles versionadas sin secretos: `saas/scripts/local/` (arranque, humo y `e2e-routebase.mjs`).
+
+### 16.5 Posiciones de BlueLine y decisión del propietario
+
+Foto de solo lectura previa a la activación (`tmp/r74/final/bl-antes.json`), modelo `admin_pool`:
+
+| Cuenta | Saldo | Titular |
+|---|---|---|
+| Cuenta de la empresa | R$ 32.995,00 | — |
+| Caja (bolsa) del Administrador | R$ 123,00 | Andrew |
+| Custodia | R$ 6.959,00 | Leonel (Cobrador, Aguas Lindas) |
+| **Efectivo total** | **R$ 40.077,00** | |
+| Cartera | R$ 37.944,99 | Aguas Lindas |
+
+Andrew es el Administrador responsable de capital de Aguas Lindas (`capital_controller_membership_id`, activo), única ruta de BlueLine. Helmer es Administrador con acceso operativo a la ruta, sin responsabilidad de capital.
+
+Origen de la cuenta de la empresa (libro, `tmp/r74/final/company-origin.json`): el 22/10 el SuperAdmin Andrés depositó R$ 100.000,00 («Capital empresas Alexis») y asignó R$ 67.005,00 a Andrew («Capital para Aguas Lindas»). Los R$ 32.995,00 restantes no tenían destino documentado. La caja de Andrew (R$ 123,00) es el resto de lo que recibió para Aguas Lindas y de las devoluciones del Cobrador.
+
+**Decisiones del propietario (2026-10-24):**
+
+- **D74-F1:** lo que está en la caja del Administrador principal de Aguas Lindas (Andrew) corresponde a Aguas Lindas. No autoriza atribuir dinero de otros Administradores ni de cajas no identificadas.
+- **D74-F2:** los R$ 32.995,00 de la cuenta de la empresa pasan a la **Base de Aguas Lindas**: el SuperAdmin los asigna a Andrew y Andrew los reparte a la ruta.
+
+### 16.6 Activación
+
+Estado: **PENDIENTE de dos pasos personales** (SuperAdmin Andrés y Administrador Andrew, desde sus sesiones). Todo lo demás está preparado y verificado: la API y la web publicadas, el respaldo vigente, el diagnóstico previo y las pantallas. No se ejecutó ninguna operación en nombre de esos usuarios.
+
+Procedimiento (etiquetas comprobadas en el código publicado `8d37c05`; el ensayo sobre la copia de `adex-20261024T1408` lo ejecutó con 26/26 invariantes):
+
+| # | Quién | Pantalla y acción | Resultado esperado |
+|---|---|---|---|
+| 1 | Andrés (SuperAdmin) | Capital → **Realizar movimientos** → Operación «Asignar capital a un Administrador» → Administrador = Andrew → Valor = 32.995,00 → Concepto → **Registrar** | Cuenta de la empresa R$ 0,00; caja de Andrew R$ 33.118,00 |
+| 2 | Andrés | Capital → **Modelo de capital** → Cambio = «Congelar bolsas para preparar el corte (migración)» → Evidencia de la autorización → escribir `CONGELAR` → **Congelar bolsas** | Modelo «Migrando» |
+| 3 | Andrés | **Volver a comprobar** (debe decir «Todos cumplidos») → Cambio = «Activar Base por Ruta» → Evidencia → Referencia del respaldo verificado = `adex-20261024T1551` → escribir `ACTIVAR` → **Activar Base por Ruta** | Modelo Base por Ruta; Andrew con «Saldo sin asignar» R$ 33.118,00 |
+| 4 | Andrew (responsable de capital) | Caja principal → tarjeta «Saldo sin asignar» → **Repartir a una ruta** → Ruta = Aguas Lindas → Valor = 33.118,00 → Concepto → Evidencia → casilla «Confirmo…» → **Registrar** | Base de Aguas Lindas R$ 33.118,00; saldo sin asignar R$ 0,00 |
+
+Conciliación esperada tras el paso 4 (se comprueba con `node tmp/r74/final/bl-check.mjs despues`, solo lectura): efectivo total R$ 40.077,00 sin cambios (Base R$ 33.118,00 + custodia de Leonel R$ 6.959,00); cartera R$ 37.944,99, ingresos y gastos sin cambios; mismos recuentos de ventas, pagos, parcelas, solicitudes, gastos y clientes; solo 2 operaciones de capital nuevas (asignación y reparto) más los cambios de modelo; conservación del libro = 0.
+
+### 16.7 Pendientes reales
+
+| Pendiente | Responsable |
+|---|---|
+| Pasos 1–4 de §16.6 y verificación posterior (`bl-check.mjs despues`) | Andrés y Andrew; verificación: siguiente sesión técnica |
+| RB-D10 (faltante de acta cargable al Administrador saliente), RB-D12 (anulación por partes de una operación conjunta), RB-D13 (pagar desde la pantalla el reembolso de otro Administrador) | Decisión del propietario |
+| Política de respaldos (P-05): las copias cifradas son manuales; sin PITR | Decisión del propietario |
