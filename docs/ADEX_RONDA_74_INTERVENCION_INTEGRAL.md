@@ -735,7 +735,7 @@ Origen de la cuenta de la empresa (libro, `tmp/r74/final/company-origin.json`): 
 **Decisiones del propietario (2026-10-24):**
 
 - **D74-F1:** lo que está en la caja del Administrador principal de Aguas Lindas (Andrew) corresponde a Aguas Lindas. No autoriza atribuir dinero de otros Administradores ni de cajas no identificadas.
-- **D74-F2:** los R$ 32.995,00 de la cuenta de la empresa pasan a la **Base de Aguas Lindas**: el SuperAdmin los asigna a Andrew y Andrew los reparte a la ruta.
+- **D74-F2 (corregida el mismo día por el propietario):** los R$ 32.995,00 de la cuenta de la empresa son capital que aún no se había distribuido a ningún Administrador. Se **retiran de la empresa** («Retiro de capital de la empresa», SuperAdmin) antes del corte, y el capital se vuelve a aportar ya con Base por Ruta funcionando, mediante «Inyección de Base» del responsable de la ruta. Sustituye a la primera respuesta (asignarlos a Andrew y repartirlos), que el propietario dio sin haber revisado aún la cuenta.
 
 ### 16.6 Activación
 
@@ -745,12 +745,13 @@ Procedimiento (etiquetas comprobadas en el código publicado `8d37c05`; el ensay
 
 | # | Quién | Pantalla y acción | Resultado esperado |
 |---|---|---|---|
-| 1 | Andrés (SuperAdmin) | Capital → **Realizar movimientos** → Operación «Asignar capital a un Administrador» → Administrador = Andrew → Valor = 32.995,00 → Concepto → **Registrar** | Cuenta de la empresa R$ 0,00; caja de Andrew R$ 33.118,00 |
+| 1 | Andrés (SuperAdmin) | Capital → **Realizar movimientos** → Operación «Retiro de capital de la empresa» → Valor = 32.995,00 → Concepto → **Registrar** | Cuenta de la empresa R$ 0,00; caja de Andrew sigue en R$ 123,00 |
 | 2 | Andrés | Capital → **Modelo de capital** → Cambio = «Congelar bolsas para preparar el corte (migración)» → Evidencia de la autorización → escribir `CONGELAR` → **Congelar bolsas** | Modelo «Migrando» |
-| 3 | Andrés | **Volver a comprobar** (debe decir «Todos cumplidos») → Cambio = «Activar Base por Ruta» → Evidencia → Referencia del respaldo verificado = `adex-20261024T1551` → escribir `ACTIVAR` → **Activar Base por Ruta** | Modelo Base por Ruta; Andrew con «Saldo sin asignar» R$ 33.118,00 |
-| 4 | Andrew (responsable de capital) | Caja principal → tarjeta «Saldo sin asignar» → **Repartir a una ruta** → Ruta = Aguas Lindas → Valor = 33.118,00 → Concepto → Evidencia → casilla «Confirmo…» → **Registrar** | Base de Aguas Lindas R$ 33.118,00; saldo sin asignar R$ 0,00 |
+| 3 | Andrés | **Volver a comprobar** (debe decir «Todos cumplidos») → Cambio = «Activar Base por Ruta» → Evidencia → Referencia del respaldo verificado = `adex-20261024T1551` → escribir `ACTIVAR` → **Activar Base por Ruta** | Modelo Base por Ruta; Andrew con «Saldo sin asignar» R$ 123,00 |
+| 4 | Andrew (responsable de capital) | Caja principal → tarjeta «Saldo sin asignar» → **Repartir a una ruta** → Ruta = Aguas Lindas → Valor = 123,00 → Concepto → Evidencia → casilla «Confirmo…» → **Registrar** | Base de Aguas Lindas R$ 123,00; saldo sin asignar R$ 0,00 |
+| 5 (cuando corresponda) | Andrew | Transferencias → grupo «Base de la ruta» → **Inyección de Base** → Ruta = Aguas Lindas → Valor (el capital que se aporte) → Concepto → **Registrar** | Base de Aguas Lindas aumenta en ese valor |
 
-Conciliación esperada tras el paso 4 (se comprueba con `node tmp/r74/final/bl-check.mjs despues`, solo lectura): efectivo total R$ 40.077,00 sin cambios (Base R$ 33.118,00 + custodia de Leonel R$ 6.959,00); cartera R$ 37.944,99, ingresos y gastos sin cambios; mismos recuentos de ventas, pagos, parcelas, solicitudes, gastos y clientes; solo 2 operaciones de capital nuevas (asignación y reparto) más los cambios de modelo; conservación del libro = 0.
+Conciliación esperada tras el paso 4 (se comprueba con `node tmp/r74/final/bl-check.mjs despues`, solo lectura): efectivo total R$ 7.082,00 (= R$ 40.077,00 − R$ 32.995,00 retirados; Base R$ 123,00 + custodia de Leonel R$ 6.959,00), más lo que se inyecte en el paso 5; cartera R$ 37.944,99, ingresos y gastos sin cambios; mismos recuentos de ventas, pagos, parcelas, solicitudes, gastos y clientes; solo las operaciones de capital nuevas del retiro, el reparto y las inyecciones, más los cambios de modelo; conservación del libro = 0.
 
 ### 16.7 Pendientes reales
 
