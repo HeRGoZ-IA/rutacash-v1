@@ -739,7 +739,37 @@ Origen de la cuenta de la empresa (libro, `tmp/r74/final/company-origin.json`): 
 
 ### 16.6 Activación
 
-Estado: **PENDIENTE de dos pasos personales** (SuperAdmin Andrés y Administrador Andrew, desde sus sesiones). Todo lo demás está preparado y verificado: la API y la web publicadas, el respaldo vigente, el diagnóstico previo y las pantallas. No se ejecutó ninguna operación en nombre de esos usuarios.
+Estado: **ACTIVADA el 2026-10-24 a las 17:16 UTC** por Andrés (SuperAdmin) y Andrew (responsable), desde sus sesiones. Verificación de solo lectura en `tmp/r74/final/bl-despues.json` y `bl-invariants.json`.
+
+| Momento (UTC) | Operación | Quién | Valor |
+|---|---|---|---|
+| 17:08 | `COMPANY_WITHDRAWAL` «Dejar caja de superadmin en cero» | Andrés | R$ 32.995,00 |
+| 17:15 | Modelo → `migrating` | Andrés | — |
+| 17:16 | Modelo → `route_base` | Andrés | — |
+| 17:19 | `ROUTE_BASE_INJECTION` (por error) | Andrew | R$ 123,00 |
+| 17:21 | `REVERSAL` de esa inyección («debí trasladar el saldo sin asignar») | Andrew | R$ 123,00 |
+| 17:23 | `LEGACY_POOL_TO_ROUTE` (reparto del saldo sin asignar a Aguas Lindas) | Andrew | R$ 123,00 |
+
+La reversión de su propia inyección por el responsable, sin aprobación de nadie, es la autocorrección de 0037 funcionando en Online.
+
+| Comprobación | Antes | Después |
+|---|---|---|
+| Modelo | `admin_pool` | **`route_base`** |
+| Cuenta de la empresa / caja de Andrew | R$ 32.995,00 / R$ 123,00 | R$ 0,00 / R$ 0,00 |
+| Base de Aguas Lindas | — | **R$ 123,00** |
+| Custodia de Leonel | R$ 6.959,00 | R$ 6.959,00 |
+| Efectivo total | R$ 40.077,00 | **R$ 7.082,00** (= − R$ 32.995,00 retirados, D74-F2) |
+| Cartera / ingresos / gastos | R$ 37.944,99 / R$ 5.718,99 / R$ 27.697,00 | Sin cambios |
+| Ventas, pagos, parcelas, solicitudes, gastos, clientes | 36 / 68 / 640 / 37 / 1 / 36 | Sin cambios |
+| Operaciones de capital | 112 | 116 (las 4 de la tabla anterior) |
+| Conservación del libro; posiciones ≠ asientos; operaciones desbalanceadas; cuentas de efectivo negativas; traspasos pendientes | 0 | 0 |
+| Responsable de capital de Aguas Lindas | Andrew | Andrew |
+
+La conciliación de 26 comprobaciones de la API (`/v1/capital/reconciliation`) exige la sesión del SuperAdmin y no se ejecutó en su nombre; los invariantes anteriores se comprobaron con consultas propias de solo lectura. El propietario puede abrirla desde su sesión. Inyección de capital: **pospuesta por decisión del propietario** hasta verificar personalmente el funcionamiento.
+
+<details><summary>Procedimiento entregado (referencia)</summary>
+
+ Todo lo demás está preparado y verificado: la API y la web publicadas, el respaldo vigente, el diagnóstico previo y las pantallas. No se ejecutó ninguna operación en nombre de esos usuarios.
 
 Procedimiento (etiquetas comprobadas en el código publicado `8d37c05`; el ensayo sobre la copia de `adex-20261024T1408` lo ejecutó con 26/26 invariantes):
 
@@ -753,10 +783,12 @@ Procedimiento (etiquetas comprobadas en el código publicado `8d37c05`; el ensay
 
 Conciliación esperada tras el paso 4 (se comprueba con `node tmp/r74/final/bl-check.mjs despues`, solo lectura): efectivo total R$ 7.082,00 (= R$ 40.077,00 − R$ 32.995,00 retirados; Base R$ 123,00 + custodia de Leonel R$ 6.959,00), más lo que se inyecte en el paso 5; cartera R$ 37.944,99, ingresos y gastos sin cambios; mismos recuentos de ventas, pagos, parcelas, solicitudes, gastos y clientes; solo las operaciones de capital nuevas del retiro, el reparto y las inyecciones, más los cambios de modelo; conservación del libro = 0.
 
+</details>
+
 ### 16.7 Pendientes reales
 
 | Pendiente | Responsable |
 |---|---|
-| Pasos 1–4 de §16.6 y verificación posterior (`bl-check.mjs despues`) | Andrés y Andrew; verificación: siguiente sesión técnica |
+| Inyección de capital en la Base de Aguas Lindas (paso 5), cuando el propietario lo decida tras su verificación personal | Andrew |
 | RB-D10 (faltante de acta cargable al Administrador saliente), RB-D12 (anulación por partes de una operación conjunta), RB-D13 (pagar desde la pantalla el reembolso de otro Administrador) | Decisión del propietario |
 | Política de respaldos (P-05): las copias cifradas son manuales; sin PITR | Decisión del propietario |
