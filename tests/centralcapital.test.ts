@@ -890,7 +890,7 @@ await spec('CC-F03', 'contratos de pantalla: servicios C1 en la interfaz, sin c�
     ['Transferencias: aporte de socio a la bolsa', transfers.includes('registerPartnerContribution(')],
     ['Retiros: excluye patas centralizadas', retiros.includes('.filter(w => !w.centralLink)')],
     ['Cuadre: servicios de capital en modo centralizado', panel.includes('deliverCapitalToWorker(') && panel.includes('returnCapitalFromWorker(')],
-    ['Cobrador: «Capital recibido» y sin bolsa', cobrador.includes('Capital recibido') && !/capitalControlService|getAdminAvailableCapital|adminCapital/.test(cobrador)],
+    ['Cobrador: «Base recibida» y sin bolsa', cobrador.includes('Base recibida') && !/capitalControlService|getAdminAvailableCapital|adminCapital/.test(cobrador)],
     ['Transición: respaldo y confirmación escrita', transicion.includes('verifyCentralCapitalBackup(') && transicion.includes('PALABRA')],
     ['Ninguna pantalla escribe capital directamente', ![wizard, capital, transfers, retiros, panel, transicion].some(s => /db\.(capitalMovements|withdrawals|capitalLedger|cashCustodyMovements|tenants)\.(add|put|update)/.test(s))],
   ]
@@ -898,7 +898,7 @@ await spec('CC-F03', 'contratos de pantalla: servicios C1 en la interfaz, sin c�
   assert(checks.every(([, v]) => v), 'contrato de pantalla incumplido')
   // Marcadores de despliegue para C2 (presentes en el bundle cuando se publique).
   const marcadores = src('scripts/verify-deploy.mjs')
-  assert(marcadores.includes('Capital centralizado') && marcadores.includes('Capital recibido del Administrador'), 'faltan marcadores de despliegue de C2')
+  assert(marcadores.includes('Capital centralizado') && marcadores.includes('Base recibida y devuelta en este periodo'), 'faltan marcadores de despliegue de C2')
 })
 
 // ============================================================

@@ -7,7 +7,7 @@ import type { TransferMode, TransferOperationDef, TransferOperationKind } from '
 export * from '@clean/lib/transferOperations';
 
 const AYUDA: Partial<Record<TransferOperationKind, string>> = {
-  'entregar-capital': 'De tu caja a un cobrador o supervisor de tu ruta. No crea ningún préstamo.',
+  'entregar-capital': 'De tu caja a un cobrador o supervisor de tu ruta. No crea ninguna venta.',
   'devolver-capital': 'Efectivo que un trabajador de tu ruta te entrega.',
 };
 

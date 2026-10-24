@@ -541,8 +541,8 @@ export async function getOfficeManagementSummary(
       // Libro completo (misma fuente que la Base): los flujos cuadran con `baseActual`.
       const cajas = await Promise.all(accessibleOfficeRoutes.map(r => getRouteLedger(r.id)))
       const financieros = accessibleOfficeRoutes.map(r => {
-        const fin = (resumenes as Record<string, { baseActual?: number; carteraEnCalle?: number }>)[r.id]
-        return { baseActual: fin?.baseActual ?? 0, carteraEnCalle: fin?.carteraEnCalle ?? 0 }
+        const fin = (resumenes as Record<string, { baseActual?: number; carteraEnCalle?: number; baseRuta?: number }>)[r.id]
+        return { baseActual: fin?.baseActual ?? 0, carteraEnCalle: fin?.carteraEnCalle ?? 0, ...(fin?.baseRuta !== undefined ? { baseRuta: fin.baseRuta } : {}) }
       })
       finance = officeFinanceTotals(cajas, financieros)
     } catch {

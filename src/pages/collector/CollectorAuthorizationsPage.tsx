@@ -278,7 +278,7 @@ export default function CollectorAuthorizationsPage() {
                 </span>
               </div>
               {(r.activeCreditSaleIds?.length ?? 0) > 0 && (
-                <p className="mt-1 text-xs font-medium text-amber-700">Cliente con crédito activo · aprobar crea un crédito adicional</p>
+                <p className="mt-1 text-xs font-medium text-amber-700">Cliente con venta activa · aprobar crea una venta adicional</p>
               )}
             </button>
           ))}

@@ -211,7 +211,9 @@ export interface OfficeFinanceTotals extends RouteCashLike {
   carteraEnCalle: number
   /** Base total = Σ Base de la ruta (`getRouteBase`). No es lo disponible para retiro. */
   baseActual: number
-  /** baseActual + carteraEnCalle. */
+  /** ADEX Online con Base por Ruta: Σ Base disponible de las rutas (ausente en CLEAN y en el modelo de bolsas). */
+  baseRuta?: number
+  /** baseActual (+ baseRuta) + carteraEnCalle. */
   totalControlado: number
 }
 
@@ -222,11 +224,13 @@ export interface OfficeFinanceTotals extends RouteCashLike {
  */
 export function officeFinanceTotals(
   cajas: RouteCashLike[],
-  financieros: { baseActual: number; carteraEnCalle: number }[],
+  financieros: { baseActual: number; carteraEnCalle: number; baseRuta?: number }[],
 ): OfficeFinanceTotals {
   const sumCaja = (f: (x: RouteCashLike) => number) => cajas.reduce((n, x) => n + f(x), 0)
   const baseActual = financieros.reduce((n, x) => n + x.baseActual, 0)
   const carteraEnCalle = financieros.reduce((n, x) => n + x.carteraEnCalle, 0)
+  const conBaseRuta = financieros.some(x => x.baseRuta !== undefined)
+  const baseRuta = financieros.reduce((n, x) => n + (x.baseRuta ?? 0), 0)
   return {
     cobros: sumCaja(c => c.cobros),
     gastos: sumCaja(c => c.gastos),
@@ -237,7 +241,8 @@ export function officeFinanceTotals(
     saldoActual: sumCaja(c => c.saldoActual),
     baseActual,
     carteraEnCalle,
-    totalControlado: baseActual + carteraEnCalle,
+    ...(conBaseRuta ? { baseRuta } : {}),
+    totalControlado: baseActual + baseRuta + carteraEnCalle,
   }
 }
 

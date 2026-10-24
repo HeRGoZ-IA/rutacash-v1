@@ -122,7 +122,7 @@ const KIND_LABEL: Record<PendingOp['kind'], string> = {
 
 /** Ronda 65: lo que significa «confirmado» en un desembolso. */
 const CONFIRMED_NOTE: Partial<Record<PendingOp['kind'], string>> = {
-  disbursement: 'Crédito activo para recaudo.',
+  disbursement: 'Venta activa para recaudo.',
 };
 
 /**

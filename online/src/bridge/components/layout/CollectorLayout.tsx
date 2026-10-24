@@ -99,7 +99,7 @@ export function CollectorLayout() {
     { path: `${base}/route`, label: 'Recaudo', icon: <MapPin className="w-5 h-5" />, badge: 0 },
     { path: `${base}/disbursements`, label: 'Desembolsos', icon: <Banknote className="w-5 h-5" />, badge: pendingDisb },
     { path: `${base}/expenses`, label: 'Gastos', icon: <DollarSign className="w-5 h-5" />, badge: 0 },
-    { path: `${base}/cashclose`, label: 'Cuadre', icon: <Calculator className="w-5 h-5" />, badge: 0 },
+    { path: `${base}/cashclose`, label: 'Mi efectivo', icon: <Calculator className="w-5 h-5" />, badge: 0 },
     // ADEX Online (Ronda 59): Notificaciones del Cobrador.
     // R74 (0036): el Supervisor consulta las diferencias de sus rutas (solo lectura).
     ...(user?.rol === 'supervisor' ? [{ path: `${base}/diferencias`, label: 'Diferencias', icon: <Scale className="w-5 h-5" />, badge: 0 }] : []),

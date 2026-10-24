@@ -163,7 +163,7 @@ export default function CollectorSelectRoutePage() {
                   {efectivo === undefined ? (
                     <div className="bg-gray-50 rounded-xl p-2 text-center">
                       <p className="text-[clamp(11px,3.4vw,14px)] font-bold text-amber-600 leading-tight break-all">{formatCurrency(cartera, currency)}</p>
-                      <p className="text-xs text-gray-500">Cartera</p>
+                      <p className="text-xs text-gray-500">Cartera activa</p>
                     </div>
                   ) : conBase ? (
                     <div className="bg-primary-50 rounded-xl p-2 text-center" data-testid={`sel-route-base-${route.id}`}>
@@ -173,7 +173,7 @@ export default function CollectorSelectRoutePage() {
                   ) : (
                     <div className="bg-primary-50 rounded-xl p-2 text-center" data-testid={`sel-route-custody-${route.id}`}>
                       <p className="text-[clamp(11px,3.4vw,14px)] font-bold text-primary-700 leading-tight break-all">{formatCurrency(efectivo.custodia, currency)}</p>
-                      <p className="text-xs text-primary-500 leading-tight">Efectivo en custodias</p>
+                      <p className="text-xs text-primary-500 leading-tight">Base del trabajador</p>
                     </div>
                   )}
                 </div>
@@ -187,7 +187,7 @@ export default function CollectorSelectRoutePage() {
 
                 {efectivo !== undefined && (
                   <div className="mt-2 flex items-center justify-between rounded-xl bg-gray-50 px-3 py-1.5">
-                    <span className="text-xs text-gray-500">Cartera</span>
+                    <span className="text-xs text-gray-500">Cartera activa</span>
                     <span className="text-xs font-semibold text-amber-600">{formatCurrency(cartera, currency)}</span>
                   </div>
                 )}

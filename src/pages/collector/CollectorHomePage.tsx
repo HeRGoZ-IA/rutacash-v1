@@ -172,7 +172,7 @@ export default function CollectorHomePage() {
               cuadrar a otros trabajadores —hoy el Supervisor— lo hace desde aquí, en
               el móvil, sin pasar por ningún panel de Administración. */}
           {activeRouteId && can(user, 'cashSettlement.close', { routeId: activeRouteId, tenantId }) && (
-            <Chip label="Cuadrar trabajadores" to={`${base}/worker-settlements`} />
+            <Chip label="Cuadre de trabajadores" to={`${base}/worker-settlements`} />
           )}
         </div>
       </div>

@@ -213,7 +213,7 @@ export default function PaymentPage() {
   /** Pantalla de éxito SOLO con la confirmación del servidor (o de la base local en CLEAN). */
   async function showConfirmed(result: RegisterPaymentSuccess, geo?: GeoCapture) {
     if (result.capped) {
-      toast.warning(`Abono limitado al saldo pendiente: ${formatCurrency(result.appliedAmount, currency)}. La deuda queda en ${formatCurrency(0, currency)}.`)
+      toast.warning(`Recaudo limitado al saldo pendiente: ${formatCurrency(result.appliedAmount, currency)}. La deuda queda en ${formatCurrency(0, currency)}.`)
     }
     setPaidNumber(result.paidInstallmentNumber)
     setAppliedAmount(result.appliedAmount)
@@ -313,7 +313,7 @@ export default function PaymentPage() {
         queuedOp.status === 'confirmed' ? (
           <div className="flex flex-col items-center justify-center py-8 space-y-3" data-testid="offline-payment-confirmed">
             <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center"><CheckCircle className="w-8 h-8 text-emerald-600" /></div>
-            <p className="text-lg font-bold text-gray-900">Abono confirmado por el servidor</p>
+            <p className="text-lg font-bold text-gray-900">Recaudo confirmado por el servidor</p>
             <p className="text-sm text-gray-500">Abono {formatCurrency(toMajor(queuedOp.result?.appliedMinor ?? queuedOp.ref.amountMinor ?? 0), currency)}
               {queuedOp.result?.newBalanceMinor != null ? <> · Nuevo saldo: {formatCurrency(toMajor(queuedOp.result.newBalanceMinor), currency)}</> : null}</p>
             <button onClick={() => navigate(`${base}/route`)} className="text-primary-600 text-sm font-medium">Volver a la ruta</button>
@@ -323,7 +323,7 @@ export default function PaymentPage() {
             <div className="flex items-start gap-3">
               <Smartphone className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
               <div className="space-y-1.5 text-sm text-amber-900">
-                <p className="font-semibold">Abono guardado en este dispositivo</p>
+                <p className="font-semibold">Recaudo guardado en este dispositivo</p>
                 <p>
                   <span className="font-semibold tabular-nums">{formatCurrency(toMajor(queuedOp.ref.amountMinor ?? 0), currency)}</span> de {formatClientName(client.nombre)}, capturado el {formatDateTime(queuedOp.capturedAt)}.
                 </p>
@@ -350,7 +350,7 @@ export default function PaymentPage() {
           <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center">
             <CheckCircle className="w-8 h-8 text-emerald-600" />
           </div>
-          <p className="text-lg font-bold text-gray-900">¡Abono registrado!</p>
+          <p className="text-lg font-bold text-gray-900">¡Recaudo registrado!</p>
           {recovered && (
             <p className="max-w-xs text-center text-xs text-gray-500" data-testid="payment-recovered">
               Confirmado por el servidor al comprobar el envío anterior. Es el mismo abono: no se registró otro.
@@ -387,7 +387,7 @@ export default function PaymentPage() {
           <div className="flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
             <div className="space-y-1.5 text-sm text-amber-900">
-              <p className="font-semibold">Abono sin confirmar</p>
+              <p className="font-semibold">Recaudo sin confirmar</p>
               <p>
                 A las {sentAt(unconfirmed.startedAt)} se envió un abono de <span className="font-semibold tabular-nums">{formatCurrency(unconfirmed.requestedAmount, currency)}</span>,
                 pero el servidor no alcanzó a confirmarlo. Puede que ya esté registrado.
@@ -400,7 +400,7 @@ export default function PaymentPage() {
             {checking ? 'Comprobando…' : 'Comprobar ahora'}
           </Button>
           <p className="text-xs text-amber-700">
-            Comprobar nunca crea otro abono. Hasta confirmarlo no se puede registrar otro en este crédito. Si sigue sin respuesta, revise la conexión o avise a su administrador.
+            Comprobar nunca crea otro recaudo. Hasta confirmarlo no se puede registrar otro en esta venta. Si sigue sin respuesta, revise la conexión o avise a su administrador.
           </p>
           <button onClick={() => navigate(`${base}/route`)} disabled={checking} className="w-full text-gray-500 text-sm py-2">Volver a la ruta</button>
         </div>
@@ -415,7 +415,7 @@ export default function PaymentPage() {
           )}
           {pendingHere.length > 0 && (
             <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-xs text-gray-700" data-testid="payment-pending-here">
-              En este dispositivo hay {pendingHere.length} operación{pendingHere.length === 1 ? '' : 'es'} de este crédito sin confirmar
+              En este dispositivo hay {pendingHere.length} operación{pendingHere.length === 1 ? '' : 'es'} de esta venta sin confirmar
               {pendingPayMinor > 0 ? <> (abonos por {formatCurrency(toMajor(pendingPayMinor), currency)})</> : null}. El saldo mostrado no las descuenta.
             </div>
           )}
@@ -431,7 +431,7 @@ export default function PaymentPage() {
 
           {/* Amount input */}
           <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-3">
-            <label htmlFor="payment-amount" className="block text-sm font-semibold text-gray-700">Valor del abono</label>
+            <label htmlFor="payment-amount" className="block text-sm font-semibold text-gray-700">Valor del recaudo</label>
             <div className="relative">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-bold text-gray-400">{getCurrencySymbol(currency)}</span>
               <input

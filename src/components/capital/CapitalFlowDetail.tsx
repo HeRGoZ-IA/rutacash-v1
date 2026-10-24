@@ -15,8 +15,8 @@ export function CapitalFlowDetail({ breakdown, currency }: { breakdown: CapitalF
       .filter(k => (breakdown[grupo] as Record<string, number>)[k] !== 0)
       .map(k => ({ label: (CAPITAL_FLOW_LABELS[grupo] as Record<string, string>)[k], valor: (breakdown[grupo] as Record<string, number>)[k] }))
   const bloques = [
-    { titulo: 'Detalle del ingreso de capital', filas: filas('capital') },
-    { titulo: 'Detalle de retiros y retornos a la bolsa', filas: filas('retiros') },
+    { titulo: 'Detalle de las entregas de Base', filas: filas('capital') },
+    { titulo: 'Detalle de las devoluciones de Base', filas: filas('retiros') },
   ].filter(b => b.filas.length > 0)
   return (
     <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden" data-testid="capital-flow-detail">
@@ -31,7 +31,7 @@ export function CapitalFlowDetail({ breakdown, currency }: { breakdown: CapitalF
           ))}
         </div>
       ))}
-      <p className="px-4 py-2 text-[11px] text-gray-500">Capital centralizado: los retornos de cuadre, las devoluciones y los cobros no en efectivo vuelven a la bolsa del Administrador responsable; no son retiros voluntarios.</p>
+      <p className="px-4 py-2 text-[11px] text-gray-500">Las devoluciones, el efectivo entregado en cuadres y el recaudo no en efectivo salen de la Base del trabajador hacia la Base disponible de la ruta (antes de Base por Ruta, hacia el saldo del Administrador responsable); no son retiros.</p>
     </div>
   )
 }

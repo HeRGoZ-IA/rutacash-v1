@@ -247,7 +247,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
         toast.success(`${baseRuta ? 'Base entregada' : 'Capital entregado'} a ${formatPersonName(seleccionado?.user.nombre) || 'la persona'}.`)
       } else if (central.activo) {
         await returnCapitalFromWorker({ actor: user, tenantId, routeId, fromUserId: userId, amount: baseMonto, motivo: baseMotivo })
-        toast.success(`Devolución de ${formatPersonName(seleccionado?.user.nombre) || 'la persona'} registrada en ${baseRuta ? 'la Base de esta ruta' : 'la bolsa del responsable'}.`)
+        toast.success(`Devolución de ${formatPersonName(seleccionado?.user.nombre) || 'la persona'} registrada en ${baseRuta ? 'la Base disponible de esta ruta' : 'la bolsa del responsable'}.`)
       } else if (baseAccion === 'entregar') {
         await assignBaseToWorker({ actor: user, tenantId, routeId, recipientUserId: userId, amount: baseMonto, motivo: baseMotivo })
         toast.success(`Base entregada a ${formatPersonName(seleccionado?.user.nombre) || 'la persona'}.`)
@@ -281,8 +281,8 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
   }
 
   const etiquetaMov = (m: CashCustodyMovement) =>
-    m.origen === 'admin-pool' && m.tipo === 'BASE_ASSIGNMENT' ? (baseRuta ? `Entrega de Base · Base de esta ruta → ${nombreDe(m.toUserId ?? '')}` : `Entrega de capital · bolsa → ${nombreDe(m.toUserId ?? '')}`)
-      : m.origen === 'admin-pool' && m.tipo === 'BASE_RETURN' ? (baseRuta ? `${m.reversesId ? 'Anulación de entrega' : 'Devolución de Base'} · ${nombreDe(m.fromUserId ?? '')} → Base de esta ruta` : `${m.reversesId ? 'Anulación de entrega' : 'Devolución de capital'} · ${nombreDe(m.fromUserId ?? '')} → bolsa`)
+    m.origen === 'admin-pool' && m.tipo === 'BASE_ASSIGNMENT' ? (baseRuta ? `Entrega de Base · Base disponible → ${nombreDe(m.toUserId ?? '')}` : `Entrega de capital · bolsa → ${nombreDe(m.toUserId ?? '')}`)
+      : m.origen === 'admin-pool' && m.tipo === 'BASE_RETURN' ? (baseRuta ? `${m.reversesId ? 'Anulación de entrega' : 'Devolución de Base'} · ${nombreDe(m.fromUserId ?? '')} → Base disponible` : `${m.reversesId ? 'Anulación de entrega' : 'Devolución de capital'} · ${nombreDe(m.fromUserId ?? '')} → bolsa`)
       : m.tipo === 'PERSON_TO_PERSON' ? `Traspaso · ${nombreDe(m.fromUserId ?? '')} → ${nombreDe(m.toUserId ?? '')}`
       : m.tipo === 'BASE_ASSIGNMENT' ? `Entrega de Base · caja de la ruta → ${nombreDe(m.toUserId ?? '')}`
         : `Devolución · ${nombreDe(m.fromUserId ?? '')} → caja de la ruta`
@@ -300,7 +300,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
       <CapitalControllerBadge route={ruta} users={usuarios} currentUserId={user?.id} />
       {ruta && !canOperateRouteCash(user, ruta, 'settle', usuarios) && can(user, 'cashSettlement.view', { routeId, tenantId }) && (
         <p className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2" data-testid="settlement-readonly">
-          Consulta: el cuadre y la Base de esta ruta los maneja su Administrador responsable de capital.
+          Consulta: el cuadre y la Base disponible de esta ruta los maneja su Administrador responsable de capital.
         </p>
       )}
 
@@ -334,7 +334,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
             <Row label="Arrastre pendiente (faltante anterior)" value={money(preview.arrastreAnterior)} tone={preview.arrastreAnterior > 0 ? 'text-amber-600' : 'text-gray-800'} />
             <Row label={capital ? '(+) Capital recibido' : '(+) Base recibida'} value={money(preview.baseRecibida)} tone="text-primary-700" />
             {preview.baseDevuelta > 0 && <Row label={capital ? '(−) Capital devuelto / traspasado' : '(−) Base devuelta / traspasada'} value={money(preview.baseDevuelta)} tone="text-gray-600" />}
-            <Row label="(+) Recaudado" value={money(preview.recaudado)} tone="text-emerald-600" />
+            <Row label="(+) Recaudo" value={money(preview.recaudado)} tone="text-emerald-600" />
             <Row label="(−) Desembolsado" value={money(preview.desembolsado)} tone="text-blue-600" />
             <Row label="(−) Gastos" value={money(preview.gastos)} tone="text-red-500" />
             <div className="flex items-center justify-between px-4 py-3 bg-primary-50">
@@ -509,7 +509,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
             <p>Esperado: <b>{money(preview.esperado)}</b></p>
             <p>Entregado: <b>{money(entregado)}</b></p>
             {outcome.resultado === 'exacto' && <p className="text-emerald-700 font-semibold">Cuadre exacto.</p>}
-            {central.activo && <p className="text-xs text-gray-600 bg-primary-50 rounded-lg px-3 py-2" data-testid="cuadre-to-pool">{baseRuta ? 'El efectivo entregado vuelve a la Base de esta ruta.' : 'El efectivo entregado vuelve a la bolsa del Administrador responsable de la ruta (no a la caja de la ruta).'}</p>}
+            {central.activo && <p className="text-xs text-gray-600 bg-primary-50 rounded-lg px-3 py-2" data-testid="cuadre-to-pool">{baseRuta ? 'El efectivo entregado vuelve a la Base disponible de esta ruta.' : 'El efectivo entregado vuelve a la bolsa del Administrador responsable de la ruta (no a la caja de la ruta).'}</p>}
             {outcome.resultado === 'faltante' && (
               <>
                 <p className="text-red-600 font-semibold">Faltante: {money(outcome.faltante)}</p>
@@ -536,12 +536,12 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
         <div className="space-y-3">
           {baseAccion === 'entregar' ? (
             <div className="flex items-center justify-between gap-2 rounded-xl bg-primary-50 px-3 py-2 text-sm" data-testid="base-modal-available">
-              <span className="text-gray-600">{baseRuta ? 'Disponible en la Base de esta ruta' : central.activo ? 'Disponible en tu bolsa' : 'Disponible en la caja sin asignar'}</span>
+              <span className="text-gray-600">{baseRuta ? 'Base disponible de esta ruta' : central.activo ? 'Disponible en tu bolsa' : 'Disponible en la caja sin asignar'}</span>
               <span className="font-bold text-primary-700">{baseDisponible === undefined ? '…' : baseDisponible === null ? 'No disponible' : money(baseDisponible)}</span>
             </div>
           ) : preview && preview.userId === userId ? (
             <div className="flex items-center justify-between gap-2 rounded-xl bg-primary-50 px-3 py-2 text-sm" data-testid="return-modal-position">
-              <span className="text-gray-600">A cargo de {formatPersonName(preview.userName)}</span>
+              <span className="text-gray-600">Base del trabajador · {formatPersonName(preview.userName)}</span>
               <span className="font-bold text-primary-700">{money(Math.max(0, preview.esperado))}</span>
             </div>
           ) : null}
@@ -569,12 +569,12 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
             <p className="text-lg font-bold text-gray-900">Traspasar {money(traspasoMonto)}</p>
             <p className="text-gray-700">De <b>{formatPersonName(seleccionado?.user.nombre)}</b> a <b>{nombreDe(traspasoDestino)}</b></p>
             <p className="text-gray-500">Ruta {preview?.routeName ?? ''} · {traspasoMotivo.trim()}</p>
-            <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">{baseRuta ? 'No cambia la Base de esta ruta: solo quién tiene el efectivo.' : central.activo ? 'No cambia la Base ni la bolsa: solo quién tiene el efectivo.' : 'No cambia la Base ni la caja sin asignar de la ruta: solo quién tiene el efectivo.'}</p>
+            <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">{baseRuta ? 'No cambia la Base disponible de esta ruta: solo quién tiene el efectivo.' : central.activo ? 'No cambia la Base ni la bolsa: solo quién tiene el efectivo.' : 'No cambia la Base ni la caja sin asignar de la ruta: solo quién tiene el efectivo.'}</p>
           </div>
         ) : (
           <div className="space-y-3">
             <div className="flex items-center justify-between rounded-xl bg-primary-50 px-3 py-2 text-sm">
-              <span className="text-gray-600">En manos de {formatPersonName(seleccionado?.user.nombre)}</span>
+              <span className="text-gray-600">Base del trabajador · {formatPersonName(seleccionado?.user.nombre)}</span>
               <span className="font-bold text-primary-700">{disponibleTraspaso == null ? '…' : money(disponibleTraspaso)}</span>
             </div>
             <Select label="Entregar a" value={traspasoDestino} onChange={e => setTraspasoDestino(e.target.value)}
@@ -582,7 +582,7 @@ export function WorkerCashSettlementPanel({ routeId, preseleccion }: {
               placeholder="Selecciona quién recibe" />
             <MoneyInput label="Valor" value={traspasoMonto} onValueChange={setTraspasoMonto} currency={currency} min={0} />
             {disponibleTraspaso != null && traspasoMonto > disponibleTraspaso && (
-              <p className="text-xs text-red-600">Supera el efectivo en manos de {formatPersonName(seleccionado?.user.nombre)} ({money(disponibleTraspaso)}).</p>
+              <p className="text-xs text-red-600">Supera la Base del trabajador de {formatPersonName(seleccionado?.user.nombre)} ({money(disponibleTraspaso)}).</p>
             )}
             <div>
               <label className="block text-xs text-gray-500 mb-1.5">Motivo</label>

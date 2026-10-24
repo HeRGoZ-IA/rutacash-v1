@@ -410,9 +410,9 @@ await spec('SETTLEMENT-SNAPSHOT-005', 'Snapshot', 'el CSV del cierre sale del do
   } as never)
   const archivado = await db.weeklySettlements.get(doc.id)
   const fila = closedSettlementCsvRow(archivado!, 'Ruta Norte', 'RN')
-  metric('cobros en el CSV', fila.Cobros)
+  metric('recaudo en el CSV', fila.Recaudo)
   metric('oficina en el CSV', fila['Oficina (al cierre)'])
-  assert(fila.Cobros === 50000, 'el CSV conserva la cifra cerrada; un cobro posterior no la altera')
+  assert(fila.Recaudo === 50000, 'el CSV conserva la cifra cerrada; un cobro posterior no la altera')
   assert(fila['Oficina (al cierre)'] === 'Oficina Centro', 'la Oficina del CSV es la del snapshot')
 })
 

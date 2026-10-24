@@ -535,7 +535,7 @@ export default function RoutesPage() {
                 )}
                 <div className="bg-indigo-50 rounded-xl p-3">
                   <p className="text-sm font-bold text-indigo-600 tabular-nums truncate">{formatCurrency(summaryByRoute[route.id]?.carteraEnCalle ?? 0, currency)}</p>
-                  <p className="text-xs text-gray-500">Cartera Activa</p>
+                  <p className="text-xs text-gray-500">Cartera activa</p>
                 </div>
                 {central.bloqueos[route.id] && (
                   <p className="col-span-full text-xs font-medium text-amber-700" data-testid={`routes-blocked-${route.id}`}>Bloqueada para capital nuevo desde la activación del capital centralizado.</p>
@@ -662,7 +662,7 @@ export default function RoutesPage() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Input label="Tasa de interés (%)" type="number" value={form.tasaInteres} onChange={e => setForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} min={0} max={100} />
-            <MoneyInput label="Monto máx. préstamo" currency={currency} value={form.montoMaximoPrestamo} onValueChange={v => setForm(f => ({ ...f, montoMaximoPrestamo: v }))} />
+            <MoneyInput label="Monto máx. de venta" currency={currency} value={form.montoMaximoPrestamo} onValueChange={v => setForm(f => ({ ...f, montoMaximoPrestamo: v }))} />
           </div>
           {/* v16: el capital inicial sale de la bolsa del responsable de capital y solo
               lo coloca él (el Administrador que crea la ruta). El SuperAdmin asigna
@@ -724,7 +724,7 @@ export default function RoutesPage() {
                   onChange={e => setForm(f => ({ ...f, capitalControllerAdminId: e.target.value }))}
                   options={adminsEfectivos.map(a => ({ value: a.id, label: formatPersonName(a.nombre) }))}
                   placeholder={adminsEfectivos.length ? 'Seleccionar Administrador' : 'Sin Administradores asignados'}
-                  hint="Solo uno maneja el capital y la caja de la ruta. Al cambiarlo, el capital colocado pasa a su bolsa." />
+                  hint="Solo uno responde por el dinero de la ruta. Al cambiarlo, la ruta queda en entrega hasta que el nuevo responsable confirme el conteo." />
               ) : (
                 <CapitalControllerBadge route={editing} users={allUsers} currentUserId={user?.id} />
               )}

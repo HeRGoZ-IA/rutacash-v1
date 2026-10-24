@@ -160,8 +160,8 @@ export default function SecretarioClientsPage() {
                   fecha de creación y fecha real de finalización. Solo consulta. */}
               <button
                 onClick={() => setHistoryClient(c)}
-                title="Ver historial de créditos"
-                aria-label={`Ver historial de créditos de ${formatClientName(c.nombre)}`}
+                title="Ver historial de ventas"
+                aria-label={`Ver historial de ventas de ${formatClientName(c.nombre)}`}
                 className="flex-shrink-0 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
               >
                 <History className="w-3.5 h-3.5" /> Historial
@@ -173,7 +173,7 @@ export default function SecretarioClientsPage() {
 
       {/* Historial de créditos (solo consulta) */}
       <Modal open={!!historyClient} onClose={() => setHistoryClient(null)} size="xl"
-        title={historyClient ? `Historial de créditos · ${formatClientName(historyClient.nombre)}` : 'Historial de créditos'}
+        title={historyClient ? `Historial de ventas · ${formatClientName(historyClient.nombre)}` : 'Historial de ventas'}
         footer={<Button variant="secondary" onClick={() => setHistoryClient(null)}>Cerrar</Button>}>
         {historyClient && (
           <div className="space-y-3">

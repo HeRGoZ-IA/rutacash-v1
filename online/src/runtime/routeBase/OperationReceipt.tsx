@@ -60,10 +60,10 @@ export function OperationReceipt() {
     ['Estado', STATUS_LABEL[m.status] ?? m.status],
     ...(m.route ? [['Ruta', `${m.route.name ?? '—'}${m.toRoute ? ` → ${m.toRoute.name ?? ''}` : ''}`] as [string, string]] : []),
     ...(m.route?.office ? [['Oficina', m.route.office] as [string, string]] : []),
-    ...(m.worker ? [[rb ? 'Cobrador' : 'Trabajador', formatPersonName(m.worker.name ?? '') || 'Trabajador'] as [string, string]] : []),
+    ...(m.worker ? [['Trabajador', formatPersonName(m.worker.name ?? '') || 'Trabajador'] as [string, string]] : []),
     ...(m.client ? [['Cliente', formatClientName(m.client.name ?? '') || 'Cliente'] as [string, string]] : []),
     ...(m.admin && !['GENERAL_EXPENSE_OWN_MONEY', 'ADMIN_REIMBURSEMENT'].includes(base)
-      ? [[rb ? 'Responsable de la ruta' : 'Bolsa / responsable de capital', formatPersonName(m.admin.name ?? '') || 'Administrador'] as [string, string]] : []),
+      ? [[rb ? 'Responsable de capital' : 'Bolsa / responsable de capital', formatPersonName(m.admin.name ?? '') || 'Administrador'] as [string, string]] : []),
     ...(base === 'ADMIN_REIMBURSEMENT' && m.admin ? [['Pagó', formatPersonName(m.admin.name ?? '') || 'Administrador'] as [string, string]] : []),
     ...(m.reversesOperationId ? [['Anula a la referencia', m.reversesOperationId] as [string, string]] : []),
     ...(m.reversedBy ? [['Anulado por la referencia', m.reversedBy] as [string, string]] : []),
@@ -71,7 +71,7 @@ export function OperationReceipt() {
   const note = base === 'GENERAL_EXPENSE_OWN_MONEY'
     ? 'Este gasto no movió efectivo: lo pagó el Administrador con dinero propio y quedó un saldo a su favor (obligación de la empresa), reembolsable.'
     : base === 'ADMIN_REIMBURSEMENT' ? 'Este reembolso paga una obligación con el Administrador; no vuelve a registrar el gasto.'
-      : base === 'GENERAL_EXPENSE_CONTRIBUTION' ? 'Aporte de una ruta a un gasto general: el gasto existe una sola vez; cada ruta aportó desde su Base.' : null;
+      : base === 'GENERAL_EXPENSE_CONTRIBUTION' ? 'Aporte de una ruta a un gasto general: el gasto existe una sola vez; cada ruta aportó desde su Base disponible.' : null;
 
   return (
     <div className="min-h-screen bg-gray-100 print:bg-white py-6 px-4 print:p-0">

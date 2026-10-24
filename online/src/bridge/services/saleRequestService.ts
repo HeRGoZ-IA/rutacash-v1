@@ -153,7 +153,7 @@ async function confirmDisbursementOnline(saleId: string, _actor: User): Promise<
 }
 
 async function markSaleLostOnline(): Promise<void> {
-  throw new SaleRuleError('Marcar un crédito como perdido (castigo) todavía no está disponible en el servidor de ADEX Online.');
+  throw new SaleRuleError('Marcar una venta como perdida (castigo) todavía no está disponible en el servidor de ADEX Online.');
 }
 
 /** Ronda 73 · SOC-09: rectificación de una venta desembolsada (Administrador, `POST /v1/credits/:id/rectify`). */

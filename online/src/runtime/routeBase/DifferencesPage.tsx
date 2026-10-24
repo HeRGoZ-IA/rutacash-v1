@@ -41,12 +41,12 @@ export const BLOCKER_TEXT: Record<DifferenceBlocker, string> = {
 const RESOLUTION_HELP: Record<Resolution, string> = {
   route_shortage: 'La ruta asume el faltante. Queda registrado como faltante conciliado; no es un gasto ni una pérdida de resultado.',
   worker_owes: 'El trabajador debe reponerlo: queda como faltante pendiente a su cargo (se ve en sus cuadres).',
-  surplus_to_base: 'El sobrante pasa a la Base de la ruta. Queda registrado como sobrante conciliado; no es ganancia.',
+  surplus_to_base: 'El sobrante pasa a la Base disponible de la ruta. Queda registrado como sobrante conciliado; no es ganancia.',
   surplus_returned: 'El sobrante se devuelve a quien pertenece: sale del control y no es ingreso.',
 };
 
 const LEG_TEXT: Record<string, string> = {
-  route_base: 'Base de la ruta', route_difference: 'Faltante/sobrante conciliado (no es efectivo)', custody: 'Efectivo del trabajador',
+  route_base: 'Base disponible', route_difference: 'Faltante/sobrante conciliado (no es efectivo)', custody: 'Base del trabajador',
   suspense: 'Sobrante en control', admin: 'Bolsa del Administrador', unidentified: 'Origen sin identificar (contrapartida)',
 };
 
@@ -105,7 +105,7 @@ export default function DifferencesPage() {
             <Fig label="Diferencias por conciliar" value={String(s!.pendingCount)} />
             <Fig label="Faltantes pendientes" value={money(s!.pendingShortageMinor)} hint="No es billete" />
             <Fig label="Sobrantes pendientes" value={money(s!.pendingSurplusMinor)} hint="En control; no es Base ni ganancia" />
-            <Fig label="A cargo de trabajadores" value={money(s!.workerOwedMinor)} hint="Faltantes decididos como del trabajador" />
+            <Fig label="Faltantes asignados a trabajadores" value={money(s!.workerOwedMinor)} hint="Faltantes decididos como del trabajador" />
           </dl>
           <p className="text-xs text-gray-500">Ninguna de estas cifras es efectivo ni resultado operativo.</p>
 
@@ -129,7 +129,7 @@ export default function DifferencesPage() {
                         {i.workerName ? `${formatPersonName(i.workerName)} · ` : i.holderName ? `${formatPersonName(i.holderName)} · ` : ''}{formatDate(i.businessDate)}
                         {' · '}esperado <span className={num}>{money(i.expectedMinor)}</span>, contado <span className={num}>{money(i.countedMinor)}</span>
                       </p>
-                      {i.workerOwedMinor > 0 && <p className="text-xs text-gray-500">Ya a cargo del trabajador: {money(i.workerOwedMinor)}</p>}
+                      {i.workerOwedMinor > 0 && <p className="text-xs text-gray-500">Ya asignado al trabajador: {money(i.workerOwedMinor)}</p>}
                     </div>
                     <div className="flex items-center gap-3 sm:flex-shrink-0">
                       <div className="text-right">
@@ -262,7 +262,7 @@ function ResolveDialog({ item, onClose, canWrite, rb }: { item: DifferenceItem |
                 {preview.legs.map((l, ix) => (
                   <li key={ix} className="flex items-center gap-2 text-gray-700">
                     <span className={cn('w-14 text-xs font-semibold', l.sign < 0 ? 'text-gray-900' : 'text-emerald-700')}>{l.sign < 0 ? 'Sale de' : 'Llega a'}</span>
-                    <span className="min-w-0">{l.kind === 'admin' && rb ? 'Saldo del Administrador' : LEG_TEXT[l.kind] ?? l.kind}</span>
+                    <span className="min-w-0">{l.kind === 'admin' && rb ? 'Saldo sin asignar' : LEG_TEXT[l.kind] ?? l.kind}</span>
                   </li>
                 ))}
               </ul>

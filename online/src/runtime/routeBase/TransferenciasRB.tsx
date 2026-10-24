@@ -46,12 +46,12 @@ type Kind = 'inject' | 'withdraw' | 'deliver' | 'receive' | 'transfer' | 'assign
 const KINDS: Kind[] = ['inject', 'withdraw', 'deliver', 'receive', 'transfer', 'assign'];
 
 const TITLE: Record<Kind, string> = {
-  inject: 'Inyección de Base', withdraw: 'Retiro de Base', deliver: 'Entrega de Base a Cobrador',
-  receive: 'Recepción de devolución de Cobrador', transfer: 'Transferencia entre rutas', assign: 'Reparto de saldo sin asignar',
+  inject: 'Inyección de Base', withdraw: 'Retiro de Base', deliver: 'Entrega de Base a trabajador',
+  receive: 'Devolución de Base', transfer: 'Transferencia entre rutas', assign: 'Reparto de saldo sin asignar',
 };
 const FLOW: Record<Kind, string> = {
-  inject: 'Aporte externo → Base de tu ruta', withdraw: 'Base de tu ruta → fuera de ADEX', deliver: 'Base de tu ruta → efectivo del Cobrador',
-  receive: 'Efectivo del Cobrador → Base de tu ruta', transfer: 'Base de tu ruta → Base de otra ruta', assign: 'Saldo sin asignar → Base de tu ruta',
+  inject: 'Aporte externo → Base disponible', withdraw: 'Base disponible → fuera de ADEX', deliver: 'Base disponible → Base del trabajador',
+  receive: 'Base del trabajador → Base disponible', transfer: 'Base disponible → Base disponible de otra ruta', assign: 'Saldo sin asignar → Base disponible',
 };
 const ICON: Record<Kind, ReactNode> = {
   inject: <ArrowDownToLine className="w-5 h-5" />, withdraw: <ArrowUpFromLine className="w-5 h-5" />, deliver: <ArrowUpRight className="w-5 h-5" />,
@@ -105,15 +105,15 @@ export function TransferenciasRB({ model }: { model: CapitalModel }) {
     inject: mine.length === 0 ? noRoutes : operable.length === 0 ? allInHandover : null,
     withdraw: mine.length === 0 ? noRoutes : operable.length === 0 ? allInHandover : !operable.some((r) => r.baseMinor > 0) ? 'Tus rutas no tienen Base disponible.' : null,
     deliver: mine.length === 0 ? noRoutes : operable.length === 0 ? allInHandover : !operable.some((r) => r.baseMinor > 0) ? 'Tus rutas no tienen Base disponible.' : null,
-    receive: mine.length === 0 ? noRoutes : withCash.length === 0 ? 'Ningún trabajador de tus rutas tiene efectivo entregable.' : null,
+    receive: mine.length === 0 ? noRoutes : withCash.length === 0 ? 'Ningún trabajador de tus rutas tiene Base del trabajador entregable.' : null,
     transfer: mine.length === 0 ? noRoutes : operable.length === 0 ? allInHandover : !operable.some((r) => r.baseMinor > 0) ? 'Tus rutas no tienen Base disponible.'
       : destinations.length < 2 ? 'No hay otra ruta operativa con responsable.' : null,
     assign: ownPool <= 0 ? 'No tienes saldo sin asignar.' : operable.length === 0 ? (mine.length === 0 ? noRoutes : allInHandover) : null,
   };
   const groups: { title: string; note?: string; kinds: Kind[]; extra?: ReactNode }[] = [
-    { title: 'Base de la ruta', kinds: ['inject', 'withdraw'] },
-    { title: 'Cobradores', kinds: ['deliver', 'receive'], extra: (
-      <ActionRow icon={<Send className="w-5 h-5" />} title="Pedir entrega de efectivo a un Cobrador" sub="Solicitud: no mueve dinero hasta que el Cobrador entregue"
+    { title: 'Base disponible', kinds: ['inject', 'withdraw'] },
+    { title: 'Trabajadores', kinds: ['deliver', 'receive'], extra: (
+      <ActionRow icon={<Send className="w-5 h-5" />} title="Pedir entrega de efectivo a un trabajador" sub="Solicitud: no mueve dinero hasta que el trabajador entregue"
         blocked={mine.length === 0 ? noRoutes : null} onClick={() => setAsking(true)} testId="rb-op-request" />
     ) },
     { title: 'Entre rutas', kinds: ['transfer', 'assign'] },
@@ -193,7 +193,7 @@ export function TransferenciasRB({ model }: { model: CapitalModel }) {
             </Link>
             <Link to="/admin/weekly-settlement" className="rounded-2xl border border-gray-200 bg-white px-4 py-3 flex items-center gap-3 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">
               <CalendarRange className="w-5 h-5 text-gray-500" aria-hidden />
-              <span className="min-w-0 flex-1"><b className="block text-gray-900">El cuadre no es una transferencia</b><span className="text-xs text-gray-600">Cuadrar el efectivo de un Cobrador se hace en Liquidación.</span></span>
+              <span className="min-w-0 flex-1"><b className="block text-gray-900">El cuadre no es una transferencia</b><span className="text-xs text-gray-600">Cuadrar la Base del trabajador se hace en Liquidación.</span></span>
               <ChevronRight className="w-4 h-4 text-gray-400" aria-hidden />
             </Link>
           </section>
@@ -267,23 +267,23 @@ function OperationModal({ kind, onClose, routes, positions, users, destinations,
 
   const e: Explanation = (() => {
     switch (kind) {
-      case 'inject': return { from: 'Fuera de ADEX: un aporte (el origen queda solo como nota).', to: `Base de ${routeName}`, who: `${myName}, responsable de la ruta`,
-        responsible: `${myName}, como responsable de ${routeName}`, changes: `Base de ${routeName} sube`,
+      case 'inject': return { from: 'Fuera de ADEX: un aporte (el origen queda solo como nota).', to: `Base disponible de ${routeName}`, who: `${myName}, responsable de la ruta`,
+        responsible: `${myName}, como responsable de ${routeName}`, changes: `Base disponible de ${routeName} sube`,
         limits: ['Solo el responsable vigente de la ruta.', 'No con la ruta en entrega.', 'Una inyección es un aporte a la Base: no es pérdida ni gasto.'] };
-      case 'withdraw': return { from: `Base de ${routeName}`, to: 'Fuera de ADEX', who: `${myName}, responsable de la ruta`, responsible: 'Quien recibe el retiro, fuera de ADEX',
-        changes: `Base de ${routeName} baja`, limits: ['No puede superar la Base disponible.', 'Un solo concepto, «Retiro de Base»: no es una ganancia calculada.', 'No con la ruta en entrega.'] };
-      case 'deliver': return { from: `Base de ${routeName}`, to: workerName ? `Efectivo de ${workerName}` : 'Efectivo del Cobrador elegido', who: `${myName}, responsable de la ruta`,
-        responsible: `${workerName || 'El Cobrador'} responde por ese efectivo hasta devolverlo o cuadrar`, changes: 'Base baja · efectivo del Cobrador sube',
+      case 'withdraw': return { from: `Base disponible de ${routeName}`, to: 'Fuera de ADEX', who: `${myName}, responsable de la ruta`, responsible: 'Quien recibe el retiro, fuera de ADEX',
+        changes: `Base disponible de ${routeName} baja`, limits: ['No puede superar la Base disponible.', 'Un solo concepto, «Retiro de Base»: no es una ganancia calculada.', 'No con la ruta en entrega.'] };
+      case 'deliver': return { from: `Base disponible de ${routeName}`, to: workerName ? `Base del trabajador · ${workerName}` : 'Base del trabajador elegido', who: `${myName}, responsable de la ruta`,
+        responsible: `${workerName || 'El trabajador'} responde por ese efectivo hasta devolverlo o cuadrar`, changes: 'Base disponible baja · Base del trabajador sube',
         limits: ['No puede superar la Base disponible.', 'No con la ruta en entrega.', 'Nadie se entrega efectivo a sí mismo.'] };
-      case 'receive': return { from: workerName ? `Efectivo de ${workerName}` : 'Efectivo del Cobrador elegido', to: `Base de ${routeName}`, who: `${myName}, responsable de la ruta`,
-        responsible: `${myName}, por la Base de ${routeName}`, changes: 'Efectivo del Cobrador baja · Base sube',
-        limits: ['Hasta el efectivo entregable del trabajador (no cubre faltantes ni saldos negativos).', 'Esto no es un cuadre: el cuadre se hace en Liquidación.'] };
-      case 'transfer': return { from: `Base de ${routeName}`, to: dest ? `Base de ${dest.name}` : 'Base de la ruta destino', who: `${myName}, responsable de la ruta de origen`,
+      case 'receive': return { from: workerName ? `Base del trabajador · ${workerName}` : 'Base del trabajador elegido', to: `Base disponible de ${routeName}`, who: `${myName}, responsable de la ruta`,
+        responsible: `${myName}, por la Base disponible de ${routeName}`, changes: 'Base del trabajador baja · Base disponible sube',
+        limits: ['Hasta la Base del trabajador entregable (no cubre faltantes ni saldos negativos).', 'Esto no es un cuadre: el cuadre se hace en Liquidación.'] };
+      case 'transfer': return { from: `Base disponible de ${routeName}`, to: dest ? `Base disponible de ${dest.name}` : 'Base disponible de la ruta destino', who: `${myName}, responsable de la ruta de origen`,
         responsible: dest ? `${otherController ? formatPersonName(dest.controllerName) : myName}, como responsable de ${dest.name}` : 'El responsable de la ruta destino',
-        changes: 'Base de origen baja · Base de destino sube',
+        changes: 'Base disponible de origen baja · Base disponible de destino sube',
         limits: ['Se aplica en el acto, sin aceptación: quien tiene el dinero lo entrega.', 'Si el destino es de otro responsable, recibe un aviso.', 'No puede superar la Base disponible; no con la ruta de origen en entrega.', 'No se anula: para devolver, el destino hace otra transferencia.'] };
-      case 'assign': return { from: `Saldo sin asignar de ${myName}`, to: `Base de ${routeName}`, who: myName, responsible: `${myName}, como responsable de ${routeName}`,
-        changes: `Saldo sin asignar baja · Base de ${routeName} sube`, limits: ['Solo a rutas de las que eres responsable.', 'Requiere confirmación y evidencia (mínimo 10 caracteres).', 'No se anula.'] };
+      case 'assign': return { from: `Saldo sin asignar de ${myName}`, to: `Base disponible de ${routeName}`, who: myName, responsible: `${myName}, como responsable de ${routeName}`,
+        changes: `Saldo sin asignar baja · Base disponible de ${routeName} sube`, limits: ['Solo a rutas de las que eres responsable.', 'Requiere confirmación y evidencia (mínimo 10 caracteres).', 'No se anula.'] };
     }
   })();
 
@@ -317,8 +317,8 @@ function OperationModal({ kind, onClose, routes, positions, users, destinations,
     <div className="space-y-1">
       {kind === 'assign'
         ? <BalancePreview label="Saldo sin asignar" before={ownPool} after={ownPool - amountMinor} money={money} />
-        : kind === 'receive' && worker ? <BalancePreview label={`Efectivo de ${workerName}`} before={worker.transferableMinor} after={worker.transferableMinor - amountMinor} money={money} /> : null}
-      <BalancePreview label={`Base de ${routeName}`} before={base} after={base + delta} money={money} />
+        : kind === 'receive' && worker ? <BalancePreview label={`Base del trabajador · ${workerName}`} before={worker.transferableMinor} after={worker.transferableMinor - amountMinor} money={money} /> : null}
+      <BalancePreview label={`Base disponible de ${routeName}`} before={base} after={base + delta} money={money} />
       {kind === 'transfer' && dest && <p className="text-xs text-gray-600">{dest.name} recibe {money(amountMinor)}{otherController ? ` · se notificará a ${formatPersonName(dest.controllerName)}` : ''}.</p>}
     </div>
   ) : undefined;
@@ -333,14 +333,14 @@ function OperationModal({ kind, onClose, routes, positions, users, destinations,
             options={routeOptions} placeholder={routeOptions.length ? 'Seleccionar ruta' : 'Sin rutas disponibles'} required />
           {inHandover && kind !== 'receive' && <Notice tone="violet">Ruta en entrega: confirma el conteo antes de mover su Base.</Notice>}
           {kind === 'deliver' && (
-            <Select label="Cobrador" value={f.workerId} onChange={(ev) => setF((x) => ({ ...x, workerId: ev.target.value }))} required
+            <Select label="Trabajador" value={f.workerId} onChange={(ev) => setF((x) => ({ ...x, workerId: ev.target.value }))} required
               options={f.routeId ? workersOf(f.routeId).map((u) => ({ value: u.id, label: `${formatPersonName(u.nombre)}${u.rol !== 'cobrador' ? ` (${ROLE[u.rol] ?? u.rol})` : ''}` })) : []}
               placeholder={!f.routeId ? 'Primero elige la ruta' : workersOf(f.routeId).length ? 'Seleccionar' : 'Nadie asignado a la ruta'} />
           )}
           {kind === 'receive' && (
-            <Select label="Cobrador que devuelve" value={f.workerId} onChange={(ev) => setF((x) => ({ ...x, workerId: ev.target.value }))} required
+            <Select label="Trabajador que devuelve" value={f.workerId} onChange={(ev) => setF((x) => ({ ...x, workerId: ev.target.value }))} required
               options={holders.map((p) => ({ value: p.workerId, label: `${formatPersonName(p.workerName)} · entregable ${money(p.transferableMinor)}` }))}
-              placeholder={!f.routeId ? 'Primero elige la ruta' : holders.length ? 'Seleccionar' : 'Nadie con efectivo entregable'} />
+              placeholder={!f.routeId ? 'Primero elige la ruta' : holders.length ? 'Seleccionar' : 'Nadie con Base del trabajador entregable'} />
           )}
           {kind === 'transfer' && (
             <Select label="Ruta destino" value={f.toRouteId} onChange={(ev) => setF((x) => ({ ...x, toRouteId: ev.target.value }))} required
@@ -358,7 +358,7 @@ function OperationModal({ kind, onClose, routes, positions, users, destinations,
               <label className="flex items-start gap-2 text-sm text-gray-800">
                 <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" checked={f.confirmed}
                   onChange={(ev) => setF((x) => ({ ...x, confirmed: ev.target.checked }))} data-testid="rb-assign-confirm" />
-                Confirmo que este saldo sin asignar pasa a la Base de {routeName}. No se puede anular.
+                Confirmo que este saldo sin asignar pasa a la Base disponible de {routeName}. No se puede anular.
               </label>
             </>
           )}

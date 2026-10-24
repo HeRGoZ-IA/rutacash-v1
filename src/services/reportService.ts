@@ -31,8 +31,8 @@ import type {
 export type ReportType = 'pagos' | 'ventas' | 'gastos' | 'caja_diaria'
 
 export const REPORT_OPTIONS: { value: ReportType; label: string }[] = [
-  { value: 'pagos', label: 'Pagos recibidos' },
-  { value: 'ventas', label: 'Ventas / Créditos' },
+  { value: 'pagos', label: 'Recaudo' },
+  { value: 'ventas', label: 'Ventas' },
   { value: 'gastos', label: 'Gastos' },
   { value: 'caja_diaria', label: 'Caja diaria por ruta' },
 ]
@@ -211,7 +211,7 @@ export function buildCajaDiariaReport(src: ReportSources, f: ReportFilters): Rep
       return {
         Fecha: formatDate(fecha),
         Ruta: routeName(routeId),
-        Cobros: v.cobros,
+        Recaudo: v.cobros,
         Gastos: v.gastos,
         Neto: v.cobros - v.gastos,
       }

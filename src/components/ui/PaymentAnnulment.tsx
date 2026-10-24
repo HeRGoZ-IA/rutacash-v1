@@ -119,7 +119,7 @@ export function AnnulPaymentModal({ target, currency, onCancel, onConfirm }: {
             )}
           </div>
           <p className="text-xs text-gray-500">
-            El pago quedará en el historial como anulado. El saldo, las parcelas y el estado del crédito se recalculan, y la Base y el efectivo de quien cobró bajan por el mismo valor.
+            El pago quedará en el historial como anulado. El saldo, las parcelas y el estado de la venta se recalculan, y la Base y el efectivo de quien cobró bajan por el mismo valor.
           </p>
           <div className="flex flex-wrap gap-1.5">
             {PAYMENT_ANNULMENT_REASONS.map(r => (

@@ -373,7 +373,7 @@ function ReimbursementRow({ r, nameOf, me, rb, canReverse, onReverse }: {
         </p>
         <p className="text-xs text-gray-600">
           {r.source === 'admin_pool'
-            ? `Pagado desde ${rb ? 'el saldo' : 'la bolsa'} de ${r.payerId === me ? 'ti' : nameOf(r.payerId)}`
+            ? `Pagado desde ${rb ? 'el saldo sin asignar' : 'la bolsa'} de ${r.payerId === me ? 'ti' : nameOf(r.payerId)}`
             : `Aportes: ${r.contributions.map((c) => `${c.routeName ?? 'Ruta'} ${money(c.amountMinor)}`).join(' · ') || '—'}`}
           {!self ? ` · pagó ${nameOf(r.payerId)}` : ''}
         </p>
@@ -485,7 +485,7 @@ export function GeneralExpenseModal({ open, onClose, model, routes, categories, 
             : f.source === 'routes' && sum !== amountMinor ? 'La suma de los aportes debe ser igual al total.' : null;
 
   const e: Explanation = f.source === 'routes' ? {
-    from: chosen.length ? `Base de ${chosen.join(', ')}` : 'Base de las rutas que elijas', to: `Gasto ${f.scope === 'administrador' ? 'general del Administrador' : 'general de empresa'} (se registra una sola vez)`,
+    from: chosen.length ? `Base disponible de ${chosen.join(', ')}` : 'Base disponible de las rutas que elijas', to: `Gasto ${f.scope === 'administrador' ? 'general del Administrador' : 'general de empresa'} (se registra una sola vez)`,
     who: myName, responsible: `${myName}, como responsable de las rutas aportantes`, changes: 'La Base de cada ruta aportante baja en su aporte',
     limits: ['Solo aportan rutas de las que eres el responsable vigente (nunca rutas de otro Administrador).', 'La suma de los aportes debe ser igual al total.',
       'Ningún aporte supera la Base disponible de su ruta.', 'No entra en el resultado operativo de esas rutas: se informa aparte como gasto general.',
@@ -517,7 +517,7 @@ export function GeneralExpenseModal({ open, onClose, model, routes, categories, 
           <Segmented label="Alcance (a quién beneficia)" value={f.scope} onChange={(v) => setF((x) => ({ ...x, scope: v }))} testId="ge-scope"
             options={[['administrador', 'General del Administrador', 'Varias de tus rutas o tu gestión'], ['empresa', 'General de empresa', 'No atribuible a una ruta ni a un Administrador']]} />
           <Segmented label="Fuente del dinero" value={f.source} onChange={(v) => setF((x) => ({ ...x, source: v }))} testId="ge-source"
-            options={[...(rb ? [['routes', 'Aportes de mis rutas', 'Sale de la Base de las rutas que elijas'] as [string, string, string]] : []),
+            options={[...(rb ? [['routes', 'Aportes de mis rutas', 'Sale de la Base disponible de las rutas que elijas'] as [string, string, string]] : []),
               ['own_money', 'Mi dinero propio', 'Reembolsable: crea un saldo a favor tuyo']] as [typeof f.source, string, string][]} />
           <Select label="Categoría" value={f.categoryId} onChange={(ev) => setF((x) => ({ ...x, categoryId: ev.target.value }))} required placeholder="Seleccionar categoría"
             options={categories.filter((c) => c.active).map((c) => ({ value: c.id, label: `${c.name} · ${natureLabel(c.nature)}` }))}
@@ -601,7 +601,7 @@ function ReimburseModal({ target, onClose, model, routes, payables, poolAvailabl
             : f.reason.trim().length < 3 ? 'Escribe el motivo (mínimo 3 caracteres).' : null;
 
   const e: Explanation = {
-    from: rb ? (chosen.length ? `Base de ${chosen.join(', ')}` : 'Base de las rutas que elijas') : `Tu bolsa (${myName})`,
+    from: rb ? (chosen.length ? `Base disponible de ${chosen.join(', ')}` : 'Base disponible de las rutas que elijas') : `Tu bolsa (${myName})`,
     to: `${who}: recibe el efectivo del reembolso`, who: myName, responsible: `${who} deja de tener ese saldo a favor`,
     changes: `${rb ? 'La Base de cada ruta aportante baja' : 'Tu bolsa baja'} · el saldo a favor de ${who} pasa de ${money(pending)} a ${money(Math.max(0, pending - total))}`,
     limits: ['No vuelve a registrar el gasto: solo paga la obligación.', 'Nunca más que lo pendiente; puede ser parcial.',

@@ -94,7 +94,7 @@ export function OfficesExecutivePanel() {
               </div>
               <div className="bg-indigo-50 rounded-xl p-2 text-center">
                 <p className="text-sm font-bold text-indigo-600 tabular-nums">{formatCurrency(row.totals.carteraActiva, currency)}</p>
-                <p className="text-xs text-gray-500">Cartera</p>
+                <p className="text-xs text-gray-500">Cartera activa</p>
               </div>
               <div className="bg-emerald-50 rounded-xl p-2 text-center">
                 <p className="text-sm font-bold text-emerald-600 tabular-nums">{formatCurrency(row.totals.recaudadoHoy, currency)}</p>
@@ -132,7 +132,7 @@ export function OfficesExecutivePanel() {
               <th className="text-right font-medium px-3 py-2">Rutas</th>
               <th className="text-right font-medium px-3 py-2">Clientes</th>
               <th className="text-right font-medium px-3 py-2">Ventas</th>
-              <th className="text-right font-medium px-3 py-2">Cartera</th>
+              <th className="text-right font-medium px-3 py-2">Cartera activa</th>
               <th className="text-right font-medium px-3 py-2">Vencida</th>
               <th className="text-right font-medium px-3 py-2">Recaudo hoy</th>
               <th className="text-right font-medium px-3 py-2">Cumpl.</th>

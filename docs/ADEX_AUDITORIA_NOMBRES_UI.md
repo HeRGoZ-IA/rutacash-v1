@@ -77,3 +77,38 @@ Son pantallas compartidas con CLEAN que no se adaptaron a Base por Ruta. En Blue
 - Una ronda de solo textos, por grupos: primero §3, después §2 y luego los sinónimos de §1.
 - En C2 y C3, además del texto, hay que sumar la Base disponible al «Efectivo de la ruta» o a la «Base total» con Base por Ruta. Es un cambio de cifra mostrada, no de dinero: el libro no se toca.
 - Cada grupo con su prueba en el E2E (`saas/scripts/local/e2e-routebase.mjs`) y en la guarda BASE-020 de CLEAN (`tests/routebase.test.ts`), que ya impide reintroducir etiquetas retiradas.
+
+## 6. Decisiones del propietario (2026-10-24)
+
+| # | Decisión |
+|---|---|
+| N-1 | **Según el perfil.** Desde el perfil del trabajador (Cobrador o Supervisor), su propio dinero es **«Mi efectivo»**. Desde el Administrador, el dinero en manos de un trabajador es **«Base del trabajador»**. «Trabajador» = Cobrador o Supervisor |
+| N-2 | La Base propia de la ruta es **«Base disponible»** en todas las pantallas (no «Base de la ruta») |
+| N-3 | **Recaudo** = recibir dinero por el pago de una parcela: pago total de la parcela, abono a la parcela o pago total de la cuenta. Es el nombre de lo cobrado a clientes (no «Cobros», «Cobranza», «Pagos recibidos», «Total cobrado») |
+| N-4 | **Venta** = desembolsar un crédito a un cliente. Es el único nombre del producto: no se usan «Crédito» ni «Préstamo» como sinónimos |
+| N-5 | **Cartera: las dos cifras, siempre con su nombre.** «Capital colocado» = solo capital pendiente; «Cartera activa» = capital + interés pendiente |
+| N-6 | Las pantallas compartidas con CLEAN se adaptan a Base por Ruta (§3) |
+
+## 7. Aplicado (2026-10-24)
+
+Se aplicaron las decisiones N-1 a N-6 en todas las pantallas de Online, incluidas las compartidas con CLEAN. Lo que cambió:
+
+- **§3 (rótulos contra su cifra):** C1–C11 corregidos.
+  - Cuadre del trabajador: «Base disponible» y «Base del trabajador» por separado; «Base recibida» y «Base devuelta» en lugar de «Capital recibido».
+  - Liquidación y Consultas → Caja por ruta: «Entregas de Base», «Devoluciones de Base», «Base del trabajador al inicio / al cierre».
+  - Liquidación → Cuadre por trabajador: «Base del trabajador».
+  - Oficina: «Base disponible» y «Base del trabajador», y el «Total controlado» incluye la Base disponible.
+  - Avisos y anulaciones: «Base recibida», «Entrega de Base», «Devolución de Base».
+  - Gastos del Supervisor: «Base disponible de la ruta».
+  - El texto de ayuda del editor de Rutas ya no menciona la bolsa.
+- **Cartera:** «Capital colocado» = solo capital; «Cartera activa» = capital + interés. El Dashboard ya no dice «Cartera pendiente».
+- **Recaudo:** reemplaza a Cobros, Cobranza, Pagos recibidos, Total cobrado, Abono registrado y Registrar pago.
+- **Venta:** reemplaza a Crédito y Préstamo como nombre del registro: mensajes, historial del cliente, formulario «Crear venta ahora», «Monto máx. de venta».
+- **Trabajador:** en Transferencias, «Trabajador» y «Entrega de Base a trabajador»; en el menú del trabajador, «Mi efectivo».
+- **Otros:** «Responsable de capital» en Caja principal y comprobantes; la columna de Consultas se llama «Registró»; «Saldo sin asignar» es el único nombre del saldo anterior; «Transferencia entre rutas» frente a «Traspaso de trabajador entre rutas»; «Resultado operativo» sin «básico».
+- **Exportaciones:** los CSV de la Liquidación y del cierre usan los mismos encabezados nuevos (Recaudo, Desembolsos, Entregas y Devoluciones de Base, Base del trabajador inicial/final). **Quien tenga hojas de cálculo con los encabezados anteriores debe ajustarlas.**
+
+**No se cambió:**
+- Textos que solo ven empresas en el modelo de bolsas («bolsa», «Ingreso de capital a la empresa»), salvo los compartidos.
+- Nombres de los tipos de gasto: no hubo decisión.
+- Nombres internos del código y de la API.

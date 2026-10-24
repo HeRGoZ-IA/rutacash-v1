@@ -92,7 +92,7 @@ export default function LoginPage() {
             <span className="text-primary-400">con total control</span>
           </h1>
           <p className="text-gray-400 text-lg mb-8">
-            Préstamos, cobros, gastos, caja y liquidación semanal en una sola plataforma.
+            Ventas, recaudo, gastos, caja y liquidación semanal en una sola plataforma.
           </p>
 
           <div className="space-y-4">

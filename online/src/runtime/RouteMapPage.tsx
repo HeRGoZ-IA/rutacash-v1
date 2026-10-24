@@ -53,7 +53,7 @@ interface MapData {
   clients: MapClient[]; activities: Activity[]; lastKnown: LastKnown[]; truncated: boolean;
 }
 
-const KIND_LABEL: Record<Kind, string> = { sale: 'Venta o crédito', payment: 'Cobro exitoso', visit: 'Visita sin pago' };
+const KIND_LABEL: Record<Kind, string> = { sale: 'Venta', payment: 'Recaudo', visit: 'Visita sin pago' };
 const REASON_LABEL: Record<string, string> = {
   no_estaba: 'No estaba', sin_dinero: 'Sin dinero', negocio_cerrado: 'Negocio cerrado', promesa_pago: 'Promesa de pago', otro: 'Otro motivo',
 };

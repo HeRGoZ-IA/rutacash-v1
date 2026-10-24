@@ -32,7 +32,7 @@ interface MovementRow {
 }
 
 const KIND_LABEL: Record<MovementKind, string> = {
-  entrega: 'Entregas a trabajadores', devolucion: 'Devoluciones y entregas de efectivo', traspaso: 'Traspasos entre trabajadores', administradores: 'Entre Administradores',
+  entrega: 'Entregas de Base', devolucion: 'Devoluciones de Base', traspaso: 'Traspasos entre trabajadores', administradores: 'Entre Administradores',
 };
 const EMPTY = { kind: '', estado: '', desde: '', hasta: '', ruta: '', persona: '', q: '' };
 const DECISION = (d: string) => (d === 'confirmed' ? 'Confirmó' : d === 'rejected' ? 'Rechazó' : d === 'not_required' ? 'Entrega directa' : 'Pendiente');
@@ -85,7 +85,7 @@ export function TransfersHistory() {
         estado: anulacion ? 'Anulación' : m.reversalId ? 'Anulada' : 'Vigente', ref: m.id.slice(0, 8).toUpperCase(),
         detail: [['Ruta', routeLabel(m.routeId)], ['Registró', userName(m.createdByUserId) || '—'], ['Concepto', m.motivo || '—'], ['Referencia', m.id.slice(0, 8).toUpperCase()]],
         reversible: !anulacion && !m.reversalId && opId && kind !== 'traspaso' && canReverse(m.routeId)
-          ? { operationId: opId, tipo: kind === 'entrega' ? 'Entrega de capital a trabajador' : 'Entrega de efectivo al Administrador' } : undefined,
+          ? { operationId: opId, tipo: kind === 'entrega' ? 'Entrega de Base' : 'Devolución de Base' } : undefined,
       });
     }
     for (const t of transfers) {

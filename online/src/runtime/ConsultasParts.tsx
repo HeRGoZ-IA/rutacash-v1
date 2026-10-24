@@ -21,9 +21,9 @@ export const money = (minor: number, currency?: string) => formatCurrency(toMajo
 const FIELD = 'w-full h-11 sm:h-9 rounded-lg border border-gray-300 bg-white text-base sm:text-sm text-gray-900 px-3 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent';
 const LABEL = 'block text-xs font-medium text-gray-600 mb-1';
 
-const KIND_GROUP_LABEL: Record<PerspectiveOption['kind'], string> = { company: 'Empresa', route: 'Rutas (efectivo en custodia)', admin: 'Bolsas de Administradores', custody: 'Custodias de trabajadores' };
+const KIND_GROUP_LABEL: Record<PerspectiveOption['kind'], string> = { company: 'Empresa', route: 'Rutas (Base del trabajador)', admin: 'Bolsas de Administradores', custody: 'Base del trabajador' };
 // R74 · Base por Ruta: la ruta es Base + custodias y la cuenta del Administrador es solo el saldo anterior «sin asignar».
-const KIND_GROUP_LABEL_RB: Record<PerspectiveOption['kind'], string> = { company: 'Empresa', route: 'Rutas (Base de la ruta y del trabajador)', admin: 'Saldo sin asignar (anterior a Base por Ruta)', custody: 'Base del trabajador' };
+const KIND_GROUP_LABEL_RB: Record<PerspectiveOption['kind'], string> = { company: 'Empresa', route: 'Rutas (Base disponible y Base del trabajador)', admin: 'Saldo sin asignar (anterior a Base por Ruta)', custody: 'Base del trabajador' };
 
 /** Selector de perspectiva: «Caja o ruta». Agrupado por tipo; la oficina o la ruta acompañan al nombre. */
 export function PerspectiveSelect({ options, value, onChange, id }: { options: PerspectiveOption[]; value: string; onChange: (v: string) => void; id: string }) {
@@ -318,7 +318,7 @@ export function DetailDrawer({ id, timezone, currency, perspectiveLabel, flowHin
                   </h3>
                   <p className="text-xs text-gray-500 mb-1">
                     {contributions.purpose === 'expense'
-                      ? 'El gasto se registró una sola vez; cada ruta aportó con una operación propia desde su Base.'
+                      ? 'El gasto se registró una sola vez; cada ruta aportó con una operación propia desde su Base disponible.'
                       : 'El reembolso paga una obligación con el Administrador; no vuelve a registrar el gasto.'}
                   </p>
                   <ul className="divide-y divide-gray-50 text-sm">

@@ -37,7 +37,7 @@ const BLOCKED_TEXT: Record<string, string> = {
   ALREADY_REVERSED: 'Ya está anulado.',
   REVERSAL_NOT_ALLOWED: 'Este movimiento no se anula por esta vía (p. ej. una anulación, un desembolso o un reparto de saldo sin asignar).',
   CAPITAL_AUTHORITY_REQUIRED: 'Solo el Administrador responsable de capital de las rutas afectadas corrige esta operación.',
-  SELF_CORRECTION_FORBIDDEN: 'Nadie anula un gasto cargado a su propia custodia (tampoco con otra membresía).',
+  SELF_CORRECTION_FORBIDDEN: 'Nadie anula un gasto pagado con su propio efectivo (tampoco con otra membresía).',
 };
 const TARGET_TEXT: Record<JointTargetKind, string> = { expense: 'Gasto general', reimbursement: 'Reembolso', route_transfer: 'Transferencia entre rutas' };
 

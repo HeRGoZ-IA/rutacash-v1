@@ -139,9 +139,9 @@ export default function CollectorExpensesPage() {
   /** Para el Supervisor: a quién se cargó cada gasto. */
   const etiqueta = (e: Expense) => {
     const a = expenseAttribution(e)
-    if (user && a.cashHolderId === user.id) return 'A tu cargo'
-    if (a.scope === 'trabajador') return `A cargo de ${nombreDe(a.cashHolderId)}`
-    return 'Caja de la ruta'
+    if (user && a.cashHolderId === user.id) return 'Mi efectivo'
+    if (a.scope === 'trabajador') return `Base del trabajador · ${nombreDe(a.cashHolderId)}`
+    return 'Base disponible'
   }
 
   return (
@@ -149,7 +149,7 @@ export default function CollectorExpensesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-bold text-gray-900">Gastos</h1>
-          <p className="text-xs text-gray-500">{veGastosDeRuta ? 'A tu cargo hoy' : 'Hoy'}: {formatCurrency(todayTotal, currency)}</p>
+          <p className="text-xs text-gray-500">{veGastosDeRuta ? 'Con mi efectivo hoy' : 'Hoy'}: {formatCurrency(todayTotal, currency)}</p>
         </div>
         <button onClick={() => { operacion.current = null; setShowForm(true) }} className="w-10 h-10 bg-primary-600 text-white rounded-full flex items-center justify-center">
           <Plus className="w-5 h-5" />
@@ -187,9 +187,9 @@ export default function CollectorExpensesPage() {
               >
                 {pagaConSuEfectivo && <option value={user!.id}>Mi efectivo</option>}
                 {team.filter(u => u.id !== user!.id).map(u => (
-                  <option key={u.id} value={u.id}>Efectivo de {formatPersonName(u.nombre)}</option>
+                  <option key={u.id} value={u.id}>Base del trabajador · {formatPersonName(u.nombre)}</option>
                 ))}
-                {pagaCajaRuta && <option value={CAJA_RUTA}>Caja de la ruta (sin trabajador)</option>}
+                {pagaCajaRuta && <option value={CAJA_RUTA}>Base disponible de la ruta</option>}
               </select>
             </div>
           )}

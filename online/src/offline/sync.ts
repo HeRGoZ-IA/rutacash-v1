@@ -133,7 +133,7 @@ async function run(): Promise<void> {
         if (!sendable(op)) continue;
         // 2. Dependencia real: abono posterior de un crédito con otro abono en revisión.
         if (blockerOf(op, live)) {
-          if (!held(op)) await save({ ...op, status: 'review', error: { code: DEPENDENCY, message: 'Espera a que se revise un abono anterior de este mismo crédito.', at: now() } });
+          if (!held(op)) await save({ ...op, status: 'review', error: { code: DEPENDENCY, message: 'Espera a que se revise un recaudo anterior de esta misma venta.', at: now() } });
           continue;
         }
         const prev = held(op) ? 'local' : op.status;

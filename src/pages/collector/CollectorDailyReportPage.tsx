@@ -66,7 +66,7 @@ export default function CollectorDailyReportPage() {
     const misGastos = expenses.filter(e => isExpenseOf(e, user.id))
 
     const movs: Movement[] = []
-    for (const p of misAbonos) movs.push({ hora: hora(p.createdAt), cliente: formatClientName(clientMap.get(p.clientId)?.nombre) || 'Cliente', concepto: 'Abono', valor: p.valor, tipo: 'abono' })
+    for (const p of misAbonos) movs.push({ hora: hora(p.createdAt), cliente: formatClientName(clientMap.get(p.clientId)?.nombre) || 'Cliente', concepto: 'Recaudo', valor: p.valor, tipo: 'abono' })
     for (const s of misDesembolsos) movs.push({ hora: hora(s.createdAt), cliente: formatClientName(clientMap.get(s.clientId)?.nombre) || 'Cliente', concepto: 'Desembolso', valor: s.valorVenta, tipo: 'venta' })
     for (const e of misGastos) movs.push({ hora: hora(e.createdAt), cliente: catName(e.categoryId), concepto: 'Gasto', valor: e.valor, tipo: 'gasto' })
     movs.sort((a, b) => a.hora.localeCompare(b.hora))
@@ -94,7 +94,7 @@ export default function CollectorDailyReportPage() {
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-white rounded-2xl p-3 shadow-card border border-gray-100 text-center">
           <p className="text-sm font-bold text-emerald-600 leading-tight">{formatCurrency(totals.abonos, currency)}</p>
-          <p className="text-xs text-gray-500 mt-0.5">Abonos</p>
+          <p className="text-xs text-gray-500 mt-0.5">Recaudo</p>
         </div>
         <div className="bg-white rounded-2xl p-3 shadow-card border border-gray-100 text-center">
           <p className="text-sm font-bold text-primary-600 leading-tight">{formatCurrency(totals.ventas, currency)}</p>

@@ -106,7 +106,7 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
           <h1 className="text-xl font-bold text-gray-900">{isSa ? 'Panel de rutas' : 'Caja principal'}</h1>
           <p className="text-sm text-gray-600 mt-0.5 max-w-2xl">
             {isSa ? 'Todas las rutas de la empresa, solo lectura. ' : 'Tus rutas en un solo panel. '}
-            No es una cuenta: el efectivo está en la <b>Base</b> de cada ruta o en manos de sus trabajadores.
+            No es una cuenta: el efectivo está en la <b>Base disponible</b> de cada ruta o en la <b>Base del trabajador</b>.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 lg:flex-nowrap lg:flex-shrink-0">
@@ -158,13 +158,13 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
                 <p className="text-xs font-medium text-gray-500 mb-1.5">Cartera (no es efectivo)</p>
                 <dl className="grid grid-cols-2 gap-2">
                   <Mini label="Capital colocado" value={money(t.principalPlacedMinor)} />
-                  <Mini label="Cartera con interés" value={money(t.outstandingMinor)} hint="Incluye interés aún no cobrado" />
+                  <Mini label="Cartera activa" value={money(t.outstandingMinor)} hint="Capital + interés aún no cobrado" />
                 </dl>
               </div>
               <div className="rounded-xl border border-gray-100 p-3" data-testid="rb-total-period">
                 <p className="text-xs font-medium text-gray-500 mb-1.5">Periodo · {periodText}</p>
                 <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <Mini label="Recaudos" value={money(t.collectionsMinor)} />
+                  <Mini label="Recaudo" value={money(t.collectionsMinor)} />
                   <Mini label="Gastos de rutas" value={money(t.expensesMinor)} />
                   <Mini label="Retiros de Base" value={money(t.withdrawalsMinor)} />
                   <Mini label="Resultado operativo" value={money(t.resultMinor)} hint="No es utilidad contable ni dinero retirable" negative={t.resultMinor < 0} testId="rb-total-result" />
@@ -188,12 +188,12 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
                   </>
                 ) : (
                   <>
-                    <Mini label="Faltantes pendientes" value={money(t.shortageMinor)} hint="Arrastrados en cuadres; no es billete" testId="rb-shortage-pending" />
-                    <Mini label="Sobrantes en control" value={money(t.surplusMinor)} hint="Aparte; no es Base" testId="rb-surplus-pending" />
+                    <Mini label="Faltantes arrastrados" value={money(t.shortageMinor)} hint="Reconocidos en cuadres; no es billete" testId="rb-shortage-pending" />
+                    <Mini label="Sobrantes en control" value={money(t.surplusMinor)} hint="Aparte; no es Base disponible" testId="rb-surplus-pending" />
                   </>
                 )}
                 <Mini label="Reembolsos pendientes a Administradores" value={money(panel.general.pendingAdminReimbursements?.totalMinor ?? 0)} hint="Obligación de la empresa; no es efectivo" testId="rb-total-payables" />
-                <Mini label="Aportes a gastos generales" value={money(t.generalContributionsMinor)} hint={`Salieron de las Bases · periodo; reembolsos pagados ${money(t.reimbursementsMinor)}`} />
+                <Mini label="Aportes a gastos generales" value={money(t.generalContributionsMinor)} hint={`Salieron de la Base disponible · periodo; reembolsos pagados ${money(t.reimbursementsMinor)}`} />
               </dl>
             </div>
           </section>
@@ -206,7 +206,7 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
                 <dl className="grid grid-cols-3 gap-2">
                   <Mini label="Oficinas" value={String(officeCount)} />
                   <Mini label="Rutas" value={String(rows.length)} />
-                  <Mini label="Responsables" value={String(controllers)} />
+                  <Mini label="Responsables de capital" value={String(controllers)} />
                 </dl>
                 <dl className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-gray-100">
                   <Mini label="Faltantes arrastrados" value={money(t.shortageMinor)} />
@@ -315,7 +315,7 @@ function PeriodControl({ period, onPeriod, custom, onCustom }: {
           </label>
         </div>
       )}
-      <p className="text-xs text-gray-500 basis-full sm:basis-auto">El periodo cambia recaudos, gastos, retiros y resultado; los saldos son siempre los actuales.</p>
+      <p className="text-xs text-gray-500 basis-full sm:basis-auto">El periodo cambia recaudo, gastos, retiros y resultado; los saldos son siempre los actuales.</p>
     </div>
   );
 }
@@ -400,7 +400,7 @@ function RouteRow({ r, mine, office, onOpen, onConfirm, canConfirm }: {
           </p>
           <p className="text-xs text-gray-600">
             {r.controller.id
-              ? <>Responsable: <span className="font-medium text-gray-800">{mine ? 'Tú' : formatPersonName(r.controller.name) || '—'}</span></>
+              ? <>Responsable de capital: <span className="font-medium text-gray-800">{mine ? 'Tú' : formatPersonName(r.controller.name) || '—'}</span></>
               : <span className="text-red-700 font-medium">Sin responsable</span>}
           </p>
           {(states.length > 0 || alerts.length > 0) && (
@@ -419,8 +419,8 @@ function RouteRow({ r, mine, office, onOpen, onConfirm, canConfirm }: {
         {fig('Base disponible', money(r.baseMinor), 'base', { testId: 'rb-fig-base' })}
         {fig('Base del trabajador', money(r.custody.grossMinor), 'efectivo', { sub: custodySub || undefined, negative: r.custody.negativeMinor < 0, testId: 'rb-fig-custody' })}
         {fig('Efectivo de la ruta', money(r.cashMinor), 'efectivo', { testId: 'rb-fig-cash' })}
-        {fig('Capital colocado', money(r.portfolio.principalPlacedMinor), 'cartera', { sub: `con interés ${money(r.portfolio.outstandingWithInterestMinor)}`, testId: 'rb-fig-portfolio' })}
-        {fig('Recaudos', money(r.period.collectionsMinor), 'periodo', { testId: 'rb-fig-collections' })}
+        {fig('Capital colocado', money(r.portfolio.principalPlacedMinor), 'cartera', { sub: `cartera activa ${money(r.portfolio.outstandingWithInterestMinor)}`, testId: 'rb-fig-portfolio' })}
+        {fig('Recaudo', money(r.period.collectionsMinor), 'periodo', { testId: 'rb-fig-collections' })}
         {fig('Gastos', money(routeExpenses(r)), 'periodo', { sub: r.period.expenses.bienDuraderoMinor ? `bienes duraderos ${money(r.period.expenses.bienDuraderoMinor)}` : undefined, testId: 'rb-fig-expenses' })}
         {fig('Retiros de Base', money(r.period.base?.withdrawalsMinor ?? 0), 'base', { testId: 'rb-fig-withdrawals' })}
         {fig('Resultado operativo', money(r.operatingResultMinor), 'periodo', { negative: r.operatingResultMinor < 0, testId: 'rb-fig-result' })}
@@ -467,7 +467,7 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
     setSaving(true);
     try {
       await setRouteCapitalController({ actor: user, tenantId, routeId: r!.routeId, adminId: changing.adminId, motivo: changing.motivo });
-      toast.success('Responsable cambiado: la ruta queda en entrega hasta que el nuevo responsable confirme el conteo');
+      toast.success('Responsable de capital cambiado: la ruta queda en entrega hasta que el nuevo responsable confirme el conteo');
       setChanging(null);
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Error'); } finally { setSaving(false); }
   }
@@ -477,7 +477,7 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
       footer={<Button variant="secondary" onClick={onClose}>Cerrar</Button>}>
       <div className="space-y-5" data-testid="rb-route-drawer">
         <p className="text-sm text-gray-600">
-          Responsable: <b className="text-gray-900">{formatPersonName(r.controller.name) || 'sin responsable'}</b>{!r.controller.valid && r.controller.id ? ' (no válido)' : ''}
+          Responsable de capital: <b className="text-gray-900">{formatPersonName(r.controller.name) || 'sin responsable'}</b>{!r.controller.valid && r.controller.id ? ' (no válido)' : ''}
           {' '}· saldos al momento · periodo {range.from === range.to ? range.from : `${range.from} a ${range.to}`}
         </p>
         {(states.length > 0 || alerts.length > 0) && (
@@ -495,12 +495,12 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
             <h3 id="rb-d-ef-h" className="text-sm font-semibold text-gray-900 mb-1">Efectivo de la ruta</h3>
             <dl>
               {row('Base disponible', r.baseMinor)}
-              {row('Base del trabajador (bruto)', r.custody.grossMinor, { hint: `${r.custody.positions} trabajador(es) con caja` })}
+              {row('Base del trabajador (bruto)', r.custody.grossMinor, { hint: `${r.custody.positions} trabajador(es) con efectivo` })}
               {row('Efectivo de la ruta', r.cashMinor, { strong: true })}
               {row('Base del trabajador entregable', r.custody.deliverableMinor, { hint: 'Lo que los trabajadores pueden entregar hoy' })}
               {r.custody.negativeMinor < 0 && row('Base del trabajador negativa', r.custody.negativeMinor, { hint: 'Gastos de trabajadores por encima de su efectivo; no es efectivo' })}
               {r.custody.carriedShortageMinor > 0 && row('Faltante arrastrado', r.custody.carriedShortageMinor, { hint: 'Reconocido en cuadres; no es billete' })}
-              {r.surplusInControlMinor > 0 && row('Sobrante en control', r.surplusInControlMinor, { hint: 'Aparte; no es Base' })}
+              {r.surplusInControlMinor > 0 && row('Sobrante en control', r.surplusInControlMinor, { hint: 'Aparte; no es Base disponible' })}
             </dl>
           </section>
           <section id="rb-d-base" aria-labelledby="rb-d-b-h">
@@ -512,11 +512,11 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
                 {b.unassignedAssignedMinor > 0 && row('Reparto de saldo sin asignar', b.unassignedAssignedMinor, { sign: '+' })}
                 {b.transfersInMinor > 0 && row('Transferencias recibidas', b.transfersInMinor, { sign: '+' })}
                 {b.returnsReceivedMinor > 0 && row('Devoluciones de Cobradores', b.returnsReceivedMinor, { sign: '+' })}
-                {b.collectionsReceivedMinor > 0 && row('Recaudos recibidos en la Base', b.collectionsReceivedMinor, { sign: '+' })}
+                {b.collectionsReceivedMinor > 0 && row('Recaudo recibido en la Base disponible', b.collectionsReceivedMinor, { sign: '+' })}
                 {b.withdrawalsMinor > 0 && row('Retiros de Base', b.withdrawalsMinor, { sign: '−' })}
                 {b.transfersOutMinor > 0 && row('Transferencias enviadas', b.transfersOutMinor, { sign: '−' })}
                 {b.deliveredToWorkersMinor > 0 && row('Entregas de Base a Cobradores', b.deliveredToWorkersMinor, { sign: '−' })}
-                {b.disbursedMinor > 0 && row('Desembolsos desde la Base', b.disbursedMinor, { sign: '−' })}
+                {b.disbursedMinor > 0 && row('Desembolsos desde la Base disponible', b.disbursedMinor, { sign: '−' })}
                 {b.routeExpensesMinor > 0 && row('Gastos pagados con la Base', b.routeExpensesMinor, { sign: '−' })}
                 {b.reassignmentsNetMinor !== 0 && row('Reasignaciones entre rutas (neto)', b.reassignmentsNetMinor)}
                 {b.otherMinor !== 0 && row('Otros (anulaciones, cuadres)', b.otherMinor)}
@@ -529,20 +529,20 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
             <h3 id="rb-d-c-h" className="text-sm font-semibold text-gray-900 mb-1">Cartera (no es efectivo)</h3>
             <dl>
               {row('Capital colocado', r.portfolio.principalPlacedMinor, { hint: 'Capital pendiente de las ventas, sin interés' })}
-              {row('Cartera con interés', r.portfolio.outstandingWithInterestMinor, { hint: 'Incluye interés aún no cobrado' })}
+              {row('Cartera activa', r.portfolio.outstandingWithInterestMinor, { hint: 'Capital + interés aún no cobrado' })}
               {row('Ventas aprobadas sin desembolsar', r.approvedNotDisbursedMinor)}
             </dl>
           </section>
           <section id="rb-d-periodo" aria-labelledby="rb-d-p-h">
             <h3 id="rb-d-p-h" className="text-sm font-semibold text-gray-900 mb-1">Periodo y resultado</h3>
             <dl>
-              {row('Recaudos', r.period.collectionsMinor, { hint: `De ellos, interés cobrado ${money(r.period.interestCollectedMinor)}` })}
+              {row('Recaudo', r.period.collectionsMinor, { hint: `De ellos, interés cobrado ${money(r.period.interestCollectedMinor)}` })}
               {row('Capital desembolsado', r.period.principalDisbursedMinor)}
               {row('Gastos operativos', r.period.expenses.operativoMinor)}
               {row('Otros gastos', r.period.expenses.otroMinor)}
               {row('Bienes duraderos', r.period.expenses.bienDuraderoMinor, { hint: 'Aparte: no cuentan en el resultado operativo' })}
-              {row('Resultado operativo básico', r.operatingResultMinor, { strong: true, hint: 'Interés cobrado − gastos operativos y otros. No es utilidad contable ni dinero retirable' })}
-              {row('Flujo operativo', r.operatingFlowMinor, { hint: 'Recaudos − desembolsos − gastos. Puede ser negativo sin ser pérdida' })}
+              {row('Resultado operativo', r.operatingResultMinor, { strong: true, hint: 'Interés cobrado − gastos operativos y otros. No es utilidad contable ni dinero retirable' })}
+              {row('Flujo operativo', r.operatingFlowMinor, { hint: 'Recaudo − desembolsos − gastos. Puede ser negativo sin ser pérdida' })}
               {r.capitalNeedMinor != null && row('Necesidad de capital', r.capitalNeedMinor)}
             </dl>
           </section>
@@ -580,7 +580,7 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
         <section className="flex flex-wrap gap-x-4 gap-y-2 border-t border-gray-100 pt-3 text-sm" aria-label="Ver en Consultas">
           <Link to={`/admin/consultas?${q}`} className="text-primary-700 hover:underline inline-flex items-center gap-1"><History className="w-4 h-4" aria-hidden />Dinero de la ruta (Base de la ruta y del trabajador)</Link>
           <Link to={`/admin/consultas?vista=actividad&${q}`} className="text-primary-700 hover:underline inline-flex items-center gap-1"><Info className="w-4 h-4" aria-hidden />Actividad de la ruta</Link>
-          <span className="text-xs text-gray-500 basis-full">«Dinero de la ruta» incluye la Base (inyecciones, retiros, transferencias, aportes a gastos generales y reembolsos) y la Base de sus trabajadores (entregas, devoluciones, recaudos). Cada operación abre su detalle con comprobante.</span>
+          <span className="text-xs text-gray-500 basis-full">«Dinero de la ruta» incluye la Base disponible (inyecciones, retiros, transferencias, aportes a gastos generales y reembolsos) y la Base de sus trabajadores (entregas, devoluciones, recaudos). Cada operación abre su detalle con comprobante.</span>
         </section>
       </div>
     </Modal>

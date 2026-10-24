@@ -26,7 +26,7 @@ interface Props {
   title?: string
 }
 
-export function ClientCreditHistory({ client, title = 'Historial de créditos' }: Props) {
+export function ClientCreditHistory({ client, title = 'Historial de ventas' }: Props) {
   const { user } = useAuth()
   const { currency } = useTenant()
   const [history, setHistory] = useState<ClientCreditHistory | null>(null)
@@ -84,8 +84,8 @@ export function ClientCreditHistory({ client, title = 'Historial de créditos' }
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <Mini label="Créditos" value={String(history.total)} />
-        <Mini label="Total prestado" value={formatCurrency(history.totalPrestado, currency)} />
+        <Mini label="Ventas" value={String(history.total)} />
+        <Mini label="Total desembolsado" value={formatCurrency(history.totalPrestado, currency)} />
         <Mini label="Total abonado" value={formatCurrency(history.totalAbonado, currency)} tone="text-emerald-600" />
         <Mini label="Saldo pendiente" value={formatCurrency(history.saldoPendiente, currency)} tone="text-amber-600" />
       </div>
@@ -94,7 +94,7 @@ export function ClientCreditHistory({ client, title = 'Historial de créditos' }
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
-              <th className="text-left px-3 py-2">Valor del crédito</th>
+              <th className="text-left px-3 py-2">Valor de la venta</th>
               <th className="text-left px-3 py-2 whitespace-nowrap">Fecha de creación</th>
               <th className="text-left px-3 py-2 whitespace-nowrap">Fin estimado</th>
               <th className="text-left px-3 py-2 whitespace-nowrap">Finalización real</th>

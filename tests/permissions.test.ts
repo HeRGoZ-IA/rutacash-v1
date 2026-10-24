@@ -1794,6 +1794,9 @@ check('OFFICE-OPS-004e — cumplimiento exacto',
     fin.baseActual === 800 && fin.carteraEnCalle === 1700 && fin.totalControlado === 2500)
   check('OFFICE-FIN-002c — sin rutas, el consolidado es cero y no rompe',
     officeFinanceTotals([], []).totalControlado === 0)
+  const rb = officeFinanceTotals([caja(), caja()], [{ baseActual: 500, carteraEnCalle: 1000, baseRuta: 200 }, { baseActual: 300, carteraEnCalle: 700, baseRuta: 50 }])
+  check('OFFICE-FIN-002d — con Base por Ruta suma la Base disponible aparte y en el total; sin ella no aparece',
+    rb.baseRuta === 250 && rb.baseActual === 800 && rb.totalControlado === 2750 && fin.baseRuta === undefined)
 }
 
 // --- OFFICE-FIN-003/004: el consolidado depende del PERMISO financiero ---

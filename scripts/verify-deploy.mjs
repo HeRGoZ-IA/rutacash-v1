@@ -125,7 +125,7 @@ const MARCADORES = [
   ['Capital centralizado', true, 'pantalla de diagnóstico y activación (C2)'],
   ['Entregar capital a un trabajador', true, 'entrega de capital bolsa → trabajador (C2)'],
   ['Traspasar saldo heredado a mi bolsa', true, 'vaciado del saldo heredado de la caja de ruta (C2)'],
-  ['Capital recibido del Administrador', true, '«Mi efectivo» con capital recibido separado del recaudo (C2)'],
+  ['Base recibida y devuelta en este periodo', true, '«Mi efectivo» con la Base recibida separada del recaudo (C2, nombres N-1)'],
   ['Efectivo de cuadres devuelto a la bolsa', true, 'retornos de cuadre separados de los retiros (C2)'],
   ['Esta ruta quedó bloqueada al activar el capital centralizado', true, 'rutas inconsistentes bloqueadas para capital nuevo (C2)'],
 ]

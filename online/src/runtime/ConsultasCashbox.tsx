@@ -108,18 +108,18 @@ export function CashboxPanel() {
           {/* Summary table */}
           <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
             <div className="divide-y divide-gray-50">
-              <CashboxRow label="Saldo anterior" value={summary.saldoAnterior} type="neutral" />
-              <CashboxRow label={flujo?.hayCentralizados ? '(+) Ingreso de capital (ver detalle)' : '(+) Ingreso capital'} value={summary.ingresoCapital} type="positive" />
-              <CashboxRow label="(+) Cobros recibidos" value={summary.cobros} type="positive" />
-              <CashboxRow label="(+) Transferencias entrantes" value={summary.transferenciasEntradas} type="positive" />
-              <CashboxRow label="(-) Préstamos entregados" value={summary.prestamosEntregados} type="negative" />
-              <CashboxRow label="(-) Gastos" value={summary.gastos} type="negative" />
-              <CashboxRow label="(−) Transferencias salientes" value={summary.transferenciasSalidas} type="negative" />
-              <CashboxRow label={flujo?.hayCentralizados ? '(-) Retiros y retornos a la bolsa (ver detalle)' : '(-) Retiros'} value={summary.retiros} type="negative" />
+              <CashboxRow label="Base del trabajador al inicio" value={summary.saldoAnterior} type="neutral" />
+              <CashboxRow label={flujo?.hayCentralizados ? '(+) Entregas de Base (ver detalle)' : '(+) Entregas de Base'} value={summary.ingresoCapital} type="positive" />
+              <CashboxRow label="(+) Recaudo" value={summary.cobros} type="positive" />
+              <CashboxRow label="(+) Transferencias recibidas" value={summary.transferenciasEntradas} type="positive" />
+              <CashboxRow label="(−) Desembolsos" value={summary.prestamosEntregados} type="negative" />
+              <CashboxRow label="(−) Gastos" value={summary.gastos} type="negative" />
+              <CashboxRow label="(−) Transferencias enviadas" value={summary.transferenciasSalidas} type="negative" />
+              <CashboxRow label={flujo?.hayCentralizados ? '(−) Devoluciones de Base (ver detalle)' : '(−) Devoluciones de Base'} value={summary.retiros} type="negative" />
             </div>
             <div className="px-4 py-4 bg-primary-50 border-t-2 border-primary-200">
               <div className="flex justify-between items-center">
-                <span className="font-bold text-gray-900">SALDO AL CIERRE DEL PERIODO</span>
+                <span className="font-bold text-gray-900">BASE DEL TRABAJADOR AL CIERRE</span>
                 <span className={`text-xl font-bold ${summary.saldoActual >= 0 ? 'text-primary-700' : 'text-red-600'}`}>
                   {formatCurrency(summary.saldoActual)}
                 </span>
@@ -131,10 +131,10 @@ export function CashboxPanel() {
 
           {/* KPI grid */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <MiniKPI label="Total cobrado" value={formatCurrency(summary.cobros)} color="green" />
+            <MiniKPI label="Recaudo" value={formatCurrency(summary.cobros)} color="green" />
             <MiniKPI label="Total gastos" value={formatCurrency(summary.gastos)} color="red" />
-            <MiniKPI label="Préstamos" value={formatCurrency(summary.prestamosEntregados)} color="blue" />
-            <MiniKPI label={flujo?.hayCentralizados ? 'Retiros y retornos' : 'Retiros'} value={formatCurrency(summary.retiros)} color="yellow" />
+            <MiniKPI label="Desembolsos" value={formatCurrency(summary.prestamosEntregados)} color="blue" />
+            <MiniKPI label="Devoluciones de Base" value={formatCurrency(summary.retiros)} color="yellow" />
           </div>
         </div>
       ) : (

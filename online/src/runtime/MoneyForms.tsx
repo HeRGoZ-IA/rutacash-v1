@@ -31,7 +31,7 @@ export const REQUEST_OPTIONS: Record<'superadmin' | 'admin', { kind: RequestKind
   admin: [
     { kind: 'admin_allocation', label: 'Pedir capital al SuperAdmin' },
     { kind: 'admin_transfer', label: 'Pedir capital a otro Administrador' },
-    { kind: 'worker_return', label: 'Pedir entrega de efectivo a un Cobrador' },
+    { kind: 'worker_return', label: 'Pedir entrega de efectivo a un trabajador' },
   ],
 };
 
@@ -110,7 +110,7 @@ export function RequestModal({ open, onClose, onDone, currency, initialKind, kin
           </>
         )}
         {f.kind !== 'admin_allocation' && (
-          <Select label={f.kind === 'worker_return' ? 'Cobrador' : 'Administrador'} value={f.holderId} onChange={(e) => setF((x) => ({ ...x, holderId: e.target.value }))}
+          <Select label={f.kind === 'worker_return' ? 'Trabajador' : 'Administrador'} value={f.holderId} onChange={(e) => setF((x) => ({ ...x, holderId: e.target.value }))}
             options={holders} placeholder={holders.length ? 'Seleccionar' : f.kind === 'worker_return' && !f.routeId ? 'Primero elige la ruta' : 'Nadie disponible'} required />
         )}
         <MoneyInput label="Valor" currency={currency} value={f.amount} onValueChange={(v) => setF((x) => ({ ...x, amount: v }))} required />
@@ -195,7 +195,7 @@ export function DeliverCashModal({ open, onClose, onDone, currency, request }: {
   async function save() {
     if (!f.routeId) { toast.error('Selecciona la ruta'); return; }
     if (f.amount <= 0) { toast.error('El valor debe ser mayor a 0'); return; }
-    if (exceeds) { toast.error('El valor supera el efectivo a tu cargo.'); return; }
+    if (exceeds) { toast.error('El valor supera tu efectivo.'); return; }
     setSaving(true);
     try {
       await deliverOwnCash({ routeId: f.routeId, amount: f.amount, concept: f.concept, note: f.note, requestId: request?.id, operationId: opId });
@@ -215,10 +215,10 @@ export function DeliverCashModal({ open, onClose, onDone, currency, request }: {
         <Select label="Concepto" value={f.concept} onChange={(e) => setF((x) => ({ ...x, concept: e.target.value as 'recaudo' | 'base' }))}
           options={[{ value: 'recaudo', label: CONCEPT_LABEL.recaudo }, { value: 'base', label: CONCEPT_LABEL.base }]} />
         <MoneyInput label="Valor" currency={currency} value={f.amount} onValueChange={(v) => setF((x) => ({ ...x, amount: v }))} required
-          hint={cash != null && f.routeId ? `Efectivo a tu cargo: ${formatCurrency(cash, currency)}` : undefined} error={exceeds ? 'Supera el efectivo a tu cargo' : undefined} />
+          hint={cash != null && f.routeId ? `Mi efectivo: ${formatCurrency(cash, currency)}` : undefined} error={exceeds ? 'Supera tu efectivo' : undefined} />
         <Textarea label="Nota (opcional)" value={f.note} onChange={(e) => setF((x) => ({ ...x, note: e.target.value }))} rows={2} />
         {f.routeId && !controller && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2" role="status">La ruta no tiene responsable de capital: pide al SuperAdmin que lo asigne.</p>}
-        {f.routeId && controller && cash === 0 && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2" role="status">No tienes efectivo a tu cargo en esta ruta.</p>}
+        {f.routeId && controller && cash === 0 && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2" role="status">No tienes efectivo en esta ruta.</p>}
       </div>
     </Modal>
   );

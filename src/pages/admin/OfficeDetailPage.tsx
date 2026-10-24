@@ -305,16 +305,16 @@ export default function OfficeDetailPage() {
       {/* OPERACIÓN DEL DÍA — todo sobre las rutas visibles de esta oficina. */}
       <div className="space-y-2">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold text-gray-700">Cobranza de hoy</h2>
+          <h2 className="text-sm font-semibold text-gray-700">Recaudo de hoy</h2>
           <span className="text-xs text-gray-500">{fecha}</span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Card className="py-3">
-            <p className="text-xs text-gray-500">A cobrar hoy</p>
+            <p className="text-xs text-gray-500">Esperado hoy</p>
             <p className="text-base font-bold text-gray-800 tabular-nums">{formatCurrency(ops.aCobrarHoy, currency)}</p>
           </Card>
           <Card className="py-3">
-            <p className="text-xs text-gray-500">Recaudado hoy</p>
+            <p className="text-xs text-gray-500">Recaudado</p>
             <p className="text-base font-bold text-emerald-600 tabular-nums">{formatCurrency(ops.recaudadoHoy, currency)}</p>
           </Card>
           <Card className="py-3">
@@ -367,8 +367,14 @@ export default function OfficeDetailPage() {
         <div className="space-y-2">
           <h2 className="text-sm font-semibold text-gray-700">Resumen financiero</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+            {finance.baseRuta !== undefined && (
+              <Card className="py-3">
+                <p className="text-xs text-gray-500">Base disponible</p>
+                <p className="text-sm font-bold text-primary-700 tabular-nums">{formatCurrency(finance.baseRuta, currency)}</p>
+              </Card>
+            )}
             <Card className="py-3">
-              <p className="text-xs text-gray-500">Base total</p>
+              <p className="text-xs text-gray-500">Base del trabajador</p>
               <p className="text-sm font-bold text-primary-700 tabular-nums">{formatCurrency(finance.baseActual, currency)}</p>
             </Card>
             <Card className="py-3">
@@ -376,7 +382,7 @@ export default function OfficeDetailPage() {
               <p className="text-sm font-bold text-gray-800 tabular-nums">{formatCurrency(finance.totalControlado, currency)}</p>
             </Card>
             <Card className="py-3">
-              <p className="text-xs text-gray-500">Cobros</p>
+              <p className="text-xs text-gray-500">Recaudo</p>
               <p className="text-sm font-bold text-emerald-600 tabular-nums">{formatCurrency(finance.cobros, currency)}</p>
             </Card>
             <Card className="py-3">
@@ -388,7 +394,7 @@ export default function OfficeDetailPage() {
               <p className="text-sm font-bold text-amber-600 tabular-nums">{formatCurrency(finance.gastos, currency)}</p>
             </Card>
             <Card className="py-3">
-              <p className="text-xs text-gray-500">Retiros</p>
+              <p className="text-xs text-gray-500">Devoluciones de Base</p>
               <p className="text-sm font-bold text-gray-700 tabular-nums">{formatCurrency(finance.retiros, currency)}</p>
             </Card>
             <Card className="py-3">

@@ -1408,7 +1408,7 @@ await spec('REP-ROUTE-002', 'Reportes', 'los importes del reporte de A son exact
   assert(total === 150_000, `total contaminado o fuera de rango: ${total}`)
 
   const caja = buildReport('caja_diaria', src, soloA)
-  const cobros = caja.reduce((s, r) => s + Number(r.Cobros), 0)
+  const cobros = caja.reduce((s, r) => s + Number(r.Recaudo), 0)
   const gastos = caja.reduce((s, r) => s + Number(r.Gastos), 0)
   metric('caja diaria A', `cobros=${cobros} gastos=${gastos}`)
   assert(cobros === 150_000 && gastos === 20_000, `caja diaria contaminada: ${cobros}/${gastos}`)
@@ -1482,7 +1482,7 @@ await spec('REP-SEM-001', 'Reportes', 'un pago corregido aparece una sola vez, n
   assert(total === 230_000, `total incorrecto tras la correccion: ${total}`)
 
   const caja = buildReport('caja_diaria', src, soloA)
-  const cobros = caja.reduce((s, r) => s + Number(r.Cobros), 0)
+  const cobros = caja.reduce((s, r) => s + Number(r.Recaudo), 0)
   metric('cobros de caja diaria', cobros)
   assert(cobros === 230_000, `caja diaria incoherente con el reporte de pagos: ${cobros}`)
 })
@@ -3180,14 +3180,14 @@ await spec('SUPERVISOR-UI-002', 'Supervisor', 'el Cobrador NO ve la Base: ni se 
   assert(guarded, 'la Base debe consultarse solo con `cashbox.viewRoute` (fail-closed)')
 })
 
-await spec('SUPERVISOR-UI-003', 'Supervisor', '"Mi efectivo" y "Caja de la Ruta" son bloques separados', () => {
+await spec('SUPERVISOR-UI-003', 'Supervisor', '"Mi efectivo" y "Dinero de la ruta" son bloques separados', () => {
   const page = readSource('src/pages/collector/CollectorCashClosePage.tsx')
   const tieneMiEfectivo = page.includes('Mi efectivo')
-  const tieneCajaRuta = page.includes('Caja de la Ruta')
+  const tieneCajaRuta = page.includes('Dinero de la ruta')
   const avisa = page.includes('no forma parte de tu efectivo')
   const failClosed = page.includes('verCajaRuta ? await getRouteFinancialSummary(routeId) : null')
   metric('bloque "Mi efectivo"', tieneMiEfectivo)
-  metric('bloque "Caja de la Ruta"', tieneCajaRuta)
+  metric('bloque "Dinero de la ruta"', tieneCajaRuta)
   metric('advierte que no es su dinero', avisa)
   metric('el dato de ruta es fail-closed', failClosed)
   assert(tieneMiEfectivo && tieneCajaRuta, 'los dos dineros deben presentarse como bloques distintos')

@@ -488,7 +488,7 @@ await spec('PAY-REV-019', 'reportes del día: pago 01/10, anulado el 03/10', asy
   const s = await fuentes()
   const rep01 = sumaPagos(buildPagosReport(s, dia(DIA_PAGO)))
   const rep03 = sumaPagos(buildPagosReport(s, dia(today())))
-  const caja01 = buildCajaDiariaReport(s, dia(DIA_PAGO)).reduce((t, r) => t + Number(r.Cobros), 0)
+  const caja01 = buildCajaDiariaReport(s, dia(DIA_PAGO)).reduce((t, r) => t + Number(r.Recaudo), 0)
   const motor01 = (await getCashboxSummary(R1, DIA_PAGO, DIA_PAGO)).cobros
   const motor03 = (await getCashboxSummary(R1, today(), today())).cobros
   const dash01 = (await getAdminDashboardData({ user: ADMIN, tenantId: T, now: new Date(`${DIA_PAGO}T12:00:00`) })).recaudoHoy

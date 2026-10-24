@@ -123,7 +123,7 @@ export default function ActivationPage() {
               <ul className="list-disc pl-5 space-y-0.5">
                 <li>Es <b>irreversible</b>: la empresa no vuelve al modelo de bolsas.</li>
                 <li>El SuperAdmin deja de mover dinero: sin ingresos, retiros, asignaciones ni recogidas de capital de empresa.</li>
-                <li>Cada ruta tiene su Base; solo su Administrador responsable inyecta, retira, entrega y transfiere.</li>
+                <li>Cada ruta tiene su Base disponible; solo su Administrador responsable de capital inyecta, retira, entrega y transfiere.</li>
                 <li>Lo que hoy está en las bolsas queda como «saldo sin asignar»: no se mueve; cada Administrador lo reparte a sus rutas con confirmación.</li>
                 <li>Exige un respaldo verificado de la base de datos y su referencia. Las capturas sin conexión de los Cobradores siguen siendo válidas.</li>
               </ul>

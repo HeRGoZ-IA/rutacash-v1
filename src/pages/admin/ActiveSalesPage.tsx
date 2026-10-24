@@ -279,7 +279,7 @@ export default function ActiveSalesPage() {
   async function confirmAnnul(reason: string) {
     if (!annulTarget || !detailSale) return
     await annulPayment({ actor: user, tenantId, paymentId: annulTarget.paymentId, reason })
-    toast.success('Pago anulado. El crédito se recalculó.')
+    toast.success('Recaudo anulado. La venta se recalculó.')
     setAnnulTarget(null)
     await refreshDetail(detailSale.id)
     await load(true)
@@ -649,7 +649,7 @@ export default function ActiveSalesPage() {
       </Modal>
 
       {/* Quick payment modal */}
-      <Modal open={!!paymentSale} onClose={() => { setPaymentSale(null); setPaymentCollectorId('') }} title="Registrar pago"
+      <Modal open={!!paymentSale} onClose={() => { setPaymentSale(null); setPaymentCollectorId('') }} title="Registrar recaudo"
         footer={<><Button variant="secondary" onClick={() => { setPaymentSale(null); setPaymentCollectorId('') }}>Cancelar</Button><Button onClick={handleQuickPayment} loading={payingQuick} icon={<DollarSign className="w-4 h-4" />}>Confirmar pago</Button></>}>
         {paymentSale && paymentQuick && (
           <div className="space-y-4">
@@ -662,7 +662,7 @@ export default function ActiveSalesPage() {
               <button type="button" onClick={() => setPaymentValor(paymentQuick.mitad)} className="py-2 bg-gray-50 text-gray-600 rounded-xl text-xs font-medium hover:bg-gray-100">Mitad<br />{formatCurrency(paymentQuick.mitad, currency)}</button>
               <button type="button" onClick={() => setPaymentValor(paymentQuick.total)} className="py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-medium hover:bg-emerald-100">Total saldo<br />{formatCurrency(paymentQuick.total, currency)}</button>
             </div>
-            <MoneyInput label="Valor del pago" currency={currency} value={paymentValor} onValueChange={setPaymentValor} required
+            <MoneyInput label="Valor del recaudo" currency={currency} value={paymentValor} onValueChange={setPaymentValor} required
               hint={paymentValor > paymentQuick.total ? `Supera el saldo: se registrará ${formatCurrency(paymentQuick.total, currency)}` : undefined} />
             {/* El efectivo se carga a la caja del cobrador que lo recibió, no del
                 usuario que registra la operación. */}

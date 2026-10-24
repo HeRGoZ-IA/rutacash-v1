@@ -318,7 +318,7 @@ try {
     await waitTestid('rb-change-form');
     const picked = await pick('Nuevo responsable', newAdminName);
     await setField('Motivo', reason); await sleep(300);
-    const saved = picked && (await tap('rb-change-save')) && await waitToast('Responsable cambiado');
+    const saved = picked && (await tap('rb-change-save')) && await waitToast('Responsable de capital cambiado');
     await page.keyboard.press('Escape').catch(() => undefined);
     return saved;
   };
@@ -388,7 +388,7 @@ try {
     const card1 = { base: minorOf(await testid(`route-base-${C1}`)), worker: minorOf(await testid(`route-worker-base-${C1}`)) };
     const db1 = { base: await base(C1), worker: await bal(N, 'custody', { route: C1 }) };
     ok('A-03c', ['C-07'], 'Rutas: la tarjeta separa Base disponible, Base del trabajador y Cartera activa (= PostgreSQL)',
-      card1.base === db1.base && card1.worker === db1.worker && (await text()).includes('Cartera Activa'), JSON.stringify({ card1, db1 }));
+      card1.base === db1.base && card1.worker === db1.worker && (await text()).includes('Cartera activa'), JSON.stringify({ card1, db1 }));
     await go('/admin/transfers'); await waitTestid('rb-transfers'); await sleep(800);
     const trTxt = await text();
     ok('A-03d', ['C-01'], 'Transferencias y Notificaciones a todo el ancho; Transferencias sin «Custodias»',
@@ -411,14 +411,14 @@ try {
 
     b0 = await base(C1); let k0 = await custody(M.cob1, C1);
     await openOp('deliver');
-    await pick('Ruta', 'Ruta Centro 1'); await sleep(300); await pick('Cobrador', 'Norte Uno'); await setField('Valor', '300'); await setField('Concepto', 'Base para cobrar (E2E)');
-    ok('A-07', ['C-01'], 'Entrega de Base R$ 300 al Cobrador Norte Uno: Base −300, custodia +300', await saveOp('Entrega de Base a Cobrador registrada') && (await base(C1)) === b0 - 30_000 && (await custody(M.cob1, C1)) === k0 + 30_000);
+    await pick('Ruta', 'Ruta Centro 1'); await sleep(300); await pick('Trabajador', 'Norte Uno'); await setField('Valor', '300'); await setField('Concepto', 'Base para cobrar (E2E)');
+    ok('A-07', ['C-01'], 'Entrega de Base R$ 300 al Cobrador Norte Uno: Base −300, custodia +300', await saveOp('Entrega de Base a trabajador registrada') && (await base(C1)) === b0 - 30_000 && (await custody(M.cob1, C1)) === k0 + 30_000);
 
     // RB-D4: el Administrador pide una devolución → no se mueve dinero.
     b0 = await base(C1); k0 = await custody(M.cob1, C1);
     await go('/admin/transfers'); await waitTestid('rb-op-request'); await sleep(600);
     await tap('rb-op-request'); await waitTestid('request-form');
-    await pick('Ruta', 'Ruta Centro 1'); await sleep(300); await pick('Cobrador', 'Norte Uno'); await setField('Valor', '100'); await setField('Nota (opcional)', 'Devuelve R$ 100 de la Base (E2E)');
+    await pick('Ruta', 'Ruta Centro 1'); await sleep(300); await pick('Trabajador', 'Norte Uno'); await setField('Valor', '100'); await setField('Nota (opcional)', 'Devuelve R$ 100 de la Base (E2E)');
     await sleep(300); await shot('A-08-pedir-entrega-1280');
     await clickText('button', /^Enviar solicitud$/);
     const reqSent = await waitToast('Solicitud enviada');
@@ -818,8 +818,8 @@ try {
     ok('E-04', ['C-04'], 'Tras conciliar, la alerta PENDING_DIFFERENCES de Centro 1 desaparece', !(await page.$(`[data-testid="rb-route-${C1}"] [data-testid="alert-PENDING_DIFFERENCES"]`)));
     bd = await base(C1); let kd = await custody(M.cob1, C1);
     await openOp('deliver');
-    await pick('Ruta', 'Ruta Centro 1'); await sleep(300); await pick('Cobrador', 'Norte Uno'); await setField('Valor', '50'); await setField('Concepto', 'Entrega posterior a la conciliación');
-    ok('E-05', ['C-04'], 'La ruta sigue operando: una entrega posterior funciona', await saveOp('Entrega de Base a Cobrador registrada') && (await base(C1)) === bd - 5_000 && (await custody(M.cob1, C1)) === kd + 5_000);
+    await pick('Ruta', 'Ruta Centro 1'); await sleep(300); await pick('Trabajador', 'Norte Uno'); await setField('Valor', '50'); await setField('Concepto', 'Entrega posterior a la conciliación');
+    ok('E-05', ['C-04'], 'La ruta sigue operando: una entrega posterior funciona', await saveOp('Entrega de Base a trabajador registrada') && (await base(C1)) === bd - 5_000 && (await custody(M.cob1, C1)) === kd + 5_000);
     ok('E-06', ['C-04'], 'Consultas muestra «Conciliación de diferencia»', await consultasHas('Conciliación de diferencia', C1));
     await both('E-06-consultas-conciliacion');
 
@@ -980,8 +980,8 @@ try {
     await login('admin1.norte@example.test');
     // Entrega de Base al Cobrador 2 en Oeste 1 (ruta recibida) y su cuadre con faltante.
     await openOp('deliver');
-    await pick('Ruta', 'Ruta Oeste 1'); await sleep(300); await pick('Cobrador', 'Norte Dos'); await setField('Valor', '100'); await setField('Concepto', 'Base del día en la ruta recibida');
-    ok('I-00', ['C-01'], 'El Admin 1 entrega R$ 100 de Base al Cobrador 2 en Oeste 1 (ruta recibida del Admin 2)', await saveOp('Entrega de Base a Cobrador registrada'));
+    await pick('Ruta', 'Ruta Oeste 1'); await sleep(300); await pick('Trabajador', 'Norte Dos'); await setField('Valor', '100'); await setField('Concepto', 'Base del día en la ruta recibida');
+    ok('I-00', ['C-01'], 'El Admin 1 entrega R$ 100 de Base al Cobrador 2 en Oeste 1 (ruta recibida del Admin 2)', await saveOp('Entrega de Base a trabajador registrada'));
     await go('/admin/weekly-settlement'); await sleep(2000);
     await clickText('button', /^Cuadre por trabajador$/); await sleep(800);
     await pick('Ruta', 'Ruta Oeste 1'); await sleep(1500);
@@ -1048,8 +1048,8 @@ try {
     ok('I-05', ['C-14'], 'El Admin 1 aprueba la solicitud desde Autorizaciones', appr === 'approved', appr);
     // El Cobrador necesita efectivo para desembolsar sin conexión: el Admin 1 le entrega R$ 300 de Base.
     await openOp('deliver');
-    await pick('Ruta', 'Ruta Centro 1'); await sleep(300); await pick('Cobrador', 'Norte Uno'); await setField('Valor', '300'); await setField('Concepto', 'Base para desembolsar en campo');
-    ok('I-05b', ['C-01'], 'El Admin 1 entrega R$ 300 de Base al Cobrador 1 (para el desembolso en campo)', await saveOp('Entrega de Base a Cobrador registrada'));
+    await pick('Ruta', 'Ruta Centro 1'); await sleep(300); await pick('Trabajador', 'Norte Uno'); await setField('Valor', '300'); await setField('Concepto', 'Base para desembolsar en campo');
+    ok('I-05b', ['C-01'], 'El Admin 1 entrega R$ 300 de Base al Cobrador 1 (para el desembolso en campo)', await saveOp('Entrega de Base a trabajador registrada'));
     // Sin conexión: no hay alta de clientes ni ventas; desembolso aprobado y cobro sí, en cola; al volver, se sincronizan.
     await login('cobrador1.norte@example.test');
     await page.evaluate(() => navigator.serviceWorker?.ready.then(() => true)).catch(() => undefined);
@@ -1319,7 +1319,7 @@ try {
     // Consultas: la devolución mueve «Sobrante en control» → «Origen sin identificar»; ninguna es cuenta de la ruta
     // (Base o custodias), así que en la perspectiva de la ruta cuenta como «no toca su Base ni sus custodias».
     const inRoute = await consultasHas('Conciliación de diferencia', O1);
-    const outsideNote = /no tocan su Base ni sus custodias/.test(await text());
+    const outsideNote = /no tocan su Base disponible ni la Base del trabajador/.test(await text());
     await shot('T-14-consultas-admin2-oeste1');
     const dd = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
     await go(`/admin/consultas?vista=actividad&perspectiva=${encodeURIComponent(`route:${O1}`)}&desde=${dd}&hasta=${dd}`); await sleep(2500);

@@ -284,7 +284,7 @@ function PoolCapitalPage() {
               <Stat label="Disponible sin asignar" value={money(toMajor(summary.company.availableMinor))} tone="text-emerald-700" bg="bg-emerald-50" testId="company-available" />
               <Stat label="En cajas de Administradores" value={money(toMajor(summary.company.adminPoolsMinor))} tone="text-primary-700" bg="bg-primary-50" testId="company-assigned" />
               <Stat label="A cargo de trabajadores" value={money(toMajor(summary.company.custodyMinor))} tone="text-indigo-700" bg="bg-indigo-50" />
-              <Stat label="Prestado (cartera)" value={money(toMajor(summary.company.portfolioMinor))} />
+              <Stat label="Capital colocado" value={money(toMajor(summary.company.portfolioMinor))} />
             </div>
           </section>
 
@@ -299,7 +299,7 @@ function PoolCapitalPage() {
                   <tr className="text-left text-xs text-gray-500 border-b border-gray-100">
                     <th className="py-2 pr-3 font-medium">Administrador</th>
                     <th className="py-2 pr-3 font-medium text-right">Recibido (neto)</th>
-                    <th className="py-2 pr-3 font-medium text-right">A cargo de trabajadores</th>
+                    <th className="py-2 pr-3 font-medium text-right">Base del trabajador</th>
                     <th className="py-2 pr-3 font-medium text-right">Disponible</th>
                     <th className="py-2 pr-3 font-medium text-center">Rutas</th>
                     <th className="py-2 font-medium" />
@@ -351,7 +351,7 @@ function PoolCapitalPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-right">
-                        <p className="text-xs text-gray-500">A cargo de trabajadores</p>
+                        <p className="text-xs text-gray-500">Base del trabajador</p>
                         <p className="text-sm font-semibold text-gray-800">{money(enRuta(r.id))}</p>
                       </div>
                       <Button size="sm" variant="secondary" disabled={validRouteAdmins(users, r).filter(a => a.id !== r.capitalControllerAdminId).length === 0}
@@ -409,7 +409,7 @@ function PoolCapitalPage() {
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
               Responsable actual: <span className="font-semibold">{formatPersonName(routeCapitalController(changingRoute, users)?.nombre) || 'ninguno'}</span>.
-              El efectivo a cargo de los trabajadores de la ruta pasa a responsabilidad del nuevo Administrador desde este momento.
+              La Base del trabajador de la ruta pasa a responsabilidad del nuevo Administrador desde este momento.
             </p>
             <Select label="Nuevo responsable" value={changing.adminId} onChange={e => setChanging(c => c && { ...c, adminId: e.target.value })} required placeholder="Seleccionar Administrador asignado"
               options={candidatos.map(a => ({ value: a.id, label: formatPersonName(a.nombre) }))}

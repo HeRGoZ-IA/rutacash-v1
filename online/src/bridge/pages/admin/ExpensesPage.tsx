@@ -48,7 +48,7 @@ type GeneralOption = 'administrador' | 'empresa-general' | 'propio'
 
 /** Textos con Base por Ruta (sin bolsas). */
 const EFECTO_RB: Record<'ruta' | 'trabajador', string> = {
-  ruta: 'Pagado con la Base de la ruta: resta su Base disponible. No se carga a ningún trabajador.',
+  ruta: 'Pagado con la Base disponible de la ruta. No se carga a ningún trabajador.',
   trabajador: 'Pagado con el efectivo de un trabajador: resta lo que tiene en manos y aparece en sus Gastos y en su cuadre.',
 }
 
@@ -177,7 +177,7 @@ export default function ExpensesPage() {
   const opcionesGenerales: { value: GeneralOption; label: string }[] = !esAdmin ? [] : model === 'route_base'
     ? [{ value: 'administrador', label: 'General del Administrador' }, { value: 'empresa-general', label: 'General de empresa' }]
     : model === 'admin_pool' ? [{ value: 'propio', label: 'General con mi dinero propio (reembolsable)' }] : []
-  const SCOPE_RB: Record<'ruta' | 'trabajador', string> = { ruta: 'De ruta (lo paga su Base)', trabajador: 'De un trabajador (su efectivo)' }
+  const SCOPE_RB: Record<'ruta' | 'trabajador', string> = { ruta: 'De ruta (lo paga su Base disponible)', trabajador: 'De un trabajador (lo paga su Base del trabajador)' }
   const scopeLabel = (s: ExpenseScope) => (rb && s !== 'empresa' ? SCOPE_RB[s] : EXPENSE_SCOPE_LABEL[s])
   const trabajadores = form.routeId
     ? users.filter(u => custodianBlockedReason(u, form.routeId, tenantId) === null).sort((a, b) => a.nombre.localeCompare(b.nombre))
@@ -242,7 +242,7 @@ export default function ExpensesPage() {
     const f = expenseFundingOf(e)
     // R74 · Base por Ruta: los gastos de bolsa son anteriores al corte; se rotulan sin el vocabulario de bolsas.
     if (rb) {
-      if (f.kind === 'admin') return `Anterior a Base por Ruta · ${nombreDe(f.adminId)}`
+      if (f.kind === 'admin') return `Saldo sin asignar · ${nombreDe(f.adminId)}`
       if (f.kind === 'empresa') return 'Anterior a Base por Ruta · empresa'
       if (f.kind === 'historico') return 'Histórico'
       return null
@@ -392,7 +392,7 @@ export default function ExpensesPage() {
                   .filter(r => canRegisterExpenseScope(user, form.scope as ExpenseScope, r.id, { route: r, users }))
                   .map(r => ({ value: r.id, label: r.nombre }))}
                 placeholder="Seleccionar ruta" required
-                hint={form.scope === 'ruta' ? (rb ? 'Solo las rutas de las que eres responsable: el gasto sale de su Base.' : 'Solo las rutas de las que eres responsable de capital: el gasto sale de su caja.') : undefined} />
+                hint={form.scope === 'ruta' ? (rb ? 'Solo las rutas de las que eres responsable: el gasto sale de su Base disponible.' : 'Solo las rutas de las que eres responsable de capital: el gasto sale de su caja.') : undefined} />
               {form.scope === 'trabajador' && (
                 <Select label="Trabajador que pagó" value={form.collectorId} onChange={e => setForm(f => ({ ...f, collectorId: e.target.value }))}
                   options={trabajadores.map(u => ({ value: u.id, label: formatPersonName(u.nombre) }))}

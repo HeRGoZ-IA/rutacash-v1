@@ -205,7 +205,7 @@ const OP_TEXT: Record<string, (o: { actor: { name: string | null }; workerName: 
   'capital-collected': (o) => `${formatPersonName(o.actor.name) || 'El SuperAdmin'} recogió capital de tu caja`,
   'cash-delivered': (o) => `Entrega de efectivo de ${formatPersonName(o.actor.name) || 'un Cobrador'}`,
   'capital-returned': (o) => `${formatPersonName(o.actor.name) || 'Un Administrador'} devolvió capital`,
-  'capital-delivered': (o) => `Capital recibido de ${formatPersonName(o.actor.name) || 'tu Administrador'}`,
+  'capital-delivered': (o) => `Base recibida de ${formatPersonName(o.actor.name) || 'tu Administrador'}`,
   'return-registered': (o) => `${formatPersonName(o.actor.name) || 'Tu Administrador'} registró una devolución tuya`,
   'route-transfer-received': (o) => `Transferencia de Base recibida de ${formatPersonName(o.actor.name) || 'otro Administrador'}`,
 };

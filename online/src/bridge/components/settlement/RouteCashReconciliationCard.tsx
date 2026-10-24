@@ -53,16 +53,16 @@ export function RouteCashReconciliationCard({ routeId }: { routeId: string }) {
     <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden divide-y divide-gray-50">
       <div className="px-4 py-3 bg-gray-50 flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 text-sm font-semibold text-gray-800">
-          <Landmark className="w-4 h-4 text-gray-400" /> Efectivo de la ruta
+          <Landmark className="w-4 h-4 text-gray-400" /> Base del trabajador
         </span>
         {r.cuadra
           ? <span className="flex items-center gap-1 text-xs font-medium text-emerald-600"><CheckCircle2 className="w-3.5 h-3.5" /> Cuadra</span>
           : <span className="flex items-center gap-1 text-xs font-medium text-red-600"><AlertTriangle className="w-3.5 h-3.5" /> Revisar</span>}
       </div>
-      <Linea label="Base de la ruta" value={money(r.libro.saldo)} strong />
+      <Linea label="Base del trabajador (total de la ruta)" value={money(r.libro.saldo)} strong />
       {r.personas.filter(p => p.posicion !== 0 || p.baseRecibida > 0).map(p => (
         <Linea key={p.userId}
-          label={`En manos de ${formatPersonName(p.nombre)}${p.baseRecibida ? ` (${central.activo ? 'capital recibido neto' : 'Base entregada'} ${money(p.baseRecibida - p.baseDevuelta)})` : ''}`}
+          label={`${formatPersonName(p.nombre)}${p.baseRecibida ? ` (Base entregada neta ${money(p.baseRecibida - p.baseDevuelta)})` : ''}`}
           value={money(p.posicion)} tone={p.posicion < 0 ? 'text-red-600' : 'text-gray-800'} />
       ))}
       {r.faltantes.map(f => (
@@ -71,7 +71,7 @@ export function RouteCashReconciliationCard({ routeId }: { routeId: string }) {
       {e.sobrantesRegistrados > 0 && (
         <Linea label="Sobrantes registrados (fuera del libro)" value={money(e.sobrantesRegistrados)} tone="text-amber-600" />
       )}
-      <Linea label="Cartera en calle (no es efectivo)" value={money(r.cartera.carteraEnCalle)} tone="text-indigo-600" />
+      <Linea label="Cartera activa (no es efectivo)" value={money(r.cartera.carteraEnCalle)} tone="text-indigo-600" />
     </div>
   )
 }

@@ -140,7 +140,7 @@ function PoolTransfersPage() {
       { kind: 'request-sa', title: 'Pedir capital al SuperAdmin', help: 'Lo atiende el SuperAdmin.', icon: <Send className="w-5 h-5" /> },
       { kind: 'request-admin', title: 'Pedir capital a otro Administrador', help: 'Lo atiende quien tiene el capital.', icon: <Send className="w-5 h-5" />,
         blocked: otherAdmins.length === 0 ? 'No hay otros Administradores activos.' : null },
-      { kind: 'request-worker', title: 'Pedir entrega de efectivo a un Cobrador', help: 'Recaudo o devolución de base.', icon: <Send className="w-5 h-5" />,
+      { kind: 'request-worker', title: 'Pedir entrega de efectivo a un trabajador', help: 'Recaudo o devolución de base.', icon: <Send className="w-5 h-5" />,
         blocked: misRutas.length === 0 ? sinRutas : null },
     ] },
   ]
@@ -175,7 +175,7 @@ function PoolTransfersPage() {
           <p className="text-lg font-bold text-primary-700" data-testid="summary-pool">{available == null ? '—' : money(available)}</p>
         </div>
         <div className="rounded-2xl bg-white border border-gray-100 shadow-card p-4">
-          <p className="text-xs text-gray-600">En manos de trabajadores</p>
+          <p className="text-xs text-gray-600">Base del trabajador</p>
           <p className="text-lg font-bold text-gray-900" data-testid="summary-workers">{money(totalEnManos)}</p>
           <p className="text-[11px] text-gray-500">{rutasVisibles.length} ruta(s)</p>
         </div>
@@ -214,7 +214,7 @@ function PoolTransfersPage() {
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="text-[11px] text-gray-500">En trabajadores</p>
+                  <p className="text-[11px] text-gray-500">Base del trabajador</p>
                   <p className="text-sm font-bold text-gray-800">{enManos[r.id] == null ? '—' : money(enManos[r.id] ?? 0)}</p>
                 </div>
               </div>

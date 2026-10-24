@@ -18,7 +18,7 @@ const BLOCKER_TEXT: Record<string, string> = {
   CREDIT_NOT_ACTIVE: 'La venta no está activa.',
   OVERPAYMENT: 'Reaplicarlo superaría el saldo de la venta.',
   LEGACY_PAYMENTS: 'El pago no tiene asiento en el libro: no se sabe qué cuenta lo recibió.',
-  CUSTODIAN_CHANGED: 'El trabajador que recibió el pago ya no tiene caja en esta ruta.',
+  CUSTODIAN_CHANGED: 'El trabajador que recibió el pago ya no tiene Base del trabajador en esta ruta.',
   REVERSAL_SETTLED: 'La anulación ya entró en un cuadre del trabajador: ese efectivo pudo quedar como sobrante. Sin política de conciliación aprobada no se reaplica.',
   POOL_OF_ANOTHER_ADMIN: 'El pago entró a la cuenta de otro Administrador (su bolsa o los fondos de una ruta a su cargo): solo ese Administrador puede reaplicarlo.',
 }

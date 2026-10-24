@@ -29,7 +29,7 @@ const BLOCKER_TEXT: Record<string, string> = {
   LEDGER_INCONSISTENT: 'Los pagos y su imputación no concilian con la venta: revísela antes de corregirla.',
   DISBURSEMENT_SETTLED: 'El desembolso ya entró en un cuadre del trabajador: corregirlo alteraría un cuadre cerrado.',
   PERIOD_CLOSED: 'El periodo de la ruta está cerrado: no se registran movimientos en un periodo cerrado.',
-  CUSTODIAN_CHANGED: 'El trabajador que entregó el dinero ya no tiene caja en esta ruta: no hay a quién cargar o devolver la diferencia.',
+  CUSTODIAN_CHANGED: 'El trabajador que entregó el dinero ya no tiene Base del trabajador en esta ruta: no hay a quién cargar o devolver la diferencia.',
   POOL_OF_ANOTHER_ADMIN: 'El desembolso salió de la cuenta de otro Administrador (su bolsa o los fondos de una ruta a su cargo): solo ese Administrador puede corregirlo.',
   INSUFFICIENT_FUNDS: 'La cuenta que pagó el desembolso no tiene saldo suficiente para el capital adicional.',
   OFFLINE_PENDING: 'Hay cobros guardados sin conexión que todavía no llegaron al servidor: el estado de la venta no es seguro.',
@@ -141,8 +141,8 @@ export function RectifySaleModal({ sale, user, currency, open, onClose, onDone }
         <div className="rounded-xl bg-amber-50 border border-amber-100 p-3 text-sm text-amber-800 flex gap-2">
           <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
           <p>No se borra nada. El desembolso original ({formatCurrency(sale.valorVenta, currency)}{sale.fechaDesembolso ? `, ${formatDate(sale.fechaDesembolso)}` : ''}) y
-            cada pago se conservan con su fecha. Si cambia el valor entregado, la diferencia es un movimiento nuevo de la cuenta que pagó (custodia del
-            trabajador, fondos de la ruta o bolsa del Administrador). No se puede corregir en un periodo cerrado.</p>
+            cada pago se conservan con su fecha. Si cambia el valor entregado, la diferencia es un movimiento nuevo de la cuenta que pagó (Base del
+            trabajador, Base disponible de la ruta o saldo del Administrador). No se puede corregir en un periodo cerrado.</p>
         </div>
         {pagos && (
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800 space-y-1.5" data-testid="rectify-payments">

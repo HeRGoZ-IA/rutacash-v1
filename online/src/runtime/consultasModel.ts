@@ -54,8 +54,8 @@ export interface Detail {
 
 export const KIND_LABEL: Record<string, string> = {
   COMPANY_DEPOSIT: 'Depósito de capital', COMPANY_WITHDRAWAL: 'Retiro de capital', ADMIN_ALLOCATION: 'Inyección a bolsa',
-  ADMIN_RETURN: 'Devolución a la empresa', PARTNER_CONTRIBUTION: 'Aporte de socio (histórico)', WORKER_DELIVERY: 'Entrega a trabajador',
-  WORKER_RETURN: 'Devolución del trabajador', WORKER_TRANSFER: 'Traspaso entre trabajadores', ROUTE_REASSIGNMENT: 'Traspaso entre rutas',
+  ADMIN_RETURN: 'Devolución a la empresa', PARTNER_CONTRIBUTION: 'Aporte de socio (histórico)', WORKER_DELIVERY: 'Entrega de Base a trabajador',
+  WORKER_RETURN: 'Devolución de Base', WORKER_TRANSFER: 'Traspaso entre trabajadores', ROUTE_REASSIGNMENT: 'Traspaso de trabajador entre rutas',
   LOAN_DISBURSEMENT: 'Desembolso', COLLECTION: 'Recaudo', WORKER_EXPENSE: 'Gasto del trabajador', ROUTE_EXPENSE: 'Gasto de ruta',
   COMPANY_EXPENSE: 'Gasto de empresa', EXPENSE_REFUND: 'Reintegro de gasto', SETTLEMENT_RETURN: 'Entrega por cuadre',
   SETTLEMENT_SURPLUS: 'Sobrante de cuadre', ADMIN_TRANSFER_HOLD: 'Traspaso entre Administradores · salida',
@@ -65,7 +65,7 @@ export const KIND_LABEL: Record<string, string> = {
   SALE_CANCELLATION: 'Venta aprobada cancelada', CUSTODY_SETTLEMENT: 'Cuadre', PERIOD_CLOSURE: 'Cierre de periodo',
   CREDIT_RECTIFICATION: 'Corrección de venta sin diferencia',
   // R74 · Base por Ruta (0034) y gastos generales (0035): mismo vocabulario que Transferencias y la Caja principal.
-  ROUTE_BASE_INJECTION: 'Inyección de Base', ROUTE_BASE_WITHDRAWAL: 'Retiro de Base', ROUTE_TRANSFER: 'Transferencia de Base entre rutas',
+  ROUTE_BASE_INJECTION: 'Inyección de Base', ROUTE_BASE_WITHDRAWAL: 'Retiro de Base', ROUTE_TRANSFER: 'Transferencia entre rutas',
   LEGACY_POOL_TO_ROUTE: 'Reparto de saldo sin asignar', GENERAL_EXPENSE_CONTRIBUTION: 'Aporte de ruta a gasto general',
   GENERAL_EXPENSE_OWN_MONEY: 'Gasto general con dinero propio', ADMIN_REIMBURSEMENT: 'Reembolso a Administrador',
   DIFFERENCE_CONCILIATION: 'Conciliación de diferencia',
@@ -76,7 +76,7 @@ export const KIND_LABEL: Record<string, string> = {
  * cambia de dónde sale o a dónde llega el dinero: la Base de la ruta, no una bolsa).
  */
 const KIND_LABEL_ROUTE_BASE: Record<string, string> = {
-  WORKER_DELIVERY: 'Entrega de Base a Cobrador', WORKER_RETURN: 'Devolución de Base', SETTLEMENT_RETURN: 'Entrega por cuadre a la Base',
+  WORKER_DELIVERY: 'Entrega de Base a trabajador', WORKER_RETURN: 'Devolución de Base', SETTLEMENT_RETURN: 'Entrega por cuadre a la Base disponible',
 };
 
 /** Etiqueta del movimiento; un tipo desconocido se muestra legible, nunca rompe la vista. */
@@ -120,14 +120,14 @@ export function partyLabel(p: Party | null | undefined, routeBase = false): stri
   const name = formatPersonName(p.name ?? '');
   switch (p.type) {
     // Con Base por Ruta, la bolsa solo existe como historia (antes del corte) o como saldo «sin asignar».
-    case 'pool': return routeBase ? `Saldo anterior de ${name || 'Administrador'}` : `Bolsa de ${name || 'Administrador'}`;
+    case 'pool': return routeBase ? `Saldo sin asignar de ${name || 'Administrador'}` : `Bolsa de ${name || 'Administrador'}`;
     case 'custody': return name || 'Trabajador';
     case 'route_base': return `Base de ${p.routeName ?? p.name ?? 'la ruta'}`;
     case 'company': return 'Empresa';
     case 'client': return formatClientName(p.name ?? '') || 'Cliente';
     case 'expense': return `Gasto · ${p.name ?? ''}`.trim();
     case 'external': return 'Fuera de la empresa';
-    case 'transit': return routeBase ? `Saldo anterior de ${name || 'Administrador'} · en tránsito` : `Bolsa de ${name || 'Administrador'} · en tránsito`;
+    case 'transit': return routeBase ? `Saldo sin asignar de ${name || 'Administrador'} · en tránsito` : `Bolsa de ${name || 'Administrador'} · en tránsito`;
     case 'control': return 'Sobrante en control';
     case 'unidentified': return 'Origen sin identificar';
     case 'partner': return `Socio ${name}`.trim();

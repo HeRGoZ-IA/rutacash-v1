@@ -36,9 +36,9 @@ function gastos(src: ReportSources, f: ReportFilters): ReportRow[] {
           : EXPENSE_SCOPE_LABEL[a.scope];
     const fuente = raw.funding === 'routes' ? 'Aportes de rutas'
       : raw.funding === 'own_money' ? `Dinero propio de ${userName(e.userId)} (reembolsable)`
-        : a.scope === 'trabajador' ? (rb ? 'Efectivo del trabajador' : '—')
-          : a.scope === 'ruta' ? (rb ? 'Base de la ruta' : '—')
-            : pool.kind === 'admin' ? (rb ? `Saldo anterior de ${userName(pool.adminId)}` : `Administrador ${userName(pool.adminId)}`)
+        : a.scope === 'trabajador' ? (rb ? 'Base del trabajador' : '—')
+          : a.scope === 'ruta' ? (rb ? 'Base disponible' : '—')
+            : pool.kind === 'admin' ? (rb ? `Saldo sin asignar de ${userName(pool.adminId)}` : `Administrador ${userName(pool.adminId)}`)
               : pool.kind === 'empresa' ? (rb ? 'Empresa (anterior a Base por Ruta)' : 'Empresa')
                 : pool.kind === 'historico' ? (rb ? 'Histórico' : 'Histórico sin bolsa') : '—';
     const estado = general ? (e.reversesId ? 'anulacion' : e.reversalId ? 'anulado' : 'vigente') : poolExpenseStateOf(e);

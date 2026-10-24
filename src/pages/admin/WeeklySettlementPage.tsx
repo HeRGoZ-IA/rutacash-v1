@@ -297,15 +297,15 @@ export default function WeeklySettlementPage() {
       'Código ruta': generatedRoute?.codigo ?? '',
       'Semana inicio': formatDate(settlement.semanaInicio),
       'Semana fin': formatDate(settlement.semanaFin),
-      'Saldo anterior': settlement.saldoAnterior,
-      'Ingreso capital': settlement.ingresoCapital,
-      Cobros: settlement.cobros,
-      'Préstamos entregados': settlement.prestamosEntregados,
+      'Base del trabajador inicial': settlement.saldoAnterior,
+      'Entregas de Base': settlement.ingresoCapital,
+      Recaudo: settlement.cobros,
+      Desembolsos: settlement.prestamosEntregados,
       Gastos: settlement.gastos,
       'Transferencias entrada': settlement.transferenciasEntradas,
       'Transferencias salida': settlement.transferenciasSalidas,
-      Retiros: settlement.retiros,
-      'Saldo final': settlement.saldoFinal,
+      'Devoluciones de Base': settlement.retiros,
+      'Base del trabajador final': settlement.saldoFinal,
     }]
     downloadCSV(rows, `liquidacion_${routeFileTag(routes, settlement.routeId)}_${semanaInicio}_${semanaFin}.csv`)
     toast.success('CSV descargado')
@@ -443,7 +443,7 @@ export default function WeeklySettlementPage() {
           {/* KPI de ESTA ruta */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="bg-primary-50 rounded-xl p-4 text-center">
-              <p className="text-xs text-gray-500">Cobros</p>
+              <p className="text-xs text-gray-500">Recaudo</p>
               <p className="text-xl font-bold text-primary-700 mt-1">{formatCurrency(settlement.cobros, currency)}</p>
             </div>
             <div className="bg-red-50 rounded-xl p-4 text-center">
@@ -451,7 +451,7 @@ export default function WeeklySettlementPage() {
               <p className="text-xl font-bold text-red-600 mt-1">{formatCurrency(settlement.gastos, currency)}</p>
             </div>
             <div className="bg-emerald-50 rounded-xl p-4 text-center">
-              <p className="text-xs text-gray-500">Saldo final</p>
+              <p className="text-xs text-gray-500">Base del trabajador al cierre</p>
               <p className={`text-xl font-bold mt-1 ${settlement.saldoFinal >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
                 {formatCurrency(settlement.saldoFinal, currency)}
               </p>
@@ -460,21 +460,21 @@ export default function WeeklySettlementPage() {
 
           {/* Detalle completo de la ruta liquidada */}
           <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden divide-y divide-gray-50">
-            <Row label="Saldo anterior" value={settlement.saldoAnterior} />
-            <Row label={flujo?.hayCentralizados ? '(+) Ingreso de capital (ver detalle)' : '(+) Ingreso capital'} value={settlement.ingresoCapital} tone="text-emerald-600" />
-            <Row label="(+) Cobros" value={settlement.cobros} tone="text-emerald-600" />
+            <Row label="Base del trabajador al inicio" value={settlement.saldoAnterior} />
+            <Row label={flujo?.hayCentralizados ? '(+) Entregas de Base (ver detalle)' : '(+) Entregas de Base'} value={settlement.ingresoCapital} tone="text-emerald-600" />
+            <Row label="(+) Recaudo" value={settlement.cobros} tone="text-emerald-600" />
             {/* ETIQUETA NEUTRA (decisión D-6): NO se renombra a "Base recibida" porque
                 este total agrega naturalezas distintas — una transferencia socio→ruta
                 sí es base nueva, pero una ruta→ruta es un traslado interno que otra
                 ruta perdió. Distinguirlas exige modelado nuevo (Fase 2). Hasta
                 entonces, una sola etiqueta consistente en toda la app. */}
             <Row label="(+) Transferencias entrantes" value={settlement.transferenciasEntradas} tone="text-emerald-600" />
-            <Row label="(−) Préstamos entregados" value={settlement.prestamosEntregados} tone="text-blue-600" />
+            <Row label="(−) Desembolsos" value={settlement.prestamosEntregados} tone="text-blue-600" />
             <Row label="(−) Gastos" value={settlement.gastos} tone="text-red-500" />
             <Row label="(−) Transferencias salientes" value={settlement.transferenciasSalidas} tone="text-red-500" />
-            <Row label={flujo?.hayCentralizados ? '(−) Retiros y retornos a la bolsa (ver detalle)' : '(−) Retiros'} value={settlement.retiros} tone="text-amber-600" />
+            <Row label={flujo?.hayCentralizados ? '(−) Devoluciones de Base (ver detalle)' : '(−) Devoluciones de Base'} value={settlement.retiros} tone="text-amber-600" />
             <div className="flex items-center justify-between px-4 py-3.5 bg-gray-50">
-              <span className="text-sm font-semibold text-gray-800">Saldo final</span>
+              <span className="text-sm font-semibold text-gray-800">Base del trabajador al cierre</span>
               <span className={`text-base font-bold ${settlement.saldoFinal >= 0 ? 'text-primary-700' : 'text-red-600'}`}>
                 {formatCurrency(settlement.saldoFinal, currency)}
               </span>
@@ -523,7 +523,7 @@ export default function WeeklySettlementPage() {
                   <th className="text-left font-medium px-4 py-2.5">Semana</th>
                   <th className="text-left font-medium px-4 py-2.5">Oficina al cierre</th>
                   <th className="text-left font-medium px-4 py-2.5">Estado</th>
-                  <th className="text-right font-medium px-4 py-2.5">Saldo final</th>
+                  <th className="text-right font-medium px-4 py-2.5">Base del trabajador al cierre</th>
                   <th className="px-4 py-2.5" />
                 </tr>
               </thead>
@@ -609,14 +609,14 @@ export default function WeeklySettlementPage() {
                 <div><dt className="text-xs text-gray-500">Estado</dt><dd className="font-medium text-gray-900">{previos > 0 ? `Reabierto (ya tuvo ${previos} cierre${previos > 1 ? 's' : ''})` : 'Abierto, sin cierre previo'}</dd></div>
               </dl>
               <div className="divide-y divide-gray-100">
-                {fila('Saldo anterior', confirmCierre.saldoAnterior)}
-                {fila('(+) Cobros', confirmCierre.cobros, 'text-emerald-700')}
-                {fila('(+) Ingreso de capital y transferencias entrantes', confirmCierre.ingresoCapital + confirmCierre.transferenciasEntradas, 'text-emerald-700')}
-                {fila('(−) Préstamos entregados', confirmCierre.prestamosEntregados, 'text-blue-700')}
+                {fila('Base del trabajador al inicio', confirmCierre.saldoAnterior)}
+                {fila('(+) Recaudo', confirmCierre.cobros, 'text-emerald-700')}
+                {fila('(+) Entregas de Base y transferencias recibidas', confirmCierre.ingresoCapital + confirmCierre.transferenciasEntradas, 'text-emerald-700')}
+                {fila('(−) Desembolsos', confirmCierre.prestamosEntregados, 'text-blue-700')}
                 {fila('(−) Gastos', confirmCierre.gastos, 'text-red-600')}
-                {fila('(−) Transferencias salientes y retiros', confirmCierre.transferenciasSalidas + confirmCierre.retiros, 'text-red-600')}
+                {fila('(−) Transferencias enviadas y devoluciones de Base', confirmCierre.transferenciasSalidas + confirmCierre.retiros, 'text-red-600')}
                 <div className="flex items-center justify-between gap-3 py-2">
-                  <span className="font-semibold text-gray-800">Saldo final</span>
+                  <span className="font-semibold text-gray-800">Base del trabajador al cierre</span>
                   <span className={`text-base font-bold tabular-nums ${confirmCierre.saldoFinal >= 0 ? 'text-primary-700' : 'text-red-600'}`}>{formatCurrency(confirmCierre.saldoFinal, currency)}</span>
                 </div>
               </div>

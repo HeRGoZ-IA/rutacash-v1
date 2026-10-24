@@ -119,11 +119,11 @@ export default function DashboardPage() {
         <>
           {/* R74 · Base por Ruta: el efectivo (Base + custodias) y la cartera, nunca sumados entre sí. */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-testid="dashboard-kpis">
-            <KPICard title="Base disponible" value={m(t.baseMinor)} icon={<Wallet className="w-5 h-5" />} color="blue" subtitle="En la Base de tus rutas" />
+            <KPICard title="Base disponible" value={m(t.baseMinor)} icon={<Wallet className="w-5 h-5" />} color="blue" subtitle="De tus rutas" />
             <KPICard title="Base del trabajador" value={m(t.custodyMinor)} icon={<Users className="w-5 h-5" />} color="purple" subtitle="En manos de trabajadores" />
-            <KPICard title="Efectivo total" value={m(t.cashMinor)} icon={<DollarSign className="w-5 h-5" />} color="green" subtitle="Base de las rutas + Base del trabajador" />
-            <KPICard title="Cartera pendiente" value={m(t.principalPlacedMinor)} icon={<CreditCard className="w-5 h-5" />} color="gray"
-              subtitle="Capital colocado · no es efectivo" />
+            <KPICard title="Efectivo de las rutas" value={m(t.cashMinor)} icon={<DollarSign className="w-5 h-5" />} color="green" subtitle="Base disponible + Base del trabajador" />
+            <KPICard title="Capital colocado" value={m(t.principalPlacedMinor)} icon={<CreditCard className="w-5 h-5" />} color="gray"
+              subtitle="Sin interés · no es efectivo" />
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3" data-testid="dashboard-route-base">
             <MiniStat label="Recaudo hoy" value={money(data.recaudoHoy)} icon={<TrendingUp className="w-4 h-4 text-emerald-600" />} />
@@ -133,7 +133,7 @@ export default function DashboardPage() {
               tone={(t.differences ? t.differences.shortagePendingMinor : t.shortageMinor) > 0 ? 'text-amber-700' : undefined}
               hint="No es billete" icon={<AlertTriangle className="w-4 h-4 text-amber-600" />} />
             <MiniStat label={t.differences ? 'Sobrantes pendientes' : 'Sobrantes en control'} value={m(t.differences ? t.differences.surplusPendingMinor : t.surplusMinor)}
-              hint="Aparte; no es Base" icon={<Scale className="w-4 h-4 text-gray-500" />} />
+              hint="Aparte; no es Base disponible" icon={<Scale className="w-4 h-4 text-gray-500" />} />
             <MiniStat label="Reembolsos pendientes" value={m(panel.general.pendingAdminReimbursements?.totalMinor ?? 0)}
               hint="A Administradores · obligación; no es efectivo" icon={<HandCoins className="w-4 h-4 text-violet-600" />} />
           </div>
@@ -145,10 +145,10 @@ export default function DashboardPage() {
             value={money(data.recaudoHoy)}
             icon={<TrendingUp className="w-5 h-5" />}
             color="green"
-            subtitle="Cobros del día"
+            subtitle="Del día"
           />
           <KPICard
-            title="Cartera Activa"
+            title="Cartera activa"
             value={money(data.carteraEnCalle)}
             icon={<CreditCard className="w-5 h-5" />}
             color="purple"
@@ -156,15 +156,15 @@ export default function DashboardPage() {
           />
           {/* R74 (§4.2): era «Base total», pero es Σ custodias (efectivo en manos de trabajadores; sin bolsas). */}
           <KPICard
-            title="Efectivo en custodias"
+            title="Base del trabajador"
             value={money(data.baseActualTotal)}
             icon={<DollarSign className="w-5 h-5" />}
             color="blue"
-            subtitle="En manos de trabajadores · sin bolsas"
+            subtitle="Efectivo de los trabajadores · sin bolsas"
           />
           {/* R74 (§4.2): era «Total controlado» e incluía interés no cobrado sin decirlo. */}
           <KPICard
-            title="Custodias + cartera"
+            title="Base del trabajador + Cartera activa"
             value={money(data.totalControlado)}
             icon={<TrendingUp className="w-5 h-5" />}
             color="green"

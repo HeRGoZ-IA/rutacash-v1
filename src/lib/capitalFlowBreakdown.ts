@@ -73,15 +73,15 @@ export function capitalFlowBreakdown(
 
 export const CAPITAL_FLOW_LABELS = {
   capital: {
-    aCajaDeRuta: 'Capital a la caja de la ruta',
-    entregasATrabajadores: 'Capital entregado a trabajadores',
-    desembolsosDelAdministrador: 'Préstamos del Administrador (con su bolsa)',
-    gastosDeRutaConBolsa: 'Gastos de ruta pagados con la bolsa',
+    aCajaDeRuta: 'Capital a la caja de la ruta (modelo anterior)',
+    entregasATrabajadores: 'Entregas de Base a trabajadores',
+    desembolsosDelAdministrador: 'Desembolsos del Administrador (con su saldo sin asignar)',
+    gastosDeRutaConBolsa: 'Gastos de ruta pagados con el saldo sin asignar',
   },
   retiros: {
     retirosDeCaja: 'Retiros de la caja de la ruta',
-    devolucionesDeTrabajadores: 'Devoluciones de trabajadores a la bolsa',
-    retornosDeCuadre: 'Efectivo de cuadres devuelto a la bolsa',
-    cobrosNoEnEfectivo: 'Cobros no en efectivo enviados a la bolsa',
+    devolucionesDeTrabajadores: 'Devoluciones de Base de trabajadores',
+    retornosDeCuadre: 'Efectivo entregado en cuadres',
+    cobrosNoEnEfectivo: 'Recaudo no en efectivo (fuera de la Base del trabajador)',
   },
 } as const

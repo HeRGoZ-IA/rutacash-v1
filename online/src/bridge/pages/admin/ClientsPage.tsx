@@ -244,7 +244,7 @@ export default function ClientsPage() {
 
     // Validación de la venta opcional (solo al crear cliente con crédito)
     if (!editing && addSale) {
-      if (saleForm.valorVenta <= 0) { toast.error('El valor del préstamo debe ser mayor a 0'); return }
+      if (saleForm.valorVenta <= 0) { toast.error('El valor de la venta debe ser mayor a 0'); return }
       if (capDisponible != null && saleForm.valorVenta > capDisponible) { toast.error(`La venta supera el dinero disponible (${formatCurrency(capDisponible, currency)})`); return }
       if (saleForm.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return }
       if (![10, 20].includes(saleForm.tasaInteres)) { toast.error('La tasa de interés debe ser 10% o 20%'); return }
@@ -269,7 +269,7 @@ export default function ClientsPage() {
           frecuenciaPago: saleForm.frecuenciaPago, fechaInicio: saleForm.fechaInicio, paymentDays: saleForm.paymentDays,
         }, user, { newClient: client })
         if (user) await logAction({ tenantId, userId: user.id, action: 'CREATE_CLIENT', entityType: 'Client', entityId: client.id, descripcion: `Cliente creado con crédito: ${client.nombre}` })
-        toast.success('Cliente y crédito creados')
+        toast.success('Cliente y venta creados')
       } else {
         // ADEX Online: + tipo de documento.
         const client = { id: generateId(), tenantId, ...form, documentType: tipoDocumento, status: 'activo', createdAt: nowISO(), updatedAt: nowISO() } as Client
@@ -287,7 +287,7 @@ export default function ClientsPage() {
     try {
       const totalSales = await db.sales.where('clientId').equals(client.id).count()
       if (totalSales > 0) {
-        toast.error('No se puede eliminar este cliente porque tiene créditos asociados. Puedes inactivarlo.')
+        toast.error('No se puede eliminar este cliente porque tiene ventas asociadas. Puedes inactivarlo.')
         return
       }
       setDeleteTarget(client)
@@ -467,17 +467,17 @@ export default function ClientsPage() {
                   onChange={e => setAddSale(e.target.checked)}
                   className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                 />
-                <span className="text-sm font-medium text-gray-800">Crear crédito ahora</span>
+                <span className="text-sm font-medium text-gray-800">Crear venta ahora</span>
                 <span className="text-xs text-gray-500">Agrega una venta al guardar el cliente</span>
               </label>
 
               {addSale && (
                 <div className="mt-4 space-y-4 border-t border-gray-100 pt-4">
                   <p className="text-xs text-gray-500">
-                    El crédito se crea en la ruta del cliente: <span className="font-medium text-gray-700">{routes.find(r => r.id === form.routeId)?.nombre ?? 'sin ruta'}</span>
+                    La venta se crea en la ruta del cliente: <span className="font-medium text-gray-700">{routes.find(r => r.id === form.routeId)?.nombre ?? 'sin ruta'}</span>
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <MoneyInput label="Valor del préstamo" currency={currency} value={saleForm.valorVenta} onValueChange={v => setSaleForm(f => ({ ...f, valorVenta: v }))} required />
+                    <MoneyInput label="Valor de la venta" currency={currency} value={saleForm.valorVenta} onValueChange={v => setSaleForm(f => ({ ...f, valorVenta: v }))} required />
                     <Select label="Tasa interés" value={String(saleForm.tasaInteres)} onChange={e => setSaleForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={TASA_OPTIONS} />
                     <Input label="N° de parcelas" type="number" min={1} required value={saleForm.numeroCuotas || ''} onChange={e => { const v = e.target.value; setSaleForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder={`Ej: ${DEFAULT_INSTALLMENTS}`} />
                   </div>

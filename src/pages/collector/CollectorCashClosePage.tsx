@@ -126,31 +126,31 @@ export default function CollectorCashClosePage() {
         {ciclo && (
           <>
             {central.activo && (
-              <p className="text-[11px] text-gray-500" data-testid="cycle-flows-note">Entradas y salidas de este periodo. No son saldos separados: el único saldo es tu efectivo a cargo.</p>
+              <p className="text-[11px] text-gray-500" data-testid="cycle-flows-note">Entradas y salidas de este periodo. No son saldos separados: el único saldo es tu efectivo.</p>
             )}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-card divide-y divide-gray-50">
               {ciclo.arrastreAnterior > 0 && (
                 <Row icon={<AlertTriangle className="w-4 h-4 text-amber-600" />} label="Faltante pendiente del cuadre anterior" value={`+${money(ciclo.arrastreAnterior)}`} color="text-amber-600" />
               )}
               {ciclo.baseRecibida > 0 && (
-                <Row icon={<Wallet className="w-4 h-4 text-primary-600" />} label={central.activo ? 'Capital recibido del Administrador' : 'Base recibida'} value={`+${money(ciclo.baseRecibida)}`} color="text-primary-700" />
+                <Row icon={<Wallet className="w-4 h-4 text-primary-600" />} label="Base recibida" value={`+${money(ciclo.baseRecibida)}`} color="text-primary-700" />
               )}
               {ciclo.baseDevuelta > 0 && (
-                <Row icon={<Wallet className="w-4 h-4 text-gray-500" />} label={central.activo ? 'Capital devuelto / traspasado' : 'Base devuelta / traspasada'} value={`-${money(ciclo.baseDevuelta)}`} color="text-gray-600" />
+                <Row icon={<Wallet className="w-4 h-4 text-gray-500" />} label="Base devuelta / traspasada" value={`-${money(ciclo.baseDevuelta)}`} color="text-gray-600" />
               )}
-              <Row icon={<TrendingUp className="w-4 h-4 text-emerald-600" />} label="Recaudado en efectivo por ti" value={`+${money(ciclo.recaudado)}`} color="text-emerald-600" />
-              <Row icon={<Banknote className="w-4 h-4 text-primary-600" />} label="Desembolsado por ti" value={`-${money(ciclo.desembolsado)}`} color="text-primary-600" />
-              <Row icon={<TrendingDown className="w-4 h-4 text-red-500" />} label="Tus gastos" value={`-${money(ciclo.gastos)}`} color="text-red-500" />
+              <Row icon={<TrendingUp className="w-4 h-4 text-emerald-600" />} label="Mi recaudo en efectivo" value={`+${money(ciclo.recaudado)}`} color="text-emerald-600" />
+              <Row icon={<Banknote className="w-4 h-4 text-primary-600" />} label="Mis desembolsos" value={`-${money(ciclo.desembolsado)}`} color="text-primary-600" />
+              <Row icon={<TrendingDown className="w-4 h-4 text-red-500" />} label="Mis gastos" value={`-${money(ciclo.gastos)}`} color="text-red-500" />
             </div>
 
             <div className="bg-gradient-to-r from-primary-600 to-primary-800 rounded-2xl p-5 text-white">
               <div className="flex items-center gap-2 text-primary-200 text-sm">
-                <Calculator className="w-4 h-4" /> {central.activo ? 'Efectivo a tu cargo' : 'Efectivo a entregar'}
+                <Calculator className="w-4 h-4" /> {central.activo ? 'Mi efectivo actual' : 'Efectivo a entregar'}
               </div>
               <p className="text-3xl font-bold mt-1">{money(ciclo.esperado)}</p>
               <p className="text-primary-200 text-xs mt-2">{central.activo
-                ? 'Faltante pendiente + capital recibido − capital devuelto + recaudado en efectivo − desembolsado − gastos, desde tu último cuadre. Con este efectivo financias las ventas autorizadas de esta ruta.'
-                : 'Faltante pendiente + Base recibida − Base devuelta + recaudado en efectivo − desembolsado − gastos, desde tu último cuadre'}</p>
+                ? 'Faltante pendiente + Base recibida − Base devuelta + recaudo en efectivo − desembolsos − gastos, desde tu último cuadre. Con este efectivo financias las ventas autorizadas de esta ruta.'
+                : 'Faltante pendiente + Base recibida − Base devuelta + recaudo en efectivo − desembolsos − gastos, desde tu último cuadre'}</p>
             </div>
 
             {/* Saldo negativo: gastos por encima del efectivo registrado. No es dinero
@@ -160,7 +160,7 @@ export default function CollectorCashClosePage() {
                 <AlertTriangle className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
                 <p className="text-xs text-red-800">
                   <span className="font-semibold">Saldo negativo de {money(Math.abs(ciclo.esperado))}</span>: tus gastos superan el
-                  efectivo registrado a tu cargo. Se conciliará en tu próximo cuadre.
+                  efectivo registrado. Se conciliará en tu próximo cuadre.
                 </p>
               </div>
             )}
@@ -169,10 +169,10 @@ export default function CollectorCashClosePage() {
 
         {central.activo && misMovs.length > 0 && (
           <div className="space-y-1.5" data-testid="my-capital-movements">
-            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Capital recibido y devuelto en este periodo</h2>
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Base recibida y devuelta en este periodo</h2>
             {misMovs.map(m => (
               <div key={m.id} className="flex items-center justify-between rounded-lg bg-white border border-gray-100 px-3 py-2 text-xs">
-                <span className="text-gray-600 min-w-0 break-words">{formatDateTime(m.createdAt)} · {m.toUserId === user?.id ? (m.tipo === 'PERSON_TO_PERSON' ? 'Recibido de un compañero' : 'Capital recibido') : (m.tipo === 'PERSON_TO_PERSON' ? 'Entregado a un compañero' : 'Capital devuelto')} · {m.motivo}</span>
+                <span className="text-gray-600 min-w-0 break-words">{formatDateTime(m.createdAt)} · {m.toUserId === user?.id ? (m.tipo === 'PERSON_TO_PERSON' ? 'Recibido de un compañero' : 'Base recibida') : (m.tipo === 'PERSON_TO_PERSON' ? 'Entregado a un compañero' : 'Capital devuelto')} · {m.motivo}</span>
                 <span className={`font-semibold whitespace-nowrap ${m.toUserId === user?.id ? 'text-primary-700' : 'text-gray-600'}`}>{m.toUserId === user?.id ? '+' : '−'}{money(m.amount)}</span>
               </div>
             ))}
@@ -182,7 +182,7 @@ export default function CollectorCashClosePage() {
         {/* KPI DIARIO — separado a propósito de "Mi efectivo". */}
         {hoy && (
           <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3">
-            <span className="text-sm text-gray-600">Mi recaudo hoy · {formatDate(today())}</span>
+            <span className="text-sm text-gray-600">Mi recaudo de hoy · {formatDate(today())}</span>
             <span className="text-sm font-bold text-emerald-600">{money(hoy.recaudado)}</span>
           </div>
         )}
@@ -217,7 +217,7 @@ export default function CollectorCashClosePage() {
           <div className="flex items-start gap-2">
             <Landmark className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
             <div>
-              <h2 className="text-sm font-semibold text-gray-700">Caja de la Ruta</h2>
+              <h2 className="text-sm font-semibold text-gray-700">Dinero de la ruta</h2>
               <p className="text-xs text-gray-500">Información financiera de la ruta</p>
             </div>
           </div>
@@ -230,10 +230,18 @@ export default function CollectorCashClosePage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4">
-              <div className="flex items-center gap-1.5 text-xs text-gray-500"><Wallet className="w-3.5 h-3.5" /> Base de la ruta</div>
-              <p className="text-lg font-bold text-primary-700 mt-1">{formatCurrency(route.baseActual, currency)}</p>
+          {/* ADEX Online con Base por Ruta: Base disponible y Base del trabajador por separado. Sin ella, la
+              cifra de la ruta es la Base de sus trabajadores (`baseActual` = Σ custodias). */}
+          <div className={`grid gap-3 ${route.baseRuta !== undefined ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            {route.baseRuta !== undefined && (
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4" data-testid="cash-close-route-base">
+                <div className="flex items-center gap-1.5 text-xs text-gray-500"><Wallet className="w-3.5 h-3.5" /> Base disponible</div>
+                <p className="text-lg font-bold text-primary-700 mt-1">{formatCurrency(route.baseRuta, currency)}</p>
+              </div>
+            )}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4" data-testid="cash-close-worker-base">
+              <div className="flex items-center gap-1.5 text-xs text-gray-500"><Wallet className="w-3.5 h-3.5" /> Base del trabajador</div>
+              <p className="text-lg font-bold text-primary-700 mt-1">{formatCurrency(route.baseTrabajador ?? route.baseActual, currency)}</p>
             </div>
             <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-4">
               <div className="flex items-center gap-1.5 text-xs text-gray-500"><MapPin className="w-3.5 h-3.5" /> Cartera activa</div>
