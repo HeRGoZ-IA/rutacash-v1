@@ -377,6 +377,22 @@ try {
     const dbCons = { base: (await base(C1)) + (await base(C2)), custody: (await bal(N, 'custody', { route: C1 })) + (await bal(N, 'custody', { route: C2 })) };
     ok('A-02', ['C-07'], 'Consolidado = Σ Bases + Σ custodias de sus rutas (PostgreSQL), sin duplicar', consolidated.base === dbCons.base && consolidated.custody === dbCons.custody && consolidated.cash === dbCons.base + dbCons.custody, JSON.stringify({ consolidated, dbCons }));
     ok('A-03', ['C-01'], 'Caja principal sin desbordamiento a 390 y 1280 px', await both('A-03-admin1-caja', () => waitTestid('rb-consolidated')));
+    // Observaciones del propietario (2026-10-24): «Base del trabajador» en lugar de «custodias»; ancho completo.
+    const wide = async (tid) => page.evaluate((t) => {
+      const el = document.querySelector(`[data-testid="${t}"]`); const main = document.querySelector('main');
+      return !!el && !!main && el.getBoundingClientRect().width >= main.clientWidth - 2;
+    }, tid);
+    ok('A-03b', ['C-01'], 'Caja principal: «Base del trabajador» (sin «custodias») y a todo el ancho',
+      /Base del trabajador/.test(cajaTxt) && !/custodia/i.test(cajaTxt) && await wide('rb-caja'));
+    await go('/admin/routes'); await waitTestid(`route-worker-base-${C1}`); await sleep(1000);
+    const card1 = { base: minorOf(await testid(`route-base-${C1}`)), worker: minorOf(await testid(`route-worker-base-${C1}`)) };
+    const db1 = { base: await base(C1), worker: await bal(N, 'custody', { route: C1 }) };
+    ok('A-03c', ['C-07'], 'Rutas: la tarjeta separa Base de la ruta, Base del trabajador y Cartera activa (= PostgreSQL)',
+      card1.base === db1.base && card1.worker === db1.worker && (await text()).includes('Cartera Activa'), JSON.stringify({ card1, db1 }));
+    await go('/admin/transfers'); await waitTestid('rb-transfers'); await sleep(800);
+    const trTxt = await text();
+    ok('A-03d', ['C-01'], 'Transferencias y Notificaciones a todo el ancho; Transferencias sin «Custodias»',
+      await wide('rb-transfers') && !/Custodias/.test(trTxt) && (await go('/admin/notificaciones'), await waitTestid('notifications-page'), await wide('notifications-page')));
 
     let b0 = await base(C1);
     await openOp('inject');
@@ -1338,9 +1354,9 @@ try {
     const cC1 = await card(C1), cO1 = await card(O1);
     const dbC1 = { base: await base(C1), custody: await bal(N, 'custody', { route: C1 }) }, dbO1 = { base: await base(O1), custody: await bal(N, 'custody', { route: O1 }) };
     const selTxt = await text();
-    ok('T-15', ['C-07'], 'Supervisor Norte (Base por Ruta): cada tarjeta muestra «Base disponible» = Base real de la ruta y «Efectivo en custodias» aparte (= PostgreSQL), sin «Base de la ruta»',
+    ok('T-15', ['C-07'], 'Supervisor Norte (Base por Ruta): cada tarjeta muestra «Base disponible» = Base real de la ruta y «Base del trabajador» aparte (= PostgreSQL), sin «Base de la ruta»',
       selOk && cC1.base === dbC1.base && cC1.custody === dbC1.custody && cO1.base === dbO1.base && cO1.custody === dbO1.custody
-        && /Base disponible/.test(cC1.baseLbl ?? '') && /Efectivo en custodias/.test(cC1.custLbl ?? '') && !selTxt.includes('Base de la ruta'),
+        && /Base disponible/.test(cC1.baseLbl ?? '') && /Base del trabajador/.test(cC1.custLbl ?? '') && !selTxt.includes('Base de la ruta'),
       JSON.stringify({ cC1: { base: cC1.base, custody: cC1.custody }, dbC1, cO1: { base: cO1.base, custody: cO1.custody }, dbO1 }));
     ok('T-16', ['C-01'], '«Selecciona tu ruta» del Supervisor sin desbordamiento a 390 y 1280 px', await both('T-16-supervisor-selecciona-ruta-norte', () => waitTestid(`sel-route-${C1}`)));
     await login('supervisor.norte@example.test', 'Préstamos Sintéticos Sur');

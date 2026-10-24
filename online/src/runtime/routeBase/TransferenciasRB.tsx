@@ -120,7 +120,7 @@ export function TransferenciasRB({ model }: { model: CapitalModel }) {
   ];
 
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-6xl mx-auto w-full" data-testid="rb-transfers">
+    <div className="p-4 md:p-6 space-y-5" data-testid="rb-transfers">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-xl font-bold text-gray-900">Transferencias</h1>
@@ -156,7 +156,7 @@ export function TransferenciasRB({ model }: { model: CapitalModel }) {
                     data-testid={`rb-myroute-${r.routeId}`}>
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{r.name}</p>
-                      <p className="text-xs text-gray-500">{r.handoverState === 'en_entrega' ? <span className="text-violet-700 font-medium">Ruta en entrega</span> : `Custodias ${money(r.custody.grossMinor)}`}</p>
+                      <p className="text-xs text-gray-500">{r.handoverState === 'en_entrega' ? <span className="text-violet-700 font-medium">Ruta en entrega</span> : `Base del trabajador ${money(r.custody.grossMinor)}`}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-[11px] text-gray-500">Base disponible</p>

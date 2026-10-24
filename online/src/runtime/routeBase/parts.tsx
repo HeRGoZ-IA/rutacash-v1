@@ -66,7 +66,7 @@ const ALERT_META: Partial<Record<PanelAlert, { label: string; icon: typeof Alert
   NO_VALID_CONTROLLER: { label: 'Sin responsable válido', icon: UserX, cls: 'bg-red-50 text-red-800 ring-red-200' },
   ROUTE_IN_HANDOVER: { label: 'Ruta en entrega', icon: Handshake, cls: 'bg-violet-50 text-violet-800 ring-violet-200' },
   HANDOVER_DIFFERENCE: { label: 'Diferencia en la última entrega', icon: Scale, cls: 'bg-gray-100 text-gray-700 ring-gray-200' },
-  NEGATIVE_CUSTODY: { label: 'Custodia negativa', icon: AlertTriangle, cls: 'bg-amber-50 text-amber-900 ring-amber-200' },
+  NEGATIVE_CUSTODY: { label: 'Base del trabajador negativa', icon: AlertTriangle, cls: 'bg-amber-50 text-amber-900 ring-amber-200' },
   CARRIED_SHORTAGE: { label: 'Faltante arrastrado', icon: AlertTriangle, cls: 'bg-amber-50 text-amber-900 ring-amber-200' },
   SURPLUS_IN_CONTROL: { label: 'Sobrante en control', icon: ShieldQuestion, cls: 'bg-gray-100 text-gray-700 ring-gray-200' },
   // 0036: faltantes o sobrantes sin conciliar (se resuelven en «Diferencias»).

@@ -1285,6 +1285,12 @@ export interface RouteFinancialSummary {
   /** Clientes distintos con venta activa desembolsada. */
   clientesActivos: number
   /**
+   * ADEX Online con Base por Ruta: Base propia de la ruta y efectivo en manos de sus trabajadores
+   * («Base del trabajador»), por separado. Ausentes en CLEAN y en el modelo de bolsas.
+   */
+  baseRuta?: number
+  baseTrabajador?: number
+  /**
    * Interés pendiente por cobrar ESTIMADO (proporcional al saldo de cada venta:
    * saldo × valorInteres / valorTotal). Es una aproximación, no un desglose exacto;
    * se documenta como estimado hasta que el socio defina el desglose definitivo (V2).

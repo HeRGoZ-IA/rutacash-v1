@@ -120,8 +120,8 @@ export default function DashboardPage() {
           {/* R74 · Base por Ruta: el efectivo (Base + custodias) y la cartera, nunca sumados entre sí. */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-testid="dashboard-kpis">
             <KPICard title="Base disponible" value={m(t.baseMinor)} icon={<Wallet className="w-5 h-5" />} color="blue" subtitle="En la Base de tus rutas" />
-            <KPICard title="Efectivo en custodia" value={m(t.custodyMinor)} icon={<Users className="w-5 h-5" />} color="purple" subtitle="En manos de trabajadores" />
-            <KPICard title="Efectivo total" value={m(t.cashMinor)} icon={<DollarSign className="w-5 h-5" />} color="green" subtitle="De las rutas: Base + custodias" />
+            <KPICard title="Base del trabajador" value={m(t.custodyMinor)} icon={<Users className="w-5 h-5" />} color="purple" subtitle="En manos de trabajadores" />
+            <KPICard title="Efectivo total" value={m(t.cashMinor)} icon={<DollarSign className="w-5 h-5" />} color="green" subtitle="Base de las rutas + Base del trabajador" />
             <KPICard title="Cartera pendiente" value={m(t.principalPlacedMinor)} icon={<CreditCard className="w-5 h-5" />} color="gray"
               subtitle="Capital colocado · no es efectivo" />
           </div>

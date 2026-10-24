@@ -513,18 +513,32 @@ export default function RoutesPage() {
                 </div>
               </div>
 
-              {/* Base de la ruta (getRouteBase) vs Cartera en calle — punto 4, 2026-10-02 */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="bg-primary-50 rounded-xl p-3">
-                  <p className="text-sm font-bold text-primary-700 truncate">{summaryByRoute[route.id] ? formatCurrency(summaryByRoute[route.id].baseActual, currency) : '—'}</p>
-                  <p className="text-xs text-gray-500">Base de la ruta</p>
-                </div>
+              {/* Base de la ruta (getRouteBase) vs Cartera en calle — punto 4, 2026-10-02.
+                  ADEX Online con Base por Ruta (R74): Base propia de la ruta y Base del trabajador por separado. */}
+              <div className={`grid gap-2 ${summaryByRoute[route.id]?.baseRuta !== undefined ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                {summaryByRoute[route.id]?.baseRuta !== undefined ? (
+                  <>
+                    <div className="bg-primary-50 rounded-xl p-3" data-testid={`route-base-${route.id}`}>
+                      <p className="text-sm font-bold text-primary-700 truncate">{formatCurrency(summaryByRoute[route.id].baseRuta ?? 0, currency)}</p>
+                      <p className="text-xs text-gray-500">Base de la ruta</p>
+                    </div>
+                    <div className="bg-violet-50 rounded-xl p-3" data-testid={`route-worker-base-${route.id}`}>
+                      <p className="text-sm font-bold text-violet-700 truncate">{formatCurrency(summaryByRoute[route.id].baseTrabajador ?? 0, currency)}</p>
+                      <p className="text-xs text-gray-500">Base del trabajador</p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="bg-primary-50 rounded-xl p-3">
+                    <p className="text-sm font-bold text-primary-700 truncate">{summaryByRoute[route.id] ? formatCurrency(summaryByRoute[route.id].baseActual, currency) : '—'}</p>
+                    <p className="text-xs text-gray-500">Base de la ruta</p>
+                  </div>
+                )}
                 <div className="bg-indigo-50 rounded-xl p-3">
-                  <p className="text-sm font-bold text-indigo-600 tabular-nums">{formatCurrency(summaryByRoute[route.id]?.carteraEnCalle ?? 0, currency)}</p>
+                  <p className="text-sm font-bold text-indigo-600 tabular-nums truncate">{formatCurrency(summaryByRoute[route.id]?.carteraEnCalle ?? 0, currency)}</p>
                   <p className="text-xs text-gray-500">Cartera Activa</p>
                 </div>
                 {central.bloqueos[route.id] && (
-                  <p className="col-span-2 text-xs font-medium text-amber-700" data-testid={`routes-blocked-${route.id}`}>Bloqueada para capital nuevo desde la activación del capital centralizado.</p>
+                  <p className="col-span-full text-xs font-medium text-amber-700" data-testid={`routes-blocked-${route.id}`}>Bloqueada para capital nuevo desde la activación del capital centralizado.</p>
                 )}
               </div>
               <div className="bg-gray-50 rounded-xl p-2.5 flex items-center justify-between">

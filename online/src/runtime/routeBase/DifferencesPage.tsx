@@ -80,7 +80,7 @@ export default function DifferencesPage() {
   const s = page?.summary;
 
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-6xl mx-auto w-full" data-testid="dif-page">
+    <div className="p-4 md:p-6 space-y-5" data-testid="dif-page">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2"><Scale className="w-5 h-5 text-gray-500" aria-hidden />Diferencias y conciliación</h1>

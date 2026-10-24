@@ -71,7 +71,7 @@ export default function NotificationsPage() {
   const reload = () => { void fetchInbox().then(setInbox).catch(() => { /* se reintenta con el refresco */ }); };
 
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-6xl mx-auto w-full" data-testid="notifications-page">
+    <div className="p-4 md:p-6 space-y-5" data-testid="notifications-page">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-bold text-gray-900">Notificaciones</h1>
         <div className="flex flex-wrap gap-2 sm:justify-end">

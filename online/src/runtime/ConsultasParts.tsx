@@ -23,7 +23,7 @@ const LABEL = 'block text-xs font-medium text-gray-600 mb-1';
 
 const KIND_GROUP_LABEL: Record<PerspectiveOption['kind'], string> = { company: 'Empresa', route: 'Rutas (efectivo en custodia)', admin: 'Bolsas de Administradores', custody: 'Custodias de trabajadores' };
 // R74 · Base por Ruta: la ruta es Base + custodias y la cuenta del Administrador es solo el saldo anterior «sin asignar».
-const KIND_GROUP_LABEL_RB: Record<PerspectiveOption['kind'], string> = { company: 'Empresa', route: 'Rutas (Base y custodias)', admin: 'Saldo sin asignar (anterior a Base por Ruta)', custody: 'Custodias de trabajadores' };
+const KIND_GROUP_LABEL_RB: Record<PerspectiveOption['kind'], string> = { company: 'Empresa', route: 'Rutas (Base de la ruta y del trabajador)', admin: 'Saldo sin asignar (anterior a Base por Ruta)', custody: 'Base del trabajador' };
 
 /** Selector de perspectiva: «Caja o ruta». Agrupado por tipo; la oficina o la ruta acompañan al nombre. */
 export function PerspectiveSelect({ options, value, onChange, id }: { options: PerspectiveOption[]; value: string; onChange: (v: string) => void; id: string }) {

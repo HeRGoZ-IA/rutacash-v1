@@ -180,7 +180,7 @@ export default function CollectorSelectRoutePage() {
 
                 {conBase && (
                   <div className="mt-2 flex items-center justify-between gap-2 rounded-xl bg-gray-50 px-3 py-1.5" data-testid={`sel-route-custody-${route.id}`}>
-                    <span className="text-xs text-gray-500">Efectivo en custodias <span className="text-gray-400">(en manos de trabajadores)</span></span>
+                    <span className="text-xs text-gray-500">Base del trabajador <span className="text-gray-400">(en manos de trabajadores)</span></span>
                     <span className="text-xs font-semibold text-gray-700 whitespace-nowrap">{formatCurrency(efectivo!.custodia, currency)}</span>
                   </div>
                 )}

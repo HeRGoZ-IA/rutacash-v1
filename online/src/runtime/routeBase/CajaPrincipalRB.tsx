@@ -86,6 +86,8 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
   const rows = (panel?.routes ?? []).filter((r) => !filtering || officeFilter.visibleRouteIds.has(r.routeId));
   const t = sumRows(rows);
   const pools = panel?.general.unassignedPools ?? [];
+  // Saldo sin asignar: herencia de la transición; el bloque solo aparece mientras alguien conserve saldo anterior.
+  const hasUnassigned = pools.some((p) => p.balanceMinor !== 0);
   const ownPool = pools.find((p) => p.adminId === me?.membershipId);
   const selected = detail ? panel?.routes.find((r) => r.routeId === detail.routeId) ?? null : null;
   const periodText = period === 'rango' ? `${range.from} a ${range.to}` : PERIOD_LABEL[period];
@@ -97,7 +99,7 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
   const controllers = new Set(rows.map((r) => r.controller.id).filter(Boolean)).size;
 
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-7xl mx-auto w-full" data-testid="rb-caja">
+    <div className="p-4 md:p-6 space-y-5" data-testid="rb-caja">
       {/* ---------- Cabecera ---------- */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
@@ -146,7 +148,7 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
             <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_auto_1fr] items-stretch gap-2 md:gap-3">
               <Figure label="Base disponible" value={money(t.baseMinor)} testId="rb-total-base" strong />
               <Op>+</Op>
-              <Figure label="Efectivo en custodias" value={money(t.custodyMinor)} testId="rb-total-custody"
+              <Figure label="Base del trabajador" value={money(t.custodyMinor)} testId="rb-total-custody"
                 note={<>Entregable {money(t.deliverableMinor)}{t.negativeCustodyMinor < 0 ? <> · negativo {money(t.negativeCustodyMinor)}</> : null}</>} />
               <Op>=</Op>
               <Figure label="Efectivo de las rutas" value={money(t.cashMinor)} testId="rb-total-cash" strong tone="primary" />
@@ -249,7 +251,7 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
           <div data-testid="rb-general">
             <GeneralExpensesPanel model={model} panel={panel} periodText={periodText} />
           </div>
-          <section className="grid grid-cols-1 lg:grid-cols-2 gap-3" aria-label="Fuera de las rutas">
+          <section className={`grid grid-cols-1 gap-3 ${hasUnassigned ? 'lg:grid-cols-2' : ''}`} aria-label="Fuera de las rutas">
             <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-2" data-testid="rb-consolidated-result">
               <h2 className="text-sm font-semibold text-gray-900">Resultado consolidado del periodo</h2>
               <p className="text-xs text-gray-600">Resultado operativo de las rutas y, aparte, los gastos generales. No es utilidad contable ni dinero retirable.</p>
@@ -260,7 +262,7 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
                 <Mini label="Bienes duraderos generales" value={money(panel.consolidated?.generalDurableGoodsMinor ?? 0)} hint="Aparte: no es pérdida" />
               </dl>
             </div>
-            <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-2" data-testid="rb-unassigned">
+            {hasUnassigned && <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-2" data-testid="rb-unassigned">
               <h2 className="text-sm font-semibold text-gray-900">Saldo sin asignar</h2>
               <p className="text-xs text-gray-600">Lo que quedó de antes de Base por Ruta. No es Base de ninguna ruta: solo su Administrador lo reparte a una ruta suya, con confirmación.</p>
               {pools.length === 0 ? <p className="text-sm text-gray-500">No hay saldo sin asignar.</p> : (
@@ -276,7 +278,7 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
               {ownPool && ownPool.balanceMinor > 0 && (
                 <Button size="sm" variant="secondary" onClick={() => navigate('/admin/transfers?op=assign')} data-testid="rb-assign-unassigned">Repartir a una ruta</Button>
               )}
-            </div>
+            </div>}
           </section>
         </>
       )}
@@ -415,7 +417,7 @@ function RouteRow({ r, mine, office, onOpen, onConfirm, canConfirm }: {
       </div>
       <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-x-4 gap-y-3 border-t border-gray-100 pt-3">
         {fig('Base disponible', money(r.baseMinor), 'base', { testId: 'rb-fig-base' })}
-        {fig('En custodias', money(r.custody.grossMinor), 'efectivo', { sub: custodySub || undefined, negative: r.custody.negativeMinor < 0, testId: 'rb-fig-custody' })}
+        {fig('Base del trabajador', money(r.custody.grossMinor), 'efectivo', { sub: custodySub || undefined, negative: r.custody.negativeMinor < 0, testId: 'rb-fig-custody' })}
         {fig('Efectivo de la ruta', money(r.cashMinor), 'efectivo', { testId: 'rb-fig-cash' })}
         {fig('Capital colocado', money(r.portfolio.principalPlacedMinor), 'cartera', { sub: `con interés ${money(r.portfolio.outstandingWithInterestMinor)}`, testId: 'rb-fig-portfolio' })}
         {fig('Recaudos', money(r.period.collectionsMinor), 'periodo', { testId: 'rb-fig-collections' })}
@@ -493,10 +495,10 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
             <h3 id="rb-d-ef-h" className="text-sm font-semibold text-gray-900 mb-1">Efectivo de la ruta</h3>
             <dl>
               {row('Base disponible', r.baseMinor)}
-              {row('En custodias (bruto)', r.custody.grossMinor, { hint: `${r.custody.positions} trabajador(es) con caja` })}
+              {row('Base del trabajador (bruto)', r.custody.grossMinor, { hint: `${r.custody.positions} trabajador(es) con caja` })}
               {row('Efectivo de la ruta', r.cashMinor, { strong: true })}
-              {row('Custodia entregable', r.custody.deliverableMinor, { hint: 'Lo que los trabajadores pueden entregar hoy' })}
-              {r.custody.negativeMinor < 0 && row('Custodias negativas', r.custody.negativeMinor, { hint: 'Gastos de trabajadores por encima de su efectivo; no es efectivo' })}
+              {row('Base del trabajador entregable', r.custody.deliverableMinor, { hint: 'Lo que los trabajadores pueden entregar hoy' })}
+              {r.custody.negativeMinor < 0 && row('Base del trabajador negativa', r.custody.negativeMinor, { hint: 'Gastos de trabajadores por encima de su efectivo; no es efectivo' })}
               {r.custody.carriedShortageMinor > 0 && row('Faltante arrastrado', r.custody.carriedShortageMinor, { hint: 'Reconocido en cuadres; no es billete' })}
               {r.surplusInControlMinor > 0 && row('Sobrante en control', r.surplusInControlMinor, { hint: 'Aparte; no es Base' })}
             </dl>
@@ -576,9 +578,9 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
           )}
         </section>
         <section className="flex flex-wrap gap-x-4 gap-y-2 border-t border-gray-100 pt-3 text-sm" aria-label="Ver en Consultas">
-          <Link to={`/admin/consultas?${q}`} className="text-primary-700 hover:underline inline-flex items-center gap-1"><History className="w-4 h-4" aria-hidden />Dinero de la ruta (Base y custodias)</Link>
+          <Link to={`/admin/consultas?${q}`} className="text-primary-700 hover:underline inline-flex items-center gap-1"><History className="w-4 h-4" aria-hidden />Dinero de la ruta (Base de la ruta y del trabajador)</Link>
           <Link to={`/admin/consultas?vista=actividad&${q}`} className="text-primary-700 hover:underline inline-flex items-center gap-1"><Info className="w-4 h-4" aria-hidden />Actividad de la ruta</Link>
-          <span className="text-xs text-gray-500 basis-full">«Dinero de la ruta» incluye la Base (inyecciones, retiros, transferencias, aportes a gastos generales y reembolsos) y las custodias de sus trabajadores (entregas, devoluciones, recaudos). Cada operación abre su detalle con comprobante.</span>
+          <span className="text-xs text-gray-500 basis-full">«Dinero de la ruta» incluye la Base (inyecciones, retiros, transferencias, aportes a gastos generales y reembolsos) y la Base de sus trabajadores (entregas, devoluciones, recaudos). Cada operación abre su detalle con comprobante.</span>
         </section>
       </div>
     </Modal>

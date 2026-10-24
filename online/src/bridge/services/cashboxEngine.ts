@@ -25,6 +25,7 @@ import { db } from '@/lib/db';
 import { calendar, custodyPositions, serverView, ServerGap } from '../../runtime/projection.ts';
 import { cashboxFromFigures, flowFromFigures } from '../../runtime/cashboxFigures.ts';
 import { toMajor } from '../../runtime/mappers.ts';
+import { fetchModel, fetchPanel, isRouteBaseUi } from '../../runtime/routeBase/api.ts';
 
 export * from '@clean/services/cashboxEngine';
 import * as Clean from '@clean/services/cashboxEngine';
@@ -45,8 +46,27 @@ async function getRoutesCurrentBalanceOnline(routeIds: string[]): Promise<Record
   return result;
 }
 
+/**
+ * R74 · Base por Ruta: Base propia y Base del trabajador (custodias) de cada ruta, del panel del servidor
+ * (`cashbox.viewRoute`). `null` en el modelo de bolsas o sin permiso. Una sola petición por lote de rutas.
+ */
+let rbFigures: { at: number; p: Promise<Map<string, { base: number; worker: number }> | null> } | null = null;
+function routeBaseFigures(): Promise<Map<string, { base: number; worker: number }> | null> {
+  if (rbFigures && Date.now() - rbFigures.at < 3000) return rbFigures.p;
+  const p = (async () => {
+    const model = await fetchModel().then((m) => m.model).catch(() => 'admin_pool' as const);
+    if (!isRouteBaseUi(model)) return null;
+    const hoy = (await calendar()).businessDate;
+    const panel = await fetchPanel(hoy, hoy);
+    return new Map(panel.routes.map((r) => [r.routeId, { base: toMajor(r.baseMinor), worker: toMajor(r.custody.grossMinor) }]));
+  })().catch(() => null);
+  rbFigures = { at: Date.now(), p };
+  return p;
+}
+
 async function getRouteFinancialSummaryOnline(routeId: string): Promise<RouteFinancialSummary> {
   const baseActual = await getRouteBaseOnline(routeId);
+  const rb = (await routeBaseFigures())?.get(routeId);
   const sales = await db.sales.where('routeId').equals(routeId).toArray();
   const activas = sales.filter((s) => s.status === 'activa' && s.disbursementStatus !== 'pendiente');
   const carteraEnCalle = carteraEnCalleOf(sales);
@@ -58,10 +78,12 @@ async function getRouteFinancialSummaryOnline(routeId: string): Promise<RouteFin
     routeId,
     baseActual,
     carteraEnCalle,
-    totalControlado: baseActual + carteraEnCalle,
+    // Con Base por Ruta el total incluye también la Base propia de la ruta.
+    totalControlado: (rb ? rb.base + rb.worker : baseActual) + carteraEnCalle,
     ventasActivas: activas.length,
     clientesActivos: new Set(activas.map((s) => s.clientId)).size,
     interesPorCobrarEstimado,
+    ...(rb ? { baseRuta: rb.base, baseTrabajador: rb.worker } : {}),
   };
 }
 
