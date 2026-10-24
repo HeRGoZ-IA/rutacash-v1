@@ -604,23 +604,74 @@ Encargo: completar el sistema de Base y caja independiente por Ruta y dejarlo **
 | RB-D8 | Reembolso al propio Administrador desde sus rutas: permitido hasta la obligación pendiente, con fondos, aportes explícitos por ruta, sin aprobación, visible al SuperAdmin y auditado. Excepción expresa; no elimina otras reglas de independencia | — (confirma) |
 | RB-D9 | Reembolso desde la bolsa propia mientras la empresa esté en `admin_pool`; con `route_base`, el circuito nuevo; nunca pagar dos veces la misma obligación | — (confirma) |
 
-### 15.3 Criterios de aceptación (seguimiento)
+### 15.3 Criterios de aceptación (resultado en local, 2026-10-24)
+
+Estado: **VERIFICADO EN LOCAL** (PostgreSQL embebido aislado, datos sintéticos). **No publicado ni validado operativamente.**
 
 | # | Criterio | Estado | Evidencia |
 |---|---|---|---|
-| C-01 | Todos los flujos autorizados se completan desde el navegador | ⏳ | |
-| C-02 | Ninguna pantalla esencial sustituida por «API disponible» | ⏳ | |
-| C-03 | El Administrador concilia diferencias sin aprobación superior | ⏳ | |
-| C-04 | Una conciliación resuelta no mantiene el bloqueo por esa diferencia | ⏳ | |
-| C-05 | Desactivar un Administrador con cuentas pendientes se rechaza con explicación; tras saldar y entregar, se permite | ⏳ | |
-| C-06 | Una ruta no consume fondos de otra | ⏳ | |
-| C-07 | Cajas y consolidado concilian sin duplicaciones | ⏳ | |
-| C-08 | Gastos y reembolsos no duplican gasto, efectivo ni obligaciones | ⏳ | |
-| C-09 | Reintentos y concurrencia no duplican operaciones | ⏳ | |
-| C-10 | API y PostgreSQL rechazan empresas o rutas ajenas | ⏳ | |
-| C-11 | El SuperAdmin supervisa sin ejecutar operaciones financieras del modelo nuevo | ⏳ | |
-| C-12 | Empresas en `admin_pool` conservan su comportamiento | ⏳ | |
-| C-13 | La transición conserva posiciones y trazabilidad, sin ingresos ficticios | ⏳ | |
-| C-14 | Offline: no crea clientes ni ventas y conserva sus operaciones permitidas | ⏳ | |
-| C-15 | Sin regresiones nuevas frente a una línea base reproducible | ⏳ | |
-| C-16 | Documentación, commits y pasos de prueba coinciden con el resultado | ⏳ | |
+| C-01 | Todos los flujos autorizados se completan desde el navegador | ✅ local | E2E final 43/43 casos de flujo (A, B, C, D, E, I, G) — `tmp/r74/e2e/e2e-final-summary.json` |
+| C-02 | Ninguna pantalla esencial sustituida por «API disponible» | ✅ local | Todo el dinero del E2E se movió por la interfaz; solo aislamiento y concurrencia (H-01…H-10) usan HTTP directo. El aviso «estarán disponibles aquí» fue retirado |
+| C-03 | El Administrador concilia diferencias sin aprobación superior | ✅ local | E-02, E-03, E-08, E-10, E-11, H-01; AA-001…AA-015 |
+| C-04 | Una conciliación resuelta no mantiene el bloqueo por esa diferencia | ✅ local | E-01, E-04/05, E-06, E-09, E-12…E-14 (la ruta sigue operando; el aviso se apaga; Consultas muestra «Conciliación de diferencia») |
+| C-05 | Desactivar un Administrador con cuentas pendientes se rechaza con explicación; tras saldar y entregar, se permite | ✅ local | F-01…F-10 (recorrido en 15.5) |
+| C-06 | Una ruta no consume fondos de otra | ✅ local | A-05, B-01…B-04, B-06, C-04, H-02…H-04, H-10 |
+| C-07 | Cajas y consolidado concilian sin duplicaciones | ✅ local | A-02, Z-01 (conciliación de empresa en Norte, Sur y Vacía), Z-02 |
+| C-08 | Gastos y reembolsos no duplican gasto, efectivo ni obligaciones | ✅ local | C-01…C-18, D-07…D-11, F-04, Z-03 |
+| C-09 | Reintentos y concurrencia no duplican operaciones | ✅ local | H-08 (mismo id → una operación), H-09 (dos conciliaciones simultáneas: 201 + 409), H-10 (aportes simultáneos: la Base nunca queda negativa), A-08/A-10/A-11 |
+| C-10 | API y PostgreSQL rechazan empresas o rutas ajenas | ✅ local | B-06, C-04, D-09, D-10, H-01…H-03, H-05, H-06; pruebas RLS de la suite |
+| C-11 | El SuperAdmin supervisa sin ejecutar operaciones financieras del modelo nuevo | ✅ local | H-07, D-01…D-03, E-15, E-17, F-07 |
+| C-12 | Empresas en `admin_pool` conservan su comportamiento | ✅ local | C-14…C-19, E-18, G-05; regresión completa sin cambios de resultado |
+| C-13 | La transición conserva posiciones y trazabilidad, sin ingresos ficticios | ✅ local | G-01…G-11 (activación directa negada con saldos → Migrando → Base por Ruta; reparto con evidencia; ingresos y cartera sin cambios). Limitación: las custodias de la empresa de transición estaban en cero |
+| C-14 | Offline: no crea clientes ni ventas y conserva sus operaciones permitidas | ✅ local | I-04…I-08 |
+| C-15 | Sin regresiones nuevas frente a una línea base reproducible | ✅ local | Worktree limpio de `8a185ea`: 573 pruebas, 569 ✔, 3 ✖ (HIST-001/002/003: mismo error AX413, misma línea que la base, también aisladas en ambos worktrees), 1 omitida (RND-060, igual que la base); +24 nuevas, todas ✔; unidad 31/31; CLEAN `npm test` todo PASS; tipos y build sin errores — `tmp/r74/reg/` |
+| C-16 | Documentación, commits y pasos de prueba coinciden con el resultado | ✅ | Este apartado, Registro Maestro, `tmp/r74/local/README.md` (sin marcas pendientes), commits de 15.4 |
+
+### 15.4 Qué se hizo (commits locales en `r74-route-base`, sin push)
+
+| Commit | Contenido |
+|---|---|
+| `61427ce` · migración **0036** | Autoridad del Administrador y conciliación: cuenta `route_difference`, operación `DIFFERENCE_CONCILIATION` y tabla inmutable `difference_conciliations` (RB-D3); `admin_pending_accounts`, control previo y bloqueo AX433 de la desactivación en todos los modelos (RB-D1); cuenta de empresa en cero sin excepción por nota (RB-D2); requisito `direct-activation-or-migrating` (RB-D6); anulación de operaciones conjuntas solo por el responsable vigente de **todas** las rutas aportantes, nunca parcial (RB-D7, AX434); disparador `routes_controller_change_guard` (AX402), que cierra un hueco por el que un Administrador podía hacerse responsable de una ruta ajena por SQL; `route_panel` con diferencias y alerta `PENDING_DIFFERENCES`; feature `admin-authority-v1` (fuera de la puerta de Vercel). RB-D4, D5, D8 y D9: verificados con pruebas, sin cambios de lógica |
+| `8a185ea` | Pantallas: gastos generales A/C1/C2 y reembolsos en la Caja principal; C2 y reembolso desde la bolsa en `admin_pool`; pantalla **Diferencias** (solo lectura para SuperAdmin y Supervisor); control previo de desactivación en Usuarios; Consultas con todos los tipos nuevos (las obligaciones y diferencias nunca cuentan como efectivo) y comprobante de operación; Dashboard desde `route_panel`; textos sin «bolsa» en Gastos y Reportes con Base por Ruta |
+| `b84c987` | Defectos hallados por el E2E final: tope de desembolso = Base de la ruta (no el saldo sin asignar); botón «Anular» para el responsable vigente (RB-D7); total de Gastos rotulado; textos de corrección/reaplicación neutrales |
+
+Migraciones de la rama: 0001–0036 (0034, 0035 y 0036 solo en la rama; ADEX-Staging sigue en 0001–0031). Reversiones probadas: 0034 15/15, 0035 13/13, 0036 13/13 (el esquema vuelve a ser idéntico; la reversión de 0036 se niega si ya hay conciliaciones). 0036 es generada por `tmp/r74/w1/build-0036.mjs`.
+
+### 15.5 Cómo se despeja cada bloqueo de desactivación (RB-D1) desde la interfaz
+
+| Bloqueo | Paso |
+|---|---|
+| Saldo sin asignar | El Administrador: Transferencias → Reparto de saldo sin asignar a una de sus rutas |
+| Reembolso pendiente | El Administrador: Caja principal → Gastos generales y reembolsos → Reembolsos pendientes → reembolsar (RB-D8) |
+| Diferencias sin conciliar / saldo en control | El Administrador: Diferencias → conciliar |
+| Responsable de rutas | SuperAdmin: Usuarios → otro Administrador → añadirle las rutas; Panel de rutas → Detalle → «Cambiar responsable» |
+| Entrega pendiente | El Administrador entrante confirma el conteo desde el aviso de su Caja principal |
+
+### 15.6 Limitaciones reales
+
+- Todo es local. Nada está publicado ni validado operativamente; ninguna empresa real cambió de modelo.
+- En el navegador no se ejercitó «Devolver el sobrante a su dueño» (sí está probado en la API, AA-*).
+- El E2E final se ejecutó en dos partes (82 + 41) por el límite de tiempo de los procesos; el modo de una sola ejecución no se corrió.
+- El texto neutral de los modales de corrección se cambió después del E2E (solo texto); CLEAN y el build se repitieron después.
+- El cierre de periodo se probó sobre la semana anterior (el servidor exige que el periodo haya terminado).
+- En «Selecciona tu ruta» del Supervisor (`src/pages/collector/CollectorSelectRoutePage.tsx`), «Base de la ruta» muestra la suma de custodias, no la Base real en `route_base`. Es un archivo compartido de CLEAN y no se cambió; es un rótulo, no un cálculo de dinero.
+- Herramientas locales (no versionadas, `tmp/` está en `.gitignore`): `tmp/r74/local/` (arranque, siembra, humo 42/42) y `tmp/r74/e2e/e2e-final.mjs`.
+
+### 15.7 Decisiones del propietario que quedan abiertas (no bloquean las pruebas locales)
+
+| Id | Pregunta | Situación actual |
+|---|---|---|
+| RB-D10 | ¿Un faltante de acta de entrega se puede cargar al Administrador saliente? | Hoy solo «faltante de la ruta»; cargarlo exigiría una cuenta por cobrar nueva (no se inventó) |
+| RB-D11 | ¿El responsable de capital puede anular un gasto de ruta que él mismo registró? | La regla de independencia aprobada (F5-D02, AX717) lo impide; como solo él registra esos gastos, nadie puede anularlos hasta que cambie el responsable |
+| RB-D12 | RB-D7 «cada uno sobre su parte»: ¿anulación por partes de una operación conjunta? | Implementado el rechazo (AX434) salvo que el actor controle todas las rutas; por partes exige definir qué gasto u obligación queda |
+| RB-D13 | ¿Un Administrador puede pagar el reembolso pendiente de **otro** Administrador desde la pantalla? | La API lo admite; la pantalla solo muestra el saldo a favor propio |
+
+### 15.8 Plan de publicación posterior (requiere autorización expresa; no ejecutado)
+
+1. **Antes:** publicar primero `main` (R74: 0032 y 0033) según §13.3. Fusionar `r74-route-base` en `main` solo con autorización, porque `staging:migrate` aplicaría 0034–0036.
+2. **Respaldo:** copia cifrada nueva de ADEX-Staging, restaurada y verificada (procedimiento R73/R74), con su referencia anotada.
+3. **Diagnóstico de solo lectura:** `tmp/r74/w1/legacy-inactive-admins.sql` (Administradores inactivos con cuentas pendientes, empresas con saldo de empresa); reportar, no ajustar.
+4. **Migraciones:** `staging:migrate` aplica 0034, 0035 y 0036 en orden. Esto no cambia el modelo de ninguna empresa: todas siguen en `admin_pool`. Tras migrar, puede fallar la autenticación de Render unos minutos (ver memoria de contraseñas de roles): reintentar.
+5. **Servicios:** desplegar la API (Render) y comprobar que `/healthz` anuncia `route-base-v1`, `general-expenses-v1` y `admin-authority-v1`; después la web (Vercel; la puerta exige `movements-v2` y `rectification-payments-v1`).
+6. **Comprobaciones:** humo de solo lectura en BlueLine (sin operaciones sintéticas ni destructivas); conciliación de empresa sin diferencias; las empresas en `admin_pool` muestran las mismas pantallas que antes.
+7. **Activación por empresa, por separado:** con autorización del propietario para cada empresa. SuperAdmin de esa empresa → Modelo de capital → requisitos en verde → con saldos, «Migrando» → reparto del saldo sin asignar con evidencia → activar con referencia de respaldo. Nunca activar BlueLine ni otra empresa real sin esa autorización.
