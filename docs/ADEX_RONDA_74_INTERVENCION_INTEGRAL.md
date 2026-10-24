@@ -792,3 +792,14 @@ Conciliación esperada tras el paso 4 (se comprueba con `node tmp/r74/final/bl-c
 | Inyección de capital en la Base de Aguas Lindas (paso 5), cuando el propietario lo decida tras su verificación personal | Andrew |
 | RB-D10 (faltante de acta cargable al Administrador saliente), RB-D12 (anulación por partes de una operación conjunta), RB-D13 (pagar desde la pantalla el reembolso de otro Administrador) | Decisión del propietario |
 | Política de respaldos (P-05): las copias cifradas son manuales; sin PITR | Decisión del propietario |
+
+### 16.8 Observaciones del propietario tras activar (2026-10-24, commit `760722b`, publicado)
+
+| # | Observación | Cambio |
+|---|---|---|
+| 1 | Caja principal, Transferencias y Notificaciones con márgenes laterales | Ocupan todo el ancho, como las demás pantallas (también Diferencias) |
+| 2 | Tarjeta de Rutas sin distinguir el dinero | Con Base por Ruta muestra **Base de la ruta**, **Base del trabajador** y **Cartera activa**; el total controlado incluye la Base de la ruta. CLEAN y el modelo de bolsas conservan la tarjeta anterior |
+| 3 | «Custodias» se llama **Base del trabajador** | Caja principal (consolidado y detalle de ruta), Dashboard, Transferencias, Consultas y la tarjeta del Supervisor |
+| 4 | Bloque «Saldo sin asignar» ya innecesario | Solo aparece mientras algún Administrador conserve saldo anterior a la activación |
+
+Pruebas: E2E 86/86 (nuevas A-03b, A-03c y A-03d: textos, tarjeta de Rutas = PostgreSQL, ancho completo), 41/41 y 25/25; CLEAN `npm test` en verde; tipos de Online, CLEAN y SaaS sin errores (`tmp/r74/final/ux/`). Web servida: `index-C2OzAHKs.js` = `760722b`. Render sin cambios (`8d37c05`): no se tocó la API.
