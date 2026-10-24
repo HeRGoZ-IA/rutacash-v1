@@ -520,7 +520,7 @@ export default function RoutesPage() {
                   <>
                     <div className="bg-primary-50 rounded-xl p-3" data-testid={`route-base-${route.id}`}>
                       <p className="text-sm font-bold text-primary-700 truncate">{formatCurrency(summaryByRoute[route.id].baseRuta ?? 0, currency)}</p>
-                      <p className="text-xs text-gray-500">Base de la ruta</p>
+                      <p className="text-xs text-gray-500">Base disponible</p>
                     </div>
                     <div className="bg-violet-50 rounded-xl p-3" data-testid={`route-worker-base-${route.id}`}>
                       <p className="text-sm font-bold text-violet-700 truncate">{formatCurrency(summaryByRoute[route.id].baseTrabajador ?? 0, currency)}</p>

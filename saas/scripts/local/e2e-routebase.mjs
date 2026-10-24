@@ -387,7 +387,7 @@ try {
     await go('/admin/routes'); await waitTestid(`route-worker-base-${C1}`); await sleep(1000);
     const card1 = { base: minorOf(await testid(`route-base-${C1}`)), worker: minorOf(await testid(`route-worker-base-${C1}`)) };
     const db1 = { base: await base(C1), worker: await bal(N, 'custody', { route: C1 }) };
-    ok('A-03c', ['C-07'], 'Rutas: la tarjeta separa Base de la ruta, Base del trabajador y Cartera activa (= PostgreSQL)',
+    ok('A-03c', ['C-07'], 'Rutas: la tarjeta separa Base disponible, Base del trabajador y Cartera activa (= PostgreSQL)',
       card1.base === db1.base && card1.worker === db1.worker && (await text()).includes('Cartera Activa'), JSON.stringify({ card1, db1 }));
     await go('/admin/transfers'); await waitTestid('rb-transfers'); await sleep(800);
     const trTxt = await text();
