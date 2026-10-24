@@ -265,7 +265,7 @@ describe('Fase 5 · gastos', () => {
     assert.equal((await $bruno(`/v1/expenses/${b['id']}/refunds`, { amountMinor: 5_001, reason: 'Demasiado' })).body['error'], 'REFUND_EXCEEDS_EXPENSE');
     assert.equal((await $bruno(`/v1/expenses/${b['id']}/reverse`, { reason: 'Con reintegros' })).body['error'], 'EXPENSE_HAS_REFUNDS');
     assert.equal(await companyAcc(), comp + 4_000);
-    // Gastos de trabajador y de ruta (F5-D02): los anula el responsable, nunca quien los registró.
+    // Gastos de trabajador y de ruta: los anula el responsable (R74, 0037: también los que él registró).
     // R74 (cambio de regla en esta intervención): el SuperAdmin ya no los anula.
     const w = (await worker(carlos.money, carlos.membershipId, 700, { description: 'Mal cargado' })).body['expense'] as Body;
     const rr = (await spend($ana, { scope: 'ruta', routeId: r1, amountMinor: 1_200, description: 'Ruta' })).body['expense'] as Body;
@@ -274,8 +274,9 @@ describe('Fase 5 · gastos', () => {
     assert.equal((await $ana(`/v1/expenses/${w['id']}/reverse`, { reason: 'Mal cargado' })).status, 201);
     assert.equal(await custody(carlos.membershipId), cash + 700);
     assert.equal((await $ana(`/v1/expenses/${rr['id']}/refunds`, { amountMinor: 100, reason: 'Parcial de ruta' })).body['error'], 'REFUND_NOT_ALLOWED', 'reintegros: solo gastos de bolsa (D12)');
-    assert.equal((await $ana(`/v1/expenses/${rr['id']}/reverse`, { reason: 'Propio' })).body['error'], 'SELF_CORRECTION_FORBIDDEN', 'Ana lo registró');
     assert.equal((await $bruno(`/v1/expenses/${rr['id']}/reverse`, { reason: 'Anulado por el SuperAdmin' })).body['error'], 'CAPITAL_AUTHORITY_REQUIRED', 'R74: el SuperAdmin tampoco');
+    // R74 (0037, regla definitiva): la responsable de capital anula también lo que ella registró (sin F5-D02).
+    assert.equal((await $ana(`/v1/expenses/${rr['id']}/reverse`, { reason: 'Propio' })).status, 201, 'Ana lo registró y lo anula');
     // Históricos sembrados (D9, sin asiento): no se corrigen por esta vía.
     const legacy = (await db.admin.query(`select id from adex.expenses where company_id = $1 and ledger_operation_id is null and reverses_id is null and refunds_expense_id is null and reversal_id is null and route_id is null limit 1`, [c1])).rows[0]?.id;
     if (legacy) assert.equal((await $bruno(`/v1/expenses/${legacy}/reverse`, { reason: 'Histórico' })).body['error'], 'NOT_CORRECTABLE_HERE');

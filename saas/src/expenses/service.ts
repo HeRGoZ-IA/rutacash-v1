@@ -27,7 +27,7 @@ import { loadMembers, need } from '../structure/common.ts';
 import { oneOf, optId, optText, PAGE_ORDER, pageFilters, pathId, reqId, reqText } from '../structure/input.ts';
 import { requireAuthority, requireCustodian, requireOperationId, routeOf } from '../capital/service.ts';
 import { parseOffline, requireOfflineActor, storeOfflineCapture } from '../offline/capture.ts';
-import { requireControlsAllRoutes } from '../capital/conciliation.ts';
+import { derivedOperationId, expenseDependencies, requireControlsAllRoutesOr, requireOpenPeriods } from '../capital/corrections.ts';
 import { capitalModelOf, contributionRoutes, entriesOf, expenseContributions, parseContributions, requireGeneralFundingActor, sumOf } from '../capital/generalFunding.ts';
 
 /** Alcances de gasto: los de CLEAN más el general del Administrador (0035, solo API/servidor). */
@@ -262,32 +262,71 @@ export async function createExpense(client: pg.PoolClient, ctx: ActiveContext, b
  * Anulación total (asiento espejo enlazado; el original queda ANULADO con quién, cuándo y
  * motivo; el importe vuelve a la cuenta que pagó).
  *   · gasto de bolsa (D12): el Administrador, su bolsa; el SuperAdmin, cualquiera;
- *   · gasto de trabajador o de ruta (F5-D02): autoridad `correct` (responsable de la ruta;
- *     R74: ya no el SuperAdmin) y nunca la persona que lo registró, tampoco con otra membresía; con la
- *     semana del gasto cerrada, ajuste en el periodo abierto con autoridad de ajustes (D7).
+ *   · gasto de trabajador o de ruta: autoridad `correct` (responsable de capital de la ruta; R74: ya no el
+ *     SuperAdmin). R74 (0037, regla definitiva): el responsable anula también lo que ÉL registró (se retiró la
+ *     independencia F5-D02); solo nadie anula un gasto cargado a SU propia custodia (tampoco con otra membresía).
+ *     Con la semana del gasto cerrada, ajuste en el periodo abierto con autoridad de ajustes (D7); con el periodo
+ *     de HOY cerrado, 409 con la reapertura como camino (`details.dependencies`).
+ *   · gasto con dinero propio ya reembolsado: 409 con los reembolsos que lo impiden; con `cascade: true` se anulan
+ *     esos reembolsos y el gasto en UNA transacción (si todos los puede anular el actor).
+ *   · gasto general con aportes de rutas de varios responsables: 409 con la anulación coordinada como camino.
  * PostgreSQL lo revalida todo bajo bloqueo (`adex.expense_reverse`).
  */
 export async function reverseExpense(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Record<string, unknown>, operationId: string | null) {
   const opId = requireOperationId(operationId);
   const prev = await loadExpense(client, ctx, id);
   need(ctx, 'expense.correct', prev.route_id ? { routeId: prev.route_id } : {});
+  if (body['cascade'] !== undefined && typeof body['cascade'] !== 'boolean') throw new ApiError(400, 'INVALID_INPUT', 'cascade must be a boolean', { field: 'cascade' });
+  const cascade = body['cascade'] === true;
+  const correctable = !!prev.ledger_operation_id && !prev.reverses_id && !prev.refunds_expense_id && !prev.reversal_id;
   if (prev.route_id) {
     const route = await routeOf(client, ctx, prev.route_id);
-    if (prev.scope !== 'empresa' && prev.ledger_operation_id && !prev.reverses_id && !prev.refunds_expense_id) {
+    if (prev.scope !== 'empresa' && correctable) {
       requireAuthority(ctx, route, 'correct', await loadMembers(client, ctx));
-      const same = (await client.query<{ s: boolean }>('select adex.same_person($1, $2, $3) s', [ctx.companyId, ctx.membershipId, prev.registered_by_membership_id])).rows[0]!.s;
-      if (same) throw new ApiError(403, 'SELF_CORRECTION_FORBIDDEN');
+      // R74 (0037): sin «quien registró no anula»; solo la propia custodia queda fuera (PostgreSQL: AX717).
+      if (prev.collector_membership_id) {
+        const own = (await client.query<{ s: boolean }>('select adex.same_person($1, $2, $3) s', [ctx.companyId, ctx.membershipId, prev.collector_membership_id])).rows[0]!.s;
+        if (own) throw new ApiError(403, 'SELF_CORRECTION_FORBIDDEN', 'nobody reverses an expense charged to their own custody');
+      }
+      await requireOpenPeriods(client, ctx, [route.id]);
     }
   }
-  // R74 (0036, RB-D7): un gasto general con aportes de rutas lo anula el responsable VIGENTE de TODAS las rutas aportantes
-  // (aunque no lo registrara); con rutas de distintos responsables, 409 con la lista de rutas y responsables.
-  if (prev.funding === 'routes' && !prev.reverses_id && prev.ledger_operation_id) {
+  // R74 (0036, RB-D7 · 0037): un gasto general con aportes de rutas lo anula el responsable VIGENTE de TODAS las rutas
+  // aportantes (aunque no lo registrara); con rutas de distintos responsables, 409 con la anulación coordinada como camino.
+  if (prev.funding === 'routes' && correctable) {
     if (ctx.role !== 'admin') throw new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED', 'only an administrator reverses general expenses');
     const routes = (await client.query<{ r: string[] }>('select adex.general_funding_routes($1, null) r', [prev.id])).rows[0]!.r;
-    await requireControlsAllRoutes(client, ctx, routes);
+    await requireControlsAllRoutesOr(client, ctx, routes, { kind: 'expense', id: prev.id, amountMinor: Number(prev.amount_minor), label: prev.description ?? 'Gasto general' });
+    await requireOpenPeriods(client, ctx, routes);
   }
   const reason = reqText(body, 'reason', 200);
   if (reason.length < 3) throw new ApiError(400, 'INVALID_INPUT', 'reason is required', { field: 'reason' });
+  // R74 (0037): gasto con dinero propio ya reembolsado → dependencias (reembolsos) y, si se pide, anulación en cadena.
+  const cascaded: Record<string, unknown>[] = [];
+  if (prev.funding === 'own_money' && correctable && ctx.role === 'admin' && prev.responsible_admin_membership_id === ctx.membershipId) {
+    const deps = await expenseDependencies(client, prev.id);
+    if (deps.length) {
+      const blocked = deps.filter((d) => !d['reversibleByActor']);
+      if (!cascade || blocked.length) {
+        throw new ApiError(409, 'PAYABLE_ALREADY_REIMBURSED', blocked.length
+          ? 'the obligation was reimbursed by someone else: they reverse that reimbursement first'
+          : 'the obligation was already reimbursed: reverse the reimbursements first (cascade: true does it in the same transaction)',
+        { dependencies: deps, cascadeAvailable: blocked.length === 0 });
+      }
+      for (const [i, d] of deps.entries()) {
+        const sub = derivedOperationId(opId, `cascade:${i + 1}`);
+        const rr = (await client.query<{ r: Record<string, unknown> }>('select adex.admin_reimbursement_reverse($1, $2, $3) r',
+          [sub, d.id, `${reason} (anulación en cadena del gasto)`.slice(0, 300)])).rows[0]!.r;
+        await audit(client, ctx, {
+          action: 'ADMIN_REIMBURSEMENT_REVERSED', entityType: 'admin_reimbursement', entityId: d.id, routeId: null, reason,
+          description: `Reembolso anulado (${Number(d.amountMinor)}) para poder anular el gasto que pagaba: ${reason}`,
+          before: { estado: 'vigente', amountMinor: d.amountMinor }, after: { estado: 'anulado', pendingAfterMinor: rr['pendingAfterMinor'] },
+          metadata: { operationId: sub, cascadeOf: opId, expenseId: prev.id, ledgerOperationIds: rr['operationIds'] },
+        });
+        cascaded.push({ reimbursementId: d.id, amountMinor: d.amountMinor, operationIds: rr['operationIds'] });
+      }
+    }
+  }
   const r = (await client.query<{ r: Record<string, unknown> }>('select adex.expense_reverse($1, $2, $3) r', [opId, prev.id, reason])).rows[0]!.r;
   await audit(client, ctx, {
     action: 'MOVEMENT_REVERSED', entityType: 'expense', entityId: prev.id, routeId: prev.route_id, reason,
@@ -295,7 +334,8 @@ export async function reverseExpense(client: pg.PoolClient, ctx: ActiveContext, 
     before: { valor: Number(prev.amount_minor), estado: 'vigente' },
     after: { estado: 'anulado', reversalId: r['reversalExpenseId'], fecha: r['reversalDate'], funding: prev.funding, fundingAdminId: prev.funding_admin_membership_id },
     metadata: { operationId: opId, ledgerOperationId: r['operationId'], scope: prev.scope, workerId: prev.collector_membership_id,
-      registeredBy: prev.registered_by_membership_id, originalDate: ymd(prev.expense_date), periodClosed: r['periodClosed'] === true },
+      registeredBy: prev.registered_by_membership_id, originalDate: ymd(prev.expense_date), periodClosed: r['periodClosed'] === true,
+      selfCorrection: prev.registered_by_membership_id === ctx.membershipId, ...(cascaded.length ? { cascadedReimbursements: cascaded } : {}) },
   });
   // R74 (0035): un gasto con aportes de varias rutas se anula con una operación por aporte.
   const opIds = Array.isArray(r['operationIds']) ? (r['operationIds'] as string[]) : [r['operationId'] as string];
@@ -303,6 +343,7 @@ export async function reverseExpense(client: pg.PoolClient, ctx: ActiveContext, 
     reversal: await viewOf(client, ctx, await loadExpense(client, ctx, r['reversalExpenseId'] as string)),
     original: await viewOf(client, ctx, await loadExpense(client, ctx, prev.id)),
     entries: opIds.length > 1 ? await entriesOf(client, ctx, opIds) : await visibleEntries(client, ctx, r['operationId'] as string),
+    ...(cascaded.length ? { cascadedReimbursements: cascaded } : {}),
   };
 }
 

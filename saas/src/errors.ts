@@ -81,6 +81,10 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX435': return new ApiError(409, 'DIFFERENCE_NOT_PENDING');           // RB-D3: ya conciliada o sustituida
     case 'AX436': return new ApiError(409, 'RESOLUTION_NOT_ALLOWED');           // RB-D3: resolución que no aplica a esa diferencia
     case 'AX438': return new ApiError(409, 'DIFFERENCE_AMOUNT_MISMATCH');       // RB-D3: el importe no coincide con lo pendiente (cambió)
+    // R74 · regla definitiva del responsable de capital (0037): anulación coordinada.
+    case 'AX440': return new ApiError(409, 'JOINT_REVERSAL_NOT_NEEDED');        // el actor controla todas las rutas: anulación directa
+    case 'AX441': return new ApiError(409, 'JOINT_REVERSAL_PENDING_EXISTS');    // ya hay una propuesta pendiente para esa operación
+    case 'AX442': return new ApiError(409, 'JOINT_REVERSAL_NOT_PENDING');       // asentada, cancelada o caducada
     // Fase 4 · solicitudes y desembolsos.
     case 'AX501': return new ApiError(409, 'REQUEST_STATE_INVALID');
     case 'AX502': return new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED');
@@ -115,7 +119,8 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX713': return new ApiError(409, 'REFUND_NOT_ALLOWED');
     case 'AX714': return new ApiError(409, 'REFUND_EXCEEDS_EXPENSE');
     case 'AX715': return new ApiError(409, 'EXPENSE_HAS_REFUNDS');
-    case 'AX717': return new ApiError(403, 'SELF_CORRECTION_FORBIDDEN');   // F5-D02: quien registró no anula
+    // R74 (0037): ya no es «quien registró no anula» (F5-D02 retirada para el responsable); solo un gasto cargado a la propia custodia.
+    case 'AX717': return new ApiError(403, 'SELF_CORRECTION_FORBIDDEN');
     // Fase 6 · cuadres y cierres (0014). Sin cifras de saldos.
     case 'AX801': return new ApiError(403, 'SELF_SETTLEMENT_FORBIDDEN');   // nadie se cuadra (ni reabre) a sí mismo
     case 'AX802': return new ApiError(409, 'SETTLEMENT_STALE');            // las cifras cambiaron desde la vista previa

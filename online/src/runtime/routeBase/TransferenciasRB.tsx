@@ -9,6 +9,8 @@
 // Sin flujos del modelo anterior: no se pide ni devuelve dinero al SuperAdmin, no hay bolsas ni
 // transferencias entre Administradores. El cuadre NO es una transferencia: sigue en Liquidación.
 // `?op=inject|withdraw|deliver|receive|transfer|assign` abre directamente esa operación.
+// R74 (0037): «Operaciones recientes de tus rutas» con «Corregir» (el responsable corrige también lo suyo; una transferencia
+// hacia la ruta de otro responsable se anula con una anulación conjunta) y las anulaciones conjuntas pendientes.
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -38,6 +40,7 @@ import {
 } from './api.ts';
 import { BalancePreview, ExplainPanel, Notice, num, useMoney, type Explanation } from './parts.tsx';
 import { HandoverDialog } from './HandoverDialog.tsx';
+import { JointReversalsPanel, RecentBaseOperations } from './Corrections.tsx';
 
 type Kind = 'inject' | 'withdraw' | 'deliver' | 'receive' | 'transfer' | 'assign';
 const KINDS: Kind[] = ['inject', 'withdraw', 'deliver', 'receive', 'transfer', 'assign'];
@@ -177,6 +180,10 @@ export function TransferenciasRB({ model }: { model: CapitalModel }) {
               </section>
             ))}
           </div>
+
+          {/* R74 (0037): anulaciones conjuntas pendientes y corrección de las operaciones recientes de tus rutas. */}
+          <JointReversalsPanel />
+          <RecentBaseOperations routes={mine.map((r) => ({ routeId: r.routeId, name: r.name }))} otherNames={destinations.map((d) => ({ routeId: d.routeId, name: d.name }))} />
 
           <section className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <Link to="/admin/consultas?periodo=7d" className="rounded-2xl border border-gray-200 bg-white px-4 py-3 flex items-center gap-3 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">

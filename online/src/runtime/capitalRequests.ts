@@ -108,8 +108,12 @@ export interface NoticeTransfer {
 /** R74 Base por Ruta (O5): el nuevo responsable debe contar la Base y confirmar la entrega. */
 export interface NoticeHandover { id: string; routeId: string; routeName: string; fromId: string | null; baseAtStart: number }
 
+/** R74 (0037): anulación conjunta que espera la confirmación de este responsable (vista del servidor). */
+export type NoticeJoint = import('./routeBase/api.ts').JointProposal;
+
 export type Notice =
   | { type: 'request'; at: string; request: CapitalRequest }
+  | { type: 'joint-reversal-confirmation'; at: string; proposal: NoticeJoint }
   | { type: 'handover-confirmation'; at: string; handover: NoticeHandover }
   | { type: 'transfer-confirmation'; at: string; transfer: NoticeTransfer }
   | { type: 'request-resolved'; at: string; request: CapitalRequest }
@@ -123,6 +127,9 @@ function mapNotice(n: any): Notice {
   if (n.request) return { ...n, request: fromRaw(n.request) };
   if (n.transfer) return { ...n, transfer: { ...n.transfer, amount: toMajor(n.transfer.amountMinor) } };
   if (n.handover) return { ...n, handover: { ...n.handover, baseAtStart: toMajor(n.handover.baseAtStartMinor) } };
+  if (n.proposal) return { ...n };
+  // Tipo desconocido (API más nueva): sin operación no se rompe la bandeja.
+  if (!n.operation) return { ...n, type: 'capital-received', operation: { id: String(n.at ?? ''), kind: '', amount: 0, routeId: null, reason: '', actor: { membershipId: '', name: null, role: '' }, adminName: null, workerName: null } };
   return { ...n, operation: { ...n.operation, amount: toMajor(n.operation.amountMinor) } };
 }
 

@@ -60,7 +60,10 @@ import { VISIT_FIELDS, listVisits, registerVisit } from '../collections/visits.t
 import { offlineKey } from '../offline/capture.ts';
 import { ADJUSTMENT_FIELDS, CORRECTION_FIELDS, approveAdjustment, correctCollection, createAdjustment, listAdjustments, rejectAdjustment } from '../collections/adjustments.ts';
 import { EXPENSE_FIELDS, createExpense, getExpense, listExpenses, refundExpense, reverseExpense } from '../expenses/service.ts';
-import { REIMBURSE_FIELDS, adminPayables, getReimbursement, listReimbursements, reimburseAdmin, reverseReimbursement } from '../capital/generalFunding.ts';
+import { REIMBURSE_FIELDS, adminPayableItems, adminPayables, getReimbursement, listReimbursements, reimburseAdmin, reverseReimbursement } from '../capital/generalFunding.ts';
+import {
+  JOINT_PROPOSE_FIELDS, cancelJointReversal, confirmJointReversal, getJointReversal, listJointReversals, previewCorrection, proposeJointReversal,
+} from '../capital/corrections.ts';
 import { RESOLVE_FIELDS, deactivationCheck, getConciliation, listConciliations, listDifferences, previewDifference, resolveDifference } from '../capital/conciliation.ts';
 import { CLIENT_LOCATION_FIELDS, getClientLocation, routeMap, setClientLocation } from '../map/service.ts';
 import { listMovements } from '../movements/service.ts';
@@ -231,12 +234,24 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: ([id]) => async (c, ctx, b, _q, op) => ok(await confirmHandover(c, ctx, id!, b, op)) },
   // ---------- Gastos generales (R74, 0035): saldos a favor de Administradores (nunca efectivo) y reembolsos ----------
   { method: 'GET', pattern: /^\/v1\/capital\/admin-payables$/, fields: null, handler: () => async (c, ctx) => ok(await adminPayables(c, ctx)) },
+  // R74 (0037, item 4): obligaciones pendientes por gasto (beneficiario, descripción, pendiente), para pagar la de otro Administrador.
+  { method: 'GET', pattern: /^\/v1\/capital\/admin-payables\/items$/, fields: null, handler: () => async (c, ctx) => ok(await adminPayableItems(c, ctx)) },
   { method: 'GET', pattern: /^\/v1\/capital\/reimbursements$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ reimbursements: await listReimbursements(c, ctx, q) }) },
   { method: 'POST', pattern: /^\/v1\/capital\/reimbursements$/, fields: REIMBURSE_FIELDS, idempotent: 'capital.admin_reimbursement', requiresOperation: true,
     handler: () => async (c, ctx, b, _q, op) => created(await reimburseAdmin(c, ctx, b, op)) },
   { method: 'GET', pattern: new RegExp(`^/v1/capital/reimbursements/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getReimbursement(c, ctx, id!)) },
   { method: 'POST', pattern: new RegExp(`^/v1/capital/reimbursements/${ID}/reverse$`), fields: ['reason'], idempotent: 'capital.admin_reimbursement_reverse',
     requiresOperation: true, handler: ([id]) => async (c, ctx, b, _q, op) => created(await reverseReimbursement(c, ctx, id!, b, op)) },
+  // ---------- Correcciones del responsable de capital (R74, 0037): vista previa y anulación coordinada ----------
+  { method: 'GET', pattern: /^\/v1\/corrections\/preview$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await previewCorrection(c, ctx, q)) },
+  { method: 'GET', pattern: /^\/v1\/capital\/joint-reversals$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await listJointReversals(c, ctx, q)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/joint-reversals$/, fields: JOINT_PROPOSE_FIELDS, idempotent: 'capital.joint_reversal_propose', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await proposeJointReversal(c, ctx, b, op)) },
+  { method: 'GET', pattern: new RegExp(`^/v1/capital/joint-reversals/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getJointReversal(c, ctx, id!)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/capital/joint-reversals/${ID}/confirm$`), fields: [], idempotent: 'capital.joint_reversal_confirm', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, _b, _q, op) => ok(await confirmJointReversal(c, ctx, id!, op)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/capital/joint-reversals/${ID}/cancel$`), fields: ['reason'], idempotent: 'capital.joint_reversal_cancel', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => ok(await cancelJointReversal(c, ctx, id!, b, op)) },
   // ---------- Conciliación de diferencias por el Administrador (R74, 0036, RB-D3) ----------
   { method: 'GET', pattern: /^\/v1\/capital\/differences$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await listDifferences(c, ctx, q)) },
   { method: 'GET', pattern: /^\/v1\/capital\/differences\/preview$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await previewDifference(c, ctx, q)) },
@@ -329,7 +344,8 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'POST', pattern: /^\/v1\/expenses$/, fields: EXPENSE_FIELDS, idempotent: 'expenses.create', requiresOperation: true,
     handler: () => async (c, ctx, b, _q, op) => created(await createExpense(c, ctx, b, op)) },
   { method: 'GET', pattern: new RegExp(`^/v1/expenses/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getExpense(c, ctx, id!)) },
-  { method: 'POST', pattern: new RegExp(`^/v1/expenses/${ID}/reverse$`), fields: ['reason'], idempotent: 'expenses.reverse', requiresOperation: true,
+  // R74 (0037): `cascade: true` anula en la misma transacción los reembolsos que impiden anular un gasto con dinero propio.
+  { method: 'POST', pattern: new RegExp(`^/v1/expenses/${ID}/reverse$`), fields: ['reason', 'cascade'], idempotent: 'expenses.reverse', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => created(await reverseExpense(c, ctx, id!, b, op)) },
   { method: 'POST', pattern: new RegExp(`^/v1/expenses/${ID}/refunds$`), fields: ['amountMinor', 'reason'], idempotent: 'expenses.refund', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => created(await refundExpense(c, ctx, id!, b, op)) },

@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowDownLeft, ArrowUpRight, Bell, CheckCircle2, Clock3, Handshake, Inbox as InboxIcon, Plus, Send, XCircle } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Bell, CheckCircle2, Clock3, Handshake, Inbox as InboxIcon, Plus, Send, Users, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -24,6 +24,11 @@ import { CloseRequestModal, DeliverCashModal, RequestModal } from './MoneyForms.
 import { listAdminTransfers, type AdminTransfer } from './adminTransfers.ts';
 import { TransferDecisionModal } from './AdminTransferUI.tsx';
 import { HandoverDialog } from './routeBase/HandoverDialog.tsx';
+import { JointProposalModal } from './routeBase/Corrections.tsx';
+import type { JointProposal } from './routeBase/api.ts';
+import { toMajor } from './mappers.ts';
+
+const JOINT_TEXT: Record<string, string> = { expense: 'gasto general', reimbursement: 'reembolso', route_transfer: 'transferencia entre rutas' };
 
 /** Dónde se atiende cada solicitud (el MISMO formulario de la operación). */
 const ATTEND_PATH: Record<string, string> = {
@@ -42,6 +47,8 @@ export default function NotificationsPage() {
   const [delivering, setDelivering] = useState<{ request: CapitalRequest | null } | null>(null);
   const [deciding, setDeciding] = useState<{ t: AdminTransfer; what: 'confirm' | 'reject' } | null>(null);
   const [receiving, setReceiving] = useState<{ routeId: string; name: string } | null>(null);
+  /** R74 (0037): anulación conjunta abierta desde la bandeja. */
+  const [joint, setJoint] = useState<JointProposal | null>(null);
   const money = (n: number) => formatCurrency(n, currency);
   const cobrador = role === 'cobrador';
   const consultas = role === 'admin' || role === 'superadmin';
@@ -103,6 +110,11 @@ export default function NotificationsPage() {
                           <Button size="sm" onClick={() => { void decide(n.transfer.id, 'confirm'); }}>{n.transfer.mySide === 'destination' ? 'Confirmar recepción' : 'Confirmar envío'}</Button>
                           <Button size="sm" variant="secondary" onClick={() => { void decide(n.transfer.id, 'reject'); }}>Rechazar</Button>
                         </>} />
+                    ) : n.type === 'joint-reversal-confirmation' ? (
+                      <Row icon={<Users className="w-4 h-4 text-sky-600" />} amount={formatCurrency(toMajor(n.proposal.amountMinor), currency)}
+                        title={`Confirmar tu parte de una anulación conjunta (${JOINT_TEXT[n.proposal.targetKind] ?? 'operación'})`}
+                        detail={`Propuso ${formatPersonName(n.proposal.proposedBy.name ?? '') || 'otro Administrador'} · «${n.proposal.reason}» · faltan ${n.proposal.pendingParts} confirmación(es)`} at={n.at}
+                        actions={<Button size="sm" onClick={() => setJoint(n.proposal)} data-testid="joint-attend">Revisar y confirmar</Button>} />
                     ) : n.type === 'handover-confirmation' ? (
                       <Row icon={<Handshake className="w-4 h-4 text-violet-600" />} amount={money(n.handover.baseAtStart)}
                         title={`Recibir la ruta ${n.handover.routeName}: cuenta la Base y confirma`}
@@ -150,12 +162,14 @@ export default function NotificationsPage() {
       <DeliverCashModal open={!!delivering} request={delivering?.request ?? null} currency={currency}
         onClose={() => setDelivering(null)} onDone={() => { setDelivering(null); reload(); }} />
       <HandoverDialog routeId={receiving?.routeId ?? null} routeName={receiving?.name} onClose={() => setReceiving(null)} onDone={() => { setReceiving(null); reload(); }} />
+      <JointProposalModal proposal={joint} onClose={() => { setJoint(null); reload(); }} />
       <TransferDecisionModal target={deciding} currency={currency} onClose={() => setDeciding(null)} onDone={() => { setDeciding(null); reload(); }} />
     </div>
   );
 }
 
 function key(n: Notice): string {
+  if ('proposal' in n) return `j:${n.proposal.id}`;
   if ('request' in n) return `r:${n.request.id}:${n.type}`;
   if ('transfer' in n) return `t:${n.transfer.id}:${n.type}`;
   if ('handover' in n) return `h:${n.handover.id}`;

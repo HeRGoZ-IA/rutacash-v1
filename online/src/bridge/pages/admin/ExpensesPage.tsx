@@ -5,6 +5,9 @@
 //     Sin vocabulario de bolsas; los gastos generales se listan aparte con sus aportes y su naturaleza.
 //   · admin_pool: lo de siempre (gasto de empresa con bolsa) y, para el Administrador, «General con mi dinero propio
 //     (reembolsable)» (C2). La naturaleza de la categoría se muestra en cada gasto.
+// R74 (0037, regla definitiva): el responsable de capital de la ruta anula los gastos de ruta y de trabajador de SUS
+//   rutas, también los que él registró, desde el diálogo de corrección (efecto antes de confirmar; periodo cerrado →
+//   reapertura explícita). Nadie anula un gasto cargado a su propia custodia.
 import { useState, useEffect } from 'react'
 import { Plus, TrendingDown, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -38,6 +41,7 @@ import { useRuntime } from '../../../runtime/session.ts'
 import { todayIn } from '../../../lib/format.ts'
 import { fetchCategories, fetchPanel, isGeneralFunded, isRouteBaseUi, natureLabel, useCapitalModel, type ServerCategory } from '../../../runtime/routeBase/api.ts'
 import { GeneralExpenseModal, GeneralExpensesList, fundingRoutesOf, type FundingRoute } from '../../../runtime/routeBase/GeneralExpensesRB.tsx'
+import { CorrectionDialog, type CorrectionTarget } from '../../../runtime/routeBase/Corrections.tsx'
 
 /** R74: opciones del selector que abren el formulario de gasto general (no son `ExpenseScope` de CLEAN). */
 type GeneralOption = 'administrador' | 'empresa-general' | 'propio'
@@ -95,6 +99,8 @@ export default function ExpensesPage() {
   /** Gasto administrativo (empresa): formulario compartido con Caja principal. */
   const [adminModal, setAdminModal] = useState(false)
   const [anulando, setAnulando] = useState<Expense | null>(null)
+  // R74 (0037): corrección de un gasto de ruta o de trabajador por el responsable de capital de la ruta.
+  const [corrigiendo, setCorrigiendo] = useState<CorrectionTarget | null>(null)
   const [reintegrando, setReintegrando] = useState<Expense | null>(null)
   const [reintegro, setReintegro] = useState({ valor: 0, motivo: '', operationId: '' })
   const [guardandoReintegro, setGuardandoReintegro] = useState(false)
@@ -306,6 +312,9 @@ export default function ExpensesPage() {
               const estado = poolExpenseStateOf(e)
               const bolsa = bolsaDe(e)
               const correccion = estado === 'anulacion' || estado === 'reintegro'
+              // Vigente, con asiento, de una ruta de la que el usuario es el responsable de capital (no el SuperAdmin).
+              const corregible = user?.rol === 'admin' && estado === 'ruta' && !!e.routeId && !e.reversesId && !e.refundsExpenseId && !e.reversalId
+                && routes.find(r => r.id === e.routeId)?.capitalControllerAdminId === user?.id && e.collectorId !== user?.id
               return (
                 <div key={e.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-3" data-testid="expense-row">
                   <div className="flex items-center gap-3 min-w-0">
@@ -331,6 +340,11 @@ export default function ExpensesPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
+                    {corregible && (
+                      <Button size="sm" variant="ghost" data-testid="expense-correct"
+                        onClick={() => setCorrigiendo({ kind: 'expense', id: e.id, title: `${getCatName(e.categoryId)} · ${scope === 'trabajador' ? 'De trabajador' : 'De ruta'} · ${getRouteName(e.routeId)}` })}>Anular</Button>
+                    )}
+                    {e.reversalId && estado === 'ruta' && <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-red-50 text-red-600">Anulado</span>}
                     {canCorrectPoolExpense(user, e) && (<>
                       <Button size="sm" variant="ghost" onClick={() => { setReintegrando(e); setReintegro({ valor: 0, motivo: '', operationId: generateId() }) }}>Reintegro</Button>
                       <Button size="sm" variant="ghost" onClick={() => setAnulando(e)}>Anular</Button>
@@ -407,6 +421,7 @@ export default function ExpensesPage() {
       )}
 
       {/* ANULACIÓN de un gasto de bolsa: motivo obligatorio; el servicio enlaza la reversión. */}
+      <CorrectionDialog target={corrigiendo} onClose={() => { setCorrigiendo(null); void load() }} />
       <ReverseMovementModal currency={currency} onCancel={() => setAnulando(null)} onConfirm={anular}
         target={anulando && { tipo: 'Gasto administrativo', valor: anulando.valor, fecha: anulando.fecha, detalle: `${getCatName(anulando.categoryId)} · ${bolsaDe(anulando) ?? ''}` }} />
 

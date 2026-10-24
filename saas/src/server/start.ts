@@ -27,7 +27,7 @@ import { createCompanyExecutor, createCompanyHandler } from '../http/companyApi.
 import { createDemoHandler } from '../http/demoApi.ts';
 import { createDemoService } from '../demo/service.ts';
 import { API_FEATURES, createOnlineServer } from './app.ts';
-import { adminTransfersReady, capitalRequestsReady, offlineCollectorReady, offlineDisbursementsReady, paymentLocationsReady, routeMapReady, creditRectificationReady, rectificationPaymentsReady, routeBaseReady, singleSessionReady, generalExpensesReady, adminAuthorityReady } from '../collections/location.ts';
+import { adminTransfersReady, capitalRequestsReady, offlineCollectorReady, offlineDisbursementsReady, paymentLocationsReady, routeMapReady, creditRectificationReady, rectificationPaymentsReady, routeBaseReady, singleSessionReady, generalExpensesReady, adminAuthorityReady, controllerAuthorityReady } from '../collections/location.ts';
 
 /** Configuración común a los dos servicios (empresa y Owner): TLS, CORS, proveedor, límites. */
 export function readCommonConfig(env: NodeJS.ProcessEnv) {
@@ -115,6 +115,8 @@ export async function start(env: NodeJS.ProcessEnv = process.env) {
   if (!(await generalExpensesReady(apiPool))) missing.add('general-expenses-v1');
   // R74 (0036): conciliación de diferencias y diagnóstico de desactivación de Administradores.
   if (!(await adminAuthorityReady(apiPool))) missing.add('admin-authority-v1');
+  // R74 (0037): autocorrección del responsable de capital, anulación coordinada y reembolso de obligaciones concretas.
+  if (!(await controllerAuthorityReady(apiPool))) missing.add('controller-authority-v1');
   const features = API_FEATURES.filter((f) => !missing.has(f));
   const server = createOnlineServer({
     company: createCompanyHandler(companyOpts), demo, readinessPool: apiPool, allowedOrigins: cfg.origins, trustProxy: cfg.trustProxy, rateLimit: cfg.rateLimit,

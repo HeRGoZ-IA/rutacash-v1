@@ -19,16 +19,17 @@ import { ApiError } from '../errors.ts';
 import type { ActiveContext } from '../authz/context.ts';
 import { audit } from '../db/audit.ts';
 import { need } from '../structure/common.ts';
-import { pathId, reqId, reqText } from '../structure/input.ts';
+import { optId, pathId, reqId, reqText } from '../structure/input.ts';
 import { ID_RE } from '../authz/context.ts';
 import { requireOperationId, routeOf, visibleEntries } from './service.ts';
-import { requireControlsAllRoutes } from './conciliation.ts';
+import { controllerAuthorityApplied, requireControlsAllRoutesOr, requireOpenPeriods } from './corrections.ts';
 
 type Body = Record<string, unknown>;
 
 export interface Contribution { routeId: string; amountMinor: number }
 
-export const REIMBURSE_FIELDS = ['adminId', 'contributions', 'amountMinor', 'reason'] as const;
+// R74 (0037): `expenseId` = obligación concreta (gasto con dinero propio) que se paga.
+export const REIMBURSE_FIELDS = ['adminId', 'contributions', 'amountMinor', 'reason', 'expenseId'] as const;
 
 /** Solo el Administrador (el SuperAdmin supervisa; el resto no mueve dinero de la empresa). */
 export function requireGeneralFundingActor(ctx: ActiveContext): void {
@@ -89,6 +90,7 @@ interface ReimbursementRow {
   id: string; operation_id: string; admin_membership_id: string; payer_membership_id: string; amount_minor: string; source: string;
   reason: string; entry_date: string | Date; created_at: Date; reversed_at: Date | null; reversed_by_membership_id: string | null;
   reversal_reason: string | null;
+  expense_id?: string | null;
 }
 const ymd = (d: string | Date) => (typeof d === 'string' ? d.slice(0, 10)
   : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
@@ -114,7 +116,7 @@ export const expenseContributions = (client: pg.PoolClient, ctx: ActiveContext, 
 function reimbursementView(r: ReimbursementRow, contributions: { routeId: string | null; routeName: string | null; amountMinor: number; operationId: string }[]) {
   return {
     id: r.id, operationId: r.operation_id, adminId: r.admin_membership_id, payerId: r.payer_membership_id, amountMinor: Number(r.amount_minor),
-    source: r.source, reason: r.reason, entryDate: ymd(r.entry_date), createdAt: r.created_at.toISOString(),
+    source: r.source, reason: r.reason, entryDate: ymd(r.entry_date), createdAt: r.created_at.toISOString(), expenseId: r.expense_id ?? null,
     state: r.reversed_at ? 'anulado' : 'vigente', reversedAt: r.reversed_at?.toISOString() ?? null, reversedBy: r.reversed_by_membership_id,
     reversalReason: r.reversal_reason, contributions,
   };
@@ -156,8 +158,14 @@ export async function reimburseAdmin(client: pg.PoolClient, ctx: ActiveContext, 
   if (model === 'route_base' && !contributions) throw new ApiError(400, 'CONTRIBUTIONS_INVALID', 'with the route base model the reimbursement comes from route contributions', { field: 'contributions' });
   if (model !== 'route_base' && contributions) throw new ApiError(400, 'CONTRIBUTIONS_INVALID', 'without the route base model the reimbursement is paid from your pool: send amountMinor only', { field: 'contributions' });
   const names = contributions ? await contributionRoutes(client, ctx, contributions) : new Map<string, string>();
-  const r = (await client.query<{ r: Record<string, unknown> }>('select adex.admin_reimbursement_post($1, $2, $3, $4, $5) r',
-    [opId, adminId, amount, contributions ? JSON.stringify(contributions) : null, reason])).rows[0]!.r;
+  // R74 (0037, item 4): obligación concreta (gasto con dinero propio de `adminId`); el pago reduce EXACTAMENTE esa obligación.
+  const expenseId = optId(body, 'expenseId');
+  if (expenseId && !(await controllerAuthorityApplied(client))) throw new ApiError(400, 'INVALID_INPUT', 'expenseId is not supported yet', { field: 'expenseId' });
+  const r = expenseId
+    ? (await client.query<{ r: Record<string, unknown> }>('select adex.admin_reimbursement_pay($1, $2, $3, $4, $5, $6) r',
+      [opId, adminId, amount, contributions ? JSON.stringify(contributions) : null, reason, expenseId])).rows[0]!.r
+    : (await client.query<{ r: Record<string, unknown> }>('select adex.admin_reimbursement_post($1, $2, $3, $4, $5) r',
+      [opId, adminId, amount, contributions ? JSON.stringify(contributions) : null, reason])).rows[0]!.r;
   const admin = (await client.query<{ display_name: string }>('select display_name from adex.memberships where company_id = $1 and id = $2', [ctx.companyId, adminId])).rows[0];
   const total = Number(r['amountMinor']);
   await audit(client, ctx, {
@@ -165,12 +173,14 @@ export async function reimburseAdmin(client: pg.PoolClient, ctx: ActiveContext, 
     description: `Reembolso de ${total} a ${admin?.display_name ?? adminId}`
       + (contributions ? ` con aportes de ${contributions.map((c) => `${names.get(c.routeId) ?? c.routeId} (${c.amountMinor})`).join(', ')}` : ' desde la bolsa del Administrador')
       + `. Pendiente: ${String(r['pendingBeforeMinor'])} → ${String(r['pendingAfterMinor'])}.`,
-    after: { adminId, amountMinor: total, contributions: r['contributions'], source: r['source'], pendingAfterMinor: r['pendingAfterMinor'] },
+    after: { adminId, amountMinor: total, contributions: r['contributions'], source: r['source'], pendingAfterMinor: r['pendingAfterMinor'],
+      expenseId: expenseId ?? null, obligationPendingAfterMinor: r['obligationPendingAfterMinor'] ?? null },
     metadata: { operationId: opId, ledgerOperationIds: r['operationIds'] },
   });
   return {
     reimbursement: await loadReimbursement(client, ctx, String(r['reimbursementId'])),
     pendingBeforeMinor: Number(r['pendingBeforeMinor']), pendingAfterMinor: Number(r['pendingAfterMinor']),
+    ...(expenseId ? { expenseId, obligationPendingAfterMinor: Number(r['obligationPendingAfterMinor']) } : {}),
     entries: await entriesOf(client, ctx, r['operationIds'] as string[]),
   };
 }
@@ -181,9 +191,12 @@ export async function reverseReimbursement(client: pg.PoolClient, ctx: ActiveCon
   requireGeneralFundingActor(ctx);
   const prev = await loadReimbursement(client, ctx, id);
   // R74 (0036, RB-D7): desde rutas, el responsable VIGENTE de TODAS las rutas aportantes (lista si son de varios).
-  if (prev.source === 'routes') {
+  // R74 (0037): con responsables distintos, 409 con la anulación coordinada como camino; con el periodo de hoy
+  // cerrado en una ruta aportante, 409 con la reapertura como camino.
+  if (prev.source === 'routes' && prev.state === 'vigente') {
     const routes = (await client.query<{ r: string[] }>('select adex.general_funding_routes(null, $1) r', [prev.id])).rows[0]!.r;
-    await requireControlsAllRoutes(client, ctx, routes);
+    await requireControlsAllRoutesOr(client, ctx, routes, { kind: 'reimbursement', id: prev.id, amountMinor: prev.amountMinor, label: `Reembolso: ${prev.reason}` });
+    await requireOpenPeriods(client, ctx, routes);
   }
   const reason = reqText(body, 'reason', 300);
   if (reason.length < 3) throw new ApiError(400, 'INVALID_INPUT', 'reason is required', { field: 'reason' });
@@ -231,3 +244,15 @@ export async function adminPayables(client: pg.PoolClient, ctx: ActiveContext) {
   return { isCash: false, totalPendingMinor: admins.reduce((t, a) => t + a.pendingMinor, 0), admins };
 }
 
+/**
+ * R74 (0037, item 4): obligaciones pendientes de la empresa con sus Administradores, una por gasto pagado con dinero
+ * propio (beneficiario, descripción, categoría, fecha, importe y pendiente). Todo Administrador activo las ve para
+ * poder pagar la de otro con aportes de SUS rutas (o de su bolsa en `admin_pool`); sin rutas ni saldos del
+ * beneficiario. El SuperAdmin, solo lectura. Nunca es efectivo.
+ */
+export async function adminPayableItems(client: pg.PoolClient, ctx: ActiveContext) {
+  if (ctx.role !== 'admin' && ctx.role !== 'superadmin') throw new ApiError(403, 'PERMISSION_DENIED');
+  if (!(await controllerAuthorityApplied(client))) throw new ApiError(404, 'NOT_FOUND');
+  const items = (await client.query<{ v: Record<string, unknown>[] }>('select adex.admin_payable_items() v')).rows[0]!.v;
+  return { isCash: false, totalPendingMinor: items.reduce((t, i) => t + Number(i['pendingMinor']), 0), items };
+}

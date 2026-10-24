@@ -14,6 +14,7 @@
 import type pg from 'pg';
 import type { ActiveContext } from '../authz/context.ts';
 import { holds, memberNames, requestView, type RequestRow } from './requests.ts';
+import { jointToConfirm } from './corrections.ts';
 
 const INFO_DAYS = 30;
 const INFO_LIMIT = 60;
@@ -87,7 +88,8 @@ export async function notificationCount(client: pg.PoolClient, ctx: ActiveContex
           -- R74 Base por Ruta (0034, O5): entregas de ruta pendientes de SU conteo.
           + (select count(*) from adex.route_handover_records where company_id = $1 and status = 'pendiente' and to_membership_id = $2 and $3 = 'admin') n`,
     [ctx.companyId, ctx.membershipId, ctx.role]);
-  return { actionRequired: Number(r.rows[0]!.n) };
+  // R74 (0037): anulaciones coordinadas que esperan SU confirmación.
+  return { actionRequired: Number(r.rows[0]!.n) + (await jointToConfirm(client, ctx)).length };
 }
 
 export async function notifications(client: pg.PoolClient, ctx: ActiveContext) {
@@ -152,6 +154,10 @@ export async function notifications(client: pg.PoolClient, ctx: ActiveContext) {
       actionRequired.push({ type: 'handover-confirmation', at: x.started_at.toISOString(), handover: { id: x.id, routeId: x.route_id, routeName: x.route_name,
         fromId: x.from_membership_id, baseAtStartMinor: Number(x.base_at_start_minor) } });
     }
+  }
+  // R74 (0037): anulación coordinada de una operación conjunta: el responsable de una ruta afectada confirma SU parte.
+  for (const p of await jointToConfirm(client, ctx)) {
+    actionRequired.push({ type: 'joint-reversal-confirmation', at: String(p['createdAt']), proposal: p });
   }
   for (const o of ops) {
     const type = opNotice(o, ctx);

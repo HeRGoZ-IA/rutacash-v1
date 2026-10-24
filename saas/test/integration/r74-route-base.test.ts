@@ -216,7 +216,15 @@ describe('R74 · Base por Ruta (0034)', () => {
     const w = await $ana('/v1/capital/route-base/withdrawals', { routeId: r1, amountMinor: 10_000, reason: 'Retiro de Base' });
     assert.equal(w.status, 201, JSON.stringify(w.body));
     assert.deepEqual([await base(r1), await funding(r1)], [190_000, -190_000]);
-    expectCode(await $ana(`/v1/capital/operations/${(w.body['operation'] as Body)['id']}/reverse`, { reason: 'Anular un retiro' }), 409, 'REVERSAL_NOT_ALLOWED', 'anular retiro');
+    // R74 (0037, regla definitiva): el responsable anula también un retiro (el dinero vuelve a la Base), una sola vez.
+    const wid = (w.body['operation'] as Body)['id'];
+    assert.ok([403, 404].includes((await edu.money(`/v1/capital/operations/${wid}/reverse`, { reason: 'Otro Administrador' })).status), 'otro Administrador no');
+    const wr = await $ana(`/v1/capital/operations/${wid}/reverse`, { reason: 'Anular un retiro' });
+    assert.equal(wr.status, 201, `anular retiro: ${JSON.stringify(wr.body)}`);
+    assert.deepEqual([await base(r1), await funding(r1)], [200_000, -200_000]);
+    expectCode(await $ana(`/v1/capital/operations/${wid}/reverse`, { reason: 'Otra vez' }), 409, 'ALREADY_REVERSED', 'doble anulación del retiro');
+    assert.equal((await $ana('/v1/capital/route-base/withdrawals', { routeId: r1, amountMinor: 10_000, reason: 'Retiro de Base (de nuevo)' })).status, 201);
+    assert.deepEqual([await base(r1), await funding(r1)], [190_000, -190_000]);
     // Anular una inyección: solo si la Base aún la tiene; una sola vez.
     const small = await $ana('/v1/capital/route-base/injections', { routeId: r1, amountMinor: 7_000, reason: 'Inyección equivocada' });
     const sid = (small.body['operation'] as Body)['id'];
@@ -347,7 +355,10 @@ describe('R74 · Base por Ruta (0034)', () => {
     assert.ok((n.body['info'] as Body[]).some((x) => x['type'] === 'route-transfer-received'), JSON.stringify(n.body));
     // Sin negativos, sin anulación, y Edu no transfiere desde r1.
     expectCode(await $ana('/v1/capital/route-base/transfers', { fromRouteId: r1, toRouteId: r3, amountMinor: 10_000_000, reason: 'Más que la Base' }), 409, 'INSUFFICIENT_FUNDS', 'excesiva');
-    expectCode(await $ana(`/v1/capital/operations/${o['id']}/reverse`, { reason: 'Deshacer transferencia' }), 409, 'REVERSAL_NOT_ALLOWED', 'anular transferencia');
+    // R74 (0037): con responsables distintos, la anulación es coordinada (409 con el camino), nunca unilateral.
+    const jt = await $ana(`/v1/capital/operations/${o['id']}/reverse`, { reason: 'Deshacer transferencia' });
+    expectCode(jt, 409, 'JOINT_OPERATION_MIXED_CONTROLLERS', 'anular transferencia');
+    assert.equal((((jt.body['details'] as Body)['dependencies'] as Body[])[0]!)['action'], 'propose_joint_reversal');
     assert.ok([403, 404].includes((await edu.money('/v1/capital/route-base/transfers', { fromRouteId: r1, toRouteId: r3, amountMinor: 1_000, reason: 'Desde ruta ajena' })).status));
     // Quien ahora tiene el dinero lo devuelve con otra transferencia.
     assert.equal((await edu.money('/v1/capital/route-base/transfers', { fromRouteId: r3, toRouteId: r1, amountMinor: 5_000, reason: 'Devolución parcial' })).status, 201);

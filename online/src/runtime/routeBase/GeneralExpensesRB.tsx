@@ -8,13 +8,16 @@
 //   · Reembolso: parcial o total, nunca más que lo pendiente; con Base por Ruta, aportes de las rutas de
 //        quien paga (también a sí mismo: RB-D8); en el modelo de bolsas, desde la bolsa de quien paga (RB-D9).
 //        No vuelve a reconocer el gasto: solo paga la obligación.
-//   · Un gasto se registra UNA vez; se corrige solo anulándolo (con motivo). Si ya se reembolsó, primero se
-//        anula el reembolso (PAYABLE_ALREADY_REIMBURSED).
+//   · Un gasto se registra UNA vez; se corrige solo anulándolo (con motivo). R74 (0037): el diálogo de corrección
+//        muestra el efecto antes de confirmar y el camino: si ya se reembolsó, «anular el reembolso y luego el gasto»
+//        en una sola operación; con rutas de otros responsables, anulación conjunta (cada uno confirma su parte).
+//   · Reembolsos pendientes (0037): una fila por OBLIGACIÓN (gasto con dinero propio) de cualquier Administrador; quien
+//        paga elige la obligación y la paga con aportes de SUS rutas (o de su bolsa en el modelo anterior).
 // El SuperAdmin ve todo en solo lectura. Las cifras y las reglas son del servidor (PostgreSQL bajo bloqueo);
 // aquí solo se ayuda a componer los aportes y se explica cada operación antes de registrarla.
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { HandCoins, Plus, Receipt, RotateCcw, Undo2, Wallet } from 'lucide-react';
+import { HandCoins, Plus, Receipt, RotateCcw, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input, Select, Textarea } from '@/components/ui/Input';
 import { MoneyInput } from '@/components/ui/MoneyInput';
@@ -33,11 +36,12 @@ import { toMajor, toMinor } from '../mappers.ts';
 import { serverView } from '../projection.ts';
 import { useRuntime } from '../session.ts';
 import {
-  createGeneralExpense, fetchCategories, fetchGeneralExpenses, fetchPanel, fetchPayables, fetchReimbursements, natureLabel, reimburseAdmin,
-  reverseExpense, reverseReimbursement,
-  type CapitalModel, type Contribution, type Payables, type PanelRoute, type Reimbursement, type RoutePanel, type ServerCategory, type ServerExpense,
+  createGeneralExpense, fetchCategories, fetchGeneralExpenses, fetchPanel, fetchPayableItems, fetchPayables, fetchReimbursements, natureLabel, reimburseAdmin,
+  reimburseObligation,
+  type CapitalModel, type Contribution, type Payables, type PanelRoute, type PayableItem, type Reimbursement, type RoutePanel, type ServerCategory, type ServerExpense,
 } from './api.ts';
 import { ExplainPanel, Notice, num, useMoney, type Explanation } from './parts.tsx';
+import { CorrectionDialog, JointReversalsPanel, type CorrectionTarget } from './Corrections.tsx';
 
 type Tab = 'gastos' | 'pendientes' | 'reembolsos';
 
@@ -86,8 +90,10 @@ export function GeneralExpensesPanel({ model, panel, periodText }: { model: Capi
   const [unsupported, setUnsupported] = useState(false);
   const [tab, setTab] = useState<Tab>('gastos');
   const [registering, setRegistering] = useState(false);
-  const [reimbursing, setReimbursing] = useState<{ adminId: string } | null>(null);
-  const [reversing, setReversing] = useState<{ kind: 'expense'; e: ServerExpense } | { kind: 'reimbursement'; r: Reimbursement } | null>(null);
+  const [reimbursing, setReimbursing] = useState<{ adminId: string; item?: PayableItem } | null>(null);
+  const [fixing, setFixing] = useState<CorrectionTarget | null>(null);
+  /** 0037: obligaciones por gasto (null = API anterior: se usa la lista por Administrador). */
+  const [items, setItems] = useState<PayableItem[] | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -104,6 +110,7 @@ export function GeneralExpensesPanel({ model, panel, periodText }: { model: Capi
       });
     // Bases de mis rutas (route_base) cuando el contenedor no trae el panel; disponible de mi bolsa (modelo anterior).
     if (rb && !panel && isAdmin) fetchPanel(today, today).then((p) => { if (alive) setOwnPanel(p); }).catch(() => undefined);
+    fetchPayableItems().then((x) => { if (alive) setItems(x); }).catch(() => { if (alive) setItems(null); });
     if (!rb && isAdmin) {
       serverView<{ admins: { adminId: string; availableMinor: number }[] }>('/v1/capital/summary')
         .then((s) => { if (alive) setPoolAvailable(s.admins.find((a) => a.adminId === me?.membershipId)?.availableMinor ?? 0); })
@@ -143,11 +150,13 @@ export function GeneralExpensesPanel({ model, panel, periodText }: { model: Capi
         {isAdmin && (
           <div className="flex flex-wrap gap-2 lg:flex-shrink-0">
             <Button size="sm" onClick={() => setRegistering(true)} icon={<Plus className="w-4 h-4" />} data-testid="ge-new">Registrar gasto general</Button>
-            <Button size="sm" variant="secondary" onClick={() => setReimbursing({ adminId: me?.membershipId ?? '' })} disabled={!canReimburse || !pendingRows.some((a) => a.pendingMinor > 0)}
+            <Button size="sm" variant="secondary" onClick={() => setReimbursing({ adminId: me?.membershipId ?? '' })} disabled={!canReimburse || !(items ? items.length > 0 : pendingRows.some((a) => a.pendingMinor > 0))}
               icon={<HandCoins className="w-4 h-4" />} data-testid="ge-reimburse">Pagar reembolso</Button>
           </div>
         )}
       </div>
+
+      {isAdmin && <JointReversalsPanel />}
 
       <dl className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         {general?.administratorGeneral && <Fig label="Generales del Administrador" value={money(adminGeneral)} hint={periodText ? `Periodo · ${periodText}` : undefined} testId="ge-fig-admin" />}
@@ -159,7 +168,7 @@ export function GeneralExpensesPanel({ model, panel, periodText }: { model: Capi
       </dl>
 
       <div className="inline-flex flex-wrap rounded-lg border border-gray-200 bg-white p-0.5" role="tablist" aria-label="Gastos generales y reembolsos">
-        {([['gastos', `Gastos generales (${originals.length})`], ['pendientes', `Reembolsos pendientes (${pendingRows.filter((a) => a.pendingMinor > 0).length})`],
+        {([['gastos', `Gastos generales (${originals.length})`], ['pendientes', `Reembolsos pendientes (${items ? items.length : pendingRows.filter((a) => a.pendingMinor > 0).length})`],
           ['reembolsos', `Historial de reembolsos (${reimbursements.length})`]] as [Tab, string][]).map(([k, label]) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)} data-testid={`ge-tab-${k}`}
             className={cn('px-3 h-8 text-xs font-medium rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500',
@@ -174,10 +183,38 @@ export function GeneralExpensesPanel({ model, panel, periodText }: { model: Capi
           <ul className="divide-y divide-gray-100" data-testid="ge-list">
             {originals.map((e) => (
               <ExpenseRow key={e.id} e={e} category={catOf(e.categoryId)} nameOf={nameOf}
-                canReverse={isAdmin && canReverseExpense(e, me?.membershipId, myRouteIds, rb)} onReverse={() => setReversing({ kind: 'expense', e })} />
+                canReverse={isAdmin && canReverseExpense(e, me?.membershipId, myRouteIds, rb)} onReverse={() => setFixing({ kind: 'expense', id: e.id, title: `${catOf(e.categoryId)} · ${e.description ?? 'Gasto general'}` })} />
             ))}
           </ul>
         )
+      ) : tab === 'pendientes' && items ? (
+        <div className="space-y-2" data-testid="ge-payables">
+          <Notice tone="violet">Obligaciones de la empresa con sus Administradores, una por gasto pagado con dinero propio. <b>No son efectivo</b>. Puedes pagar la de cualquier Administrador con aportes de tus rutas{rb ? '' : ' (en este modelo, desde tu bolsa)'}: el pago reduce exactamente esa obligación.</Notice>
+          {items.length === 0 ? <p className="text-sm text-gray-500">Nadie tiene reembolsos pendientes.</p> : (
+            <ul className="divide-y divide-gray-100">
+              {items.map((it) => (
+                <li key={it.expenseId} className="flex flex-col gap-2 py-2.5 sm:flex-row sm:items-center sm:justify-between" data-testid={`ge-obligation-${it.expenseId}`}>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 break-words">{it.isMine ? 'Tú' : formatPersonName(it.adminName) || 'Administrador'}{it.adminStatus !== 'activo' ? <span className="ml-1 text-xs text-gray-500">(inactivo)</span> : null}
+                      <span className="font-normal text-gray-600"> · {it.categoryName ?? 'Gasto'}{it.description ? ` · ${it.description}` : ''}</span></p>
+                    <p className="text-xs text-gray-600">{formatDate(it.expenseDate)} · pagó con dinero propio {money(it.amountMinor)} · reembolsado {money(it.reimbursedMinor)}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <p className="text-[11px] text-gray-500">Pendiente</p>
+                      <p className={`${num} text-sm font-bold text-violet-900`} data-testid="ge-obligation-pending">{money(it.pendingMinor)}</p>
+                    </div>
+                    {isAdmin && (
+                      <Button size="sm" variant="secondary" disabled={!canReimburse} onClick={() => setReimbursing({ adminId: it.adminId, item: it })} data-testid="ge-obligation-pay">
+                        {it.isMine ? 'Pagar mi reembolso' : 'Pagar'}
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       ) : tab === 'pendientes' ? (
         <div className="space-y-2" data-testid="ge-payables">
           <Notice tone="violet">Obligaciones de la empresa con sus Administradores por gastos pagados con dinero propio. <b>No son efectivo</b>: no suman a ninguna Base ni caja.</Notice>
@@ -210,7 +247,7 @@ export function GeneralExpensesPanel({ model, panel, periodText }: { model: Capi
           <ul className="divide-y divide-gray-100" data-testid="ge-reimbursements">
             {reimbursements.map((r) => (
               <ReimbursementRow key={r.id} r={r} nameOf={nameOf} me={me?.membershipId} rb={rb}
-                canReverse={isAdmin && canReverseReimbursement(r, me?.membershipId, myRouteIds, rb)} onReverse={() => setReversing({ kind: 'reimbursement', r })} />
+                canReverse={isAdmin && canReverseReimbursement(r, me?.membershipId, myRouteIds, rb)} onReverse={() => setFixing({ kind: 'reimbursement', id: r.id, title: `Reembolso a ${nameOf(r.adminId)} · ${r.reason}` })} />
             ))}
           </ul>
         )
@@ -221,7 +258,7 @@ export function GeneralExpensesPanel({ model, panel, periodText }: { model: Capi
           <GeneralExpenseModal open={registering} onClose={() => setRegistering(false)} model={model} routes={fundingRoutes} categories={categories} />
           <ReimburseModal target={reimbursing} onClose={() => setReimbursing(null)} model={model} routes={fundingRoutes} payables={payables}
             poolAvailableMinor={poolAvailable} nameOf={nameOf} />
-          <ReverseDialog target={reversing} onClose={() => setReversing(null)} money={money} catOf={catOf} nameOf={nameOf} />
+          <CorrectionDialog target={fixing} onClose={() => setFixing(null)} />
         </>
       )}
     </section>
@@ -240,7 +277,7 @@ export function GeneralExpensesList({ scope, from, to }: { scope?: 'administrado
   const [rows, setRows] = useState<ServerExpense[] | null>(null);
   const [categories, setCategories] = useState<ServerCategory[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [reversing, setReversing] = useState<{ kind: 'expense'; e: ServerExpense } | null>(null);
+  const [fixing, setFixing] = useState<CorrectionTarget | null>(null);
   const [myRouteIds, setMyRouteIds] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     let alive = true;
@@ -266,10 +303,11 @@ export function GeneralExpensesList({ scope, from, to }: { scope?: 'administrado
       <ul className="divide-y divide-gray-100">
         {list.map((e) => (
           <ExpenseRow key={e.id} e={e} category={catOf(e.categoryId)} nameOf={nameOf}
-            canReverse={me?.role === 'admin' && canReverseExpense(e, me?.membershipId, myRouteIds, true)} onReverse={() => setReversing({ kind: 'expense', e })} />
+            canReverse={me?.role === 'admin' && canReverseExpense(e, me?.membershipId, myRouteIds, true)}
+            onReverse={() => setFixing({ kind: 'expense', id: e.id, title: `${catOf(e.categoryId)} · ${e.description ?? 'Gasto general'}` })} />
         ))}
       </ul>
-      <ReverseDialog target={reversing} onClose={() => setReversing(null)} money={money} catOf={catOf} nameOf={nameOf} />
+      <CorrectionDialog target={fixing} onClose={() => setFixing(null)} />
     </section>
   );
 }
@@ -524,7 +562,7 @@ function Segmented<T extends string>({ label, value, onChange, options, testId }
 // ---------------------------------------------------------------------------
 
 function ReimburseModal({ target, onClose, model, routes, payables, poolAvailableMinor, nameOf }: {
-  target: { adminId: string } | null; onClose: () => void; model: CapitalModel; routes: FundingRoute[]; payables: Payables | null;
+  target: { adminId: string; item?: PayableItem } | null; onClose: () => void; model: CapitalModel; routes: FundingRoute[]; payables: Payables | null;
   poolAvailableMinor: number | null; nameOf: (id: string | null) => string;
 }) {
   const { currency } = useTenant();
@@ -537,14 +575,17 @@ function ReimburseModal({ target, onClose, model, routes, payables, poolAvailabl
   const owed = (payables?.admins ?? []).filter((a) => a.pendingMinor > 0);
   useEffect(() => {
     if (!target) return;
-    const preset = owed.some((a) => a.adminId === target.adminId) ? target.adminId : owed.length === 1 ? owed[0]!.adminId : '';
+    const preset = target.item ? target.item.adminId : owed.some((a) => a.adminId === target.adminId) ? target.adminId : owed.length === 1 ? owed[0]!.adminId : '';
     const single = routes.filter((r) => !r.inHandover);
     setF({ adminId: preset, amount: 0, reason: '', contribs: single.length === 1 ? { [single[0]!.routeId]: 0 } : {} });
     setOpId(generateId());
   }, [target]);  // eslint-disable-line react-hooks/exhaustive-deps
   if (!target) return null;
 
-  const pending = owed.find((a) => a.adminId === f.adminId)?.pendingMinor ?? 0;
+  const item = target.item && target.item.adminId === f.adminId ? target.item : undefined;
+  const adminPending = owed.find((a) => a.adminId === f.adminId)?.pendingMinor ?? 0;
+  // 0037: con una obligación elegida, el tope es lo pendiente de ESA obligación.
+  const pending = item ? Math.min(item.pendingMinor, adminPending || item.pendingMinor) : adminPending;
   const self = !!f.adminId && f.adminId === me?.membershipId;
   const contributions = contributionsOf(f.contribs);
   const total = rb ? contributions.reduce((t, c) => t + c.amountMinor, 0) : toMinor(f.amount);
@@ -564,15 +605,18 @@ function ReimburseModal({ target, onClose, model, routes, payables, poolAvailabl
     to: `${who}: recibe el efectivo del reembolso`, who: myName, responsible: `${who} deja de tener ese saldo a favor`,
     changes: `${rb ? 'La Base de cada ruta aportante baja' : 'Tu bolsa baja'} · el saldo a favor de ${who} pasa de ${money(pending)} a ${money(Math.max(0, pending - total))}`,
     limits: ['No vuelve a registrar el gasto: solo paga la obligación.', 'Nunca más que lo pendiente; puede ser parcial.',
-      ...(rb ? ['Solo aportan tus rutas; ninguna supera su Base disponible.'] : []), 'Solo quien pagó puede anularlo; el dinero vuelve a donde salió.'],
+      ...(rb ? ['Solo aportan tus rutas; ninguna supera su Base disponible.'] : []), 'Lo anula el responsable de las rutas que pagaron; el dinero vuelve a donde salió.'],
   };
 
   async function save() {
     if (problem) { toast.error(problem); return; }
     setSaving(true);
     try {
-      const r = await reimburseAdmin({ adminId: f.adminId, reason: f.reason, ...(rb ? { contributions } : { amountMinor: total }) }, opId);
-      toast.success(`Reembolso registrado: pendiente ${money(r.pendingAfterMinor)}`);
+      const r = item
+        ? await reimburseObligation({ adminId: f.adminId, expenseId: item.expenseId, reason: f.reason, ...(rb ? { contributions } : { amountMinor: total }) }, opId)
+        : await reimburseAdmin({ adminId: f.adminId, reason: f.reason, ...(rb ? { contributions } : { amountMinor: total }) }, opId);
+      toast.success(item ? `Reembolso registrado: queda ${money((r as { obligationPendingAfterMinor?: number }).obligationPendingAfterMinor ?? 0)} de esa obligación`
+        : `Reembolso registrado: pendiente ${money(r.pendingAfterMinor)}`);
       onClose();
     } catch (err) { toast.error(err instanceof Error ? err.message : 'Error'); } finally { setSaving(false); }
   }
@@ -583,8 +627,16 @@ function ReimburseModal({ target, onClose, model, routes, payables, poolAvailabl
         <Button onClick={save} loading={saving} disabled={!!problem} data-testid="ge-reimb-save">Registrar reembolso</Button></>}>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" data-testid="ge-reimb-form">
         <div className="space-y-3">
-          <Select label="Reembolsar a" value={f.adminId} onChange={(ev) => setF((x) => ({ ...x, adminId: ev.target.value }))} required placeholder="Seleccionar Administrador"
-            options={owed.map((a) => ({ value: a.adminId, label: `${a.adminId === me?.membershipId ? `${myName} (tú)` : nameOf(a.adminId)} · pendiente ${money(a.pendingMinor)}` }))} />
+          {item ? (
+            <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm" data-testid="ge-reimb-obligation">
+              <p className="text-violet-900 font-medium">Obligación con {item.isMine ? `${myName} (tú)` : formatPersonName(item.adminName) || 'el Administrador'}</p>
+              <p className="text-xs text-violet-900 break-words">{item.categoryName ?? 'Gasto'}{item.description ? ` · ${item.description}` : ''} · {formatDate(item.expenseDate)}</p>
+              <p className="text-xs text-violet-900">Pendiente de esta obligación: <b className={num}>{money(item.pendingMinor)}</b>. El pago la reduce exactamente.</p>
+            </div>
+          ) : (
+            <Select label="Reembolsar a" value={f.adminId} onChange={(ev) => setF((x) => ({ ...x, adminId: ev.target.value }))} required placeholder="Seleccionar Administrador"
+              options={owed.map((a) => ({ value: a.adminId, label: `${a.adminId === me?.membershipId ? `${myName} (tú)` : nameOf(a.adminId)} · pendiente ${money(a.pendingMinor)}` }))} />
+          )}
           {self && <Notice tone="sky" testId="ge-self-note"><b>Autorreembolso.</b> Te reembolsas desde {rb ? 'tus propias rutas' : 'tu bolsa'}: permitido hasta lo pendiente{rb ? ', con aportes explícitos por ruta' : ''}. Queda auditado y visible en el panel de rutas.</Notice>}
           {f.adminId && <p className="text-sm text-gray-700">Pendiente de {who}: <b className={num} data-testid="ge-reimb-pending">{money(pending)}</b></p>}
           {!rb && (
@@ -600,71 +652,6 @@ function ReimburseModal({ target, onClose, model, routes, payables, poolAvailabl
           <ExplainPanel e={e} />
           {problem && (total > 0 || f.reason) && <p className="text-xs text-amber-800" role="status" data-testid="ge-reimb-problem">{problem}</p>}
         </div>
-      </div>
-    </Modal>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Anulación con motivo (el error del servidor se muestra en el diálogo, p. ej. «ya reembolsado»)
-// ---------------------------------------------------------------------------
-
-function ReverseDialog({ target, onClose, money, catOf, nameOf }: {
-  target: { kind: 'expense'; e: ServerExpense } | { kind: 'reimbursement'; r: Reimbursement } | null; onClose: () => void;
-  money: (n: number) => string; catOf: (id: string) => string; nameOf: (id: string | null) => string;
-}) {
-  const [reason, setReason] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  /** RB-D7 (0036): rutas de la operación conjunta y su responsable vigente cuando el servidor la rechaza. */
-  const [jointRoutes, setJointRoutes] = useState<{ name: string; controllerName: string | null; isActor: boolean }[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [opId, setOpId] = useState('');
-  useEffect(() => { if (target) { setReason(''); setError(null); setJointRoutes([]); setOpId(generateId()); } }, [target]);
-  if (!target) return null;
-  const isExpense = target.kind === 'expense';
-  const title = isExpense ? 'Anular gasto general' : 'Anular reembolso';
-  const what = isExpense
-    ? `${catOf(target.e.categoryId)} · ${money(target.e.amountMinor)}`
-    : `Reembolso a ${nameOf(target.r.adminId)} · ${money(target.r.amountMinor)}`;
-  const effect = isExpense
-    ? (target.e.funding === 'own_money' ? 'El saldo a favor del Administrador baja en este valor. Si ya se le reembolsó, primero hay que anular ese reembolso.'
-      : 'Cada aporte vuelve a la Base de su ruta. Debes seguir siendo el responsable de cada ruta aportante.')
-    : 'El dinero vuelve a donde salió y el saldo a favor vuelve a quedar pendiente.';
-
-  async function confirm() {
-    if (reason.trim().length < 3) { setError('Escribe el motivo (mínimo 3 caracteres).'); return; }
-    setSaving(true); setError(null); setJointRoutes([]);
-    try {
-      if (target!.kind === 'expense') await reverseExpense(target!.e.id, reason, opId);
-      else await reverseReimbursement(target!.r.id, reason, opId);
-      toast.success(isExpense ? 'Gasto general anulado' : 'Reembolso anulado');
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo anular');
-      const routes = (err as { details?: { routes?: { name: string; controllerName: string | null; isActor: boolean }[] } }).details?.routes;
-      if (Array.isArray(routes)) setJointRoutes(routes);
-      setOpId(generateId());
-    } finally { setSaving(false); }
-  }
-
-  return (
-    <Modal open onClose={() => { if (!saving) onClose(); }} size="sm" title={title}
-      footer={<><Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
-        <Button variant="danger" onClick={confirm} loading={saving} disabled={reason.trim().length < 3} data-testid="ge-reverse-confirm">Anular</Button></>}>
-      <div className="space-y-3 text-sm" data-testid="ge-reverse-dialog">
-        <p className="font-medium text-gray-900">{what}</p>
-        <p className="text-gray-600">{effect} No se borra nada: queda una anulación enlazada con su motivo.</p>
-        <Textarea label="Motivo de la anulación" value={reason} onChange={(ev) => setReason(ev.target.value)} rows={2} required maxLength={300} />
-        {error && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-red-800 flex gap-2" role="alert" data-testid="ge-reverse-error"><Wallet className="w-4 h-4 mt-0.5 flex-shrink-0" aria-hidden />{error}</div>}
-        {jointRoutes.length > 0 && (
-          <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2" data-testid="ge-joint-routes">
-            <p className="text-xs font-medium text-gray-700 mb-1">Rutas de la operación y su responsable vigente</p>
-            <ul className="space-y-0.5 text-xs text-gray-700">
-              {jointRoutes.map((r) => <li key={r.name}>{r.name}: {r.isActor ? 'tú' : formatPersonName(r.controllerName) || 'sin responsable válido'}</li>)}
-            </ul>
-            <p className="text-xs text-gray-500 mt-1">Cada Administrador responde por sus rutas: no se anula una parte dejando inconsistente la operación conjunta.</p>
-          </div>
-        )}
       </div>
     </Modal>
   );

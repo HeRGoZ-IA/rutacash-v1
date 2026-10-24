@@ -28,6 +28,7 @@ import { oneOf, optText, pathId, reqId, reqText } from '../structure/input.ts';
 import {
   ACTIONS, amountOf, opView, reasonOf, requireAuthority, requireOperationId, routeOf, visibleEntries, type CapitalKind, type OpRow,
 } from './service.ts';
+import { requireControlsAllRoutesOr, requireOpenPeriods } from './corrections.ts';
 
 type Body = Record<string, unknown>;
 
@@ -119,8 +120,17 @@ export async function assignUnassigned(client: pg.PoolClient, ctx: ActiveContext
 
 /** Anulación de una inyección (desde `reverseOperation`): solo el responsable vigente, si la Base aún la tiene. */
 export async function reverseRouteBase(client: pg.PoolClient, ctx: ActiveContext, orig: OpRow, reason: string, operationId: string | null) {
-  if (orig.route_id) await controlledRoute(client, ctx, orig.route_id);
-  else requireAdmin(ctx);
+  // R74 (0037): también retiros (vuelven a la Base) y transferencias. Una transferencia saca dinero de la Base de
+  // destino: el actor controla LAS DOS rutas o, con responsables distintos, 409 con la anulación coordinada.
+  if (orig.kind === 'ROUTE_TRANSFER' && orig.route_id && orig.to_route_id) {
+    requireAdmin(ctx);
+    await requireControlsAllRoutesOr(client, ctx, [orig.route_id, orig.to_route_id],
+      { kind: 'route_transfer', id: orig.id, amountMinor: Number(orig.amount_minor), label: `Transferencia entre rutas: ${orig.reason}` });
+    await requireOpenPeriods(client, ctx, [orig.route_id, orig.to_route_id]);
+  } else if (orig.route_id) {
+    await controlledRoute(client, ctx, orig.route_id);
+    if (orig.kind !== 'REVERSAL') await requireOpenPeriods(client, ctx, [orig.route_id]);
+  } else requireAdmin(ctx);
   return post(client, ctx, operationId, { kind: 'REVERSAL', amount: null, reason, route: orig.route_id, reverses: orig.id },
     `Anulación de ${orig.kind} ${Number(orig.amount_minor)}.`);
 }

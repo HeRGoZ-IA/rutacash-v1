@@ -1,6 +1,7 @@
 // FASE 5 · F5-D02 (aprobada 2026-10-17): anulación auditada de gastos de trabajador y de
 // ruta. Autoridad: el Administrador responsable de capital de la ruta (`expense.correct` +
-// `correct`), nunca la PERSONA que registró el gasto (aunque use otra membresía).
+// `correct`). R74 (0037, regla definitiva): ya no «nunca la PERSONA que registró el gasto»; el responsable anula
+// también lo suyo; nadie anula un gasto cargado a SU propia custodia (aunque use otra membresía).
 // R74 (cambio de regla en esta intervención): el SuperAdmin ya no anula gastos de ruta ni de
 // trabajador ni carga gastos a otros; las pruebas que lo usaban pasan al responsable de la ruta. D7: se asienta hoy, en un periodo abierto; si la semana del gasto está
 // cerrada es un ajuste nuevo y exige autoridad de ajustes. El importe vuelve a la cuenta
@@ -107,16 +108,20 @@ describe('Fase 5 · F5-D02 · anulación de gastos de trabajador y de ruta', () 
     assert.equal(r.status, 201, JSON.stringify(r.body));
     assert.equal(await pool(M.anaAdmin), anaAfterSpend + 4_000, 'vuelve a la bolsa de Ana, que pagó');
     assert.equal(await pool(olga.membershipId), olgaBefore, 'sin transferencias a la bolsa del nuevo responsable');
-    // Un gasto que registró la propia responsable: ni ella (misma persona), ni Ana (ya no es la
-    // responsable), ni el SuperAdmin (R74) lo anulan; nada cambia.
+    // Un gasto que registró la propia responsable: ni Ana (ya no es la responsable) ni el SuperAdmin (R74) lo
+    // anulan. R74 (0037, regla definitiva): ELLA sí, como responsable de capital (se retiró la independencia F5-D02).
     const e2 = idOf(await spend($olga, { scope: 'ruta', routeId: rB, amountMinor: 1_000 }));
     assert.equal((await reverse($ana, e2)).body['error'], 'CAPITAL_AUTHORITY_REQUIRED', 'Ana ya no es la responsable de esa ruta');
-    assert.equal((await reverse($olga, e2)).body['error'], 'SELF_CORRECTION_FORBIDDEN');
     assert.equal((await reverse($bruno, e2)).status, 403);
     assert.equal(await pool(olga.membershipId), olgaBefore - 1_000, 'el gasto de Olga sigue pagado por la bolsa de Olga');
+    const own = await reverse($olga, e2);
+    assert.equal(own.status, 201, JSON.stringify(own.body));
+    assert.equal(await pool(olga.membershipId), olgaBefore, 'la responsable anuló su propio gasto: vuelve a su bolsa');
   });
 
-  test('REVX-003 · la misma persona no anula lo que registró, aunque use otra membresía (DS-05)', async () => {
+  // R74 (0037): ya no rige «quien registró no anula»; sigue rigiendo que nadie anula un gasto cargado a SU propia
+  // custodia (aquí, la custodia de Ana Cobradora, misma persona que Ana Administradora).
+  test('REVX-003 · nadie anula un gasto cargado a su propia custodia, aunque use otra membresía (DS-05)', async () => {
     const own = idOf(await workerExp($anaCob, M.anaCob, 500, rAna));   // Ana como Cobradora
     const r = await reverse($ana, own);                                 // Ana como Administradora responsable
     assert.deepEqual([r.status, r.body['error']], [403, 'SELF_CORRECTION_FORBIDDEN']);

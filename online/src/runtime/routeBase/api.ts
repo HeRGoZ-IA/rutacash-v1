@@ -343,3 +343,74 @@ export const transitionModel = (b: { target: CapitalModel; evidence: string; bac
     ...(b.backupReference?.trim() ? { backupReference: b.backupReference.trim() } : {}),
     ...(b.companyBalanceNote?.trim() ? { companyBalanceNote: b.companyBalanceNote.trim() } : {}),
   }, opId);
+
+// ---------------------------------------------------------------------------
+// Correcciones del responsable de capital (0037, regla definitiva del propietario)
+// ---------------------------------------------------------------------------
+// El responsable de capital de la ruta corrige y anula en SUS rutas, también lo que él registró, sin aprobación.
+// Antes de confirmar, la vista previa del servidor dice qué cambia y qué camino tiene la anulación: directa, en
+// cadena (gasto + su reembolso), conjunta (rutas de varios responsables) o bloqueada (p. ej. periodo cerrado, que
+// se reabre explícitamente con motivo).
+
+export type CorrectionKind = 'expense' | 'reimbursement' | 'operation';
+export interface CorrectionDependency {
+  kind: 'reimbursement' | 'closed_period' | 'joint_controllers' | 'cash_in_use'; id: string; label: string; amountMinor: number | null;
+  action: 'reverse_reimbursement' | 'reopen_period' | 'propose_joint_reversal' | 'confirm_joint_reversal' | 'view_joint_reversal' | 'ask_controller' | 'none';
+  payerName?: string | null; payerId?: string; reversibleByActor?: boolean; linked?: boolean; routeName?: string; weekStart?: string; weekEnd?: string;
+  proposalId?: string | null; targetKind?: JointTargetKind;
+  routes?: { routeId: string | null; routeName?: string; name?: string; controllerName: string | null; isActor: boolean }[];
+}
+export interface CorrectionEffect {
+  account: { kind: string; routeId: string | null; membershipId: string | null }; label: string; routeName: string | null; personName: string | null;
+  isCash: boolean; deltaMinor: number;
+}
+export interface CorrectionPreview {
+  kind: CorrectionKind; id: string; label: string; amountMinor: number; mode: 'direct' | 'cascade' | 'joint' | 'blocked'; blockedBy: string | null;
+  dependencies: CorrectionDependency[]; effects: CorrectionEffect[]; jointProposal: JointProposal | null; reasonMinLength: number;
+  routes: { routeId: string; name: string; controllerId: string | null; controllerName: string | null; isActor: boolean }[];
+}
+export const fetchCorrectionPreview = (kind: CorrectionKind, id: string) =>
+  serverView<CorrectionPreview>(`/v1/corrections/preview?kind=${kind}&id=${encodeURIComponent(id)}`);
+
+/** Anulación de un gasto; `cascade` anula en la misma transacción los reembolsos que lo impiden. */
+export const reverseExpenseWith = (id: string, reason: string, opId: string, cascade = false) =>
+  money<{ original: ServerExpense; reversal: ServerExpense; cascadedReimbursements?: unknown[] }>('POST', `/v1/expenses/${encodeURIComponent(id)}/reverse`,
+    { reason: reason.trim(), ...(cascade ? { cascade: true } : {}) }, opId);
+/** Anulación genérica de una operación de capital (inyección, retiro, transferencia, entrega, devolución…). */
+export const reverseCapitalOperation = (id: string, reason: string, opId: string) =>
+  money<{ operation: { id: string } }>('POST', `/v1/capital/operations/${encodeURIComponent(id)}/reverse`, { reason: reason.trim() }, opId);
+/** Reapertura explícita de un periodo cerrado (solo el responsable de la ruta; motivo de 10+ caracteres). */
+export const reopenPeriod = (closureId: string, reason: string, opId: string) =>
+  money<{ closure: unknown }>('POST', `/v1/periods/${encodeURIComponent(closureId)}/reopen`, { reason: reason.trim() }, opId);
+
+export type JointTargetKind = 'expense' | 'reimbursement' | 'route_transfer';
+export interface JointPart {
+  routeId: string; routeName: string; amountMinor: number; direction: 'returns_to_route' | 'leaves_route'; controllerId: string | null;
+  controllerName: string | null; confirmed: boolean; confirmedAt: string | null; isMine: boolean;
+}
+export interface JointProposal {
+  id: string; targetKind: JointTargetKind; targetId: string; amountMinor: number; reason: string; status: 'pending' | 'posted' | 'cancelled' | 'obsolete';
+  createdAt: string; closedAt: string | null; closeReason: string | null; proposedBy: { membershipId: string; name: string | null };
+  target: Record<string, unknown> | null; parts: JointPart[]; pendingParts: number; canConfirm: boolean; canCancel: boolean;
+}
+export const fetchJointReversals = async (status: 'pending' | 'all' = 'pending') =>
+  (await serverView<{ proposals: JointProposal[]; toConfirm: number }>(`/v1/capital/joint-reversals?status=${status}`)).proposals;
+export const proposeJointReversal = (b: { targetKind: JointTargetKind; targetId: string; reason: string }, opId: string) =>
+  money<{ proposal: JointProposal }>('POST', '/v1/capital/joint-reversals', { ...b, reason: b.reason.trim() }, opId);
+export const confirmJointReversal = (id: string, opId: string) =>
+  money<{ proposal: JointProposal }>('POST', `/v1/capital/joint-reversals/${encodeURIComponent(id)}/confirm`, {}, opId);
+export const cancelJointReversal = (id: string, reason: string, opId: string) =>
+  money<{ proposal: JointProposal }>('POST', `/v1/capital/joint-reversals/${encodeURIComponent(id)}/cancel`, { reason: reason.trim() }, opId);
+
+/** Obligación pendiente con un Administrador por un gasto pagado con dinero propio (0037). Nunca efectivo. */
+export interface PayableItem {
+  expenseId: string; adminId: string; adminName: string; adminStatus: string; description: string | null; categoryName: string | null; scope: string;
+  expenseDate: string; amountMinor: number; reimbursedMinor: number; pendingMinor: number; isMine: boolean;
+}
+export const fetchPayableItems = async () => (await serverView<{ items: PayableItem[]; totalPendingMinor: number }>('/v1/capital/admin-payables/items')).items;
+/** Reembolso de una obligación concreta (gasto con dinero propio) de cualquier Administrador. */
+export const reimburseObligation = (b: { adminId: string; expenseId: string; reason: string; contributions?: Contribution[]; amountMinor?: number }, opId: string) =>
+  money<{ reimbursement: Reimbursement; pendingAfterMinor: number; obligationPendingAfterMinor?: number }>('POST', '/v1/capital/reimbursements', {
+    adminId: b.adminId, expenseId: b.expenseId, reason: b.reason.trim(),
+    ...(b.contributions ? { contributions: b.contributions } : {}), ...(b.amountMinor != null ? { amountMinor: b.amountMinor } : {}),
+  }, opId);

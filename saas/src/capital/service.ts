@@ -423,7 +423,12 @@ export async function reverseOperation(client: pg.PoolClient, ctx: ActiveContext
   if (orig.route_id && !COMPANY_KINDS.includes(orig.kind)) {
     const members = await loadMembers(client, ctx);
     const route = await routeOf(client, ctx, orig.route_id);
-    if (orig.kind !== 'REVERSAL') requireAuthority(ctx, route, 'correct', members);
+    if (orig.kind !== 'REVERSAL') {
+      requireAuthority(ctx, route, 'correct', members);
+      // R74 (0037): con el periodo de hoy cerrado, 409 con la reapertura como camino (no un rechazo sin salida).
+      const { requireOpenPeriods } = await import('./corrections.ts');
+      await requireOpenPeriods(client, ctx, [orig.route_id, orig.to_route_id].filter((x): x is string => !!x));
+    }
   }
   const reason = reasonOf(body);
   return execute(client, ctx, operationId, { kind: 'REVERSAL', reason, reverses: orig.id },

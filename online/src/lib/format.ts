@@ -69,7 +69,8 @@ const ERRORS: Record<string, string> = {
   REFUND_NOT_ALLOWED: 'Solo los gastos administrativos (de bolsa) admiten reintegros.',
   REFUND_EXCEEDS_EXPENSE: 'El reintegro supera lo que queda por reintegrar de este gasto.',
   EXPENSE_HAS_REFUNDS: 'El gasto ya tiene reintegros: registre un reintegro por el resto en lugar de anularlo.',
-  SELF_CORRECTION_FORBIDDEN: 'Quien registró el gasto no puede anularlo (tampoco con otra membresía): debe hacerlo otra persona autorizada.',
+  // R74 (0037): el responsable de capital anula también lo que él registró; solo un gasto cargado a la propia custodia queda fuera.
+  SELF_CORRECTION_FORBIDDEN: 'Nadie anula un gasto cargado a su propia custodia (tampoco con otra membresía).',
   CAPITAL_CONTROLLER_MISSING: 'La ruta no tiene Administrador responsable de capital válido.',
   MEMBER_INACTIVE: 'Esa persona está inactiva.',
   SELF_SETTLEMENT_FORBIDDEN: 'Nadie cuadra (ni reabre) su propio efectivo, tampoco con otra membresía: debe hacerlo otra persona autorizada.',
@@ -123,13 +124,17 @@ const ERRORS: Record<string, string> = {
   CONTRIBUTIONS_INVALID: 'Los aportes no son válidos: cada ruta aporta una sola vez, con un valor mayor que cero, y la suma debe ser igual al total.',
   CONTRIBUTION_ROUTE_NOT_ALLOWED: 'Solo aportan las rutas de las que eres el responsable vigente. Para anular, debes seguir siendo el responsable de cada ruta aportante.',
   REIMBURSEMENT_EXCEEDS_PENDING: 'El reembolso supera lo que la empresa le debe a ese Administrador.',
-  PAYABLE_ALREADY_REIMBURSED: 'Este gasto ya fue reembolsado (total o parcialmente): primero anula el reembolso y después el gasto.',
+  PAYABLE_ALREADY_REIMBURSED: 'Este gasto ya fue reembolsado (total o parcialmente): se anula junto con su reembolso (o primero el reembolso, si lo pagó otro Administrador).',
   // Ronda 74 · autoridad del Administrador (0036: conciliación de diferencias, desactivación, operaciones conjuntas).
   ADMIN_HAS_PENDING_ACCOUNTS: 'Este Administrador tiene cuentas pendientes: debe saldarlas y entregarlas antes de desactivarlo.',
-  JOINT_OPERATION_MIXED_CONTROLLERS: 'La operación abarca rutas de distintos Administradores: solo puede corregirla quien sea responsable de todas ellas.',
+  JOINT_OPERATION_MIXED_CONTROLLERS: 'La operación abarca rutas de distintos Administradores: se anula con una anulación conjunta que cada responsable confirma desde su pantalla.',
   DIFFERENCE_NOT_PENDING: 'Esta diferencia ya no está pendiente (ya se concilió o fue sustituida). Se recargó la lista.',
   RESOLUTION_NOT_ALLOWED: 'Esa resolución no aplica a esta diferencia.',
   DIFFERENCE_AMOUNT_MISMATCH: 'El importe pendiente cambió desde la vista previa. Revise de nuevo antes de confirmar.',
+  // Ronda 74 · regla definitiva del responsable de capital (0037): anulación conjunta.
+  JOINT_REVERSAL_NOT_NEEDED: 'Eres el responsable de todas las rutas de esta operación: anúlala directamente.',
+  JOINT_REVERSAL_PENDING_EXISTS: 'Ya hay una anulación conjunta pendiente para esta operación: confírmala o espera a que la cancelen.',
+  JOINT_REVERSAL_NOT_PENDING: 'Esta anulación conjunta ya no está pendiente (se asentó, se canceló o caducó).',
 };
 
 const FIELD: Record<string, string> = {
