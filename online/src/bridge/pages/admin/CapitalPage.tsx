@@ -49,6 +49,7 @@ import { getRequest, type CapitalRequest } from '../../../runtime/capitalRequest
 import { RequestBanner, RequestModal } from '../../../runtime/MoneyForms.tsx'
 import { isRouteBaseUi, useCapitalModel } from '../../../runtime/routeBase/api.ts'
 import { CajaPrincipalRB } from '../../../runtime/routeBase/CajaPrincipalRB.tsx'
+import { GeneralExpensesPanel } from '../../../runtime/routeBase/GeneralExpensesRB.tsx'
 
 type SaOperation = 'COMPANY_DEPOSIT' | 'ADMIN_ALLOCATION' | 'ADMIN_RETURN' | 'COMPANY_WITHDRAWAL'
 
@@ -230,6 +231,10 @@ function PoolCapitalPage() {
           <Link to="/admin/consultas?categoria=capital" className="inline-flex items-center justify-center gap-2 h-9 px-4 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
             <History className="w-4 h-4" aria-hidden />Ver movimientos
           </Link>
+          {/* R74 (0036): diferencias y conciliaciones (solo lectura para el SuperAdmin). */}
+          <Link to="/admin/diferencias" className="inline-flex items-center justify-center gap-2 h-9 px-4 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50" data-testid="pool-go-differences">
+            Diferencias
+          </Link>
           <Button onClick={() => setSaOp({ tipo: 'COMPANY_DEPOSIT', adminId: '', amount: 0, descripcion: '' })} icon={<Plus className="w-4 h-4" />} data-testid="sa-movements">
             Realizar movimientos
           </Button>
@@ -257,9 +262,19 @@ function PoolCapitalPage() {
       )}
 
       {titularId ? (
-        titularPool
-          ? <PoolSummary pool={titularPool} currency={currency} titular={verAdminId ? nombre(verAdminId) : undefined} onRegistrarGasto={() => setGastoAbierto(true)} />
-          : <p className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 text-sm text-gray-500" data-testid="pool-empty">{verAdminId ? 'Este Administrador aún no ha recibido capital.' : 'Aún no has recibido capital del SuperAdmin.'}</p>
+        <>
+          {titularPool
+            ? <PoolSummary pool={titularPool} currency={currency} titular={verAdminId ? nombre(verAdminId) : undefined} onRegistrarGasto={() => setGastoAbierto(true)} />
+            : <p className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 text-sm text-gray-500" data-testid="pool-empty">{verAdminId ? 'Este Administrador aún no ha recibido capital.' : 'Aún no has recibido capital del SuperAdmin.'}</p>}
+          {/* R74 (0035, C2 y RB-D9): gastos pagados con dinero propio y reembolsos desde la bolsa propia. */}
+          {!verAdminId && (
+            <Link to="/admin/diferencias" className="block rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm hover:bg-gray-50" data-testid="pool-go-differences">
+              <b className="text-gray-900">Diferencias y conciliación</b>
+              <span className="block text-xs text-gray-600">Faltantes y sobrantes de cuadres de tus rutas: los concilias tú, sin autorización superior.</span>
+            </Link>
+          )}
+          {!verAdminId && <GeneralExpensesPanel model="admin_pool" />}
+        </>
       ) : summary?.company ? (
         <>
           <section className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-3">
@@ -351,6 +366,9 @@ function PoolCapitalPage() {
               {rutasVisibles.length === 0 && <p className="py-6 text-center text-sm text-gray-400">No hay rutas.</p>}
             </div>
           </section>
+
+          {/* R74 (0035): obligaciones con los Administradores y reembolsos, solo lectura para el SuperAdmin. */}
+          <GeneralExpensesPanel model="admin_pool" />
         </>
       ) : null}
 

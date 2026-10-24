@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { toast } from '@/components/ui/Toast';
 import { cn } from '@/lib/utils';
 import { serverView } from './projection.ts';
+import { isRouteBaseUi, useCapitalModel } from './routeBase/api.ts';
 import { DayHeading, money, rowKeys } from './ConsultasParts.tsx';
 import {
   CSV_MAX_ROWS, STATUS_LABEL, cashCsv, counterpartOf, dayHeading, extraCount, groupLabel, kindLabel, person, queryOf,
@@ -105,6 +106,7 @@ export function ConsultasDinero({ filters, today, timezone, currency, minorUnits
   filters: Filters; today: string; timezone: string; currency?: string; minorUnits: number; revision: number;
   onOpen: (row: CashRow) => void; showDate: boolean;
 }) {
+  const rb = isRouteBaseUi(useCapitalModel());
   const [page, setPage] = useState<CashPage | null>(null);
   const [rows, setRows] = useState<CashRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -149,7 +151,7 @@ export function ConsultasDinero({ filters, today, timezone, currency, minorUnits
         offset += p.rows.length;
         if (!p.hasMore || p.rows.length === 0 || all.length >= CSV_MAX_ROWS) break;
       }
-      const blob = new Blob([cashCsv(all.slice(0, CSV_MAX_ROWS), minorUnits)], { type: 'text/csv;charset=utf-8' });
+      const blob = new Blob([cashCsv(all.slice(0, CSV_MAX_ROWS), minorUnits, rb)], { type: 'text/csv;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -181,8 +183,13 @@ export function ConsultasDinero({ filters, today, timezone, currency, minorUnits
 
       {page?.summary.outside && page.summary.outside.count > 0 && (
         <p className="rounded-xl bg-primary-50 px-4 py-2.5 text-sm text-primary-900">
-          {page.summary.outside.count === 1 ? 'Una operación' : `${page.summary.outside.count} operaciones`} de esta ruta las pagó o recibió directamente la bolsa del
-          Administrador (ventas o recaudos del Administrador). No cambian el efectivo en custodia; se ven eligiendo esa bolsa en «Caja o ruta».
+          {rb ? <>
+            {page.summary.outside.count === 1 ? 'Una operación' : `${page.summary.outside.count} operaciones`} de esta ruta no tocan su Base ni sus custodias
+            (anteriores a Base por Ruta, pagadas o recibidas con el saldo anterior del Administrador). No cambian el efectivo de la ruta.
+          </> : <>
+            {page.summary.outside.count === 1 ? 'Una operación' : `${page.summary.outside.count} operaciones`} de esta ruta las pagó o recibió directamente la bolsa del
+            Administrador (ventas o recaudos del Administrador). No cambian el efectivo en custodia; se ven eligiendo esa bolsa en «Caja o ruta».
+          </>}
         </p>
       )}
 
@@ -224,8 +231,8 @@ export function ConsultasDinero({ filters, today, timezone, currency, minorUnits
             <tbody key={day} className="divide-y divide-gray-100">
               {showDate && <DayHeading colSpan={6}>{dayHeading(day)}</DayHeading>}
               {list.map((r) => {
-                const who = counterpartOf(r);
-                const label = kindLabel(r.kind, r.reversesKind);
+                const who = counterpartOf(r, rb);
+                const label = kindLabel(r.kind, r.reversesKind, rb);
                 return (
                   <tr key={r.id} onClick={() => onOpen(r)} className={cn('cursor-pointer hover:bg-primary-50/50 focus-within:bg-primary-50/50', r.status === 'anulada' && 'text-gray-500')} data-testid="cash-row">
                     <td className="px-4 py-2.5 align-top tabular-nums text-gray-600">{r.localTime}</td>
@@ -270,8 +277,8 @@ export function ConsultasDinero({ filters, today, timezone, currency, minorUnits
             {showDate && <DayHeading>{dayHeading(day)}</DayHeading>}
             <ul className="divide-y divide-gray-100 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-card">
               {list.map((r) => {
-                const who = counterpartOf(r);
-                const label = kindLabel(r.kind, r.reversesKind);
+                const who = counterpartOf(r, rb);
+                const label = kindLabel(r.kind, r.reversesKind, rb);
                 return (
                   <li key={r.id}>
                     <button type="button" data-row onClick={() => onOpen(r)} aria-haspopup="dialog" data-testid="cash-card"

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { formatClientName } from '@/lib/displayName';
 import { cn } from '@/lib/utils';
 import { serverView } from './projection.ts';
+import { isRouteBaseUi, useCapitalModel } from './routeBase/api.ts';
 import { DayHeading, money, rowKeys } from './ConsultasParts.tsx';
 import { STATUS_LABEL, dayHeading, extraCount, kindLabel, person, queryOf, type ActivityPage, type ActivityRow, type Filters } from './consultasModel.ts';
 
@@ -32,6 +33,7 @@ function byDay(rows: ActivityRow[]): [string, ActivityRow[]][] {
 export function ConsultasActividad({ filters, today, minorUnits, currency, revision, onOpen, showDate }: {
   filters: Filters; today: string; minorUnits: number; currency?: string; revision: number; onOpen: (row: ActivityRow) => void; showDate: boolean;
 }) {
+  const rb = isRouteBaseUi(useCapitalModel());
   const [page, setPage] = useState<ActivityPage | null>(null);
   const [rows, setRows] = useState<ActivityRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,7 +97,7 @@ export function ConsultasActividad({ filters, today, minorUnits, currency, revis
             <tbody key={day} className="divide-y divide-gray-100">
               {showDate && <DayHeading colSpan={5}>{dayHeading(day)}</DayHeading>}
               {list.map((r) => {
-                const label = kindLabel(r.kind, r.reversesKind);
+                const label = kindLabel(r.kind, r.reversesKind, rb);
                 const n = note(r);
                 return (
                   <tr key={r.id} onClick={() => onOpen(r)} className="cursor-pointer hover:bg-primary-50/50 focus-within:bg-primary-50/50" data-testid="activity-row">
@@ -127,7 +129,7 @@ export function ConsultasActividad({ filters, today, minorUnits, currency, revis
                 <li key={r.id}>
                   <button type="button" data-row aria-haspopup="dialog" onClick={() => onOpen(r)}
                     className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5 px-4 py-3 text-left active:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500">
-                    <span className="truncate text-sm font-medium text-gray-900">{kindLabel(r.kind, r.reversesKind)}</span>
+                    <span className="truncate text-sm font-medium text-gray-900">{kindLabel(r.kind, r.reversesKind, rb)}</span>
                     <span className="text-xs text-gray-500">{STATUS_LABEL[r.status] ?? r.status}</span>
                     <span className="col-span-2 truncate text-sm text-gray-700">{subject(r)}</span>
                     <span className="col-span-2 truncate text-xs text-gray-500">{r.localTime} · {person(r.actor, '—')}{note(r) ? ` · ${note(r)}` : ''}</span>

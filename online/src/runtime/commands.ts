@@ -18,10 +18,13 @@ import { invalidate } from './projection.ts';
 
 export class OnlineCommandError extends Error {
   readonly code: string;
-  constructor(code: string, message: string) {
+  /** Detalles del servidor (p. ej. `blockers` o `routes`) para que la pantalla los explique. */
+  readonly details?: Record<string, unknown>;
+  constructor(code: string, message: string, details?: Record<string, unknown>) {
     super(message);
     this.name = 'OnlineCommandError';
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -30,7 +33,7 @@ function translate(e: unknown): Error {
     return new OnlineCommandError('UNCERTAIN_OPERATION', 'No se pudo confirmar la operación con el servidor. No la repita: recargue la pantalla y compruebe si quedó registrada.');
   }
   if (e instanceof NetworkFailure) return new OnlineCommandError('NETWORK', `${errorText(e)} La operación no se confirmó.`);
-  if (e instanceof ApiFailure) return new OnlineCommandError(e.code, errorText(e));
+  if (e instanceof ApiFailure) return new OnlineCommandError(e.code, errorText(e), e.details);
   return e instanceof Error ? e : new Error(String(e));
 }
 

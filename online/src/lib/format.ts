@@ -115,10 +115,21 @@ const ERRORS: Record<string, string> = {
   CAPITAL_MIGRATION_IN_PROGRESS: 'La empresa está pasando a Base por Ruta: las bolsas están congeladas hasta que el SuperAdmin complete la activación.',
   ROUTE_IN_HANDOVER: 'La ruta está en entrega: el nuevo responsable debe contar la Base y confirmar antes de mover dinero.',
   ROUTE_SCOPE_VIOLATION: 'Una ruta no puede usar la Base de otra ruta.',
-  ACTIVATION_PREREQUISITES_FAILED: 'No se cumplen los requisitos para activar Base por Ruta. Revise la lista y vuelva a comprobar.',
-  GENERAL_EXPENSE_FUNDING_PENDING: 'Con Base por Ruta, los gastos generales todavía no se pueden registrar: falta habilitar su financiación. Los gastos de una ruta se pagan con su Base.',
+  ACTIVATION_PREREQUISITES_FAILED: 'No se cumplen los requisitos para activar Base por Ruta. Revise la lista y vuelva a comprobar (con saldos, pasa primero por «Migrando»).',
+  GENERAL_EXPENSE_FUNDING_PENDING: 'Con Base por Ruta, un gasto general se paga con aportes de tus rutas o con tu dinero propio (reembolsable). Elige una de esas dos fuentes.',
   HANDOVER_NOT_PENDING: 'Esta ruta ya no tiene una entrega pendiente de confirmar.',
   ROUTE_BASE_NOT_ACTIVE: 'La empresa no usa Base por Ruta: esta operación no está disponible.',
+  // Ronda 74 · gastos generales y reembolsos (0035, AX429–AX432).
+  CONTRIBUTIONS_INVALID: 'Los aportes no son válidos: cada ruta aporta una sola vez, con un valor mayor que cero, y la suma debe ser igual al total.',
+  CONTRIBUTION_ROUTE_NOT_ALLOWED: 'Solo aportan las rutas de las que eres el responsable vigente. Para anular, debes seguir siendo el responsable de cada ruta aportante.',
+  REIMBURSEMENT_EXCEEDS_PENDING: 'El reembolso supera lo que la empresa le debe a ese Administrador.',
+  PAYABLE_ALREADY_REIMBURSED: 'Este gasto ya fue reembolsado (total o parcialmente): primero anula el reembolso y después el gasto.',
+  // Ronda 74 · autoridad del Administrador (0036: conciliación de diferencias, desactivación, operaciones conjuntas).
+  ADMIN_HAS_PENDING_ACCOUNTS: 'Este Administrador tiene cuentas pendientes: debe saldarlas y entregarlas antes de desactivarlo.',
+  JOINT_OPERATION_MIXED_CONTROLLERS: 'La operación abarca rutas de distintos Administradores: solo puede corregirla quien sea responsable de todas ellas.',
+  DIFFERENCE_NOT_PENDING: 'Esta diferencia ya no está pendiente (ya se concilió o fue sustituida). Se recargó la lista.',
+  RESOLUTION_NOT_ALLOWED: 'Esa resolución no aplica a esta diferencia.',
+  DIFFERENCE_AMOUNT_MISMATCH: 'El importe pendiente cambió desde la vista previa. Revise de nuevo antes de confirmar.',
 };
 
 const FIELD: Record<string, string> = {
@@ -130,6 +141,9 @@ const FIELD: Record<string, string> = {
   routeId: 'Ruta', fromRouteId: 'Ruta de origen', toRouteId: 'Ruta destino', amountMinor: 'Valor', evidence: 'Evidencia',
   backupReference: 'Referencia del respaldo', companyBalanceNote: 'Nota sobre el capital de la empresa', countedMinor: 'Valor contado',
   expectedSeenMinor: 'Base esperada', note: 'Nota', sourceNote: 'Origen del dinero', workerId: 'Cobrador', target: 'Cambio de modelo',
+  contributions: 'Aportes de rutas', adminId: 'Administrador', description: 'Descripción', categoryId: 'Categoría', fundingSource: 'Fuente del dinero',
+  scope: 'Alcance', reference: 'Referencia',
+  sourceKind: 'Origen de la diferencia', sourceId: 'Diferencia', resolution: 'Resolución',
 };
 
 export function errorText(err: unknown): string {
@@ -200,4 +214,6 @@ export const OPERATION_KIND: Record<string, string> = {
   ADMIN_TRANSFER_RELEASE: 'Transferencia entre Administradores liberada',
   ROUTE_BASE_INJECTION: 'Inyección de Base', ROUTE_BASE_WITHDRAWAL: 'Retiro de Base', ROUTE_TRANSFER: 'Transferencia entre rutas',
   LEGACY_POOL_TO_ROUTE: 'Reparto de saldo sin asignar',
+  GENERAL_EXPENSE_CONTRIBUTION: 'Aporte de ruta a gasto general', GENERAL_EXPENSE_OWN_MONEY: 'Gasto general con dinero propio',
+  ADMIN_REIMBURSEMENT: 'Reembolso a Administrador',
 };

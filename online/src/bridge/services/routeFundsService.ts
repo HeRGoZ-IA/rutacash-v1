@@ -8,6 +8,9 @@
 
 import { RouteFundsError } from '@clean/services/routeFundsService';
 import * as Clean from '@clean/services/routeFundsService';
+import { calendar } from '../../runtime/projection.ts';
+import { toMajor } from '../../runtime/mappers.ts';
+import { currentCapitalModel, fetchPanel, isRouteBaseUi } from '../../runtime/routeBase/api.ts';
 
 export * from '@clean/services/routeFundsService';
 
@@ -16,7 +19,13 @@ const SIN_SOCIOS = 'Las operaciones con Caja socios (Ruta → Socio y entre soci
 
 async function noCaja(): Promise<never> { throw new RouteFundsError(NO_CAJA); }
 async function sinSocios(): Promise<never> { throw new RouteFundsError(SIN_SOCIOS); }
-async function getRouteAvailableFundsOnline(): Promise<number> { return 0; }
+/** R74 · Base por Ruta: el disponible de la ruta es su Base (panel del servidor); en el modelo de bolsas, 0. */
+async function getRouteAvailableFundsOnline(_tenantId?: string, routeId?: string): Promise<number> {
+  if (!routeId || !isRouteBaseUi(currentCapitalModel())) return 0;
+  const today = (await calendar()).businessDate;
+  const row = (await fetchPanel(today, today)).routes.find((r) => r.routeId === routeId);
+  return toMajor(row?.baseMinor ?? 0);
+}
 
 export const registerCapital = noCaja as unknown as typeof Clean.registerCapital;
 export const registerWithdrawal = noCaja as unknown as typeof Clean.registerWithdrawal;

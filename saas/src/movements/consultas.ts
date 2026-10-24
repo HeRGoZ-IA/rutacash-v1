@@ -35,6 +35,8 @@ import { eventBranchesSql, hasRectifications, list, ymd } from './service.ts';
 
 /** Cuentas de EFECTIVO (las demás —cartera, intereses, gastos, externo, sin identificar— son contables). */
 // Base por Ruta (0034): `route_base` es efectivo de la ruta (la contrapartida `route_funding` no).
+// Gastos generales (0035): `admin_payable` (saldo a favor de un Administrador) es una OBLIGACIÓN, nunca efectivo:
+// no entra en ninguna perspectiva de Dinero ni en sus saldos.
 export const CASH_ACCOUNT_KINDS = ['company', 'admin', 'custody', 'transit', 'suspense', 'route_base'] as const;
 
 /** Tipos de operación conocidos que mueven efectivo (base = tipo anulado si es una anulación). */
@@ -43,25 +45,43 @@ export const CASH_KINDS = [
   'WORKER_RETURN', 'WORKER_TRANSFER', 'ROUTE_REASSIGNMENT', 'LOAN_DISBURSEMENT', 'COLLECTION', 'WORKER_EXPENSE', 'ROUTE_EXPENSE',
   'COMPANY_EXPENSE', 'EXPENSE_REFUND', 'SETTLEMENT_RETURN', 'SETTLEMENT_SURPLUS', 'ADMIN_TRANSFER_HOLD', 'ADMIN_TRANSFER_APPLY',
   'ADMIN_TRANSFER_RELEASE', 'DISBURSEMENT_ADJUSTMENT',
+  // Base por Ruta (0034) y gastos generales (0035). `GENERAL_EXPENSE_OWN_MONEY` NO: no mueve efectivo (Actividad).
+  'ROUTE_BASE_INJECTION', 'ROUTE_BASE_WITHDRAWAL', 'ROUTE_TRANSFER', 'LEGACY_POOL_TO_ROUTE', 'GENERAL_EXPENSE_CONTRIBUTION', 'ADMIN_REIMBURSEMENT',
+  // 0036 (RB-D3): conciliación de un faltante o sobrante (siempre toca una Base, una custodia o un sobrante en control).
+  'DIFFERENCE_CONCILIATION',
 ] as const;
 
 /** Grupos de «Tipo de movimiento» de Dinero (por tipo base). Lo que no está aquí es `otros`. */
 export const CASH_GROUPS: Record<string, readonly string[]> = {
   desembolsos: ['LOAN_DISBURSEMENT', 'DISBURSEMENT_ADJUSTMENT'],
   recaudos: ['COLLECTION'],
-  gastos: ['WORKER_EXPENSE', 'ROUTE_EXPENSE', 'COMPANY_EXPENSE', 'EXPENSE_REFUND'],
+  gastos: ['WORKER_EXPENSE', 'ROUTE_EXPENSE', 'COMPANY_EXPENSE', 'EXPENSE_REFUND', 'GENERAL_EXPENSE_CONTRIBUTION'],
   capital: ['COMPANY_DEPOSIT', 'COMPANY_WITHDRAWAL', 'ADMIN_ALLOCATION', 'ADMIN_RETURN', 'PARTNER_CONTRIBUTION', 'WORKER_DELIVERY',
     'WORKER_RETURN', 'WORKER_TRANSFER', 'ROUTE_REASSIGNMENT', 'ADMIN_TRANSFER_HOLD', 'ADMIN_TRANSFER_APPLY', 'ADMIN_TRANSFER_RELEASE',
     'ROUTE_BASE_INJECTION', 'ROUTE_BASE_WITHDRAWAL', 'ROUTE_TRANSFER', 'LEGACY_POOL_TO_ROUTE'],
   cuadres: ['SETTLEMENT_RETURN', 'SETTLEMENT_SURPLUS'],
+  // 0035: pago de una obligación con un Administrador (no vuelve a reconocer el gasto).
+  reembolsos: ['ADMIN_REIMBURSEMENT'],
+  // 0036: faltantes y sobrantes conciliados por el Administrador (operación nueva; no reescribe cuadres).
+  diferencias: ['DIFFERENCE_CONCILIATION'],
 };
-/** Grupos de Actividad. `contables` = operaciones del libro sin efectivo y rectificaciones sin diferencia. */
+/** Grupos de Actividad (por tipo base). `contables` = operaciones del libro sin efectivo y rectificaciones sin diferencia. */
 export const ACTIVITY_GROUPS: Record<string, readonly string[]> = {
   solicitudes: ['SALE_REQUEST'],
   decisiones: ['SALE_APPROVAL', 'SALE_REJECTION', 'SALE_CANCELLATION'],
   cuadres: ['CUSTODY_SETTLEMENT'],
   cierres: ['PERIOD_CLOSURE'],
+  // 0035: gasto general pagado con dinero propio = obligación de la empresa con el Administrador (sin efectivo).
+  obligaciones: ['GENERAL_EXPENSE_OWN_MONEY'],
 };
+
+/** Modelo de capital de la empresa del contexto (las etiquetas cambian con Base por Ruta: no hay «bolsas»). */
+async function capitalModel(client: pg.PoolClient, ctx: ActiveContext): Promise<string> {
+  // `to_jsonb(c)` y no la columna: la misma consulta funciona en una base anterior a 0034 (sin `capital_model`).
+  const r = await client.query<{ m: string | null }>(`select to_jsonb(c)->>'capital_model' m from adex.companies c where c.id = $1`, [ctx.companyId]);
+  return r.rows[0]?.m ?? 'admin_pool';
+}
+const poolLabel = (model: string, name: string) => (model === 'admin_pool' ? `Bolsa de ${name}` : `Saldo sin asignar de ${name}`);
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_LIMIT = 200;
@@ -138,7 +158,7 @@ export async function resolvePerspective(client: pg.PoolClient, ctx: ActiveConte
       const ids = await accounts(`kind = 'admin' and membership_id = $2`, [membershipId]);
       // La bolsa existe desde su primera operación; antes, solo su dueño o el SuperAdmin la consultan (vacía).
       if (!ids.length && !(ctx.role === 'superadmin' || (ctx.role === 'admin' && membershipId === ctx.membershipId))) throw new ApiError(404, 'PERSPECTIVE_NOT_FOUND');
-      return { key, kind: 'admin', label: `Bolsa de ${await memberName(client, ctx, membershipId)}`, routeId: null, membershipId, accountIds: ids };
+      return { key, kind: 'admin', label: poolLabel(await capitalModel(client, ctx), await memberName(client, ctx, membershipId)), routeId: null, membershipId, accountIds: ids };
     }
     case 'custody': {
       const routeId = idOrNotFound(a);
@@ -156,7 +176,17 @@ export async function resolvePerspective(client: pg.PoolClient, ctx: ActiveConte
 
 async function defaultPerspective(client: pg.PoolClient, ctx: ActiveContext, mode: Access): Promise<string> {
   if (ctx.role === 'superadmin') return 'company';
-  if (ctx.role === 'admin') return `admin:${ctx.membershipId}`;
+  if (ctx.role === 'admin') {
+    // D74-B1: con Base por Ruta no se perpetúa la bolsa: por defecto, la primera ruta de la que es responsable
+    // (o la primera de su alcance). En el modelo de bolsas, su bolsa (como hasta ahora).
+    if (await capitalModel(client, ctx) !== 'admin_pool') {
+      const r = await client.query<{ id: string }>(
+        `select id from adex.routes where company_id = $1 and id = any($2::text[])
+          order by (capital_controller_membership_id = $3) desc nulls last, lower(name), id limit 1`, [ctx.companyId, [...ctx.routeIds], ctx.membershipId]);
+      if (r.rows[0]) return `route:${r.rows[0].id}`;
+    }
+    return `admin:${ctx.membershipId}`;
+  }
   if (mode === 'own') {
     const r = await client.query<{ route_id: string }>(
       `select route_id from adex.capital_accounts where company_id = $1 and kind = 'custody' and membership_id = $2 order by route_id limit 1`, [ctx.companyId, ctx.membershipId]);
@@ -184,8 +214,10 @@ export async function listPerspectives(client: pg.PoolClient, ctx: ActiveContext
       `select a.membership_id, m.display_name from adex.capital_accounts a join adex.memberships m on m.company_id = a.company_id and m.id = a.membership_id
         where a.company_id = $1 and a.kind = 'admin' order by lower(m.display_name), a.membership_id`, [ctx.companyId]);
     const poolIds = new Set(pools.rows.map((p) => p.membership_id));
-    if (ctx.role === 'admin' && !poolIds.has(ctx.membershipId)) pools.rows.unshift({ membership_id: ctx.membershipId, display_name: ctx.displayName });
-    for (const p of pools.rows) options.push({ key: `admin:${p.membership_id}`, kind: 'admin', label: `Bolsa de ${p.display_name}`, routeId: null, membershipId: p.membership_id, office: null });
+    const model = await capitalModel(client, ctx);
+    // Con Base por Ruta la bolsa propia vacía no se ofrece (no existe como caja): solo el saldo «sin asignar» que quedó.
+    if (ctx.role === 'admin' && !poolIds.has(ctx.membershipId) && model === 'admin_pool') pools.rows.unshift({ membership_id: ctx.membershipId, display_name: ctx.displayName });
+    for (const p of pools.rows) options.push({ key: `admin:${p.membership_id}`, kind: 'admin', label: poolLabel(model, p.display_name), routeId: null, membershipId: p.membership_id, office: null });
   }
   const custodies = await client.query<{ route_id: string; membership_id: string; display_name: string; route_name: string | null }>(
     `select a.route_id, a.membership_id, m.display_name, r.name route_name from adex.capital_accounts a
@@ -272,6 +304,7 @@ export function parties(r: NamedRow): { from: Party | null; to: Party | null } {
   const company: Party = { type: 'company', name: 'Empresa' };
   const payer = r.worker_id ? custody(r.worker_id, r.worker_name) : r.admin_id ? pool(r.admin_id, r.admin_name) : company;
   const expense: Party = { type: 'expense', name: r.expense_category ?? r.concept };
+  const generalExpense: Party = { type: 'general_expense', name: r.expense_category ?? r.concept };
   let f: [Party | null, Party | null];
   switch (r.base) {
     case 'COMPANY_DEPOSIT': f = [{ type: 'external', name: 'Fuera de la empresa' }, company]; break;
@@ -295,7 +328,26 @@ export function parties(r: NamedRow): { from: Party | null; to: Party | null } {
     case 'ROUTE_BASE_INJECTION': f = [{ type: 'external', name: 'Aporte de Base' }, base()]; break;
     case 'ROUTE_BASE_WITHDRAWAL': f = [base(), { type: 'external', name: 'Retiro de Base' }]; break;
     case 'ROUTE_TRANSFER': f = [base(), base(r.to_route_id, r.to_route_name)]; break;
-    case 'LEGACY_POOL_TO_ROUTE': f = [{ type: 'pool', id: r.admin_id, name: r.admin_name }, base()]; break;
+    // Reparto auditado del saldo que quedó en la bolsa al activar Base por Ruta («sin asignar»).
+    case 'LEGACY_POOL_TO_ROUTE': f = [{ type: 'unassigned', id: r.admin_id, name: r.admin_name }, base()]; break;
+    // 0035 · gastos generales: el gasto se reconoce una sola vez (la parte «gasto general»); cada aporte sale de SU Base.
+    case 'GENERAL_EXPENSE_CONTRIBUTION': f = [base(), generalExpense]; break;
+    // C2: sin efectivo; el Administrador pagó con dinero propio y queda un saldo a su favor (obligación).
+    case 'GENERAL_EXPENSE_OWN_MONEY': f = [{ type: 'admin_money', id: r.admin_id, name: r.admin_name }, generalExpense]; break;
+    // Reembolso: admin = quien paga (su Base de ruta o, en el modelo de bolsas, su bolsa); contraparte = quien recibe.
+    case 'ADMIN_REIMBURSEMENT': f = [r.route_id ? base() : pool(r.admin_id, r.admin_name), { type: 'reimbursed_admin', id: r.counterpart_id, name: r.counterpart_name }]; break;
+    // 0036 · conciliación: la contrapartida es «faltante/sobrante conciliado» de la ruta (no es efectivo ni resultado).
+    //   faltante de cuadre (trabajador)      custodia → conciliado
+    //   faltante de acta de entrega           Base → conciliado          (sobrante de acta: conciliado → Base)
+    //   sobrante de cuadre (contraparte)      control → Base/bolsa, o control → devuelto a su dueño (sale del efectivo)
+    case 'DIFFERENCE_CONCILIATION': {
+      const diff: Party = { type: 'route_difference', routeId: r.route_id, routeName: r.route_name, name: r.route_name };
+      const control: Party = { type: 'control', id: r.counterpart_id, name: r.counterpart_name, routeId: r.route_id, routeName: r.route_name };
+      f = r.counterpart_id ? (r.net < 0 ? [control, { type: 'external', name: 'Devuelto a su dueño' }] : [control, pool(r.admin_id, r.admin_name)])
+        : r.worker_id ? [custody(r.worker_id, r.worker_name), diff]
+          : r.net < 0 ? [base(), diff] : [diff, base()];
+      break;
+    }
     default: f = [null, null];
   }
   return r.reversal ? { from: f[1], to: f[0] } : { from: f[0], to: f[1] };
@@ -536,7 +588,8 @@ async function activitySql(client: pg.PoolClient): Promise<string> {
     union all${eventBranchesSql(await hasRectifications(client))}`;
 }
 
-const activityGroupCase = `case ${Object.entries(ACTIVITY_GROUPS).map(([g, ks]) => `when kind in (${sqlList(ks)}) then '${g}'`).join(' ')} else 'contables' end`;
+// Por tipo BASE: la anulación de un gasto con dinero propio también es una «obligación» (no un ajuste contable suelto).
+const activityGroupCase = `case ${Object.entries(ACTIVITY_GROUPS).map(([g, ks]) => `when coalesce(reverses_kind, kind) in (${sqlList(ks)}) then '${g}'`).join(' ')} else 'contables' end`;
 
 /**
  * `GET /v1/movements/activity` — eventos sin dinero desde la misma perspectiva:
@@ -599,7 +652,33 @@ export async function listActivity(client: pg.PoolClient, ctx: ActiveContext, q:
 const ACCOUNT_LABEL: Record<string, string> = {
   company: 'Empresa', admin: 'Bolsa', custody: 'Custodia', portfolio: 'Cartera de la ruta', external: 'Fuera de la empresa', income: 'Intereses',
   expense: 'Gastos', suspense: 'Sobrante en control', unidentified: 'Origen sin identificar', transit: 'En tránsito', partner: 'Socio (histórico)',
+  // Base por Ruta (0034) y gastos generales (0035).
+  route_base: 'Base de la ruta', route_funding: 'Aportes de Base (contrapartida)', admin_payable: 'Saldo a favor del Administrador (obligación)',
+  // 0036: faltantes reconocidos y sobrantes incorporados al conciliar (contrapartida por ruta; no es efectivo ni resultado).
+  route_difference: 'Faltante/sobrante conciliado',
 };
+/** Etiqueta de una cuenta según el modelo: con Base por Ruta la cuenta `admin` es el saldo «sin asignar». */
+const accountLabel = (kind: string, model: string) => (kind === 'admin' && model !== 'admin_pool' ? 'Saldo sin asignar' : ACCOUNT_LABEL[kind] ?? kind);
+
+/**
+ * Aportes por ruta del gasto general o del reembolso al que pertenece la operación (0035): todas las rutas del
+ * mismo gasto o reembolso, no solo la de esta operación. Bajo RLS (lo ajeno no aparece). null = no aplica.
+ */
+async function contributionsOfOperation(client: pg.PoolClient, ctx: ActiveContext, opId: string, reversesOperationId: string | null) {
+  const own = await client.query<{ purpose: string; expense_id: string | null; reimbursement_id: string | null }>(
+    `select purpose, expense_id, reimbursement_id from adex.general_funding_contributions where company_id = $1 and operation_id = any($2::text[]) limit 1`,
+    [ctx.companyId, [opId, ...(reversesOperationId ? [reversesOperationId] : [])]]);
+  const k = own.rows[0];
+  if (!k) return null;
+  const col = k.purpose === 'expense' ? 'expense_id' : 'reimbursement_id';
+  const rows = await client.query<{ route_id: string | null; name: string | null; amount_minor: string; operation_id: string }>(
+    `select g.route_id, ro.name, g.amount_minor, g.operation_id from adex.general_funding_contributions g
+       left join adex.routes ro on ro.company_id = g.company_id and ro.id = g.route_id
+      where g.company_id = $1 and g.${col} = $2 order by lower(coalesce(ro.name, '')), g.route_id nulls first`, [ctx.companyId, k.purpose === 'expense' ? k.expense_id : k.reimbursement_id]);
+  const items = rows.rows.map((x) => ({ routeId: x.route_id, routeName: x.name, amountMinor: Number(x.amount_minor), operationId: x.operation_id }));
+  return { purpose: k.purpose as 'expense' | 'reimbursement', expenseId: k.expense_id, reimbursementId: k.reimbursement_id,
+    totalMinor: items.reduce((t, i) => t + i.amountMinor, 0), items };
+}
 
 /**
  * `GET /v1/movements/detail?id=` — detalle de una fila (dinero o actividad): quién, cuándo (fecha y hora
@@ -636,7 +715,11 @@ export async function movementDetail(client: pg.PoolClient, ctx: ActiveContext, 
   const ops = isOp ? (await client.query<{ reverses_operation_id: string | null; actor_role: string; txid: string }>(
     `select reverses_operation_id, actor_role, txid::text from adex.capital_operations where company_id = $1 and id = $2`, [ctx.companyId, id])).rows[0] : undefined;
   const base = String(x['reverses_kind'] ?? x['kind']);
+  const model = isOp ? await capitalModel(client, ctx) : 'admin_pool';
+  const contributions = isOp && ['GENERAL_EXPENSE_CONTRIBUTION', 'ADMIN_REIMBURSEMENT'].includes(base)
+    ? await contributionsOfOperation(client, ctx, id, ops?.reverses_operation_id ?? null) : null;
   return {
+    contributions,
     movement: {
       ...baseRow(x), base, money: isOp && (CASH_KINDS as readonly string[]).includes(base), localAt: String(x['local_at']), timezone: ctx.company.timezone,
       amountMinor: x['amount_minor'] === null ? null : Number(x['amount_minor']),
@@ -644,7 +727,7 @@ export async function movementDetail(client: pg.PoolClient, ctx: ActiveContext, 
       reversesOperationId: ops?.reverses_operation_id ?? null, reversedBy, actorRole: ops?.actor_role ?? str(x['actor_role']),
     },
     legs: legs.map((l) => ({
-      leg: Number(l['leg']), account: { kind: String(l['kind']), label: ACCOUNT_LABEL[String(l['kind'])] ?? String(l['kind']), membershipId: str(l['membership_id']),
+      leg: Number(l['leg']), account: { kind: String(l['kind']), label: accountLabel(String(l['kind']), model), membershipId: str(l['membership_id']),
         name: str(l['display_name']), routeId: str(l['route_id']), routeName: str(l['route_name']) },
       cash: (CASH_ACCOUNT_KINDS as readonly string[]).includes(String(l['kind'])),
       amountMinor: Number(l['amount_minor']), balanceAfterMinor: Number(l['balance_after_minor']),

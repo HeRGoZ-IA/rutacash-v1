@@ -50,6 +50,12 @@ export function useCapitalModel(): CapitalModel | null {
 }
 let lastKnown: { company: string; model: CapitalModel } = { company: '', model: 'admin_pool' };
 
+/** Último modelo conocido de la empresa ACTIVA (para funciones puras, p. ej. reportes); `admin_pool` si no se sabe. */
+export function currentCapitalModel(): CapitalModel {
+  const company = useRuntime.getState().ctx?.company.id ?? '';
+  return company && lastKnown.company === company ? lastKnown.model : 'admin_pool';
+}
+
 /** ¿Pantallas de Base por Ruta? (`migrating` también: las bolsas están congeladas). */
 export const isRouteBaseUi = (m: CapitalModel | null) => m === 'route_base' || m === 'migrating';
 
@@ -58,7 +64,7 @@ export const isRouteBaseUi = (m: CapitalModel | null) => m === 'route_base' || m
 // ---------------------------------------------------------------------------
 
 export type PanelAlert = 'NO_VALID_CONTROLLER' | 'ROUTE_IN_HANDOVER' | 'HANDOVER_DIFFERENCE' | 'NEGATIVE_CUSTODY' | 'CARRIED_SHORTAGE'
-  | 'SURPLUS_IN_CONTROL' | 'NEGATIVE_OPERATING_RESULT' | 'NEGATIVE_FLOW_GROWTH' | 'INSUFFICIENT_LIQUIDITY';
+  | 'SURPLUS_IN_CONTROL' | 'NEGATIVE_OPERATING_RESULT' | 'NEGATIVE_FLOW_GROWTH' | 'INSUFFICIENT_LIQUIDITY' | 'PENDING_DIFFERENCES';
 
 export interface BaseBlock {
   openingMinor: number; injectionsMinor: number; withdrawalsMinor: number; transfersInMinor: number; transfersOutMinor: number;
@@ -81,18 +87,49 @@ export interface PanelRoute {
   operatingResultMinor: number; operatingFlowMinor: number; capitalNeedMinor: number | null;
   states: { negativeOperatingResult: boolean; negativeFlowFromGrowth: boolean; insufficientLiquidity: boolean | null };
   alerts: PanelAlert[];
+  /** 0035: salidas de la Base hacia gastos generales y reembolsos del periodo (NO entran en el resultado de la ruta). */
+  generalFunding?: { generalExpenseContributionsMinor: number; adminReimbursementsMinor: number };
+  /**
+   * 0036 (conciliación de faltantes y sobrantes por el Administrador): bloque opcional. La pantalla lo muestra
+   * SOLO si el servidor lo envía; mientras tanto se ven el faltante arrastrado y el sobrante en control.
+   */
+  differences?: Partial<DifferenceFigures>;
+}
+
+/** Cifras de diferencias de una ruta (0036, `adex.route_difference_summary`). Nunca efectivo ni resultado. */
+export interface DifferenceFigures {
+  pendingCount: number; pendingShortageMinor: number; pendingSurplusMinor: number; workerOwedMinor: number;
+  conciliatedCount: number; conciliatedShortageMinor: number; workerOwesDecidedMinor: number; surplusToBaseMinor: number;
+  surplusReturnedMinor: number; conciliatedNetMinor: number;
 }
 
 export interface PoolRow { adminId: string; name: string | null; balanceMinor: number }
+
+export interface AdminGeneralRow {
+  adminId: string; name: string | null; totalMinor: number; operativoMinor: number; bienDuraderoMinor: number; otroMinor: number;
+  routesFundedMinor: number; ownMoneyMinor: number;
+}
+export interface CompanyGeneral {
+  totalMinor: number; operativoMinor: number; bienDuraderoMinor: number; otroMinor: number;
+  byFunding: { routesMinor: number; ownMoneyMinor: number; adminPoolMinor: number; companyAccountMinor: number };
+}
+export interface PendingReimbursements { totalMinor: number; isCash: false; admins: { adminId: string; name: string | null; pendingMinor: number }[] }
 
 export interface RoutePanel {
   model: CapitalModel; routeBaseSince: string | null; from: string; to: string; routes: PanelRoute[];
   general: {
     expenses: { administratorMinor: number; companyMinor: number; operativoMinor: number; bienDuraderoMinor: number; otroMinor: number };
     unassignedPools?: PoolRow[]; adminPools?: PoolRow[]; companyAccountMinor: number | null;
+    // 0035 (O8): gastos generales del Administrador y de la empresa del periodo, aparte de las rutas.
+    administratorGeneral?: AdminGeneralRow[]; companyGeneral?: CompanyGeneral;
+    /** Σ saldos a favor de Administradores: obligación de la empresa, NUNCA efectivo. */
+    pendingAdminReimbursements?: PendingReimbursements;
+    reimbursementsPaid?: { totalMinor: number; fromRoutesMinor: number; fromAdminPoolMinor: number };
   };
   totals: { baseMinor: number; custodyMinor: number; deliverableCustodyMinor: number; cashMinor: number; portfolioPrincipalMinor: number;
     operatingResultMinor: number; operatingFlowMinor: number };
+  consolidated?: { routesOperatingResultMinor: number; generalOperatingExpensesMinor: number; generalDurableGoodsMinor: number;
+    resultAfterGeneralExpensesMinor: number; pendingAdminReimbursementsMinor: number };
 }
 
 export function fetchPanel(from: string, to: string): Promise<RoutePanel> {
@@ -113,6 +150,17 @@ export function sumRows(rows: PanelRoute[]) {
     interestMinor: s((r) => r.period.interestCollectedMinor), disbursedMinor: s((r) => r.period.principalDisbursedMinor),
     expensesMinor: s(routeExpenses), withdrawalsMinor: s((r) => r.period.base?.withdrawalsMinor ?? 0), injectionsMinor: s((r) => r.period.base?.injectionsMinor ?? 0),
     resultMinor: s((r) => r.operatingResultMinor), flowMinor: s((r) => r.operatingFlowMinor),
+    surplusMinor: s((r) => r.surplusInControlMinor),
+    generalContributionsMinor: s((r) => r.generalFunding?.generalExpenseContributionsMinor ?? 0),
+    reimbursementsMinor: s((r) => r.generalFunding?.adminReimbursementsMinor ?? 0),
+    // 0036: solo si el servidor publica el bloque (si ninguna fila lo trae, null).
+    differences: rows.some((r) => r.differences) ? {
+      pendingCount: s((r) => r.differences?.pendingCount ?? 0),
+      shortagePendingMinor: s((r) => r.differences?.pendingShortageMinor ?? 0), surplusPendingMinor: s((r) => r.differences?.pendingSurplusMinor ?? 0),
+      workerOwedMinor: s((r) => r.differences?.workerOwedMinor ?? 0),
+      shortageConciliatedMinor: s((r) => (r.differences?.conciliatedShortageMinor ?? 0) + (r.differences?.workerOwesDecidedMinor ?? 0)),
+      surplusConciliatedMinor: s((r) => (r.differences?.surplusToBaseMinor ?? 0) + (r.differences?.surplusReturnedMinor ?? 0)),
+    } : null,
   };
 }
 
@@ -164,6 +212,122 @@ export const deliverToWorker = (b: { routeId: string; workerId: string; amountMi
 /** Recepción de devolución de un trabajador: vuelve a la Base de la ruta. */
 export const receiveFromWorker = (b: { routeId: string; workerId: string; amountMinor: number; reason: string }, opId: string) =>
   money<Op>('POST', '/v1/capital/returns', { ...b, reason: b.reason.trim() }, opId);
+
+// ---------------------------------------------------------------------------
+// Gastos generales y reembolsos (0035, D74-O4F): A / C1 con aportes de rutas, C2 con dinero propio
+// ---------------------------------------------------------------------------
+
+export type Nature = 'operativo' | 'bien_duradero' | 'otro';
+export const NATURE_LABEL: Record<Nature, string> = { operativo: 'Operativo', bien_duradero: 'Bien duradero', otro: 'Otro' };
+export const natureLabel = (n: string | null | undefined) => (n && n in NATURE_LABEL ? NATURE_LABEL[n as Nature] : 'Operativo');
+
+export interface Contribution { routeId: string; amountMinor: number }
+export interface ContributionView { routeId: string | null; routeName: string | null; amountMinor: number; operationId: string }
+
+/** Vista de un gasto del servidor (`/v1/expenses`), con los campos de 0035. */
+export interface ServerExpense {
+  id: string; scope: 'empresa' | 'ruta' | 'trabajador' | 'administrador' | null; routeId: string | null; workerId: string | null; categoryId: string;
+  amountMinor: number; description: string | null; reference: string | null; expenseDate: string; registeredBy: string;
+  funding: string | null; fundingAdminId: string | null; state: string; reversesId: string | null; refundsExpenseId: string | null;
+  reversalId: string | null; reversedAt: string | null; reversedBy: string | null; reversalReason: string | null; ledgerOperationId: string | null;
+  createdAt: string; adminId: string | null; nature: string | null; contributions: ContributionView[]; isReimbursable: boolean;
+}
+/** ¿Gasto general con las fuentes nuevas (aportes de rutas o dinero propio)? */
+export const isGeneralFunded = (e: { funding?: string | null; scope?: string | null }) =>
+  e.funding === 'routes' || e.funding === 'own_money' || e.scope === 'administrador';
+
+export interface ServerCategory { id: string; name: string; icon: string | null; active: boolean; nature: Nature }
+export const fetchCategories = async () => (await serverView<{ categories: ServerCategory[] }>('/v1/expense-categories')).categories;
+
+/** Gastos generales con las fuentes nuevas (los dos alcances; el servidor recorta por RLS). */
+export async function fetchGeneralExpenses(): Promise<ServerExpense[]> {
+  const [a, e] = await Promise.all([
+    serverView<{ expenses: ServerExpense[] }>('/v1/expenses?scope=administrador&limit=1000'),
+    serverView<{ expenses: ServerExpense[] }>('/v1/expenses?scope=empresa&limit=1000'),
+  ]);
+  return [...a.expenses, ...e.expenses.filter(isGeneralFunded)].sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+}
+
+export const createGeneralExpense = (b: {
+  scope: 'administrador' | 'empresa'; fundingSource: 'routes' | 'own_money'; categoryId: string; amountMinor: number; description: string;
+  reference?: string; contributions?: Contribution[];
+}, opId: string) => money<{ expense: ServerExpense; pendingMinor?: number }>('POST', '/v1/expenses', {
+  scope: b.scope, fundingSource: b.fundingSource, categoryId: b.categoryId, amountMinor: b.amountMinor, description: b.description.trim(),
+  ...(b.reference?.trim() ? { reference: b.reference.trim() } : {}),
+  ...(b.fundingSource === 'routes' ? { contributions: b.contributions } : {}),
+}, opId);
+
+export const reverseExpense = (id: string, reason: string, opId: string) =>
+  money<{ original: ServerExpense; reversal: ServerExpense }>('POST', `/v1/expenses/${encodeURIComponent(id)}/reverse`, { reason: reason.trim() }, opId);
+
+export interface AdminPayable {
+  adminId: string; name: string; status: string; pendingMinor: number; ownMoneyExpensesMinor: number; reimbursedMinor: number; lastMovementAt: string | null;
+}
+export interface Payables { isCash: false; totalPendingMinor: number; admins: AdminPayable[] }
+export const fetchPayables = () => serverView<Payables>('/v1/capital/admin-payables');
+
+export interface Reimbursement {
+  id: string; operationId: string; adminId: string; payerId: string; amountMinor: number; source: 'routes' | 'admin_pool' | string; reason: string;
+  entryDate: string; createdAt: string; state: 'vigente' | 'anulado' | string; reversedAt: string | null; reversedBy: string | null;
+  reversalReason: string | null; contributions: ContributionView[];
+}
+export const fetchReimbursements = async () => (await serverView<{ reimbursements: Reimbursement[] }>('/v1/capital/reimbursements')).reimbursements;
+
+/** route_base: `contributions` (de rutas de QUIEN PAGA); admin_pool: `amountMinor` desde su bolsa. */
+export const reimburseAdmin = (b: { adminId: string; reason: string; contributions?: Contribution[]; amountMinor?: number }, opId: string) =>
+  money<{ reimbursement: Reimbursement; pendingBeforeMinor: number; pendingAfterMinor: number }>('POST', '/v1/capital/reimbursements', {
+    adminId: b.adminId, reason: b.reason.trim(),
+    ...(b.contributions ? { contributions: b.contributions } : {}), ...(b.amountMinor != null ? { amountMinor: b.amountMinor } : {}),
+  }, opId);
+
+export const reverseReimbursement = (id: string, reason: string, opId: string) =>
+  money<{ reimbursement: Reimbursement; pendingAfterMinor: number }>('POST', `/v1/capital/reimbursements/${encodeURIComponent(id)}/reverse`, { reason: reason.trim() }, opId);
+
+// ---------------------------------------------------------------------------
+// Diferencias y conciliación (0036, RB-D3): el Administrador responsable concilia sin aprobación superior
+// ---------------------------------------------------------------------------
+
+export type SourceKind = 'handover' | 'settlement_shortage' | 'settlement_surplus';
+export type Resolution = 'route_shortage' | 'worker_owes' | 'surplus_to_base' | 'surplus_returned';
+export interface DifferenceItem {
+  sourceKind: SourceKind; sourceId: string; sourceLabel: string | null; routeId: string; routeName: string; workerId: string | null; workerName: string | null;
+  holderId: string | null; holderName: string | null; kind: 'faltante' | 'sobrante'; expectedMinor: number; countedMinor: number; differenceMinor: number;
+  pendingMinor: number; workerOwedMinor: number; carriedMinor: number; pending: boolean; occurredAt: string; businessDate: string; controllerId: string | null;
+  allowedResolutions: Resolution[]; resolutions: { code: Resolution; label: string }[];
+}
+export interface DifferencesPage {
+  items: DifferenceItem[];
+  summary: { pendingCount: number; pendingShortageMinor: number; pendingSurplusMinor: number; workerOwedMinor: number; isCash: false };
+}
+export type DifferenceBlocker = 'ONLY_ADMINISTRATOR' | 'NO_VALID_CONTROLLER' | 'NOT_ROUTE_CONTROLLER' | 'PERIOD_CLOSED' | 'OWN_CASH' | 'ROUTE_IN_HANDOVER'
+  | 'CAPITAL_MIGRATION_IN_PROGRESS';
+export interface DifferencePreview extends Omit<DifferenceItem, 'routeName' | 'workerName' | 'holderName' | 'pending' | 'occurredAt' | 'businessDate' | 'sourceLabel'> {
+  resolution: Resolution | null; resolutionLabel: string | null; allowedAmountsMinor: number[]; amountMinor: number | null; capitalModel: CapitalModel;
+  legs: { kind: string; routeId: string | null; membershipId?: string | null; sign: 1 | -1 }[]; movesMoney: boolean; canResolve: boolean; blockers: DifferenceBlocker[];
+}
+export interface Conciliation {
+  id: string; operationId: string; routeId: string; routeName: string | null; sourceKind: SourceKind; sourceLabel: string; sourceId: string | null;
+  workerId: string | null; workerName: string | null; holderId: string | null; expectedMinor: number; countedMinor: number; differenceMinor: number;
+  amountMinor: number; resolution: Resolution; resolutionLabel: string; carriedAfterMinor: number | null; reason: string; ledgerOperationId: string | null;
+  movesMoney: boolean; capitalModel: string; entryDate: string; actorId: string; actorName: string | null; createdAt: string;
+}
+
+export const fetchDifferences = (status: 'pending' | 'all' = 'pending', routeId?: string) =>
+  serverView<DifferencesPage>(`/v1/capital/differences?status=${status}${routeId ? `&routeId=${encodeURIComponent(routeId)}` : ''}`);
+export const previewDifference = (sourceKind: SourceKind, sourceId: string, resolution: Resolution | null) =>
+  serverView<DifferencePreview>(`/v1/capital/differences/preview?sourceKind=${sourceKind}&sourceId=${encodeURIComponent(sourceId)}${resolution ? `&resolution=${resolution}` : ''}`);
+export const resolveDifference = (b: { sourceKind: SourceKind; sourceId: string; resolution: Resolution; amountMinor: number; reason: string }, opId: string) =>
+  money<{ conciliation: Conciliation }>('POST', '/v1/capital/differences/resolve', { ...b, reason: b.reason.trim() }, opId);
+export const fetchConciliations = async (routeId?: string) =>
+  (await serverView<{ conciliations: Conciliation[] }>(`/v1/capital/conciliations?limit=200${routeId ? `&routeId=${encodeURIComponent(routeId)}` : ''}`)).conciliations;
+
+/** RB-D1: cuentas pendientes de un Administrador antes de desactivarlo. */
+export interface DeactivationCheck {
+  applies: boolean; canDeactivate: boolean; legacy?: boolean;
+  blockers: { code: string; message: string; amountMinor?: number; count?: number; routes?: unknown[]; items?: unknown[] }[];
+}
+export const fetchDeactivationCheck = (membershipId: string) =>
+  serverView<DeactivationCheck>(`/v1/members/${encodeURIComponent(membershipId)}/deactivation-check`);
 
 // ---------------------------------------------------------------------------
 // Activación (O6, SuperAdmin)

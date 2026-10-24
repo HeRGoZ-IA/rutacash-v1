@@ -24,6 +24,10 @@ import { db } from '@/lib/db'
 // ADEX Online: enlace de primer acceso (servidor) para la membresía creada.
 import { api } from '../../../runtime/session.ts'
 import { memberId } from '../../../runtime/writeAdapters.ts'
+import { ApiFailure } from '../../../lib/client.ts'
+import { toMajor } from '../../../runtime/mappers.ts'
+import { formatCurrency } from '@/lib/formatters'
+import { fetchDeactivationCheck, type DeactivationCheck } from '../../../runtime/routeBase/api.ts'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { generateId, generateTemporaryPassword } from '@/lib/utils'
@@ -79,6 +83,9 @@ export default function UsersPage() {
   const [deleting, setDeleting] = useState(false)
   const [checkingId, setCheckingId] = useState<string | null>(null)
   const [resetTarget, setResetTarget] = useState<User | null>(null)
+  /** R74 (0036, RB-D1): cuentas pendientes que impiden desactivar a un Administrador. */
+  const [deactBlock, setDeactBlock] = useState<{ user: User; blockers: DeactivationCheck['blockers'] } | null>(null)
+  const { currency } = useTenant()
   const [resetPass, setResetPass] = useState(generateTemporaryPassword)
   // ADEX Online: estado del enlace de primer acceso del usuario de la llave.
   const [accessLink, setAccessLink] = useState<{ status: 'idle' | 'loading' | 'issued' | 'already_active' | 'error'; url?: string; message?: string }>({ status: 'idle' })
@@ -282,13 +289,26 @@ export default function UsersPage() {
       if (bloqueo) { toast.error(bloqueo.message); return }
     }
     const ns = u.status === 'activo' ? 'inactivo' : 'activo'
+    // R74 (0036, RB-D1): ningún Administrador se desactiva con cuentas pendientes. Diagnóstico ANTES de intentarlo
+    // (una API anterior a 0036 responde 404: se sigue como siempre; el servidor sigue siendo la barrera final).
+    if (ns === 'inactivo' && u.rol === 'admin') {
+      try {
+        const chk = await fetchDeactivationCheck(memberId(u.id))
+        if (chk.applies && !chk.canDeactivate && chk.blockers.length > 0) { setDeactBlock({ user: u, blockers: chk.blockers }); return }
+      } catch (e) { if (!(e instanceof ApiFailure && e.status === 404)) { toast.error(e instanceof Error ? e.message : 'No se pudo comprobar'); return } }
+    }
     // v16: desactivar al responsable de capital de una ruta exige elegir antes otro
     // responsable (si quedan Administradores); reactivar a un Admin puede convertirlo
     // en responsable de una ruta que no tenía. Todo en una transacción.
     try {
       await withCapitalControllerGuard({ tenantId, actor: currentUser!, routeIds: getAssignedRouteIds(u), preferredAdminIds: [u.id] },
         () => db.users.update(u.id, { status: ns, updatedAt: nowISO() }))
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo cambiar el estado'); return }
+    } catch (e) {
+      // R74: el servidor rechaza con la lista de cuentas pendientes (409 ADMIN_HAS_PENDING_ACCOUNTS).
+      const err = e as { code?: string; details?: { blockers?: DeactivationCheck['blockers'] } }
+      if (err.code === 'ADMIN_HAS_PENDING_ACCOUNTS' && err.details?.blockers?.length) { setDeactBlock({ user: u, blockers: err.details.blockers }); return }
+      toast.error(e instanceof Error ? e.message : 'No se pudo cambiar el estado'); return
+    }
     if (currentUser) await logAction({ tenantId, userId: currentUser.id, userRole: currentUser.rol, action: 'BLOCK_USER', entityType: 'User', entityId: u.id, descripcion: `Usuario ${ns}: ${u.nombre}`, before: { status: u.status }, after: { status: ns } })
     toast.success(`Usuario ${ns}`)
     await load()
@@ -424,6 +444,7 @@ export default function UsersPage() {
                       onClick={(e) => { e.stopPropagation(); setResetTarget(u); setResetPass(generateTemporaryPassword()); setAccessLink({ status: 'idle' }) }}
                       icon={<KeyRound className="w-3.5 h-3.5 text-primary-500" />} />
                     <Button variant="ghost" size="sm" disabled={!manageable} onClick={(e) => { e.stopPropagation(); toggleStatus(u) }}
+                      title={u.status === 'activo' ? 'Desactivar' : 'Activar'} data-testid="user-toggle"
                       icon={u.status === 'activo' ? <ToggleRight className="w-3.5 h-3.5 text-emerald-500" /> : <ToggleLeft className="w-3.5 h-3.5 text-gray-400" />} />
                     <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); requestDelete(u) }} loading={checkingId === u.id}
                       disabled={u.id === currentUser?.id || currentUser?.rol !== 'superadmin'}
@@ -503,6 +524,27 @@ export default function UsersPage() {
 
       {/* Reset password modal */}
       {/* ADEX Online: ENLACE DE PRIMER ACCESO (un solo uso). Nadie fija ni conoce la contraseña de otra persona. */}
+      {/* R74 (0036, RB-D1): por qué no se puede desactivar todavía a este Administrador. */}
+      <Modal open={!!deactBlock} onClose={() => setDeactBlock(null)} title={deactBlock ? `No se puede desactivar a ${formatPersonName(deactBlock.user.nombre)}` : ''}
+        footer={<Button onClick={() => setDeactBlock(null)}>Entendido</Button>}>
+        {deactBlock && (
+          <div className="space-y-3 text-sm" data-testid="deactivation-blockers">
+            <p className="text-gray-700">Antes de desactivarlo debe saldar y entregar sus cuentas con su socio principal o el Super Admin. Pendiente:</p>
+            <ul className="space-y-2">
+              {deactBlock.blockers.map((b) => (
+                <li key={b.code} className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900" data-testid={`deactivation-blocker-${b.code}`}>
+                  <span className="flex items-start gap-2"><AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />{b.message}</span>
+                  {(b.amountMinor != null || b.count != null) && (
+                    <span className="block text-xs mt-1 pl-6">{b.amountMinor != null ? formatCurrency(toMajor(b.amountMinor), currency) : ''}{b.amountMinor != null && b.count != null ? ' · ' : ''}{b.count != null ? `${b.count} pendiente(s)` : ''}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-gray-500">Cuando no quede nada pendiente, podrás desactivarlo. La desactivación no mueve dinero.</p>
+          </div>
+        )}
+      </Modal>
+
       <Modal open={!!resetTarget} onClose={() => setResetTarget(null)} title="Acceso del usuario"
         footer={<Button variant="secondary" onClick={() => setResetTarget(null)}>Cerrar</Button>}>
         <div className="space-y-3">

@@ -1,4 +1,10 @@
-// ADEX Online: COPIA de src/pages/admin/ExpensesPage.tsx (CLEAN). Único cambio, marcado: filtros en una fila (Ronda 53).
+// ADEX Online: COPIA de src/pages/admin/ExpensesPage.tsx (CLEAN). Cambios marcados: filtros en una fila (Ronda 53) y
+// R74 · gastos generales (0035, D74-O4F):
+//   · route_base: alcances «De ruta» (lo paga la Base de esa ruta), «De un trabajador» (su efectivo), «General del
+//     Administrador» y «General de empresa» (aportes de tus rutas o tu dinero propio, formulario `GeneralExpenseModal`).
+//     Sin vocabulario de bolsas; los gastos generales se listan aparte con sus aportes y su naturaleza.
+//   · admin_pool: lo de siempre (gasto de empresa con bolsa) y, para el Administrador, «General con mi dinero propio
+//     (reembolsable)» (C2). La naturaleza de la categoría se muestra en cada gasto.
 import { useState, useEffect } from 'react'
 import { Plus, TrendingDown, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -28,6 +34,19 @@ import {
   canCorrectPoolExpense, canRegisterExpenseScope, createExpense, listVisibleExpenses, refundAdminExpense, reverseAdminExpense,
 } from '@/services/expenseService'
 import { AdminExpenseModal } from '@/components/expenses/AdminExpenseModal'
+import { useRuntime } from '../../../runtime/session.ts'
+import { todayIn } from '../../../lib/format.ts'
+import { fetchCategories, fetchPanel, isGeneralFunded, isRouteBaseUi, natureLabel, useCapitalModel, type ServerCategory } from '../../../runtime/routeBase/api.ts'
+import { GeneralExpenseModal, GeneralExpensesList, fundingRoutesOf, type FundingRoute } from '../../../runtime/routeBase/GeneralExpensesRB.tsx'
+
+/** R74: opciones del selector que abren el formulario de gasto general (no son `ExpenseScope` de CLEAN). */
+type GeneralOption = 'administrador' | 'empresa-general' | 'propio'
+
+/** Textos con Base por Ruta (sin bolsas). */
+const EFECTO_RB: Record<'ruta' | 'trabajador', string> = {
+  ruta: 'Pagado con la Base de la ruta: resta su Base disponible. No se carga a ningún trabajador.',
+  trabajador: 'Pagado con el efectivo de un trabajador: resta lo que tiene en manos y aparece en sus Gastos y en su cuadre.',
+}
 
 /** Gasto con ruta (de ruta o de trabajador): el único que filtra Oficina → Ruta. */
 type RoutedExpense = Expense & { routeId: string }
@@ -80,12 +99,32 @@ export default function ExpensesPage() {
   const [reintegro, setReintegro] = useState({ valor: 0, motivo: '', operationId: '' })
   const [guardandoReintegro, setGuardandoReintegro] = useState(false)
 
+  // R74 · modelo de capital y gastos generales (0035).
+  const model = useCapitalModel()
+  const rb = isRouteBaseUi(model)
+  const me = useRuntime(s => s.ctx)
+  const esAdmin = me?.role === 'admin'
+  const [general, setGeneral] = useState<{ scope: 'administrador' | 'empresa' } | null>(null)
+  const [fundingRoutes, setFundingRoutes] = useState<FundingRoute[]>([])
+  const [serverCats, setServerCats] = useState<ServerCategory[]>([])
+  const natureOf = (categoryId: string) => serverCats.find(c => c.id === categoryId)?.nature
+
   /** Los gastos de empresa son información consolidada (fuera de las rutas). */
   const veEmpresa = !!user && can(user, 'cashbox.viewConsolidated', { tenantId })
 
   // Un gasto registrado en otra pestaña (Cobrador, Supervisor) se refleja sin F5.
   const revision = useDataRevision(['expenses', 'users', 'routes', 'expenseCategories'])
   useEffect(() => { load() }, [tenantId, user, revision])
+  useEffect(() => {
+    let alive = true
+    fetchCategories().then(c => { if (alive) setServerCats(c) }).catch(() => undefined)
+    // Bases de las rutas del Administrador (aportes a gastos generales con Base por Ruta).
+    if (model === 'route_base' && esAdmin) {
+      const hoy = todayIn(me?.company.timezone ?? 'UTC')
+      fetchPanel(hoy, hoy).then(p => { if (alive) setFundingRoutes(fundingRoutesOf(p.routes, me?.membershipId)) }).catch(() => undefined)
+    }
+    return () => { alive = false }
+  }, [model, esAdmin, revision, me?.membershipId, me?.company.timezone])
 
   async function load() {
     setLoading(true)
@@ -97,7 +136,9 @@ export default function ExpensesPage() {
       db.routes.where('tenantId').equals(tenantId).toArray(),
       db.users.where('tenantId').equals(tenantId).toArray(),
     ])
-    setExpenses(exps.sort((a, b) => b.fecha.localeCompare(a.fecha) || b.createdAt.localeCompare(a.createdAt)))
+    // R74: los gastos generales con aportes de rutas o dinero propio se listan aparte (con sus aportes).
+    setExpenses(exps.filter(e => !isGeneralFunded(e as { funding?: string; scope?: string }))
+      .sort((a, b) => b.fecha.localeCompare(a.fecha) || b.createdAt.localeCompare(a.createdAt)))
     setCategories(cats)
     setRoutes(filterAccessibleRoutes(user, rts))
     setUsers(us)
@@ -124,6 +165,14 @@ export default function ExpensesPage() {
   const tiposPermitidos = (['empresa', 'ruta', 'trabajador'] as ExpenseScope[])
     // R74: gastos de ruta y de trabajador exigen custodia de la ruta; el SuperAdmin solo registra los de empresa.
     .filter(s => s !== 'empresa' ? !!user && can(user, 'expense.register', { tenantId }) && can(user, 'cashCustody.manage', { tenantId }) : canRegisterExpenseScope(user, 'empresa'))
+    // R74 · Base por Ruta: no hay gasto de empresa con bolsa; los generales van por su propio formulario.
+    .filter(s => !(rb && s === 'empresa'))
+  /** R74: opciones de gasto general (solo el Administrador; con Base por Ruta, los dos alcances; con bolsas, dinero propio). */
+  const opcionesGenerales: { value: GeneralOption; label: string }[] = !esAdmin ? [] : model === 'route_base'
+    ? [{ value: 'administrador', label: 'General del Administrador' }, { value: 'empresa-general', label: 'General de empresa' }]
+    : model === 'admin_pool' ? [{ value: 'propio', label: 'General con mi dinero propio (reembolsable)' }] : []
+  const SCOPE_RB: Record<'ruta' | 'trabajador', string> = { ruta: 'De ruta (lo paga su Base)', trabajador: 'De un trabajador (su efectivo)' }
+  const scopeLabel = (s: ExpenseScope) => (rb && s !== 'empresa' ? SCOPE_RB[s] : EXPENSE_SCOPE_LABEL[s])
   const trabajadores = form.routeId
     ? users.filter(u => custodianBlockedReason(u, form.routeId, tenantId) === null).sort((a, b) => a.nombre.localeCompare(b.nombre))
     : []
@@ -164,7 +213,7 @@ export default function ExpensesPage() {
     if (!anulando) return
     // Permiso, bolsa, estado y vínculo: en el servicio, atómico.
     await reverseAdminExpense({ actor: user, tenantId, expenseId: anulando.id, reason })
-    toast.success('Gasto anulado: el valor volvió a la bolsa')
+    toast.success(rb ? 'Gasto anulado: el valor volvió a donde salió' : 'Gasto anulado: el valor volvió a la bolsa')
     setAnulando(null)
     await load()
   }
@@ -185,6 +234,13 @@ export default function ExpensesPage() {
   /** Bolsa de un gasto (solo gastos de empresa). */
   const bolsaDe = (e: Expense): string | null => {
     const f = expenseFundingOf(e)
+    // R74 · Base por Ruta: los gastos de bolsa son anteriores al corte; se rotulan sin el vocabulario de bolsas.
+    if (rb) {
+      if (f.kind === 'admin') return `Anterior a Base por Ruta · ${nombreDe(f.adminId)}`
+      if (f.kind === 'empresa') return 'Anterior a Base por Ruta · empresa'
+      if (f.kind === 'historico') return 'Histórico'
+      return null
+    }
     if (f.kind === 'admin') return `Bolsa de ${nombreDe(f.adminId)}`
     if (f.kind === 'empresa') return 'Bolsa de la empresa'
     if (f.kind === 'historico') return 'Histórico · sin bolsa'
@@ -225,7 +281,7 @@ export default function ExpensesPage() {
       >
         <Select label="Tipo" value={tipo} onChange={e => setTipo(e.target.value as ExpenseScope | '')} containerClassName="min-w-0 lg:w-44"
           options={(veEmpresa ? ['empresa', 'ruta', 'trabajador'] as ExpenseScope[] : ['ruta', 'trabajador'] as ExpenseScope[])
-            .map(s => ({ value: s, label: EXPENSE_SCOPE_LABEL[s] }))}
+            .map(s => ({ value: s, label: rb && s === 'empresa' ? 'General' : scopeLabel(s) }))}
           placeholder="Todos los tipos" />
         <Input label="Desde" type="date" value={desde} onChange={e => setDesde(e.target.value)} containerClassName="min-w-0 lg:w-40" />
         <Input label="Hasta" type="date" value={hasta} onChange={e => setHasta(e.target.value)} containerClassName="min-w-0 lg:w-40" />
@@ -256,7 +312,11 @@ export default function ExpensesPage() {
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-900 flex flex-wrap items-center gap-1.5">
                         {getCatName(e.categoryId)}
-                        <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${SCOPE_TONE[scope]}`}>{EXPENSE_SCOPE_LABEL[scope]}</span>
+                        <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${SCOPE_TONE[scope]}`}>{rb && scope !== 'empresa' ? (scope === 'ruta' ? 'De ruta' : 'De trabajador') : EXPENSE_SCOPE_LABEL[scope]}</span>
+                        {/* R74 (O4): naturaleza de la categoría (un bien duradero no es gasto operativo ni pérdida). */}
+                        {natureOf(e.categoryId) && natureOf(e.categoryId) !== 'operativo' && (
+                          <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-sky-50 text-sky-800" data-testid="expense-nature">{natureLabel(natureOf(e.categoryId))}</span>
+                        )}
                         {estado !== 'ruta' && estado !== 'vigente' && (
                           <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 ${estado === 'historico' ? 'bg-gray-100 text-gray-500' : estado === 'anulado' ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-700'}`}>
                             {POOL_STATE_LABEL[estado]}
@@ -283,19 +343,29 @@ export default function ExpensesPage() {
         )}
       </div>
 
+      {/* R74 (0035): gastos generales con aportes de rutas o dinero propio, con sus aportes y su naturaleza. */}
+      {sinFiltroDeRuta && (!tipo || tipo === 'empresa') && <GeneralExpensesList from={desde || undefined} to={hasta || undefined} />}
+
       <Modal open={modalOpen} onClose={() => { if (!saving) setModalOpen(false) }} title="Registrar gasto"
         footer={<><Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button><Button onClick={handleSave} loading={saving}>Registrar</Button></>}>
         <div className="space-y-4">
           <Select label="¿A quién corresponde este gasto?" value={form.scope} required
             onChange={e => {
-              const scope = e.target.value as ExpenseScope | ''
+              const value = e.target.value
+              // R74: gasto general (aportes de rutas o dinero propio): formulario propio.
+              if (value === 'administrador' || value === 'empresa-general' || value === 'propio') {
+                setModalOpen(false); setGeneral({ scope: value === 'administrador' ? 'administrador' : 'empresa' }); return
+              }
+              const scope = value as ExpenseScope | ''
               // Empresa = gasto administrativo pagado con una bolsa: formulario propio.
               if (scope === 'empresa') { setModalOpen(false); setAdminModal(true); return }
               setForm(f => ({ ...f, scope, collectorId: '' }))
             }}
-            options={tiposPermitidos.map(s => ({ value: s, label: EXPENSE_SCOPE_LABEL[s] }))}
+            options={[...tiposPermitidos.map(s => ({ value: s as string, label: scopeLabel(s) })), ...opcionesGenerales]}
             placeholder="Seleccionar tipo"
-            hint={form.scope ? EFECTO[form.scope] : 'Decide qué efectivo reduce el gasto, no quién lo registra.'} />
+            hint={form.scope ? (rb && form.scope !== 'empresa' ? EFECTO_RB[form.scope] : EFECTO[form.scope])
+              : rb ? 'De ruta: lo paga la Base de esa ruta. General: con aportes de tus rutas o con tu dinero propio (reembolsable).'
+                : 'Decide qué efectivo reduce el gasto, no quién lo registra.'} />
           {(form.scope === 'ruta' || form.scope === 'trabajador') && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Select label="Ruta" value={form.routeId} onChange={e => setForm(f => ({ ...f, routeId: e.target.value, collectorId: '' }))}
@@ -305,7 +375,7 @@ export default function ExpensesPage() {
                   .filter(r => canRegisterExpenseScope(user, form.scope as ExpenseScope, r.id, { route: r, users }))
                   .map(r => ({ value: r.id, label: r.nombre }))}
                 placeholder="Seleccionar ruta" required
-                hint={form.scope === 'ruta' ? 'Solo las rutas de las que eres responsable de capital: el gasto sale de su caja.' : undefined} />
+                hint={form.scope === 'ruta' ? (rb ? 'Solo las rutas de las que eres responsable: el gasto sale de su Base.' : 'Solo las rutas de las que eres responsable de capital: el gasto sale de su caja.') : undefined} />
               {form.scope === 'trabajador' && (
                 <Select label="Trabajador que pagó" value={form.collectorId} onChange={e => setForm(f => ({ ...f, collectorId: e.target.value }))}
                   options={trabajadores.map(u => ({ value: u.id, label: formatPersonName(u.nombre) }))}
@@ -327,6 +397,12 @@ export default function ExpensesPage() {
       <AdminExpenseModal open={adminModal} onClose={() => setAdminModal(false)} onSaved={() => { void load() }}
         users={users} categories={categories} />
 
+      {/* R74 (0035): gasto general A / C1 (aportes de tus rutas) o C2 (dinero propio). */}
+      {model && (
+        <GeneralExpenseModal open={!!general} onClose={() => setGeneral(null)} model={model} routes={fundingRoutes} categories={serverCats}
+          presetScope={general?.scope} />
+      )}
+
       {/* ANULACIÓN de un gasto de bolsa: motivo obligatorio; el servicio enlaza la reversión. */}
       <ReverseMovementModal currency={currency} onCancel={() => setAnulando(null)} onConfirm={anular}
         target={anulando && { tipo: 'Gasto administrativo', valor: anulando.valor, fecha: anulando.fecha, detalle: `${getCatName(anulando.categoryId)} · ${bolsaDe(anulando) ?? ''}` }} />
@@ -338,7 +414,7 @@ export default function ExpensesPage() {
         {reintegrando && (
           <div className="space-y-3 text-sm">
             <p className="text-gray-600">{getCatName(reintegrando.categoryId)} · {formatCurrency(reintegrando.valor, currency)} · {bolsaDe(reintegrando)}</p>
-            <p className="text-xs text-gray-500">Pendiente por reintegrar: <b>{formatCurrency(reintegrando.valor - refundedAmountOf(reintegrando.id, expenses), currency)}</b>. El valor vuelve a la misma bolsa.</p>
+            <p className="text-xs text-gray-500">Pendiente por reintegrar: <b>{formatCurrency(reintegrando.valor - refundedAmountOf(reintegrando.id, expenses), currency)}</b>. {rb ? 'El valor vuelve a donde salió.' : 'El valor vuelve a la misma bolsa.'}</p>
             <MoneyInput label="Valor reintegrado" currency={currency} value={reintegro.valor} onValueChange={v => setReintegro(r => ({ ...r, valor: v }))} required />
             <Input label="Motivo" value={reintegro.motivo} placeholder="Ej.: el proveedor devolvió un casco" onChange={e => setReintegro(r => ({ ...r, motivo: e.target.value }))} />
           </div>

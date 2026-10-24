@@ -13,7 +13,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeftRight, ChevronRight, Handshake, History, Info, MapPin, Receipt, Repeat, Settings2 } from 'lucide-react';
+import { ArrowLeftRight, ChevronRight, Handshake, History, Info, MapPin, Repeat, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Select, Textarea } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
@@ -40,6 +40,7 @@ import {
   AlertChip, Notice, PERIOD_LABEL, StateBadge, activeStates, num, otherAlerts, periodDates, stateHelp, stateLabel, useMoney, type PanelPeriod,
 } from './parts.tsx';
 import { HandoverDialog } from './HandoverDialog.tsx';
+import { GeneralExpensesPanel } from './GeneralExpensesRB.tsx';
 
 type Section = 'efectivo' | 'base' | 'cartera' | 'periodo' | 'estados' | 'entrega';
 
@@ -168,6 +169,31 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
                 </dl>
               </div>
             </div>
+            <div className="rounded-xl border border-gray-100 p-3" data-testid="rb-total-differences">
+              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1.5">
+                <p className="text-xs font-medium text-gray-500">Diferencias y obligaciones (no son efectivo)</p>
+                <Link to="/admin/diferencias" className="text-xs font-medium text-primary-700 hover:underline" data-testid="rb-go-differences">
+                  {t.differences && t.differences.pendingCount > 0 ? `Conciliar ${t.differences.pendingCount} diferencia(s)` : 'Diferencias y conciliaciones'}
+                </Link>
+              </div>
+              <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {t.differences ? (
+                  <>
+                    <Mini label="Faltantes pendientes" value={money(t.differences.shortagePendingMinor)} testId="rb-shortage-pending" />
+                    <Mini label="Sobrantes pendientes" value={money(t.differences.surplusPendingMinor)} testId="rb-surplus-pending" />
+                    <Mini label="Faltantes conciliados" value={money(t.differences.shortageConciliatedMinor)} hint="En el periodo" />
+                    <Mini label="Sobrantes conciliados" value={money(t.differences.surplusConciliatedMinor)} hint="En el periodo" />
+                  </>
+                ) : (
+                  <>
+                    <Mini label="Faltantes pendientes" value={money(t.shortageMinor)} hint="Arrastrados en cuadres; no es billete" testId="rb-shortage-pending" />
+                    <Mini label="Sobrantes en control" value={money(t.surplusMinor)} hint="Aparte; no es Base" testId="rb-surplus-pending" />
+                  </>
+                )}
+                <Mini label="Reembolsos pendientes a Administradores" value={money(panel.general.pendingAdminReimbursements?.totalMinor ?? 0)} hint="Obligación de la empresa; no es efectivo" testId="rb-total-payables" />
+                <Mini label="Aportes a gastos generales" value={money(t.generalContributionsMinor)} hint={`Salieron de las Bases · periodo; reembolsos pagados ${money(t.reimbursementsMinor)}`} />
+              </dl>
+            </div>
           </section>
 
           {/* ---------- SuperAdmin: resumen global ---------- */}
@@ -219,22 +245,20 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
             )}
           </section>
 
-          {/* ---------- Aparte: gastos generales, saldo sin asignar ---------- */}
-          <section className="grid grid-cols-1 lg:grid-cols-2 gap-3" aria-label="Fuera de las rutas" data-testid="rb-general">
-            <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-2">
-              <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2"><Receipt className="w-4 h-4 text-gray-500" aria-hidden />Gastos generales y reembolsos</h2>
-              <p className="text-xs text-gray-600">Gastos que no son de una ruta (del Administrador o de la empresa). Se muestran aparte: no son efectivo de ninguna ruta.</p>
-              <dl className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                <Mini label="Del Administrador" value={money(panel.general.expenses.administratorMinor)} />
-                <Mini label="De la empresa" value={money(panel.general.expenses.companyMinor)} />
-                <Mini label="Bienes duraderos" value={money(panel.general.expenses.bienDuraderoMinor)} />
+          {/* ---------- Aparte: gastos generales y reembolsos (0035), saldo sin asignar ---------- */}
+          <div data-testid="rb-general">
+            <GeneralExpensesPanel model={model} panel={panel} periodText={periodText} />
+          </div>
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-3" aria-label="Fuera de las rutas">
+            <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-2" data-testid="rb-consolidated-result">
+              <h2 className="text-sm font-semibold text-gray-900">Resultado consolidado del periodo</h2>
+              <p className="text-xs text-gray-600">Resultado operativo de las rutas y, aparte, los gastos generales. No es utilidad contable ni dinero retirable.</p>
+              <dl className="grid grid-cols-2 gap-2">
+                <Mini label="Resultado operativo de las rutas" value={money(panel.consolidated?.routesOperatingResultMinor ?? t.resultMinor)} negative={(panel.consolidated?.routesOperatingResultMinor ?? t.resultMinor) < 0} />
+                <Mini label="Gastos generales operativos" value={money(panel.consolidated?.generalOperatingExpensesMinor ?? 0)} />
+                <Mini label="Después de gastos generales" value={money(panel.consolidated?.resultAfterGeneralExpensesMinor ?? t.resultMinor)} negative={(panel.consolidated?.resultAfterGeneralExpensesMinor ?? 0) < 0} testId="rb-result-after-general" />
+                <Mini label="Bienes duraderos generales" value={money(panel.consolidated?.generalDurableGoodsMinor ?? 0)} hint="Aparte: no es pérdida" />
               </dl>
-              {/* PUNTO DE ENTRADA RESERVADO (R74 · O4/D74-O4F, migración 0035 en preparación): registro de gastos
-                  generales con aportes de rutas y «reembolsos pendientes a Administradores». Se conecta aquí
-                  cuando la API publique esos endpoints; hasta entonces no se ofrece ningún flujo. */}
-              <p className="text-xs text-gray-500 border-t border-gray-100 pt-2" data-testid="rb-general-placeholder">
-                El registro de gastos generales con aportes de rutas y los reembolsos pendientes a Administradores estarán disponibles aquí cuando se habiliten. Hoy, con Base por Ruta, los gastos generales se rechazan con un aviso.
-              </p>
             </div>
             <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-2" data-testid="rb-unassigned">
               <h2 className="text-sm font-semibold text-gray-900">Saldo sin asignar</h2>
@@ -380,7 +404,7 @@ function RouteRow({ r, mine, office, onOpen, onConfirm, canConfirm }: {
           {(states.length > 0 || alerts.length > 0) && (
             <div className="flex flex-wrap gap-1 mt-1.5" data-testid="rb-route-states">
               {states.map((k) => <StateBadge key={k} k={k} detail={k === 'insufficientLiquidity' && r.capitalNeedMinor ? `faltan ${money(r.capitalNeedMinor)}` : undefined} />)}
-              {alerts.map((a) => <AlertChip key={a} a={a} />)}
+              {alerts.map((a) => <AlertChip key={a} a={a} to={a === 'PENDING_DIFFERENCES' ? `/admin/diferencias?ruta=${encodeURIComponent(r.routeId)}` : undefined} />)}
             </div>
           )}
         </div>
@@ -552,9 +576,9 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
           )}
         </section>
         <section className="flex flex-wrap gap-x-4 gap-y-2 border-t border-gray-100 pt-3 text-sm" aria-label="Ver en Consultas">
-          <Link to={`/admin/consultas?${q}`} className="text-primary-700 hover:underline inline-flex items-center gap-1"><History className="w-4 h-4" aria-hidden />Movimientos de las custodias de la ruta</Link>
+          <Link to={`/admin/consultas?${q}`} className="text-primary-700 hover:underline inline-flex items-center gap-1"><History className="w-4 h-4" aria-hidden />Dinero de la ruta (Base y custodias)</Link>
           <Link to={`/admin/consultas?vista=actividad&${q}`} className="text-primary-700 hover:underline inline-flex items-center gap-1"><Info className="w-4 h-4" aria-hidden />Actividad de la ruta</Link>
-          <span className="text-xs text-gray-500 basis-full">Inyecciones, retiros y transferencias de Base se ven en «Actividad de la ruta»; entregas y devoluciones de Cobradores, en los movimientos de las custodias. Cada operación abre su detalle con comprobante.</span>
+          <span className="text-xs text-gray-500 basis-full">«Dinero de la ruta» incluye la Base (inyecciones, retiros, transferencias, aportes a gastos generales y reembolsos) y las custodias de sus trabajadores (entregas, devoluciones, recaudos). Cada operación abre su detalle con comprobante.</span>
         </section>
       </div>
     </Modal>

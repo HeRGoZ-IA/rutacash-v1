@@ -12,7 +12,7 @@
 //      y confirmación al cerrar sesión con operaciones sin sincronizar. El Supervisor no cambia.
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation, Navigate } from 'react-router-dom'
-import { Home, MapPin, DollarSign, Banknote, Calculator, LogOut, WifiOff, Wifi, ShieldAlert, ChevronDown, UserCog, Bell } from 'lucide-react'
+import { Home, MapPin, DollarSign, Banknote, Calculator, LogOut, WifiOff, Wifi, ShieldAlert, ChevronDown, UserCog, Bell, Scale } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { useActiveRoute } from '@/hooks/useActiveRoute'
@@ -101,6 +101,8 @@ export function CollectorLayout() {
     { path: `${base}/expenses`, label: 'Gastos', icon: <DollarSign className="w-5 h-5" />, badge: 0 },
     { path: `${base}/cashclose`, label: 'Cuadre', icon: <Calculator className="w-5 h-5" />, badge: 0 },
     // ADEX Online (Ronda 59): Notificaciones del Cobrador.
+    // R74 (0036): el Supervisor consulta las diferencias de sus rutas (solo lectura).
+    ...(user?.rol === 'supervisor' ? [{ path: `${base}/diferencias`, label: 'Diferencias', icon: <Scale className="w-5 h-5" />, badge: 0 }] : []),
     ...(user?.rol === 'cobrador' ? [{ path: `${base}/notificaciones`, label: 'Avisos', icon: <Bell className="w-5 h-5" />, badge: pendingNotices }] : []),
   ]
 

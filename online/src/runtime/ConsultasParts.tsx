@@ -9,6 +9,7 @@ import { formatCurrency } from '@/lib/formatters';
 import { formatClientName } from '@/lib/displayName';
 import { cn } from '@/lib/utils';
 import { serverView } from './projection.ts';
+import { isRouteBaseUi, useCapitalModel } from './routeBase/api.ts';
 import { toMajor } from './mappers.ts';
 import {
   CASH_GROUPS, ACTIVITY_GROUPS, EMPTY_EXTRA, PERIODS, ROLE_LABEL, STATUS_LABEL, extraCount, fullDateTime, kindLabel, partyLabel, person,
@@ -21,18 +22,22 @@ const FIELD = 'w-full h-11 sm:h-9 rounded-lg border border-gray-300 bg-white tex
 const LABEL = 'block text-xs font-medium text-gray-600 mb-1';
 
 const KIND_GROUP_LABEL: Record<PerspectiveOption['kind'], string> = { company: 'Empresa', route: 'Rutas (efectivo en custodia)', admin: 'Bolsas de Administradores', custody: 'Custodias de trabajadores' };
+// R74 · Base por Ruta: la ruta es Base + custodias y la cuenta del Administrador es solo el saldo anterior «sin asignar».
+const KIND_GROUP_LABEL_RB: Record<PerspectiveOption['kind'], string> = { company: 'Empresa', route: 'Rutas (Base y custodias)', admin: 'Saldo sin asignar (anterior a Base por Ruta)', custody: 'Custodias de trabajadores' };
 
 /** Selector de perspectiva: «Caja o ruta». Agrupado por tipo; la oficina o la ruta acompañan al nombre. */
 export function PerspectiveSelect({ options, value, onChange, id }: { options: PerspectiveOption[]; value: string; onChange: (v: string) => void; id: string }) {
+  const rb = isRouteBaseUi(useCapitalModel());
+  const groupLabel = rb ? KIND_GROUP_LABEL_RB : KIND_GROUP_LABEL;
   const kinds = (['company', 'route', 'admin', 'custody'] as const).filter((k) => options.some((o) => o.kind === k));
   return (
     <select id={id} className={cn(FIELD, 'pr-8')} value={value} onChange={(e) => onChange(e.target.value)} data-testid="consultas-perspective">
       {kinds.map((k) => (
-        <optgroup key={k} label={KIND_GROUP_LABEL[k]}>
+        <optgroup key={k} label={groupLabel[k]}>
           {options.filter((o) => o.kind === k).map((o) => (
             <option key={o.key} value={o.key}>
               {o.kind === 'custody' ? `${person({ name: o.label.replace(/^Custodia de /, '') })}${o.office ? ` · ${o.office}` : ''}`
-                : o.kind === 'admin' ? `Bolsa de ${person({ name: o.label.replace(/^Bolsa de /, '') })}`
+                : o.kind === 'admin' ? `${rb ? 'Saldo sin asignar de' : 'Bolsa de'} ${person({ name: o.label.replace(/^(Bolsa de|Saldo sin asignar de) /, '') })}`
                   : `${o.label}${o.office ? ` · ${o.office}` : ''}`}
             </option>
           ))}
@@ -204,6 +209,7 @@ export function DetailDrawer({ id, timezone, currency, perspectiveLabel, flowHin
 }) {
   const [data, setData] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const rb = isRouteBaseUi(useCapitalModel());
   const panel = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const opener = useRef<HTMLElement | null>(null);
@@ -237,7 +243,9 @@ export function DetailDrawer({ id, timezone, currency, perspectiveLabel, flowHin
   }
 
   const m = data?.movement;
-  const receipt = m && m.money ? receiptPath(m) : null;
+  // El gasto con dinero propio no mueve efectivo, pero es un hecho con comprobante (crea una obligación).
+  const receipt = m && (m.money || (m.reversesKind ?? m.kind) === 'GENERAL_EXPENSE_OWN_MONEY') ? receiptPath(m, rb) : null;
+  const contributions = data?.contributions ?? null;
   const legSum = data?.legs.reduce((a, l) => a + l.amountMinor, 0) ?? 0;
   return (
     <div className="fixed inset-0 z-[70] flex justify-end" onKeyDown={onKeyDown}>
@@ -247,7 +255,7 @@ export function DetailDrawer({ id, timezone, currency, perspectiveLabel, flowHin
         <style>{'@keyframes slideIn{from{transform:translateX(24px);opacity:.6}to{transform:none;opacity:1}}'}</style>
         <header className="flex items-start justify-between gap-3 border-b border-gray-100 px-4 sm:px-6 py-4">
           <div className="min-w-0">
-            <h2 id={titleId} className="text-base font-semibold text-gray-900">{m ? kindLabel(m.kind, m.reversesKind) : 'Detalle del movimiento'}</h2>
+            <h2 id={titleId} className="text-base font-semibold text-gray-900">{m ? kindLabel(m.kind, m.reversesKind, rb) : 'Detalle del movimiento'}</h2>
             {m && <p className="mt-0.5 text-sm text-gray-500">{STATUS_LABEL[m.status] ?? m.status}{m.money ? '' : ' · sin efectivo'}</p>}
           </div>
           <button type="button" data-autofocus onClick={onClose} aria-label="Cerrar detalle"
@@ -278,13 +286,13 @@ export function DetailDrawer({ id, timezone, currency, perspectiveLabel, flowHin
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <div className="min-w-0 flex-1 rounded-xl bg-gray-50 px-3 py-2">
                       <p className="text-xs text-gray-500">Desde</p>
-                      <p className="text-sm font-medium text-gray-900 break-words">{partyLabel(m.from)}</p>
+                      <p className="text-sm font-medium text-gray-900 break-words">{partyLabel(m.from, rb)}</p>
                       {m.from?.routeName && <p className="text-xs text-gray-500">{m.from.routeName}</p>}
                     </div>
                     <ArrowRight className="w-4 h-4 shrink-0 self-center text-gray-400 rotate-90 sm:rotate-0" aria-hidden="true" />
                     <div className="min-w-0 flex-1 rounded-xl bg-gray-50 px-3 py-2">
                       <p className="text-xs text-gray-500">Hacia</p>
-                      <p className="text-sm font-medium text-gray-900 break-words">{partyLabel(m.to)}</p>
+                      <p className="text-sm font-medium text-gray-900 break-words">{partyLabel(m.to, rb)}</p>
                       {m.to?.routeName && <p className="text-xs text-gray-500">{m.to.routeName}</p>}
                     </div>
                   </div>
@@ -303,6 +311,31 @@ export function DetailDrawer({ id, timezone, currency, perspectiveLabel, flowHin
                   {m.concept && <Field label="Concepto">{m.concept}</Field>}
                 </dl>
               </section>
+              {contributions && contributions.items.length > 0 && (
+                <section aria-labelledby={`${titleId}-c`} data-testid="detail-contributions">
+                  <h3 id={`${titleId}-c`} className="text-sm font-semibold text-gray-900 mb-1">
+                    {contributions.purpose === 'expense' ? 'Aportes de rutas al gasto general' : 'Aportes al reembolso'}
+                  </h3>
+                  <p className="text-xs text-gray-500 mb-1">
+                    {contributions.purpose === 'expense'
+                      ? 'El gasto se registró una sola vez; cada ruta aportó con una operación propia desde su Base.'
+                      : 'El reembolso paga una obligación con el Administrador; no vuelve a registrar el gasto.'}
+                  </p>
+                  <ul className="divide-y divide-gray-50 text-sm">
+                    {contributions.items.map((c) => (
+                      <li key={c.operationId} className="flex items-center justify-between gap-3 py-1.5">
+                        <span className="min-w-0 truncate text-gray-900">{c.routeName ?? (c.routeId ? 'Ruta' : 'Desde la bolsa de quien pagó')}</span>
+                        <span className="flex items-center gap-2">
+                          {c.operationId === m.id || c.operationId === m.reversesOperationId ? <span className="text-xs text-primary-700">esta operación</span>
+                            : <button type="button" className="text-xs text-primary-700 hover:underline" onClick={() => onOpen(c.operationId)}>ver</button>}
+                          <span className="tabular-nums whitespace-nowrap">{money(c.amountMinor, currency)}</span>
+                        </span>
+                      </li>
+                    ))}
+                    <li className="flex items-center justify-between gap-3 py-1.5 font-semibold"><span>Total</span><span className="tabular-nums">{money(contributions.totalMinor, currency)}</span></li>
+                  </ul>
+                </section>
+              )}
               {data!.legs.length > 0 && (
                 <section aria-labelledby={`${titleId}-l`}>
                   <h3 id={`${titleId}-l`} className="text-sm font-semibold text-gray-900 mb-1">Asientos contables</h3>

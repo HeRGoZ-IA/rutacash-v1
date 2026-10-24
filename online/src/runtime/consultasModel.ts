@@ -43,6 +43,11 @@ export interface Detail {
   movement: RowBase & { base: string; money: boolean; localAt: string; timezone: string; amountMinor: number | null; from: Party | null; to: Party | null;
     reversesOperationId: string | null; reversedBy: string | null; actorRole: string | null };
   legs: DetailLeg[]; legsComplete: boolean;
+  /** 0035: aportes por ruta del gasto general o del reembolso al que pertenece la operación (null = no aplica). */
+  contributions?: {
+    purpose: 'expense' | 'reimbursement'; expenseId: string | null; reimbursementId: string | null; totalMinor: number;
+    items: { routeId: string | null; routeName: string | null; amountMinor: number; operationId: string }[];
+  } | null;
 }
 
 // ---------- Etiquetas ----------
@@ -59,12 +64,26 @@ export const KIND_LABEL: Record<string, string> = {
   SALE_REQUEST: 'Solicitud de venta', SALE_APPROVAL: 'Venta autorizada', SALE_REJECTION: 'Solicitud rechazada',
   SALE_CANCELLATION: 'Venta aprobada cancelada', CUSTODY_SETTLEMENT: 'Cuadre', PERIOD_CLOSURE: 'Cierre de periodo',
   CREDIT_RECTIFICATION: 'Corrección de venta sin diferencia',
+  // R74 · Base por Ruta (0034) y gastos generales (0035): mismo vocabulario que Transferencias y la Caja principal.
+  ROUTE_BASE_INJECTION: 'Inyección de Base', ROUTE_BASE_WITHDRAWAL: 'Retiro de Base', ROUTE_TRANSFER: 'Transferencia de Base entre rutas',
+  LEGACY_POOL_TO_ROUTE: 'Reparto de saldo sin asignar', GENERAL_EXPENSE_CONTRIBUTION: 'Aporte de ruta a gasto general',
+  GENERAL_EXPENSE_OWN_MONEY: 'Gasto general con dinero propio', ADMIN_REIMBURSEMENT: 'Reembolso a Administrador',
+  DIFFERENCE_CONCILIATION: 'Conciliación de diferencia',
+};
+
+/**
+ * Con Base por Ruta, los tipos de siempre se nombran con el vocabulario nuevo (la operación es la misma; solo
+ * cambia de dónde sale o a dónde llega el dinero: la Base de la ruta, no una bolsa).
+ */
+const KIND_LABEL_ROUTE_BASE: Record<string, string> = {
+  WORKER_DELIVERY: 'Entrega de Base a Cobrador', WORKER_RETURN: 'Devolución de Base', SETTLEMENT_RETURN: 'Entrega por cuadre a la Base',
 };
 
 /** Etiqueta del movimiento; un tipo desconocido se muestra legible, nunca rompe la vista. */
-export function kindLabel(kind: string, reversesKind?: string | null): string {
-  if (kind === 'REVERSAL') return `Anulación · ${reversesKind ? (KIND_LABEL[reversesKind] ?? humanize(reversesKind)).toLowerCase() : 'operación'}`;
-  return KIND_LABEL[kind] ?? humanize(kind);
+export function kindLabel(kind: string, reversesKind?: string | null, routeBase = false): string {
+  const label = (k: string) => (routeBase ? KIND_LABEL_ROUTE_BASE[k] : undefined) ?? KIND_LABEL[k] ?? humanize(k);
+  if (kind === 'REVERSAL') return `Anulación · ${reversesKind ? label(reversesKind).toLowerCase() : 'operación'}`;
+  return label(kind);
 }
 function humanize(code: string): string {
   const t = code.toLowerCase().replace(/_/g, ' ');
@@ -73,11 +92,13 @@ function humanize(code: string): string {
 
 export const CASH_GROUPS: { value: string; label: string }[] = [
   { value: 'recaudos', label: 'Recaudos' }, { value: 'desembolsos', label: 'Desembolsos' }, { value: 'gastos', label: 'Gastos' },
-  { value: 'capital', label: 'Capital, entregas y traspasos' }, { value: 'cuadres', label: 'Cuadres' }, { value: 'otros', label: 'Otros' },
+  { value: 'capital', label: 'Capital, entregas y traspasos' }, { value: 'cuadres', label: 'Cuadres' },
+  { value: 'reembolsos', label: 'Reembolsos a Administradores' }, { value: 'diferencias', label: 'Diferencias conciliadas' }, { value: 'otros', label: 'Otros' },
 ];
 export const ACTIVITY_GROUPS: { value: string; label: string }[] = [
   { value: 'solicitudes', label: 'Solicitudes' }, { value: 'decisiones', label: 'Autorizaciones y rechazos' },
-  { value: 'cuadres', label: 'Cuadres' }, { value: 'cierres', label: 'Cierres' }, { value: 'contables', label: 'Correcciones y ajustes contables' },
+  { value: 'cuadres', label: 'Cuadres' }, { value: 'cierres', label: 'Cierres' },
+  { value: 'obligaciones', label: 'Gastos con dinero propio (obligaciones)' }, { value: 'contables', label: 'Correcciones y ajustes contables' },
 ];
 export const groupLabel = (g: string) => CASH_GROUPS.find((x) => x.value === g)?.label ?? ACTIVITY_GROUPS.find((x) => x.value === g)?.label ?? humanize(g);
 
@@ -94,30 +115,38 @@ export const ROLE_LABEL: Record<string, string> = {
 export const person = (r: { name: string | null } | null | undefined, fallback = 'Usuario') => formatPersonName(r?.name ?? '') || fallback;
 
 /** Parte legible (sin truncar: la vista abrevia con CSS y el detalle la muestra completa). */
-export function partyLabel(p: Party | null | undefined): string {
+export function partyLabel(p: Party | null | undefined, routeBase = false): string {
   if (!p) return '—';
   const name = formatPersonName(p.name ?? '');
   switch (p.type) {
-    case 'pool': return `Bolsa de ${name || 'Administrador'}`;
+    // Con Base por Ruta, la bolsa solo existe como historia (antes del corte) o como saldo «sin asignar».
+    case 'pool': return routeBase ? `Saldo anterior de ${name || 'Administrador'}` : `Bolsa de ${name || 'Administrador'}`;
     case 'custody': return name || 'Trabajador';
     case 'route_base': return `Base de ${p.routeName ?? p.name ?? 'la ruta'}`;
     case 'company': return 'Empresa';
     case 'client': return formatClientName(p.name ?? '') || 'Cliente';
     case 'expense': return `Gasto · ${p.name ?? ''}`.trim();
     case 'external': return 'Fuera de la empresa';
-    case 'transit': return `Bolsa de ${name || 'Administrador'} · en tránsito`;
+    case 'transit': return routeBase ? `Saldo anterior de ${name || 'Administrador'} · en tránsito` : `Bolsa de ${name || 'Administrador'} · en tránsito`;
     case 'control': return 'Sobrante en control';
     case 'unidentified': return 'Origen sin identificar';
     case 'partner': return `Socio ${name}`.trim();
+    // R74 · Base por Ruta y gastos generales.
+    case 'unassigned': return `Saldo sin asignar de ${name || 'Administrador'}`;
+    case 'general_expense': return `Gasto general · ${p.name ?? ''}`.trim();
+    case 'admin_money': return `Dinero propio de ${name || 'Administrador'}`;
+    case 'reimbursed_admin': return `Reembolso a ${name || 'Administrador'}`;
+    case 'admin_payable': return `Saldo a favor de ${name || 'Administrador'} (no es efectivo)`;
+    case 'route_difference': return `Faltante/sobrante conciliado · ${p.routeName ?? p.name ?? 'ruta'} (no es efectivo)`;
     default: return name || '—';
   }
 }
 
 /** «Persona / concepto»: la OTRA parte vista desde la perspectiva (nunca el cliente dos veces). */
-export function counterpartOf(r: CashRow): string {
-  if (r.flow === 'in') return partyLabel(r.from);
-  if (r.flow === 'out') return partyLabel(r.to);
-  return `${partyLabel(r.from)} → ${partyLabel(r.to)}`;
+export function counterpartOf(r: CashRow, routeBase = false): string {
+  if (r.flow === 'in') return partyLabel(r.from, routeBase);
+  if (r.flow === 'out') return partyLabel(r.to, routeBase);
+  return `${partyLabel(r.from, routeBase)} → ${partyLabel(r.to, routeBase)}`;
 }
 
 // ---------- Fechas en la zona horaria de la empresa ----------
@@ -171,13 +200,20 @@ export function timeIn(iso: string, timezone: string): string {
 // ---------- Comprobantes (vista imprimible ya existente de CLEAN) ----------
 
 const LEDGER_KINDS = ['COMPANY_DEPOSIT', 'COMPANY_WITHDRAWAL', 'ADMIN_ALLOCATION', 'ADMIN_RETURN', 'PARTNER_CONTRIBUTION'];
+/** Tipos que solo tienen comprobante de operación (no existen en el historial de CLEAN). */
+const OPERATION_RECEIPT_KINDS = ['ROUTE_BASE_INJECTION', 'ROUTE_BASE_WITHDRAWAL', 'ROUTE_TRANSFER', 'LEGACY_POOL_TO_ROUTE',
+  'GENERAL_EXPENSE_CONTRIBUTION', 'GENERAL_EXPENSE_OWN_MONEY', 'ADMIN_REIMBURSEMENT', 'DIFFERENCE_CONCILIATION'];
 /**
  * Ruta del comprobante, con la misma identidad que la proyección del historial (`capitalRecords.ts`):
  * fuente + id del registro. null = ese movimiento no tiene comprobante en el historial.
  */
-export function receiptPath(m: { id: string; kind: string; reversesKind: string | null; admin: Ref | null; route: { id: string } | null; expenseId: string | null }): string | null {
+export function receiptPath(m: { id: string; kind: string; reversesKind: string | null; admin: Ref | null; route: { id: string } | null; expenseId: string | null },
+  routeBase = false): string | null {
   const k = m.kind === 'REVERSAL' ? m.reversesKind ?? '' : m.kind;
   const at = (fuente: string, id = m.id) => `/comprobante/${fuente}/${encodeURIComponent(id)}`;
+  // R74: las operaciones de Base por Ruta y de gastos generales (y, con Base por Ruta, toda operación del libro)
+  // tienen su comprobante de OPERACIÓN, leído del detalle del servidor y con el vocabulario de la Base.
+  if (OPERATION_RECEIPT_KINDS.includes(k) || (routeBase && !m.id.includes(':'))) return at('operacion');
   if (m.expenseId) return at('expenses', m.expenseId);
   if (LEDGER_KINDS.includes(k)) return at('capitalLedger');
   if (k === 'WORKER_DELIVERY' && m.route) return at('capitalMovements');
@@ -232,10 +268,10 @@ const csvCell = (v: string | number | null | undefined) => {
   const s = v == null ? '' : String(v);
   return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
-export function cashCsv(rows: CashRow[], minorUnits: number): string {
+export function cashCsv(rows: CashRow[], minorUnits: number, routeBase = false): string {
   const amount = (minor: number) => (minor === 0 ? '' : (minor / 10 ** minorUnits).toFixed(minorUnits).replace('.', ','));
   const head = ['Fecha', 'Hora', 'Movimiento', 'Estado', 'Cliente o persona', 'Concepto', 'Responsable', 'Ruta', 'Entrada', 'Salida', 'Interno', 'Referencia'];
-  const lines = rows.map((r) => [r.date, r.localTime, kindLabel(r.kind, r.reversesKind), STATUS_LABEL[r.status] ?? r.status,
+  const lines = rows.map((r) => [r.date, r.localTime, kindLabel(r.kind, r.reversesKind, routeBase), STATUS_LABEL[r.status] ?? r.status,
     r.client?.name ?? r.worker?.name ?? r.counterpart?.name ?? '', r.concept, r.actor?.name ?? '', r.route?.name ?? '',
     amount(r.inMinor), amount(r.outMinor), amount(r.internalMinor), r.reference ?? r.id].map(csvCell).join(';'));
   return '\uFEFF' + [head.join(';'), ...lines].join('\r\n') + '\r\n';

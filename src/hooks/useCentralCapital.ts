@@ -17,6 +17,11 @@ export interface CentralCapitalState {
   desde?: string
   bloqueos: Record<string, CentralCapitalRouteBlock>
   heredadoAlActivar: Record<string, number>
+  /**
+   * ADEX Online · Base por Ruta (R74): el dinero de la ruta está en SU Base (no en la bolsa del responsable).
+   * Solo cambia textos y el «disponible» que se muestra; CLEAN nunca lo activa.
+   */
+  baseRuta?: boolean
 }
 
 const TABLAS = ['tenants'] as const

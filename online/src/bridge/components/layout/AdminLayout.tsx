@@ -21,7 +21,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, MapPin, CreditCard,
   ArrowLeftRight, TrendingDown, BarChart3, CalendarRange,
-  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt, Building2, Bell, Search, Map as MapIcon } from 'lucide-react'
+  Settings, LogOut, Menu, Wifi, WifiOff, DollarSign, ClipboardCheck, Receipt, Building2, Bell, Search, Map as MapIcon, Scale } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { cn } from '@/lib/utils'
@@ -73,6 +73,8 @@ const navItems: NavItem[] = [
   { path: '/admin/consultas', label: 'Consultas', icon: <Search className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Dinero' },
   { path: '/admin/reports', label: 'Reportes', icon: <BarChart3 className="w-4 h-4" />, group: 'Control' },
   { path: '/admin/weekly-settlement', label: 'Liquidación', icon: <CalendarRange className="w-4 h-4" />, group: 'Control' },
+  // R74 (0036): faltantes y sobrantes; los concilia el Administrador responsable (el SuperAdmin, solo lectura).
+  { path: '/admin/diferencias', label: 'Diferencias', icon: <Scale className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Control' },
   { path: '/admin/users', label: 'Usuarios', icon: <Users className="w-4 h-4" />, roles: ['admin', 'superadmin'], group: 'Estructura' },
   { path: '/admin/settings', label: 'Configuración', icon: <Settings className="w-4 h-4" /> },
 ]

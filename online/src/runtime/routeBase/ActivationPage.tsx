@@ -30,6 +30,8 @@ const CHECK_LABEL: Record<string, string> = {
   'no-pending-pool-requests': 'Sin solicitudes de capital de bolsa pendientes',
   'active-routes-have-controller': 'Toda ruta activa tiene un responsable válido',
   'ledger-clean': 'Libro de capital conciliado (sin descuadres, negativos ni patas fuera de ruta)',
+  // 0036 (RB-D6): la activación directa solo para una empresa sin saldos; con saldos, primero «Migrando».
+  'direct-activation-or-migrating': 'Activación directa solo sin saldos: con saldos, pasa primero por «Migrando»',
 };
 
 export default function ActivationPage() {
@@ -86,6 +88,10 @@ export default function ActivationPage() {
   const detail = (c: PrereqCheck): string | null => {
     if (c.ok) return null;
     if (c.name === 'company-account-zero' || c.name === 'transit-zero') return `Saldo: ${money(Number(c.detail))}`;
+    if (c.name === 'direct-activation-or-migrating') {
+      const n = Number((c.detail as { nonZeroAccounts?: number } | null)?.nonZeroAccounts ?? 0);
+      return `Hay ${n} cuenta(s) con saldo. Elige «Congelar bolsas para preparar el corte (migración)», reparte los saldos y después activa.`;
+    }
     if (c.name === 'active-routes-have-controller' && Array.isArray(c.detail)) return `Rutas: ${(c.detail as string[]).map((id) => routes.find((r) => r.id === id)?.nombre ?? id).join(', ')}`;
     if (typeof c.detail === 'number') return `Pendientes: ${c.detail}`;
     if (c.detail && typeof c.detail === 'object') return Object.entries(c.detail as Record<string, unknown>).filter(([, v]) => Number(v) !== 0).map(([k, v]) => `${k}: ${String(v)}`).join(' · ');

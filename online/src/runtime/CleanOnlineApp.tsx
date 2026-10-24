@@ -66,6 +66,8 @@ const TransfersPage = lazy(() => import('@/pages/admin/TransfersPage'));
 // R74 · Base por Ruta: activación del modelo (SuperAdmin, estructural; no mueve dinero).
 const CapitalModelPage = lazy(() => import('./routeBase/ActivationPage.tsx'));
 const ConsultasPage = lazy(() => import('./ConsultasPage.tsx'));
+// R74 (0036): diferencias y conciliación (Administrador; SuperAdmin y Supervisor en solo lectura).
+const DifferencesPage = lazy(() => import('./routeBase/DifferencesPage.tsx'));
 const NotificationsPage = lazy(() => import('./NotificationsPage.tsx'));
 // Ronda 67: mapa del Administrador (Leaflet viaja solo en este paquete bajo demanda).
 const RouteMapPage = lazy(() => import('./RouteMapPage.tsx'));
@@ -216,6 +218,7 @@ export function CleanOnlineApp() {
             <Route path="transfers" element={<TransfersPage />} />
             <Route path="notificaciones" element={<NotificationsPage />} />
             <Route path="consultas" element={<ConsultasPage />} />
+            <Route path="diferencias" element={<RequireAuth roles={['admin', 'superadmin']}><DifferencesPage /></RequireAuth>} />
             <Route path="movements" element={<ToConsultas />} />
             <Route path="cashbox" element={<ToConsultas vista="caja" />} />
             <Route path="partner-cash" element={<ToConsultas vista="caja" />} />
@@ -232,6 +235,7 @@ export function CleanOnlineApp() {
             </RequireAuth>
           }>
             {operationalRoutes()}
+            <Route path="diferencias" element={<Suspense fallback={null}><DifferencesPage /></Suspense>} />
           </Route>
           <Route path="/collector" element={
             <RequireAuth roles={['cobrador']}>

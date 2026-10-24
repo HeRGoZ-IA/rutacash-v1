@@ -123,7 +123,7 @@ export function TransferenciasRB({ model }: { model: CapitalModel }) {
           <h1 className="text-xl font-bold text-gray-900">Transferencias</h1>
           <p className="text-sm text-gray-600 mt-0.5 max-w-2xl">Mueve la <b>Base</b> de las rutas de las que eres responsable. Cada operación se aplica en el acto y queda con su comprobante.</p>
         </div>
-        <Link to="/admin/consultas?vista=actividad&periodo=7d" data-testid="rb-history"
+        <Link to="/admin/consultas?periodo=7d" data-testid="rb-history"
           className="flex-shrink-0 whitespace-nowrap inline-flex items-center justify-center gap-2 h-10 sm:h-9 px-4 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">
           <History className="w-4 h-4" aria-hidden />Historial y comprobantes
         </Link>
@@ -179,9 +179,9 @@ export function TransferenciasRB({ model }: { model: CapitalModel }) {
           </div>
 
           <section className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-            <Link to="/admin/consultas?vista=actividad&periodo=7d" className="rounded-2xl border border-gray-200 bg-white px-4 py-3 flex items-center gap-3 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">
+            <Link to="/admin/consultas?periodo=7d" className="rounded-2xl border border-gray-200 bg-white px-4 py-3 flex items-center gap-3 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">
               <History className="w-5 h-5 text-gray-500" aria-hidden />
-              <span className="min-w-0 flex-1"><b className="block text-gray-900">Historial y comprobantes</b><span className="text-xs text-gray-600">Inyecciones, retiros y transferencias en Actividad; entregas y devoluciones en Dinero. Cada una abre su comprobante.</span></span>
+              <span className="min-w-0 flex-1"><b className="block text-gray-900">Historial y comprobantes</b><span className="text-xs text-gray-600">En Consultas · Dinero, eligiendo la ruta: inyecciones, retiros, transferencias, entregas y devoluciones. Cada una abre su comprobante.</span></span>
               <ChevronRight className="w-4 h-4 text-gray-400" aria-hidden />
             </Link>
             <Link to="/admin/weekly-settlement" className="rounded-2xl border border-gray-200 bg-white px-4 py-3 flex items-center gap-3 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">

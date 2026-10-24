@@ -3,6 +3,7 @@
 // de Base, Entrega de Base, Devolución de Base, Caja principal (panel), Recaudo, Cobrador, Cuadre.
 
 import type { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, Droplets, Handshake, Sprout, TrendingDown, UserX, Scale, ShieldQuestion } from 'lucide-react';
 import { formatCurrency } from '@/lib/formatters';
 import { useTenant } from '@/hooks/useTenant';
@@ -68,6 +69,8 @@ const ALERT_META: Partial<Record<PanelAlert, { label: string; icon: typeof Alert
   NEGATIVE_CUSTODY: { label: 'Custodia negativa', icon: AlertTriangle, cls: 'bg-amber-50 text-amber-900 ring-amber-200' },
   CARRIED_SHORTAGE: { label: 'Faltante arrastrado', icon: AlertTriangle, cls: 'bg-amber-50 text-amber-900 ring-amber-200' },
   SURPLUS_IN_CONTROL: { label: 'Sobrante en control', icon: ShieldQuestion, cls: 'bg-gray-100 text-gray-700 ring-gray-200' },
+  // 0036: faltantes o sobrantes sin conciliar (se resuelven en «Diferencias»).
+  PENDING_DIFFERENCES: { label: 'Diferencias por conciliar', icon: Scale, cls: 'bg-amber-50 text-amber-900 ring-amber-200' },
 };
 const O9_ALERTS = new Set<PanelAlert>(['NEGATIVE_OPERATING_RESULT', 'NEGATIVE_FLOW_GROWTH', 'INSUFFICIENT_LIQUIDITY']);
 
@@ -75,12 +78,15 @@ export function otherAlerts(r: PanelRoute): PanelAlert[] {
   return r.alerts.filter((a) => !O9_ALERTS.has(a) && ALERT_META[a]);
 }
 
-export function AlertChip({ a }: { a: PanelAlert }) {
+export function AlertChip({ a, to }: { a: PanelAlert; to?: string }) {
   const m = ALERT_META[a];
   if (!m) return null;
   const Icon = m.icon;
+  const cls = cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset', m.cls);
+  // Con destino (p. ej. «Diferencias por conciliar» → pantalla de Diferencias de esa ruta), la alerta es un enlace.
+  if (to) return <Link to={to} className={cn(cls, 'hover:underline')} data-testid={`alert-${a}`}><Icon className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />{m.label}</Link>;
   return (
-    <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset', m.cls)} data-testid={`alert-${a}`}>
+    <span className={cls} data-testid={`alert-${a}`}>
       <Icon className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />{m.label}
     </span>
   );
