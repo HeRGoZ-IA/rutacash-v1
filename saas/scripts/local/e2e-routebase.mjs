@@ -207,6 +207,27 @@ try {
     el.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
   }, label, contains);
+  /** Selector con búsqueda (cliente): escribe en el campo y toca la primera opción que contiene el texto. */
+  const pickSearch = async (label, contains) => {
+    const typed = await page.evaluate((label, contains) => {
+      const scope = [...document.querySelectorAll('[role="dialog"]')].at(-1) ?? document;
+      const l = [...scope.querySelectorAll('label')].find((x) => x.innerText.replace(/ /g, ' ').trim().replace(/\s*\*$/, '') === label);
+      const el = l && document.getElementById(l.htmlFor);
+      if (!el || el.getAttribute('role') !== 'combobox') return false;
+      el.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, contains);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return el.id;
+    }, label, contains);
+    if (!typed) return false;
+    await sleep(300);
+    return page.evaluate((id, contains) => {
+      const o = [...document.querySelectorAll(`#${CSS.escape(id)}-list [role="option"]`)].find((x) => x.textContent.includes(contains));
+      if (!o) return false;
+      o.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      return true;
+    }, typed, contains);
+  };
   const options = (label) => page.evaluate((label) => {
     const scope = [...document.querySelectorAll('[role="dialog"]')].at(-1) ?? document;
     const l = [...scope.querySelectorAll('label')].find((x) => x.innerText.replace(/\u00a0/g, ' ').trim().replace(/\s*\*$/, '') === label);
@@ -495,8 +516,7 @@ try {
     await go('/admin/active-sales'); await sleep(2000);
     await clickText('button', /^Nueva venta$/);
     await page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"]')].some((d) => d.innerText.includes('Valor de la venta')), { timeout: 20_000 });
-    await pick('Ruta', 'Ruta Centro 2'); await sleep(800); await pick('Cliente', 'E2E CENTRO 2').catch(() => false);
-    if (!(await page.evaluate(() => { const d = [...document.querySelectorAll('[role="dialog"]')].at(-1); const s = [...d.querySelectorAll('select')][1]; return !!s?.value; }))) await pick('Cliente', 'Directa');
+    await pick('Ruta', 'Ruta Centro 2'); await sleep(800); if (!(await pickSearch('Cliente', 'E2E CENTRO 2').catch(() => false))) await pickSearch('Cliente', 'Directa');
     await sleep(1200);
     const dispTxt = await page.evaluate(() => [...document.querySelectorAll('[role="dialog"]')].at(-1)?.innerText.replace(/\u00a0/g, ' ') ?? '');
     const cap = minorOf((dispTxt.match(/Disponible para esta venta:\s*(R\$\s*[\d.,]+)/) ?? [])[1]);

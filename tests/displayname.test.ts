@@ -4,6 +4,7 @@
 // Cualquier caso fallido → exit 1.
 // ============================================================
 import { formatBusinessName, formatClientName, formatPersonName } from '../src/lib/displayName'
+import { filterOptions } from '../src/lib/searchFilter'
 
 let failed = 0
 let passed = 0
@@ -54,6 +55,25 @@ eq('MIX-003', formatClientName('Joao Silva - BAR'), 'Joao Silva - BAR')
 eq('MIX-004', formatClientName('PEDRO-PAULO SOUZA'), 'Pedro-Paulo Souza')
 eq('MIX-005', formatClientName('JOSE NETO - PADARIA DO NETO ME'), 'Jose Neto - Padaria do Neto ME')
 eq('MIX-006', formatClientName(null), '')
+
+// Selector de cliente con búsqueda (Nueva venta, Histórico de abonos, Ventas): en el
+// celular se escribe y se filtra; sin mayúsculas ni acentos, primero lo que empieza.
+const CLIENTES = [
+  { value: '1', label: 'Maria das Graças - 111' },
+  { value: '2', label: 'João da Silva - 222' },
+  { value: '3', label: 'Ana Joaquina - 333' },
+  { value: '4', label: 'Joana Prado - 444' },
+  { value: '5', label: 'Pedro Souza - 5551' },
+]
+const ids = (q: string) => filterOptions(CLIENTES, q).map(o => o.value).join(',')
+eq('SRCH-001', ids(''), '1,2,3,4,5')
+eq('SRCH-002', ids('jo'), '2,4,3')
+eq('SRCH-003', ids('JOAO'), '2')
+eq('SRCH-004', ids('graca'), '1')
+eq('SRCH-005', ids('  souza  '), '5')
+eq('SRCH-006', ids('555'), '5')
+eq('SRCH-007', ids('zz'), '')
+eq('SRCH-008', ids('a'), '3,1,2,4,5')
 
 console.log(`displayname: ${passed} ✔ · ${failed} ✖`)
 if (failed > 0) process.exit(1)

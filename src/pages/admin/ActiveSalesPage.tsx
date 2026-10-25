@@ -4,6 +4,7 @@ import { Plus, CreditCard, Search, XCircle, DollarSign, AlertTriangle, RotateCcw
 import { Button } from '@/components/ui/Button'
 import { Input, Select, Textarea } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
+import { SearchSelect } from '@/components/ui/SearchSelect'
 import { SaleStatusBadge, InstallmentStatusBadge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -465,9 +466,9 @@ export default function ActiveSalesPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Select label="Ruta" value={form.routeId} onChange={e => handleRouteChange(e.target.value)}
               options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
-            <Select label="Cliente" value={form.clientId} onChange={e => setForm(f => ({ ...f, clientId: e.target.value }))}
+            <SearchSelect label="Cliente" value={form.clientId} onChange={clientId => setForm(f => ({ ...f, clientId }))}
               options={clientsForRoute.map(c => ({ value: c.id, label: `${formatClientName(c.nombre)} - ${c.documento}` }))}
-              placeholder={form.routeId ? 'Seleccionar cliente' : 'Selecciona primero la ruta'} disabled={!form.routeId} required />
+              placeholder={form.routeId ? 'Escribe el nombre o el documento' : 'Selecciona primero la ruta'} disabled={!form.routeId} required />
           </div>
           {form.routeId && clientsForRoute.length === 0 && (
             <p className="text-xs text-amber-600">No hay clientes registrados en esta ruta.</p>

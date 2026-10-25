@@ -6,6 +6,7 @@ import { useOpBase } from '@/hooks/useOpBase'
 import { ChevronLeft, UserPlus, FileText, Send, AlertTriangle } from 'lucide-react'
 import { Input, Select } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
+import { SearchSelect } from '@/components/ui/SearchSelect'
 import { toast } from '@/components/ui/Toast'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
@@ -207,8 +208,8 @@ export default function CollectorNewSalePage() {
               <UserPlus className="w-3.5 h-3.5" /> Nuevo cliente
             </button>
           </div>
-          <Select value={form.clientId} onChange={e => setForm(f => ({ ...f, clientId: e.target.value }))}
-            options={clients.map(c => ({ value: c.id, label: `${formatClientName(c.nombre)} - ${c.documento}` }))} placeholder="Seleccionar cliente" required />
+          <SearchSelect aria-label="Cliente" value={form.clientId} onChange={clientId => setForm(f => ({ ...f, clientId }))}
+            options={clients.map(c => ({ value: c.id, label: `${formatClientName(c.nombre)} - ${c.documento}` }))} placeholder="Escribe el nombre o el documento" required />
           {routeIds.length === 0 && <p className="mt-1 text-xs text-amber-600">No tienes rutas asignadas.</p>}
           {activeSale && (
             <div className="mt-2 flex items-start gap-2 p-3 bg-amber-50 rounded-xl border border-amber-200">

@@ -8,6 +8,7 @@
 // abonos o visitas guardados en el dispositivo llevan «Pendiente de sincronizar»; los saldos NO se
 // alteran (son los últimos del servidor) y esas operaciones no cuentan como «Abonados».
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { foldText } from '@/lib/searchFilter'
 import { Search, CheckCircle, XCircle, Eye } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useOpBase } from '@/hooks/useOpBase'
@@ -143,8 +144,9 @@ export default function CollectorRoutePage() {
   }
 
   const filtered = items.filter(item => {
-    const q = search.toLowerCase()
-    return !q || item.client.nombre.toLowerCase().includes(q) || item.client.documento.includes(q)
+    // Sin distinguir mayúsculas ni acentos («joao» encuentra «JOÃO»).
+    const q = foldText(search)
+    return !q || foldText(item.client.nombre).includes(q) || item.client.documento.includes(q)
   })
 
   // ADEX Online: «—» mientras no hay datos confirmados del servidor.

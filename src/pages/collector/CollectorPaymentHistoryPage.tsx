@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { History } from 'lucide-react'
 import { Select } from '@/components/ui/Input'
+import { SearchSelect } from '@/components/ui/SearchSelect'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
@@ -127,8 +128,8 @@ export default function CollectorPaymentHistoryPage() {
         <p className="text-xs text-gray-500">Abonos registrados por venta</p>
       </div>
 
-      <Select label="Cliente" value={clientId} onChange={e => onSelectClient(e.target.value)}
-        options={clients.map(c => ({ value: c.id, label: `${formatClientName(c.nombre)} - ${c.documento}` }))} placeholder="Seleccionar cliente" />
+      <SearchSelect label="Cliente" value={clientId} onChange={onSelectClient}
+        options={clients.map(c => ({ value: c.id, label: `${formatClientName(c.nombre)} - ${c.documento}` }))} placeholder="Escribe el nombre o el documento" />
 
       {clientId && (
         <Select label="Venta" value={saleId} onChange={e => onSelectSale(e.target.value)}
