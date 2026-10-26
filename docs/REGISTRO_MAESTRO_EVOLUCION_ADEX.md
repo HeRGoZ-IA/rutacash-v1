@@ -104,6 +104,8 @@ Las rondas sin documento propio se indican con «—» en la referencia. La corr
 | 2026-10-23 | R73 (cierre) | Decisiones D73-01…D73-06: tasa por ruta con «Tasa libre», reducción de parcelas (cuotas `sustituida`), excepciones bloqueadas con comprobación previa y casos registrables, retención Offline de sesiones desplazadas, reversiones de 0030/0031 probadas. Copia lógica cifrada verificada por restauración antes de migrar | `72b6e1b..2fa7152` | 0030 ampliada, 0031 (aplicadas 2026-10-23) | Sí | **PUBLICADO** 2026-10-23 (API Render + web `index-DyK4-kHp.js`) | [R73 §7](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
 | 2026-10-23 | R74 | Intervención integral post-R73: **A** rectificación de ventas con pagos (anulados o vigentes; reclasificación capital/interés sin efectivo; reaplicación de pagos anulados), **B** Consultas v2, **C** nombres sin mayúsculas (solo vista), E1 SuperAdmin sin operaciones de ruta, huecos de roles; diseño de Base por Ruta (D/F/G) con decisiones pendientes | `07c624a`, `e3522eb`, `9d84c1e` + commit documental | 0032, 0033 | Sí (local) | **NO publicado** | [R74](./ADEX_RONDA_74_INTERVENCION_INTEGRAL.md) |
 | 2026-10-24 | R74 (publicación) | Base por Ruta (0034), gastos generales (0035), autoridad del Administrador y conciliación (0036), responsable de capital único con autocorrección y reversiones conjuntas (0037), indicador del Supervisor. Respaldo cifrado `adex-20261024T1551` restaurado y verificado antes de migrar; regresión completa sobre `8d37c05`. BlueLine: Base por Ruta **activada** (retiro de R$ 32.995,00 de la empresa, Migrando, activación, reparto de R$ 123,00 a Aguas Lindas); datos conservados | `61427ce` … `8d37c05` | 0032–0037 (aplicadas 2026-10-24) | Sí | **PUBLICADO** 2026-10-24 (Render `8d37c05` ×2 + web `index-C_tgH73z.js`) | [R74 §16](./ADEX_RONDA_74_INTERVENCION_INTEGRAL.md) |
+| 2026-10-24/26 | R75 | Ajustes tras la revisión del propietario: normalización de nombres N-1…N-6 (`9ca7dc4`); buscador de clientes en el celular y sin acentos (`c1976db`); **cierre de periodo del mismo día** con aviso en la confirmación y enlace «Ir a Liquidación semanal» corregido (`bca28d3`, 0038) | `9ca7dc4`, `c1976db`, `bca28d3` | 0038 (aplicada 2026-10-26 por el propietario) | Sí | **PUBLICADO** (Vercel `bca28d3`; Render sin cambios: la API no cambió) | `PROMPT.md` (Dónde quedamos) |
+| 2026-10-26 | R76 | Listado canónico de pendientes actualizado; **mora al día** (estado «vencida» y días calculados al leer con la fecha contable de la empresa, sin escribir); desactivación de trabajadores con efectivo **resuelta por diseño** con evidencia (RB-021); propuesta de respaldos recurrentes | `865844a` + documentación | — | Sí | **PUBLICADO** (Render `adex-online-api` `865844a`) | [Pendientes](./ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md), [Respaldos](./ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md) |
 | 2026-10-22 | R73 | Correcciones del socio SOC-01…SOC-09 (SOC-10 excluida): tasa autorizada en el puente (SOC-07), parcelas en la autorización (SOC-04), rectificación de ventas desembolsadas (SOC-09), venta directa con la bolsa (SOC-02), 20 parcelas propuestas (SOC-03), negocio obligatorio (SOC-05), Consultas en tabla (SOC-08), sesión única (SOC-01), ubicaciones confirmables (SOC-06) | `3c869b1` … `2fa7152` | 0030, 0031 | Sí | Publicado con el cierre (fila anterior) | [R73](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
 
 **Hitos registrados:** 14 de la etapa CLEAN y 29 de la etapa SaaS (43 en total).
@@ -155,8 +157,9 @@ Las 31 migraciones existen en `main` @ `2fa7152`. La columna «Staging» indica 
 | 0035 | `general_expenses_funding` | Gastos generales O4F (rama): A, C1 y C2, reembolsos | `admin_payable`, `GENERAL_EXPENSE_CONTRIBUTION`/`OWN_MONEY`, `ADMIN_REIMBURSEMENT` | R74 | Aplicada 2026-10-24 (reversión probada 13/13) |
 | 0036 | `admin_authority_reconciliation` | Autoridad del Administrador (rama `r74-route-base`): conciliación RB-D3, desactivación RB-D1, RB-D2/D6/D7, guardia de cambio de responsable | `route_difference`, `DIFFERENCE_CONCILIATION`, `difference_conciliations`, `admin_pending_accounts`, AX433/AX434/AX402 | R74 | Aplicada 2026-10-24 (reversión probada 13/13) |
 | 0037 | `controller_authority` | Responsable de capital único por ruta: corrige y reversa sus propios movimientos; otros Administradores sin autoridad financiera; reversiones conjuntas por propuesta y confirmación | tablas `joint_reversal_*`, feature `controller-authority-v1` | R74 | Aplicada 2026-10-24 (reversión probada, `tmp/r74/fin/rollback-check-0037.log`) |
+| 0038 | `same_day_period_close` | Cierre de periodo que termina hoy (decisión del propietario 2026-10-25): AX804 solo si `p_to > hoy`; la restricción de `period_closures` pasa a `week_end <= business_date` (`period_closures_period_ended`) | `period_close`, restricción renombrada | R75 | Aplicada 2026-10-26 (verificada en solo lectura: restricción y función) |
 
-**Migraciones catalogadas:** 37, todas aplicadas en staging (0032–0037 el 2026-10-24, R74 §16). `staging:migrate` vuelve a aplicar las contraseñas de los roles: si un despliegue de Render falla por autenticación justo después, reintentar (R73 §8.3). Los commits de las filas 0023 y 0027 provienen de `git log` del archivo.
+**Migraciones catalogadas:** 38, todas aplicadas en staging (0032–0037 el 2026-10-24, R74 §16; 0038 el 2026-10-26). `staging:migrate` vuelve a aplicar las contraseñas de los roles: si un despliegue de Render falla por autenticación justo después, reintentar (R73 §8.3). Los commits de las filas 0023 y 0027 provienen de `git log` del archivo.
 
 ---
 
@@ -183,6 +186,10 @@ El bundle de Vercel **cambia de nombre con cada commit**, aunque el código no c
 | 2026-10-23 | `adex-online-api` + `adex-owner-api` (Render) + web | `2fa7152` (los tres; Render según su panel) | `index-DyK4-kHp.js` · `credit-rectification-v1, movements-v1, single-session-v1` · Owner sin cambio de funciones | 401 en los endpoints nuevos sin sesión; recuentos idénticos; BlueLine y Owners intactos | [R73 §8](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
 
 | 2026-10-24 | `adex-online-api` + `adex-owner-api` (Render) + web | `8d37c05` (los tres; Render por su API de despliegues; web por `VITE_VERCEL_GIT_COMMIT_SHA`) | `index-C_tgH73z.js` · `movements-v2, rectification-payments-v1, route-base-v1, general-expenses-v1, admin-authority-v1, controller-authority-v1` · Owner sin cambio de funciones | Regresión completa; recuentos y saldos de BlueLine idénticos tras migrar | [R74 §16](./ADEX_RONDA_74_INTERVENCION_INTEGRAL.md) |
+
+**Ronda 76:** 2026-10-26. Solo `adex-online-api` (Render, despliegue manual de `865844a`): las lecturas de cuotas calculan la mora al día. Owner sin cambios (no usa ese código). Vercel recompila con el push sin cambio funcional.
+
+**Ronda 75:** `bca28d3` publicado en Vercel el 2026-10-26 tras aplicar 0038; Render no se desplegó (sin cambios en la API).
 
 **Ronda 74:** publicada el 2026-10-24. El primer build de Vercel lo canceló la puerta (API sin desplegar); se redesplegó el mismo commit después de Render.
 
@@ -252,7 +259,7 @@ Solo se listan decisiones con aprobación escrita. Donde una decisión sustituye
 
 ---
 
-## F. Estado vigente (2026-10-23)
+## F. Estado vigente (2026-10-23; filas R75/R76 añadidas el 2026-10-26)
 
 | Componente | Desarrollo | Publicación | Última verificación | Pendiente de validación operativa |
 |---|---|---|---|---|
@@ -274,6 +281,8 @@ Solo se listan decisiones con aprobación escrita. Donde una decisión sustituye
 | R73: parcelas al aprobar, rectificación (0030), Consultas en tabla, negocio obligatorio, sesión única (0031), ubicaciones | Cerrado (incluye D73-01…D73-04) | Publicado (`2fa7152`; 0030/0031 aplicadas) | R73 §8, 2026-10-23 (E2E local 52/52) | Evaluación del socio ([R73 §9](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md)); la tabla B requiere empresa de pruebas autorizada |
 | R74: rectificación con pagos, Consultas v2, SuperAdmin supervisor, roles (0032/0033) | Cerrado | Publicado (`8d37c05`) | R74 §16, 2026-10-24 | Evaluación del socio |
 | R74: Base por Ruta, gastos generales, conciliación de diferencias, responsable de capital único (0034–0037) | Cerrado | Publicado (`8d37c05`) | R74 §16, 2026-10-24 (regresión completa + E2E) | BlueLine: BlueLine activa en Base por Ruta (2026-10-24); verificación personal del propietario |
+| R75: cierre de periodo del mismo día (0038) | Cerrado | Publicado (`bca28d3`, Vercel) | 2026-10-26: bundle servido y función/restricción en staging (solo lectura) | Primer cierre real del socio |
+| R76: mora al día en las lecturas de cuotas | Cerrado | Publicado (`865844a`, Render) | R76 (pruebas MORA-001…003, regresión completa) | Revisión por los usuarios |
 
 ---
 
@@ -281,12 +290,16 @@ Solo se listan decisiones con aprobación escrita. Donde una decisión sustituye
 
 Registro, no plan de trabajo. «Confirmado» = pendiente vigente en el documento de ronda más reciente que lo trata.
 
+**Listado canónico y detallado:** [ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md](./ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md) (actualizado en R76). Esta tabla es el resumen.
+
+**Cerrados en R76:** mora al día (técnico: publicado en `865844a`; operativo: sin validar por usuarios); desactivación de trabajadores con efectivo (resuelto por diseño, pruebas SEC3-006 y RB-021; bloquearla es una opción del propietario).
+
 | Tema | Pendiente | Tipo | Fuente |
 |---|---|---|---|
 | Validación operativa | Pruebas del socio sobre lo publicado; prueba con teléfonos del offline | Confirmado | [R65 §7](./ADEX_RONDA_65_OFFLINE_DESEMBOLSOS.md), [R67](./ADEX_RONDA_67_SUPERADMIN_Y_MAPA.md) |
 | Apertura de cartera existente | Sin importador de saldos iniciales ni procedimiento de discrepancias; importación de historia sin decidir (DS-06) | Confirmado | [R40 §8](./ADEX_RONDA_40_OWNER_ONLINE.md), [R39 §6](./ADEX_RONDA_39_VALIDACION_FINANCIERA_Y_PILOTO.md) |
-| Offline: ampliaciones | Registro en servidor de capturas offline no aplicadas; fotos de gastos; ubicación de visitas (sin autorización); venta directa del Cobrador (regla sin decidir); fecha de inicio vencida al sincronizar | Confirmado (propuestas futuras, no tareas) | [R62 §5](./ADEX_RONDA_62_OFFLINE_COBRADOR.md), [R65 §6](./ADEX_RONDA_65_OFFLINE_DESEMBOLSOS.md) |
-| Respaldo y continuidad | Copias de seguridad sin verificar; PITR y recuperación probada sin decidir (DS-02, DS-14); Render Free se suspende tras 15 min sin tráfico | Confirmado | [R40 §8](./ADEX_RONDA_40_OWNER_ONLINE.md), [Render](./ADEX_ONLINE_RENDER.md) |
+| Offline: ampliaciones | Registro en servidor de capturas offline no aplicadas; fotos de gastos; ubicación de visitas (sin autorización); fecha de inicio vencida al sincronizar; «en tránsito» entre rutas (opcional). Crear clientes o ventas sin conexión: **prohibido por decisión vigente**, no es ampliación | Confirmado (propuestas futuras, no tareas) | [Pendientes §2.5](./ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md) |
+| Respaldo y continuidad | Copias puntuales y restauración aislada **verificadas** (R73/R74). Falta la política recurrente: propuesta R76 con decisiones RS-1…RS-5. **No hay copia posterior a la activación de Base por Ruta.** Render Free se suspende tras 15 min sin tráfico | Pendiente del propietario | [Respaldos](./ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md), [Render](./ADEX_ONLINE_RENDER.md) |
 | Seguridad y privacidad | SMTP real (recuperación de contraseña); restablecer contraseña de un usuario activo (decisión); retención de auditoría (DS-14); `demo-accounts.ts` con `rejectUnauthorized: false`; metadatos de Git (incluido el mensaje del commit) visibles en el bundle público (observado en R70, sin evaluar) | Confirmado / observación | [R40 §8–9](./ADEX_RONDA_40_OWNER_ONLINE.md), §D |
 | Retención de coordenadas | Plazo de conservación y borrado de ubicaciones; quién las consulta; sin revisión LGPD / Ley 1581 | Confirmado | [R48 §4](./ADEX_RONDA_48_OPTIMIZACION_UX.md), [R67 §5](./ADEX_RONDA_67_SUPERADMIN_Y_MAPA.md) |
 | Teselas del mapa | Proveedor para uso intensivo / comercial | Confirmado | [R67 §5](./ADEX_RONDA_67_SUPERADMIN_Y_MAPA.md) |
@@ -297,11 +310,11 @@ Registro, no plan de trabajo. «Confirmado» = pendiente vigente en el documento
 | Herramientas internas | `scripts/prod-smoke.mjs` y `verify:deploy` apuntan a la URL retirada de CLEAN | Confirmado (no bloqueante) | [R59 §5](./ADEX_RONDA_59_DINERO.md) |
 | Ronda 73 · evaluación | Pruebas del socio según [R73 §9](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md); empresa sintética para las pruebas con dinero (requiere autorización) | Pendiente | [R73 §9.3](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
 | Ronda 73 · después de publicar | Corregir la venta real del incidente SOC-07 desde la interfaz si cumple los requisitos (D73-06); procedimiento futuro para los casos excepcionales registrados (D73-03); proveedor de búsqueda por dirección (D73-05) | Pendiente | [R73 §7.6](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
-| Ronda 74 · decisiones | D74-A1…A4 (rectificación), O1–O11 (Base por Ruta, SuperAdmin, indicadores), D74-H1 (enmienda de DS-05 para «solo el Administrador acumula perfiles») | Pendiente del propietario | [R74 §8](./ADEX_RONDA_74_INTERVENCION_INTEGRAL.md) |
-| Ronda 74 · Base por Ruta | Publicada (`8d37c05`, 0034–0037). BlueLine: BlueLine **activada** el 2026-10-24 (Base de Aguas Lindas R$ 123,00); inyección de capital pospuesta por el propietario hasta su verificación personal. RB-D10, RB-D12 y RB-D13 siguen abiertas (RB-D11 quedó resuelta por la regla del responsable único, 0037) | Pendiente del propietario | [R74 §16](./ADEX_RONDA_74_INTERVENCION_INTEGRAL.md) |
-| Normalización de nombres | Auditoría de la interfaz: sinónimos, homónimos y 11 rótulos que contradicen su cifra en pantallas compartidas con CLEAN (Cuadre del Cobrador, Liquidación, Oficinas). Cinco decisiones del propietario antes de aplicar | Pendiente del propietario | [Auditoría de nombres](./ADEX_AUDITORIA_NOMBRES_UI.md) |
-| Listos (paralelo) | Análisis de los archivos exportados de Listos para la importación inicial (DS-06); no autoriza importar datos | Pendiente | [R74 §0.2](./ADEX_RONDA_74_INTERVENCION_INTEGRAL.md) |
-| Respaldos (P-05) | La copia cifrada de R73 no es una política: respaldos periódicos, retención, PITR, continuidad; evaluar Supabase Pro de STARCLI sin mezclar productos | Confirmado | [R74 §0.2](./ADEX_RONDA_74_INTERVENCION_INTEGRAL.md) |
+| Ronda 74 · decisiones | D74-A1…A4, O1–O9, O11, D74-H1/H2 aprobadas (R74 §13.1). Siguen abiertas: O10 (ganancia retirable, diferida) y D74-O11T (tránsito entre rutas, recomendación: no por ahora) | Pendiente del propietario | [R74 §8](./ADEX_RONDA_74_INTERVENCION_INTEGRAL.md) |
+| Ronda 74 · Base por Ruta | Publicada (`8d37c05`, 0034–0037). BlueLine **activada** el 2026-10-24. Revisión personal general del propietario: **hecha y satisfactoria**. Inyección de Aguas Lindas: **pospuesta por el propietario** (no es defecto ni requisito). RB-D13 **aprobada** (falta su interfaz). Siguen abiertas RB-D10 y RB-D12 | Pendiente del propietario | [Pendientes §1, §2.1](./ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md) |
+| Normalización de nombres | Aplicada y publicada (`9ca7dc4`, N-1…N-6). Excepción vigente: nombres de los tipos de gasto. El selector del Supervisor en Online ya muestra «Base disponible» y «Base del trabajador» (el rótulo antiguo solo queda en el archivo de CLEAN) | Pendiente del propietario (tipos de gasto) | [Pendientes 2.1.15, 2.1.16](./ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md) |
+| Listos (paralelo) | Análisis inicial **hecho** (35 ventas, saldo 48.539 con moneda por confirmar, 8 ventas inconsistentes, sin recaudos ni documentos). Falta definir la incorporación (DS-06). No autoriza importar | Pendiente del propietario | [Pendientes 2.2.3](./ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md) |
+| Respaldos (P-05) | Ver «Respaldo y continuidad» | Ver arriba | [Respaldos](./ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md) |
 
 **Cerrados que ya no son pendientes:** publicación de R74 con 0032–0037 (R74 §16); pruebas HIST-001/002/003 (historia Demo determinista, `8d37c05`); publicación de R73 y su puerta de recuperación (copia cifrada verificada, R73 §8); SuperAdmin → Clientes solo lectura (pendiente en R65 §6, cerrado en R67); ubicación para el mapa (R65 §6, cerrado en R67); reintento del abono con id nuevo (R48 §4, cerrado en R48.1); recuperación ante `/healthz` incompleto en frío (R53, corregido en R59); Demo Online (retirada por decisión en R53).
 
