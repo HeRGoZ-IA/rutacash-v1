@@ -43,6 +43,7 @@
    * **No probado:** la mora con datos reales de BlueLine (no se escribió nada en BlueLine).
 3. **Qué falta:**
    * **Respaldos: alternativa A activa (2026-10-26).** Clave de recuperación creada y comprobada (en Bitwarden y en la libreta de Helmer). Tareas registradas: copia diaria a las 21:30, ensayo los lunes a las 10:00 y vigilancia. Revisar el primer resultado automático (`npm run backup -- estado` y `ADEX-respaldos/registro.log`).
+   * **Siguiente trabajo propuesto (3.1):** búsqueda sin acentos en Clientes del Administrador (`online/src/bridge/pages/admin/ClientsPage.tsx`), Clientes del Secretario (`src/pages/secretario/SecretarioClientsPage.tsx`) y Usuarios (`online/src/bridge/pages/admin/UsersPage.tsx`). Usar `foldText` de `src/lib/searchFilter.ts`. Verificado en el código el 2026-10-26: no está hecho. Espera el «sí» de Helmer.
    * Siguen abiertas RS-4 (Supabase Pro antes de la primera empresa comercial) y RS-5 (PITR).
    * Decidir si se quiere además bloquear la desactivación con efectivo (2.3.9; recomendación: no).
    * El socio prueba un cierre real del mismo día y el buscador en el celular.
