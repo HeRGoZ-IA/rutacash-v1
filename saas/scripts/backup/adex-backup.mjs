@@ -22,6 +22,7 @@
 //                                                  la copia (p. ej. desde OneDrive) y deja el volcado listo para pg_restore
 //   comprobar-clave                                pide la clave de recuperación (sin mostrarla) y dice si es la correcta:
 //                                                  abre la última copia con ella en memoria; no escribe ni guarda nada
+//   mostrar-clave                                  vuelve a mostrar la clave de recuperación (pide confirmación)
 //   prueba-recuperacion                            autoprueba con claves sintéticas (no toca ninguna copia real)
 //
 // Archivos de cada copia `adex-<AAAAMMDDTHHMM>` (carpeta local, acceso solo de este usuario):
@@ -344,20 +345,34 @@ function decryptWithRecovery(dir, name, kek) {
 }
 
 // ---------- recuperar (sin este equipo) ----------
-async function askHidden(question) {
-  const rl = (await import('node:readline')).createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-  rl._writeToOutput = (s) => { if (s.includes(question)) process.stdout.write(s); };
-  const answer = await new Promise((res) => rl.question(question, res));
+// Lee la clave sin mostrarla, con UNA sola interfaz de lectura: al pegarla puede llegar partida en varias líneas
+// de golpe (con dos interfaces, la segunda línea se perdía). Termina al reunir 52 caracteres o con una línea vacía.
+async function readKeyChars() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let typed = '';
+  const invalid = [];
+  const rl = (await import('node:readline')).createInterface({ input: process.stdin, output: process.stdout, terminal: !!process.stdin.isTTY });
+  const muted = { on: false };
+  rl._writeToOutput = (str) => { if (!muted.on) process.stdout.write(str); };
+  process.stdout.write('Clave de recuperación (no se mostrará; puede pegarla aunque ocupe varias líneas): ');
+  muted.on = true;
+  for await (const line of rl) {
+    if (!line.trim() && typed.length > 0) break;
+    for (const ch of line.toUpperCase().replace(/[\s-]/g, '')) { if (A.includes(ch)) typed += ch; else invalid.push(ch); }
+    if (typed.length >= 52) break;
+  }
+  muted.on = false;
   rl.close();
   process.stdout.write('\n');
-  return answer;
+  return { typed, invalid };
 }
 async function recuperar() {
   const name = opt('copia');
   const dir = opt('carpeta') ?? CLOUD ?? LOCAL;
   if (!name) throw new Error('indique --copia adex-AAAAMMDDTHHMM');
   const meta = JSON.parse(fs.readFileSync(path.join(dir, `${name}.json`), 'utf8'));
-  const kek = fromBase32(await askHidden('Clave de recuperación (no se mostrará): '));
+  const { typed } = await readKeyChars();
+  const kek = fromBase32(typed);
   const plain = decryptWithRecovery(dir, name, kek);
   kek.fill(0);
   if (sha(plain) !== meta.sha256_volcado) throw new Error('la huella no coincide: clave equivocada o archivo dañado');
@@ -368,20 +383,53 @@ async function recuperar() {
   console.log('Siga el procedimiento de recuperación (docs/ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md §5) y borre este archivo al terminar: contiene los datos en claro.');
 }
 
-// Comprobar lo anotado (Bitwarden o libreta) sin escribir nada: la clave abre la última copia y la huella coincide.
+// Comprobar lo anotado (Bitwarden o libreta) sin escribir nada. Acepta la clave en una o varias líneas (al copiar
+// desde la terminal puede partirse) y, si no coincide, dice QUÉ grupos difieren comparando con la copia de la clave
+// protegida por DPAPI en este equipo. Nunca muestra la clave correcta.
 async function comprobarClave() {
   const name = copies().filter((n) => fs.existsSync(path.join(LOCAL, `${n}.key.rec`))).at(-1);
   if (!name) throw new Error('todavía no hay copias protegidas con la clave de recuperación: ejecute antes clave-recuperacion');
   const meta = JSON.parse(fs.readFileSync(path.join(LOCAL, `${name}.json`), 'utf8'));
-  let kek;
-  try { kek = fromBase32(await askHidden('Clave de recuperación, tal como la anotó (no se mostrará): ')); }
-  catch (e) { console.log(`NO es correcta: ${e.message}. Revise lo anotado (solo letras y números del 2 al 9, sin I, O, 0 ni 1).`); process.exitCode = 1; return; }
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const { typed, invalid } = await readKeyChars();
+  if (invalid.length) console.log(`Aviso: se ignoraron ${invalid.length} caracteres que la clave nunca lleva (I, O, 0, 1 u otros símbolos). Revise si confundió alguno.`);
+  if (typed.length !== 52) { console.log(`NO es correcta: tiene ${typed.length} caracteres válidos y debe tener 52 (13 grupos de 4).`); process.exitCode = 1; return; }
+  const kek = fromBase32(typed);
   let ok = false;
   try { const plain = decryptWithRecovery(LOCAL, name, kek); ok = sha(plain) === meta.sha256_volcado; plain.fill(0); } catch { ok = false; }
   kek.fill(0);
   log(`comprobar-clave: ${ok ? 'correcta' : 'INCORRECTA'} (${name})`);
-  if (ok) console.log(`CORRECTA: abre la copia ${name}. Lo que anotó sirve para recuperar los respaldos.`);
-  else { console.log('NO es correcta: no abre las copias. Revise carácter por carácter lo anotado.'); process.exitCode = 1; }
+  if (ok) { console.log(`CORRECTA: abre la copia ${name}. Lo que anotó sirve para recuperar los respaldos.`); return; }
+  // Diagnóstico por grupos frente a la clave de este equipo (solo dice cuáles difieren).
+  const real = dpapiUnprotect(KEK_DPAPI);
+  const right = toBase32(real);
+  real.fill(0);
+  const bad = [];
+  for (let g = 0; g < 13; g++) if (typed.slice(g * 4, g * 4 + 4) !== right.slice(g * 4, g * 4 + 4)) bad.push(g + 1);
+  console.log(`NO es correcta. Grupos que no coinciden (contando desde la izquierda, 1 a 13): ${bad.join(', ')}.`);
+  console.log('Confusiones frecuentes al copiar a mano: 8/B, 5/S, 2/Z, 6/G, U/V, Q/G, M/N. Para ver la clave de nuevo: npm run backup -- mostrar-clave');
+  process.exitCode = 1;
+}
+
+// Vuelve a mostrar la clave de recuperación (solo en este equipo, con el usuario de Windows del propietario).
+async function mostrarClave() {
+  if (!fs.existsSync(KEK_DPAPI)) throw new Error('la clave de recuperación no existe todavía');
+  const ans = await askVisible('Se mostrará la clave de recuperación en pantalla. Asegúrese de que nadie más la vea. ¿Continuar? (s/n): ');
+  if (!/^s/i.test(ans.trim())) return;
+  const kek = dpapiUnprotect(KEK_DPAPI);
+  const b32 = toBase32(kek);
+  console.log(`
+    ${b32.match(/.{1,4}/g).join('-')}
+`);
+  console.log(`Termina en «${b32.slice(-4)}». Huella ${sha(kek).slice(0, 8)}. Al terminar: Clear-Host`);
+  kek.fill(0);
+  log('mostrar-clave: mostrada al propietario');
+}
+async function askVisible(question) {
+  const rl = (await import('node:readline')).createInterface({ input: process.stdin, output: process.stdout });
+  const a = await new Promise((res) => rl.question(question, res));
+  rl.close();
+  return a;
 }
 
 // Autoprueba: el mismo camino que una recuperación real, con claves y datos sintéticos generados aquí.
@@ -424,7 +472,8 @@ try {
   else if (cmd === 'podar') console.log(JSON.stringify({ podadas: prune() }));
   else if (cmd === 'prueba-recuperacion') pruebaRecuperacion();
   else if (cmd === 'comprobar-clave') await comprobarClave();
-  else { console.log('órdenes: crear | verificar | clave-recuperacion | comprobar-clave | estado | recuperar | podar | prueba-recuperacion'); process.exitCode = 2; }
+  else if (cmd === 'mostrar-clave') await mostrarClave();
+  else { console.log('órdenes: crear | verificar | clave-recuperacion | comprobar-clave | mostrar-clave | estado | recuperar | podar | prueba-recuperacion'); process.exitCode = 2; }
 } catch (e) {
   const msg = String(e?.message ?? e).slice(0, 500);
   log(`${cmd} FALLÓ: ${msg}`);
