@@ -1,4 +1,4 @@
-# Registra (o actualiza) las tres tareas programadas de los respaldos de ADEX (Ronda 76, alternativa A).
+﻿# Registra (o actualiza) las tres tareas programadas de los respaldos de ADEX (Ronda 76, alternativa A).
 # Lo ejecuta el PROPIETARIO, una vez, en su terminal de PowerShell (sin permisos de administrador):
 #   powershell -ExecutionPolicy Bypass -File scripts\backup\registrar-tareas.ps1
 # Las tareas corren con su usuario de Windows y solo con la sesión iniciada (DPAPI necesita su perfil).
