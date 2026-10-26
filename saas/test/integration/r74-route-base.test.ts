@@ -523,6 +523,34 @@ describe('R74 · Base por Ruta (0034)', () => {
     assert.deepEqual([await custody(feli.membershipId, r2), await custody(feli.membershipId, r3)], [3_000, 0]);
   });
 
+  // Pendiente 3.3 (2026-10-26): desactivar a un Cobrador con efectivo corta su ACCESO (revocación inmediata,
+  // también si se fue con el dinero) pero no mueve, perdona ni oculta su efectivo: sigue en el cuadre de la ruta
+  // («· inactivo») y el responsable lo recibe; un faltante queda pendiente de conciliar, no se borra.
+  test('RB-021 · Cobrador desactivado con efectivo: acceso cortado, efectivo visible y cuadrable, nada se mueve solo; aislamiento', async () => {
+    const gabi = await newPerson(api, issuer, provider.ids, bruno, { email: 'gabi-rb@example.test', role: 'cobrador', displayName: 'Gabi', routeIds: [r1] });
+    assert.equal((await $ana('/v1/capital/deliveries', { routeId: r1, workerId: gabi.membershipId, amountMinor: 20_000, reason: 'Base de Gabi' })).status, 201);
+    const [b0, ops0] = [await base(r1), await opCount()];
+    // Otra empresa no ve ni desactiva al trabajador.
+    assert.notEqual((await carla('POST', `/v1/members/${gabi.membershipId}/deactivate`, {})).status, 200, 'c2 no desactiva miembros de c1');
+    assert.equal((await bruno('POST', `/v1/members/${gabi.membershipId}/deactivate`, {})).status, 200);
+    assert.deepEqual([await base(r1), await custody(gabi.membershipId, r1), await opCount()], [b0, 20_000, ops0], 'desactivar no mueve dinero');
+    assert.equal((await gabi.call('GET', '/v1/capital/custody')).body['error'], 'MEMBERSHIP_INACTIVE');
+    expectCode(await $ana('/v1/capital/deliveries', { routeId: r1, workerId: gabi.membershipId, amountMinor: 1, reason: 'A inactivo' }), 400, 'CUSTODIAN_INVALID', 'no se entrega más a un inactivo');
+    const listed = async () => ((await ana('GET', `/v1/settlements/workers?routeId=${r1}`)).body['workers'] as Body[]).find((w) => w['workerId'] === gabi.membershipId);
+    const w0 = await listed();
+    assert.deepEqual([w0?.['status'], w0?.['positionMinor']], ['inactivo', 20_000], `sigue en el cuadre de la ruta: ${JSON.stringify(w0)}`);
+    assert.notEqual((await carla('GET', `/v1/settlements/workers?routeId=${r1}`)).status, 200, 'c2 no ve el cuadre de c1');
+    // Entrega 15.000 de 20.000: lo recibido vuelve a la Base; el faltante queda a la vista, no se perdona.
+    const p = (await ana('GET', `/v1/settlements/preview?routeId=${r1}&workerId=${gabi.membershipId}`)).body;
+    assert.equal(Number(p['expectedPositionMinor']), 20_000, JSON.stringify(p));
+    const s = await $ana('/v1/settlements', { routeId: r1, workerId: gabi.membershipId, deliveredMinor: 15_000, expectedSeenMinor: 20_000,
+      previousSettlementId: p['previousSettlementId'] ?? null, reason: 'Entregó al retirarse; faltan 5.000' });
+    assert.equal(s.status, 201, JSON.stringify(s.body));
+    assert.equal(await base(r1), b0 + 15_000);
+    const w1 = await listed();
+    assert.equal(w1?.['carriedMinor'], 5_000, `el faltante sigue pendiente a su nombre: ${JSON.stringify(w1)}`);
+  });
+
   test('RB-019 · conservación por ruta y libro en cero al final', async () => {
     await ledgerOk();
     const total = Number((await db.admin.query('select coalesce(sum(balance_minor), 0) n from adex.capital_accounts where company_id = $1', [c1])).rows[0].n);

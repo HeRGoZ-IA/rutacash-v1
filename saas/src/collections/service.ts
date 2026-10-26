@@ -24,6 +24,7 @@ import { optId, optText, PAGE_ORDER, pageFilters, pathId, reqId, reqText } from 
 import { requireOperationId, routeOf } from '../capital/service.ts';
 import { parseLocation, storePaymentLocation } from './location.ts';
 import { assertOfflineFits, parseOffline, requireOfflineActor, requireRouteNotHeldByCollector, storeOfflineCapture } from '../offline/capture.ts';
+import { INSTALLMENT_LIVE_DAYS, INSTALLMENT_LIVE_STATUS } from '../credits/service.ts';
 
 interface PaymentRow {
   id: string; sale_id: string; client_id: string; route_id: string; collector_membership_id: string; created_by_membership_id: string | null;
@@ -72,7 +73,9 @@ async function creditState(client: pg.PoolClient, ctx: ActiveContext, saleId: st
     'select id, route_id, client_id, status, balance_minor, total_value_minor, finished_on from adex.sales where company_id = $1 and id = $2', [ctx.companyId, saleId])).rows[0];
   if (!s) throw new ApiError(404, 'NOT_FOUND');
   const installments = (await client.query<{ number: number; due_date: string | Date; amount_minor: string; paid_minor: string; balance_minor: string; status: string; days_overdue: number }>(
-    `select number, due_date, amount_minor, paid_minor, balance_minor, status, days_overdue from adex.installments where company_id = $1 and sale_id = $2 and status <> 'sustituida' order by number`,
+    `select i.number, i.due_date, i.amount_minor, i.paid_minor, i.balance_minor, ${INSTALLMENT_LIVE_STATUS} status, ${INSTALLMENT_LIVE_DAYS} days_overdue
+       from adex.installments i cross join (select adex.business_today($1) d) t
+      where i.company_id = $1 and i.sale_id = $2 and i.status <> 'sustituida' order by i.number`,
     [ctx.companyId, saleId])).rows.map((i) => ({ number: i.number, dueDate: ymd(i.due_date), amountMinor: Number(i.amount_minor), paidMinor: Number(i.paid_minor),
     balanceMinor: Number(i.balance_minor), status: i.status, daysOverdue: i.days_overdue }));
   return {

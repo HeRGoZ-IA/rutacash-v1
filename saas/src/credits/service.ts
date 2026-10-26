@@ -58,6 +58,17 @@ const ymd = (d: string | Date) => (typeof d === 'string' ? d.slice(0, 10)
 const iso = (d: Date | null) => d?.toISOString() ?? null;
 const num = (v: string | null) => (v === null ? null : Number(v));
 
+/**
+ * Estado y días de mora de una cuota A LA FECHA CONTABLE de la empresa (pendiente 3.2, 2026-10-26).
+ * Lo guardado (`status`, `days_overdue`) solo se recalcula al registrar o anular un pago
+ * (`adex.credit_recompute`): sin movimientos, una cuota que vence quedaba «pendiente» y con 0 días.
+ * Aquí se deriva al leer, con la misma regla que `credit_recompute` (sin pago y vencida → «vencida»;
+ * días = hoy − vencimiento salvo pagada) y sin escribir nada: no mueve dinero ni cambia la historia.
+ * Requiere la fecha contable como `t.d` (`cross join (select adex.business_today($1) d) t`).
+ */
+export const INSTALLMENT_LIVE_STATUS = `case when i.status = 'pendiente' and i.paid_minor = 0 and i.due_date < t.d then 'vencida' else i.status end`;
+export const INSTALLMENT_LIVE_DAYS = `case when i.status = 'pagada' or i.balance_minor <= 0 then 0 else greatest(0, t.d - i.due_date) end`;
+
 function requestView(r: RequestRow) {
   return {
     id: r.id, clientId: r.client_id, routeId: r.route_id, requestedBy: r.requested_by_membership_id ?? r.collector_membership_id,
@@ -646,8 +657,10 @@ export async function listInstallments(client: pg.PoolClient, ctx: ActiveContext
     params.push(status); where += ` and s.status = $${params.length}`;
   }
   const r = await client.query<{ sale_id: string; number: number; due_date: string | Date; amount_minor: string; paid_minor: string; balance_minor: string; status: string; days_overdue: number }>(
-    `select i.sale_id, i.number, i.due_date, i.amount_minor, i.paid_minor, i.balance_minor, i.status, i.days_overdue
+    `select i.sale_id, i.number, i.due_date, i.amount_minor, i.paid_minor, i.balance_minor,
+            ${INSTALLMENT_LIVE_STATUS} status, ${INSTALLMENT_LIVE_DAYS} days_overdue
        from adex.installments i join adex.sales s on s.company_id = i.company_id and s.id = i.sale_id
+            cross join (select adex.business_today($1) d) t
       where ${where} and i.status <> 'sustituida' order by i.sale_id, i.number limit 50001`, params);
   if (r.rows.length > 50000) throw new ApiError(400, 'INVALID_INPUT', 'too many installments: filter by saleId');
   return r.rows.map((i) => ({ saleId: i.sale_id, number: i.number, dueDate: ymd(i.due_date), amountMinor: Number(i.amount_minor),
@@ -662,7 +675,9 @@ export async function getCredit(client: pg.PoolClient, ctx: ActiveContext, id: s
   if (!s) throw new ApiError(404, 'NOT_FOUND');
   const installments = (await client.query<{ number: number; due_date: string | Date; amount_minor: string; paid_minor: string; balance_minor: string; status: string }>(
     // D73-02: las cuotas sustituidas por una rectificación no son parte del calendario vigente.
-    `select number, due_date, amount_minor, paid_minor, balance_minor, status from adex.installments where company_id = $1 and sale_id = $2 and status <> 'sustituida' order by number`,
+    `select i.number, i.due_date, i.amount_minor, i.paid_minor, i.balance_minor, ${INSTALLMENT_LIVE_STATUS} status
+       from adex.installments i cross join (select adex.business_today($1) d) t
+      where i.company_id = $1 and i.sale_id = $2 and i.status <> 'sustituida' order by i.number`,
     [ctx.companyId, id])).rows.map((i) => ({ number: i.number, dueDate: ymd(i.due_date), amountMinor: Number(i.amount_minor),
     paidMinor: Number(i.paid_minor), balanceMinor: Number(i.balance_minor), status: i.status }));
   const ledger = s.ledger_operation_id ? (await client.query<{ kind: string; membership_id: string | null; route_id: string | null; amount_minor: string }>(
