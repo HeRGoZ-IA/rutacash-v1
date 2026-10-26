@@ -43,7 +43,7 @@ const ERRORS: Record<string, string> = {
   DOCUMENT_DUPLICATE: 'Ya existe un cliente con ese documento en la empresa.',
   INVALID_DOCUMENT: 'El documento no es válido para el tipo elegido.',
   ROUTE_NOT_OPERATIONAL: 'La ruta no admite operaciones nuevas.',
-  PERIOD_CLOSED: 'El periodo está cerrado.',
+  PERIOD_CLOSED: 'El periodo de esta ruta está cerrado: no admite movimientos de esa fecha. Si se cerró hoy, regístralo mañana y entrará en el próximo cierre.',
   OPERATION_ID_REUSED: 'Operación duplicada con otros datos.',
   REVOCATION_IN_PROGRESS: 'Hay un cambio de permisos en curso. Inténtelo en unos segundos.',
   RATE_LIMITED: 'Demasiadas peticiones. Espere un momento.',

@@ -362,8 +362,9 @@ describe('Fase 6 · cuadres y cierres', () => {
       await c.query('commit');
     } finally { c.release(); }
     const close = (m: Money, weekStart: string, weekEnd: string, op?: string) => m('/v1/periods/close', { routeId: r, weekStart, weekEnd, note: 'Cierre semanal' }, op);
-    // D29: un periodo que no ha terminado (hoy, en Bogotá) no se cierra.
-    assert.deepEqual([(await close($ana, today, today)).status, (await close($ana, today, today)).body['error']], [409, 'PERIOD_NOT_ENDED']);
+    // D29 (0038): un periodo que termina mañana (en Bogotá) no se cierra; hoy sí (DS4-002).
+    const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+    assert.deepEqual([(await close($ana, today, tomorrow)).status, (await close($ana, today, tomorrow)).body['error']], [409, 'PERIOD_NOT_ENDED']);
     // Autoridad: solo el responsable (R74 (cambio de regla en esta intervención): el SuperAdmin ya no cierra periodos).
     assert.equal((await close(xavier.money, '2026-10-05', '2026-10-11')).status, 404, 'Administrador sin la ruta');
     assert.equal((await dora.money('/v1/periods/close', { routeId: routes['E'], weekStart: '2026-10-05', weekEnd: '2026-10-11' })).status, 403,
@@ -715,7 +716,10 @@ describe('Fase 6 · cuadres y cierres', () => {
       const settled = await settleNow(caller(api, issuer, 'ana', M.anaAdmin), $anaC1, r, w.membershipId, 1_000);
       assert.equal(settled['businessDate'], pagoToday);
       const close = () => $anaC1('/v1/periods/close', { routeId: r, weekStart: pagoToday, weekEnd: pagoToday });
-      assert.equal((await close()).body['error'], 'PERIOD_NOT_ENDED', 'en Pago Pago ese día aún no terminó');
+      // 0038: el periodo puede terminar hoy, pero no mañana (mañana en Pago Pago).
+      const pagoTomorrow = new Date(Date.parse(`${pagoToday}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+      const early = await $anaC1('/v1/periods/close', { routeId: r, weekStart: pagoToday, weekEnd: pagoTomorrow });
+      assert.equal(early.body['error'], 'PERIOD_NOT_ENDED', 'en Pago Pago ese periodo aún no terminó');
       await tz('Pacific/Kiritimati');                                  // UTC+14: el mismo instante ya es otro día
       const cal = (await bruno('GET', '/v1/periods/calendar')).body;
       assert.ok((cal['businessDate'] as string) > pagoToday);
@@ -732,5 +736,23 @@ describe('Fase 6 · cuadres y cierres', () => {
     } finally {
       await tz('America/Sao_Paulo');
     }
+  });
+
+  test('DS4-002 · cierre del mismo día (0038): se cierra un periodo que termina hoy; después, la ruta no admite movimientos de hoy', async () => {
+    const bruno = caller(api, issuer, 'bruno', M.brunoSa);
+    const $bruno = money(bruno);
+    const $anaC1 = money(caller(api, issuer, 'ana', M.anaAdmin));
+    const r = (await bruno('POST', '/v1/routes', { name: 'Ruta Mismo Día', interestRate: 20, freeRate: false, maxLoanMinor: 0, adminIds: [M.anaAdmin] })).body['id'] as string;
+    const w = await newPerson(api, issuer, provider.ids, bruno, { email: 'f6-hoy-cob@example.test', role: 'cobrador', displayName: 'Cobrador Mismo Día', routeIds: [r] });
+    await $bruno('/v1/capital/company/deposits', { amountMinor: 20_000, reason: 'Capital mismo día' });
+    await $bruno('/v1/capital/allocations', { adminId: M.anaAdmin, amountMinor: 10_000, reason: 'Bolsa mismo día' });
+    assert.equal((await $anaC1('/v1/capital/deliveries', { routeId: r, workerId: w.membershipId, amountMinor: 1_000, reason: 'Base' })).status, 201);
+    const day = (await bruno('GET', '/v1/periods/calendar')).body['businessDate'] as string;
+    const closed = await $anaC1('/v1/periods/close', { routeId: r, weekStart: day, weekEnd: day, note: 'Cierre del domingo por la noche' });
+    assert.equal(closed.status, 201, JSON.stringify(closed.body));
+    assert.equal(((closed.body['figures'] as Record<string, Record<string, number>>)['custody'])!['deliveriesMinor'], 1_000, 'el cierre incluye lo registrado hoy');
+    // Lo que llegue después se registra mañana: hoy la ruta queda cerrada.
+    const late = await $anaC1('/v1/capital/deliveries', { routeId: r, workerId: w.membershipId, amountMinor: 500, reason: 'Base tardía' });
+    assert.deepEqual([late.status, late.body['error']], [409, 'PERIOD_CLOSED']);
   });
 });

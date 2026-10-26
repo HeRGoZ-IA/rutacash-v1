@@ -26,6 +26,7 @@ import {
   closureBlockedReason,
   isProtectingClosure,
   periodBadge,
+  periodEndsToday,
   periodNotEndedReason,
   settlementHistory,
   type SettlementHistoryRow,
@@ -623,6 +624,14 @@ export default function WeeklySettlementPage() {
               {faltantes > 0 && (
                 <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                   Hay faltantes en cuadres de trabajadores de este rango por {formatCurrency(faltantes, currency)} (informativo: no forma parte de la liquidación).
+                </p>
+              )}
+              {periodEndsToday(confirmCierre.semanaFin, new Date().toISOString()) && (
+                // 0038: cierre del mismo día. Después de cerrar, hoy queda cerrado en esta ruta.
+                <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900" data-testid="settlement-close-today-warning">
+                  <span className="font-semibold">Estás cerrando el día de hoy.</span> Después de este cierre no se podrán registrar más movimientos
+                  de hoy en esta ruta (recaudos, gastos, ventas ni entregas). Si falta registrar algo, hazlo antes de cerrar; lo que llegue
+                  después se registra mañana y entrará en el próximo cierre.
                 </p>
               )}
               <div className="flex items-start gap-2 rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600">

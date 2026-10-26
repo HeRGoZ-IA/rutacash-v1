@@ -61,7 +61,7 @@ export function PendingSettlementsNotice() {
           {pendientes.slice(0, 4).map(p => `${p.routeName} (${p.officeLabel})`).join(' · ')}
           {pendientes.length > 4 ? ` y ${pendientes.length - 4} más` : ''}
         </p>
-        <Link to="/admin/liquidacion" className="mt-1 inline-block text-xs font-medium text-amber-800 underline">
+        <Link to="/admin/weekly-settlement" className="mt-1 inline-block text-xs font-medium text-amber-800 underline">
           Ir a Liquidación semanal
         </Link>
       </div>

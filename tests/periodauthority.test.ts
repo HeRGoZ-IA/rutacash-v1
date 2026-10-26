@@ -30,7 +30,7 @@ import {
   approveSaleRequest, confirmDisbursement, createDirectSale, createSaleRequest, type SaleInputs,
 } from '../src/services/saleRequestService'
 import { getRouteBase } from '../src/services/cashboxEngine'
-import { periodClosableFrom, periodNotEndedReason } from '../src/lib/settlementPeriods'
+import { periodClosableFrom, periodEndsToday, periodNotEndedReason } from '../src/lib/settlementPeriods'
 import { can } from '../src/lib/permissions'
 import { addDays, nowISO, today } from '../src/lib/formatters'
 import type { Sale, User, WeeklySettlement } from '../src/models/types'
@@ -64,7 +64,7 @@ const CAT = 'cat-6c1'
 const HOY = today()
 const AYER = addDays(HOY, -1)
 const PASADA = { semanaInicio: addDays(HOY, -7), semanaFin: AYER }          // ya terminó
-const VIGENTE = { semanaInicio: addDays(HOY, -2), semanaFin: HOY }          // termina hoy: aún vigente
+const VIGENTE = { semanaInicio: addDays(HOY, -2), semanaFin: addDays(HOY, 1) } // termina mañana: aún vigente (0038: hoy ya se cierra)
 const persona = (id: string, nombre: string, rol: User['rol'], rutas: string[], tenantId = T): User => ({
   id, tenantId, nombre, email: `${id}@6c1.test`, password: '1234', rol, status: 'activo',
   authorizedRouteIds: rutas, createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z',
@@ -177,16 +177,20 @@ await spec('WEEK-002', 'D29', 'semana terminada: cierre válido con las cifras d
   assert(doc.status === 'cerrada' && doc.ingresoCapital === 700 && cifras(doc) === cifras(provisional), 'el cierre no archivó las cifras del motor')
 })
 
-await spec('WEEK-003', 'D29', 'límite exacto: bloqueado hasta la medianoche que sigue al último día; permitido desde ese instante', () => {
+await spec('WEEK-003', 'D29', 'límite exacto (0038): bloqueado hasta el inicio del último día; desde ahí se cierra el mismo día', () => {
   const fin = '2026-10-10'
   const limite = periodClosableFrom(fin)
   const antes = new Date(Date.parse(limite) - 1).toISOString()
   const r1 = periodNotEndedReason(fin, antes)
   const r2 = periodNotEndedReason(fin, limite)
   const r3 = periodNotEndedReason(fin, new Date(`${fin}T23:59:59`).toISOString())
-  metric('cerrable desde (medianoche local del día siguiente)', limite)
-  metric('1 ms antes / 23:59:59 del último día / en el límite', `${r1 ? 'bloqueado' : 'permitido'} / ${r3 ? 'bloqueado' : 'permitido'} / ${r2 ? 'bloqueado' : 'permitido'}`)
-  assert(r1 && r3 && r2 === null, 'el límite del periodo no respeta el rango inclusivo por días')
+  const hoy = [periodEndsToday(fin, antes), periodEndsToday(fin, new Date(`${fin}T23:59:59`).toISOString()),
+               periodEndsToday(fin, new Date(`2026-10-11T00:00:00`).toISOString())]
+  metric('cerrable desde (medianoche local del último día)', limite)
+  metric('1 ms antes / en el límite / 23:59:59 del último día', `${r1 ? 'bloqueado' : 'permitido'} / ${r2 ? 'bloqueado' : 'permitido'} / ${r3 ? 'bloqueado' : 'permitido'}`)
+  metric('aviso «cierras hoy» (antes / último día / día siguiente)', hoy.join(' / '))
+  assert(r1 && r2 === null && r3 === null, 'el límite del periodo no permite el cierre del mismo día')
+  assert(!hoy[0] && hoy[1] && !hoy[2], 'el aviso del cierre del mismo día no corresponde al último día')
 })
 
 await spec('WEEK-004', 'D29', 'tras rechazar el cierre anticipado, pagos y desembolsos de los días restantes siguen permitidos', async () => {

@@ -274,7 +274,10 @@ describe('Fase 6 · cuadres y cierres (ADEX-Staging)', { skip: SKIP }, () => {
     assert.equal(exp.status, 201);
     const day = (await call('sa', 'GET', '/v1/periods/calendar', m.sa)).body['businessDate'] as string;
     const close = (who: Who, mm: string) => money(who, '/v1/periods/close', mm, { routeId: r.h, weekStart: day, weekEnd: day, note: 'Cierre de prueba' });
-    assert.equal((await close('ana', m.ana)).body['error'], 'PERIOD_NOT_ENDED', 'en Pago Pago ese día no ha terminado');
+    // 0038: el periodo puede terminar hoy, no mañana (en Pago Pago).
+    const next = new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+    const early = await money('ana', '/v1/periods/close', m.ana, { routeId: r.h, weekStart: day, weekEnd: next, note: 'Cierre de prueba' });
+    assert.equal(early.body['error'], 'PERIOD_NOT_ENDED', 'en Pago Pago ese periodo no ha terminado');
     await tz('Pacific/Kiritimati');
     assert.equal((await close('cobA', m.cobA)).status, 403);
     const both = await Promise.all([close('ana', m.ana), close('sa', m.sa)]);

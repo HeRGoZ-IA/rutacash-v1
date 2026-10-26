@@ -66,7 +66,7 @@ export function periodsOverlap(
 }
 
 // ------------------------------------------------------------
-// Fin del periodo (D29, Ronda 6/6C.1)
+// Fin del periodo (D29, Ronda 6/6C.1; cierre del mismo día, 0038)
 // ------------------------------------------------------------
 /** Día siguiente a `fecha` (YYYY-MM-DD), en calendario local. */
 function diaSiguiente(fecha: string): string {
@@ -77,25 +77,31 @@ function diaSiguiente(fecha: string): string {
 }
 
 /**
- * Instante desde el que el periodo que termina en `semanaFin` puede CERRARSE: la
- * medianoche local que sigue a su último día. El rango es inclusivo por días
- * (`coversDate`), así que todo el día `semanaFin` pertenece al periodo.
+ * Instante desde el que el periodo que termina en `semanaFin` puede CERRARSE: desde
+ * el inicio de su último día (0038, decisión del propietario 2026-10-25: se cierra
+ * el mismo día, normalmente el sábado o el domingo por la noche). Tras cerrar, ese
+ * día queda cerrado: lo que falte se registra al día siguiente (próximo cierre).
  */
 export function periodClosableFrom(semanaFin: string): string {
-  return new Date(`${diaSiguiente(semanaFin)}T00:00:00`).toISOString()
+  return new Date(`${semanaFin}T00:00:00`).toISOString()
+}
+
+/** ¿El periodo termina hoy (fecha local de `ahora`)? Para el aviso del cierre del mismo día. */
+export function periodEndsToday(semanaFin: string, ahora: string): boolean {
+  return Boolean(semanaFin) && ahora >= periodClosableFrom(semanaFin) && ahora < new Date(`${diaSiguiente(semanaFin)}T00:00:00`).toISOString()
 }
 
 /**
- * D29: no se cierra definitivamente un periodo que no ha terminado. `null` = ya
- * terminó. Usa el FIN DEL PROPIO RANGO (no asume lunes–sábado ni lunes–domingo).
- * `ahora` lo pone el servicio; en local es el reloj del dispositivo (la autoridad
- * temporal definitiva será el servidor). Calcular la liquidación provisional no
- * pasa por aquí: solo el cierre definitivo.
+ * D29: no se cierra definitivamente un periodo que no ha terminado. `null` = se
+ * puede cerrar (ya terminó o termina hoy). Usa el FIN DEL PROPIO RANGO (no asume
+ * lunes–sábado ni lunes–domingo). `ahora` lo pone el servicio; en local es el reloj
+ * del dispositivo (la autoridad temporal definitiva es el servidor). Calcular la
+ * liquidación provisional no pasa por aquí: solo el cierre definitivo.
  */
 export function periodNotEndedReason(semanaFin: string, ahora: string): string | null {
   if (!semanaFin) return null
   if (ahora >= periodClosableFrom(semanaFin)) return null
-  return `El periodo termina el ${semanaFin} y podrá cerrarse a partir del ${diaSiguiente(semanaFin)} a las 00:00. Mientras tanto puedes generar y revisar la liquidación provisional.`
+  return `El periodo termina el ${semanaFin} y podrá cerrarse a partir del ${semanaFin} (el mismo día). Mientras tanto puedes generar y revisar la liquidación provisional.`
 }
 
 // ------------------------------------------------------------
