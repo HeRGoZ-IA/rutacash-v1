@@ -131,5 +131,4 @@ No contrata planes, no activa PITR, no crea cuentas en servicios nuevos (R2, One
 
 1. `npm run backup -- clave-recuperacion`: guardar la clave que muestra en **Bitwarden** (nota segura «ADEX respaldos - clave de recuperación») **y en la libreta de la caja fuerte** del propietario (decidido el 2026-10-26).
 2. `npm run backup -- comprobar-clave`: escribir la clave leyéndola de lo anotado. Debe responder «CORRECTA». No escribe ni guarda nada.
-2. `powershell -ExecutionPolicy Bypass -File scriptsackup
-egistrar-tareas.ps1`: registra las tres tareas.
+3. `powershell -ExecutionPolicy Bypass -File scriptsackupegistrar-tareas.ps1`: registra las tres tareas.
