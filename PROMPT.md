@@ -42,11 +42,7 @@
      * Pruebas nuevas MORA-001…003 y RB-021.
    * **No probado:** la mora con datos reales de BlueLine (no se escribió nada en BlueLine).
 3. **Qué falta:**
-   * **Respaldos (aprobada la A el 2026-10-26).** Están hechos el script versionado (`saas/scripts/backup/`) y la copia `adex-20261026T1535`, verificada y en OneDrive.
-     * Helmer debe ejecutar una vez, desde `saas`:
-       1. `npm run backup -- clave-recuperacion` (guarda la clave en su gestor de contraseñas);
-       2. `powershell -ExecutionPolicy Bypass -File scripts\backup\registrar-tareas.ps1`.
-     * El permiso automático no dejó a Claude crear tareas programadas.
+   * **Respaldos: alternativa A activa (2026-10-26).** Clave de recuperación creada y comprobada (en Bitwarden y en la libreta de Helmer). Tareas registradas: copia diaria a las 21:30, ensayo los lunes a las 10:00 y vigilancia. Revisar el primer resultado automático (`npm run backup -- estado` y `ADEX-respaldos/registro.log`).
    * Siguen abiertas RS-4 (Supabase Pro antes de la primera empresa comercial) y RS-5 (PITR).
    * Decidir si se quiere además bloquear la desactivación con efectivo (2.3.9; recomendación: no).
    * El socio prueba un cierre real del mismo día y el buscador en el celular.

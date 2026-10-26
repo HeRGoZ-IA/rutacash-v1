@@ -93,7 +93,7 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 
 | # | Decisión | Fuente |
 |---|---|---|
-| 2.3.1 | **P-05 / DS-02 / DS-14 · Respaldos.** Las copias puntuales y su restauración aislada **están verificadas** (`adex-20261024T1408` y `adex-20261024T1551`). Lo pendiente es la **política recurrente**: frecuencia, retención, destino independiente, recuperación de la clave, ensayos, RPO/RTO y PITR. **Propuesta lista:** [ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md](./ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md). **RS-1…RS-3 aprobadas e implementadas el 2026-10-26** (copia `adex-20261026T1535` verificada y en OneDrive). Falta que el propietario cree la clave de recuperación y registre las tareas (§8 de la propuesta). Siguen abiertas RS-4 (Supabase Pro) y RS-5 (PITR) | R74 §0.2, R40 §8, R76 |
+| 2.3.1 | **P-05 / DS-02 / DS-14 · Respaldos.** Las copias puntuales y su restauración aislada **están verificadas** (`adex-20261024T1408` y `adex-20261024T1551`). Lo pendiente es la **política recurrente**: frecuencia, retención, destino independiente, recuperación de la clave, ensayos, RPO/RTO y PITR. **Propuesta lista:** [ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md](./ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md). **RS-1…RS-3 aprobadas e implementadas el 2026-10-26** (copia `adex-20261026T1535` verificada y en OneDrive). Activación **completada** por el propietario: clave de recuperación creada y comprobada («CORRECTA»), guardada en Bitwarden y en su libreta; tareas programadas registradas (§8 de la propuesta). Siguen abiertas RS-4 (Supabase Pro) y RS-5 (PITR) | R74 §0.2, R40 §8, R76 |
 | 2.3.2 | **Proveedor (DS-02, DS-03):** Supabase y Render operan sin aprobación escrita. Además, el proyecto se llama «ADEX-Staging» y aloja una empresa real | Registro §G |
 | 2.3.3 | **Render Free:** se suspende tras 15 minutos sin uso y tarda en despertar. ¿Pasar a un plan de pago antes de abrir a más empresas? | ADEX_ONLINE_RENDER |
 | 2.3.4 | **SMTP real** para recuperar contraseñas. Decidir también si un administrador puede restablecer la contraseña de un usuario activo | R40 §8 |
@@ -141,7 +141,7 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 | 3.10 | Los metadatos de Git (incluido el mensaje del commit) son visibles en el código público de la web. Evaluar si conviene ocultarlos | Baja | Pendiente | R70 |
 | 3.11 | Archivo CLEAN `src/pages/collector/CollectorSelectRoutePage.tsx`: conserva «Base de la ruta» | Baja | Online usa su copia corregida, así que solo afecta a CLEAN, que está retirada. No exige decisión | R74 §15.6 |
 | 3.12 | **RB-D13 en la interfaz:** pantalla para que un Administrador reembolse a otro desde sus propias rutas (aprobado, 2.1.3) | Media | Pendiente; no implementado | R74 §15.7 |
-| 3.13 | Versionar el script de copia cifrada y su ensayo de restauración (propuesta de respaldos §3) | Alta | **HECHO** (`saas/scripts/backup/`). Activación: clave de recuperación y tareas, a cargo del propietario | R76 |
+| 3.13 | Versionar el script de copia cifrada y su ensayo de restauración (propuesta de respaldos §3) | Alta | **HECHO** (`saas/scripts/backup/`). Activado el 2026-10-26 (clave y tareas) | R76 |
 
 ## 4. Validaciones pendientes
 
@@ -169,7 +169,7 @@ Ninguno de estos riesgos fue aceptado expresamente. Se mantienen documentados ha
 | 5.5 | Con husos horarios distintos, la venta propone como inicio el «hoy» del dispositivo | R67 §5 |
 | 5.6 | Secretario: no existe un estado «en disputa» si el dinero se movió físicamente y el Administrador lo rechaza. En Base por Ruta el Secretario solo ve el historial, así que solo aplica al modelo de bolsas | R53 §2 |
 | 5.7 | Tras un cierre del mismo día, las capturas offline de ese día que lleguen después se rechazan con PERIOD_CLOSED | R75 |
-| 5.8 | ~~Todas las copias y su clave en un solo equipo; sin copia posterior a la activación~~ → **mitigado** el 2026-10-26: hay copia nueva y copia en OneDrive. Sigue el riesgo hasta crear la clave de recuperación: sin ella, la copia de OneDrive no se puede abrir fuera de este equipo | R76 |
+| 5.8 | ~~Todas las copias y su clave en un solo equipo; sin copia posterior a la activación~~ → **mitigado** el 2026-10-26: hay copia nueva y copia en OneDrive. Clave de recuperación creada y comprobada: las copias de OneDrive se pueden abrir sin este equipo. Queda el límite de que las tareas solo corren con la sesión de Windows iniciada | R76 |
 
 ## 6. Orden y limpieza (mantenimiento y evidencias)
 
