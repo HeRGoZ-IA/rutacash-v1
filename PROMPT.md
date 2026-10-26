@@ -45,7 +45,7 @@
    * **Respaldos (aprobada la A el 2026-10-26).** Están hechos el script versionado (`saas/scripts/backup/`) y la copia `adex-20261026T1535`, verificada y en OneDrive.
      * Helmer debe ejecutar una vez, desde `saas`:
        1. `npm run backup -- clave-recuperacion` (guarda la clave en su gestor de contraseñas);
-       2. `powershell -ExecutionPolicy Bypass -File scripts\backupegistrar-tareas.ps1`.
+       2. `powershell -ExecutionPolicy Bypass -File scripts\backup\registrar-tareas.ps1`.
      * El permiso automático no dejó a Claude crear tareas programadas.
    * Siguen abiertas RS-4 (Supabase Pro antes de la primera empresa comercial) y RS-5 (PITR).
    * Decidir si se quiere además bloquear la desactivación con efectivo (2.3.9; recomendación: no).
