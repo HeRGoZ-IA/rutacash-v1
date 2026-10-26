@@ -3,9 +3,9 @@
 | | |
 |---|---|
 | Fecha | 2026-10-26 (Ronda 76) |
-| Naturaleza | **Propuesta.** No se contrató nada, no se cambió la facturación, no se activó PITR y no se tocaron las copias existentes |
+| Naturaleza | Propuesta del 2026-10-26. **Alternativa A aprobada el mismo día** (RS-1 OneDrive, RS-2 clave de recuperación en el gestor de contraseñas del propietario, RS-3 copia inmediata) e implementada: ver §8. No se contrató nada ni se activó PITR; las copias anteriores se conservan |
 | Pendiente que atiende | P-05 / DS-02 / DS-14 (listado consolidado §2.3.1) |
-| Decisiones requeridas | §7 |
+| Decisiones requeridas | §7 (RS-1…RS-3 aprobadas; RS-4 y RS-5 abiertas) |
 
 Los objetivos de RPO y RTO de este documento son **propuestos**, no capacidades demostradas. Lo único demostrado hasta hoy es la restauración aislada de copias puntuales (R73 §8.1, R74 §16.3).
 
@@ -109,3 +109,25 @@ No contrata planes, no activa PITR, no crea cuentas en servicios nuevos (R2, One
 | RS-3 | Autorizar la copia nueva inmediata (no hay ninguna posterior a la activación) | Sí, ya |
 | RS-4 | Supabase Pro antes de la primera empresa comercial, y en qué organización | Sí, en una organización o proyecto propio de ADEX |
 | RS-5 | PITR: no por ahora; volver a evaluarlo con la primera empresa comercial | No por ahora |
+
+## 8. Implementación de la alternativa A (2026-10-26)
+
+| Elemento | Estado |
+|---|---|
+| Script versionado | `saas/scripts/backup/adex-backup.mjs` (`npm run backup -- <orden>` desde `saas`). Sucede a `~/ADEX-tools/respaldo-r73.mjs`, que se conserva |
+| Copia inmediata (RS-3) | **`adex-20261026T1535`**: 90 tablas y 2.458 filas, descifrado comprobado, copiada a OneDrive (`%OneDrive%\ADEX-respaldos`) |
+| Coherencia | Los recuentos por tabla y el volcado salen de la **misma instantánea** de solo lectura (`pg_export_snapshot` + `pg_dump --snapshot`) |
+| TLS | Verificado con el certificado raíz de Supabase (`ADEX_PG_SSL_CA`, `verify-full`) |
+| Ensayo de restauración | `verificar` sobre `adex-20261026T1535`: restauración en PostgreSQL local aislado con **90 tablas, 0 diferencias, 0 errores inesperados** y migraciones hasta 0038 |
+| Segundo destino (RS-1) | OneDrive recibe `.dump.enc`, `.key.rec` y `.json`. **Nunca** `.key.dpapi` ni datos en claro |
+| Clave de recuperación (RS-2) | Orden `clave-recuperacion`. **Pendiente de que el propietario la ejecute en su terminal**: genera la clave, la muestra una sola vez para su gestor de contraseñas y la aplica también a las cinco copias anteriores, sin modificarlas (solo añade `.key.rec`) |
+| Recuperación sin este equipo | `recuperar --copia … [--carpeta …]` pide la clave sin mostrarla y comprueba la huella. Autoprueba con claves sintéticas (`prueba-recuperacion`): ida y vuelta correcta y clave equivocada rechazada |
+| Retención | Implementada (`podar`, automática tras cada copia): 14 diarias, 1 semanal durante 8 semanas, 1 mensual durante 12 meses y las de antes de cada migración durante 12 meses. Solo afecta a copias R76; lo podado va a la Papelera. Probado con 135 copias sintéticas en una carpeta temporal: quedan 29, incluida la copia antigua |
+| Automatización | `saas/scripts/backup/registrar-tareas.ps1` crea tres tareas en `\ADEX\`: copia diaria a las 21:30 (hora de Colombia, 23:30 en Brasil), ensayo los lunes a las 10:00 y vigilancia al iniciar sesión y a las 12:00. **Pendiente de que la registre el propietario**: el permiso automático de esta sesión no permitió crear tareas programadas |
+| Avisos | Notificación de Windows si falla una copia o un ensayo, si no hay una copia correcta en 36 h o si falta la clave de recuperación. Además, `ADEX-respaldos\estado.json` y `registro.log` |
+| Limitación | Las tareas solo corren con la sesión de Windows iniciada. Si el equipo estuvo apagado, se ejecutan al encenderlo. RPO real: 24 h o el tiempo que el equipo pase apagado |
+
+### Acciones del propietario (una vez, en PowerShell, desde `RutaCash\saas`)
+
+1. `npm run backup -- clave-recuperacion`: guardar la clave que muestra en el gestor de contraseñas, como «ADEX respaldos - clave de recuperación».
+2. `powershell -ExecutionPolicy Bypass -File scriptsackupegistrar-tareas.ps1`: registra las tres tareas.

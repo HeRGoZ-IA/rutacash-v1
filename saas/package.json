@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "test:unit": "node --import ./scripts/register-alias.mjs --test --test-reporter=spec \"test/unit/*.test.ts\"",
     "test:db": "node --import ./scripts/register-alias.mjs scripts/run-db-tests.ts",
+    "backup": "node --import ./scripts/register-alias.mjs scripts/backup/adex-backup.mjs",
     "test:auth-real": "node --import ./scripts/register-alias.mjs --test --test-reporter=spec \"test/auth-real/*.test.ts\"",
     "test": "npm run typecheck && npm run test:unit && npm run test:db",
     "db:rebuild": "node --import ./scripts/register-alias.mjs scripts/rebuild-local.ts",

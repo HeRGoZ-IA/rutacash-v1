@@ -42,13 +42,18 @@
      * Pruebas nuevas MORA-001…003 y RB-021.
    * **No probado:** la mora con datos reales de BlueLine (no se escribió nada en BlueLine).
 3. **Qué falta:**
-   * Helmer decide los respaldos RS-1…RS-5 (`docs/ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md`).
-     * Urgente: no hay copia posterior a la activación de Base por Ruta.
+   * **Respaldos (aprobada la A el 2026-10-26).** Están hechos el script versionado (`saas/scripts/backup/`) y la copia `adex-20261026T1535`, verificada y en OneDrive.
+     * Helmer debe ejecutar una vez, desde `saas`:
+       1. `npm run backup -- clave-recuperacion` (guarda la clave en su gestor de contraseñas);
+       2. `powershell -ExecutionPolicy Bypass -File scriptsackupegistrar-tareas.ps1`.
+     * El permiso automático no dejó a Claude crear tareas programadas.
+   * Siguen abiertas RS-4 (Supabase Pro antes de la primera empresa comercial) y RS-5 (PITR).
    * Decidir si se quiere además bloquear la desactivación con efectivo (2.3.9; recomendación: no).
    * El socio prueba un cierre real del mismo día y el buscador en el celular.
    * Resto: `docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`, que es el **listado canónico**.
 4. **Decisiones tomadas:**
    * 2026-10-26:
+     * Respaldos: alternativa A con OneDrive y clave de recuperación en el gestor de Helmer (RS-1…RS-3).
      * RB-D13 está aprobado (falta su interfaz).
      * La inyección de Aguas Lindas queda pospuesta: no es un defecto.
      * Las transferencias entre rutas son inmediatas.
@@ -91,6 +96,11 @@ Si cambia su estado, su propósito, su despliegue o su ubicación, o si se elimi
 ## Changelog
 
 El historial detallado por rondas está en `docs/REGISTRO_MAESTRO_EVOLUCION_ADEX.md`.
+
+### 2026-10-26 — Ronda 76.1: respaldos
+
+* Script de respaldo versionado.
+* Copia `adex-20261026T1535` verificada y en OneDrive.
 
 ### 2026-10-26 — Ronda 76
 
