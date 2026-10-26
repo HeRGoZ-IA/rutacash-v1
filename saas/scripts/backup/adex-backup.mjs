@@ -20,6 +20,8 @@
 //   recuperar --copia adex-… [--carpeta D] [--salida F]
 //                                                  SIN este equipo: pide la clave de recuperación (sin mostrarla), descifra
 //                                                  la copia (p. ej. desde OneDrive) y deja el volcado listo para pg_restore
+//   comprobar-clave                                pide la clave de recuperación (sin mostrarla) y dice si es la correcta:
+//                                                  abre la última copia con ella en memoria; no escribe ni guarda nada
 //   prueba-recuperacion                            autoprueba con claves sintéticas (no toca ninguna copia real)
 //
 // Archivos de cada copia `adex-<AAAAMMDDTHHMM>` (carpeta local, acceso solo de este usuario):
@@ -291,7 +293,7 @@ async function claveRecuperacion() {
     dpapiProtect(kek, KEK_DPAPI);
     const b32 = toBase32(kek);
     console.log('\n=== CLAVE DE RECUPERACIÓN DE LOS RESPALDOS DE ADEX ===');
-    console.log('Guárdela AHORA en su gestor de contraseñas (entrada «ADEX respaldos - clave de recuperación»).');
+    console.log('Guárdela AHORA en Bitwarden (Nuevo elemento → Nota segura «ADEX respaldos - clave de recuperación») y en su libreta.');
     console.log('Se muestra UNA sola vez. No la envíe por chat ni la pegue en documentos.\n');
     console.log(`    ${b32.match(/.{1,4}/g).join('-')}\n`);
     console.log(`Comprobación (para confirmar que la copió bien): termina en «${b32.slice(-4)}» y su huella es ${sha(kek).slice(0, 8)}.\n`);
@@ -366,6 +368,22 @@ async function recuperar() {
   console.log('Siga el procedimiento de recuperación (docs/ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md §5) y borre este archivo al terminar: contiene los datos en claro.');
 }
 
+// Comprobar lo anotado (Bitwarden o libreta) sin escribir nada: la clave abre la última copia y la huella coincide.
+async function comprobarClave() {
+  const name = copies().filter((n) => fs.existsSync(path.join(LOCAL, `${n}.key.rec`))).at(-1);
+  if (!name) throw new Error('todavía no hay copias protegidas con la clave de recuperación: ejecute antes clave-recuperacion');
+  const meta = JSON.parse(fs.readFileSync(path.join(LOCAL, `${name}.json`), 'utf8'));
+  let kek;
+  try { kek = fromBase32(await askHidden('Clave de recuperación, tal como la anotó (no se mostrará): ')); }
+  catch (e) { console.log(`NO es correcta: ${e.message}. Revise lo anotado (solo letras y números del 2 al 9, sin I, O, 0 ni 1).`); process.exitCode = 1; return; }
+  let ok = false;
+  try { const plain = decryptWithRecovery(LOCAL, name, kek); ok = sha(plain) === meta.sha256_volcado; plain.fill(0); } catch { ok = false; }
+  kek.fill(0);
+  log(`comprobar-clave: ${ok ? 'correcta' : 'INCORRECTA'} (${name})`);
+  if (ok) console.log(`CORRECTA: abre la copia ${name}. Lo que anotó sirve para recuperar los respaldos.`);
+  else { console.log('NO es correcta: no abre las copias. Revise carácter por carácter lo anotado.'); process.exitCode = 1; }
+}
+
 // Autoprueba: el mismo camino que una recuperación real, con claves y datos sintéticos generados aquí.
 function pruebaRecuperacion() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adex-rec-test-'));
@@ -405,7 +423,8 @@ try {
   else if (cmd === 'recuperar') await recuperar();
   else if (cmd === 'podar') console.log(JSON.stringify({ podadas: prune() }));
   else if (cmd === 'prueba-recuperacion') pruebaRecuperacion();
-  else { console.log('órdenes: crear | verificar | clave-recuperacion | estado | recuperar | prueba-recuperacion'); process.exitCode = 2; }
+  else if (cmd === 'comprobar-clave') await comprobarClave();
+  else { console.log('órdenes: crear | verificar | clave-recuperacion | comprobar-clave | estado | recuperar | podar | prueba-recuperacion'); process.exitCode = 2; }
 } catch (e) {
   const msg = String(e?.message ?? e).slice(0, 500);
   log(`${cmd} FALLÓ: ${msg}`);
