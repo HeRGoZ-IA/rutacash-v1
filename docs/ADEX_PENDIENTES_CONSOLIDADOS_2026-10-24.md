@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Creado | 2026-10-24 (el nombre del archivo conserva esa fecha para no romper referencias) |
-| Última actualización | **2026-10-26 (Ronda 76)**: precisiones del propietario, frente 2 (3.2 y 3.3) y propuesta de respaldos |
+| Última actualización | **2026-10-27**: decisión 2.3.9 aprobada (no bloquear). Antes, 2026-10-26 (Ronda 76): precisiones del propietario, frente 2 (3.2 y 3.3) y propuesta de respaldos |
 | Enlazado desde | [Registro Maestro §G](./REGISTRO_MAESTRO_EVOLUCION_ADEX.md) |
 
 Es el **único** listado de pendientes del proyecto. No se crean versiones paralelas: se actualiza este archivo y se conservan los identificadores. Lo que deja de estar pendiente se marca, no se borra.
@@ -101,7 +101,7 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 | 2.3.6 | **DS-13.** Residencia de datos y normativa | Visión §16 |
 | 2.3.7 | Mapas y direcciones: proveedor de búsqueda por dirección (D73-05) y proveedor de mapas para uso comercial | R73 §7, R67 §5 |
 | 2.3.8 | Revisión de seguridad antes de abrir el producto al público (recomendada, no ejecutada) | Reglas del espacio de trabajo |
-| 2.3.9 | **Desactivación de trabajadores con efectivo (opcional).** Hoy se permite a propósito (ver 3.3). ¿Se quiere además **bloquearla** mientras tenga efectivo? Si se bloquea, tampoco se podría cortar el acceso a quien se va con el dinero. Recomendación: no bloquear | R76 |
+| 2.3.9 | **Desactivación de trabajadores con efectivo.** **APROBADO por el propietario (2026-10-27): «Me quedo con la opción A»** = **no se bloquea**. Se mantiene el comportamiento vigente de 3.3: desactivar corta el acceso al instante y el efectivo sigue visible, cuadrable y a nombre del trabajador. Sin trabajo técnico | R76; decisión 2026-10-27 |
 
 ### 2.4 Comercial SaaS
 
@@ -218,4 +218,4 @@ Vienen de documentos de septiembre (etapa CLEAN). **No son defectos actuales con
 | Cierre de periodo que incluye el día en curso | `bca28d3` + 0038 (2026-10-26) |
 | Búsqueda sin acentos en todos los buscadores (3.1) | `c1976db` + `bffdfc1` (2026-10-27) |
 | Mora al día (3.2) | R76 |
-| Desactivación de trabajadores con efectivo (3.3): efectivo visible y cuadrable | R76 (por diseño; bloqueo opcional en 2.3.9) |
+| Desactivación de trabajadores con efectivo (3.3 y 2.3.9): no se bloquea; efectivo visible y cuadrable | R76 (por diseño) + propietario 2026-10-27 (2.3.9, opción A) |
