@@ -129,7 +129,7 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 
 | # | Trabajo | Prioridad sugerida | Estado | Fuente |
 |---|---|---|---|---|
-| 3.1 | Búsqueda de clientes sin acentos: «joao» no encontraba «JOÃO» | Media | **Parcial.** Resuelto en `c1976db` para el Cobrador (Recaudo, Nueva venta, Histórico de abonos) y para Ventas del Administrador, junto con el buscador que no dejaba escribir en el celular. Faltan Clientes del Administrador y del Secretario, y Usuarios | R74 §3 |
+| 3.1 | Búsqueda sin acentos: «joao» no encontraba «JOÃO» | Media | **HECHO** (2026-10-27, `bffdfc1`): Clientes del Administrador y del Secretario y Usuarios usan la misma función que el Cobrador y Ventas (`c1976db`). E2E A-16b. Técnico: publicado en Vercel. Operativo: sin validar por usuarios | R74 §3 |
 | 3.2 | La mora (`days_overdue` y el estado «vencida» de las cuotas) solo se recalculaba al registrar algo en la venta | Alta | **CORREGIDO (R76).** La API calcula estado y días al leer, con la fecha contable de la empresa. No escribe ni mueve dinero. Pruebas MORA-001…003. Técnico: publicado en Render (ver Registro). Operativo: sin validar por usuarios | R24 §5, R76 |
 | 3.3 | Desactivar un Cobrador o Supervisor que aún tiene efectivo no se bloquea; la regla RB-D1 solo existe para Administradores | Alta | **RESUELTO POR DISEÑO, con evidencia (R76).** Desactivar corta el acceso al instante, pero no mueve, perdona ni oculta el efectivo. El trabajador sigue en el cuadre de la ruta («· inactivo»), el responsable recibe lo que entrega y el faltante queda a su nombre pendiente de conciliar. PostgreSQL lo admite expresamente («nunca se deja dinero varado»). Pruebas SEC3-006 (bolsas) y RB-021 (Base por Ruta). Sin cambios funcionales. Bloquearlo es una opción del propietario (2.3.9) | Fase 3, R74 §15, R76 |
 | 3.4 | Consulta del historial de responsables de una ruta | Media | Pendiente | R25 §4 |
@@ -216,5 +216,6 @@ Vienen de documentos de septiembre (etapa CLEAN). **No son defectos actuales con
 | Transferencias entre rutas inmediatas (regla vigente) | R59 / R74 |
 | Crear clientes o ventas sin conexión: **prohibido** | R65 (decisión vigente) |
 | Cierre de periodo que incluye el día en curso | `bca28d3` + 0038 (2026-10-26) |
+| Búsqueda sin acentos en todos los buscadores (3.1) | `c1976db` + `bffdfc1` (2026-10-27) |
 | Mora al día (3.2) | R76 |
 | Desactivación de trabajadores con efectivo (3.3): efectivo visible y cuadrable | R76 (por diseño; bloqueo opcional en 2.3.9) |
