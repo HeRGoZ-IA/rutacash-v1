@@ -499,7 +499,7 @@ try {
 
     // Venta directa del Administrador desde la Base de Centro 2 (ruta sin Cobrador): nuevo cliente y venta.
     await login('admin1.norte@example.test');
-    const c2Client = 'Cliente E2E Centro 2 Directa';
+    const c2Client = 'Cliente E2E Centro 2 Directa João';   // con tilde: lo usa la búsqueda sin acentos (A-16b)
     await go('/admin/clients'); await sleep(2000);
     await clickText('button', /Nuevo cliente/);
     await page.waitForFunction(() => [...document.querySelectorAll('label')].some((l) => l.innerText.includes('Número de documento')), { timeout: 20_000 });
@@ -512,6 +512,13 @@ try {
     let cl = null;
     for (let i = 0; i < 15 && !cl; i++) { await sleep(1000); cl = await one('select id, route_id from adex.clients where name = $1', [c2Client]); }
     ok('A-16', ['C-01'], 'Admin 1 crea un cliente en Centro 2 desde Clientes', clientOk && cl?.route_id === C2, JSON.stringify(cl));
+    // Pendiente 3.1: el buscador de Clientes no distingue acentos («joao» encuentra «JOÃO»).
+    await page.evaluate(() => { const el = document.querySelector('input[aria-label="Buscar clientes"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'joao'); el.dispatchEvent(new Event('input', { bubbles: true })); });
+    const foundFolded = await page.waitForFunction(() => /DIRECTA JO[ÃA]O/i.test(document.body.innerText), { timeout: 10_000 }).then(() => true).catch(() => false);
+    ok('A-16b', ['C-01'], 'Clientes: buscar «joao» (sin tilde) encuentra al cliente «… Directa João»', foundFolded);
+    await page.evaluate(() => { const el = document.querySelector('input[aria-label="Buscar clientes"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ''); el.dispatchEvent(new Event('input', { bubbles: true })); });
     const bC2 = await base(C2), bC1 = await base(C1);
     await go('/admin/active-sales'); await sleep(2000);
     await clickText('button', /^Nueva venta$/);

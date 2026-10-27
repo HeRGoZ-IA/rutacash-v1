@@ -26,6 +26,7 @@ import { ClientCreditHistory } from '@/components/ui/ClientCreditHistory'
 import { generateId } from '@/lib/utils'
 import { nowISO, formatDate, today, formatCurrency, normalizeDoc } from '@/lib/formatters'
 import { formatBusinessName, formatClientName } from '@/lib/displayName'
+import { foldText } from '@/lib/searchFilter'
 import { logAction } from '@/services/auditService'
 import { createDirectSale } from '@/services/saleRequestService'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute, can } from '@/lib/permissions'
@@ -157,8 +158,9 @@ export default function ClientsPage() {
   // Recorte por Oficina/Ruta ANTES de cualquier otro filtro de la pantalla.
   const clientsEnAlcance = officeFilter.filterRows(clients)
   const filtered = clientsEnAlcance.filter(c => {
-    const q = search.toLowerCase()
-    const matchSearch = !q || c.nombre.toLowerCase().includes(q) || c.documento.includes(q) || c.telefonoPrincipal.includes(q)
+    // Sin distinguir mayúsculas ni acentos («joao» encuentra «JOÃO»), como el resto de buscadores.
+    const q = foldText(search)
+    const matchSearch = !q || foldText(c.nombre).includes(q) || c.documento.includes(q) || c.telefonoPrincipal.includes(q)
     const matchStatus = !filterStatus || c.status === filterStatus
     // La ruta la aplica el filtro Oficina → Ruta compartido (arriba).
     const matchRoute = true

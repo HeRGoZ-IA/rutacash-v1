@@ -34,6 +34,7 @@ import { generateId, generateTemporaryPassword } from '@/lib/utils'
 import { validateEmail, sameEmail } from '@/lib/email'
 import { nowISO, initials } from '@/lib/formatters'
 import { formatPersonName } from '@/lib/displayName'
+import { foldText } from '@/lib/searchFilter'
 import { logAction } from '@/services/auditService'
 import { getAssignedRouteIds } from '@/lib/roles'
 import { groupRoutesByOffice } from '@/lib/officeGrouping'
@@ -399,9 +400,10 @@ export default function UsersPage() {
   // limita a los usuarios que el actor puede ver. No se expone el total del tenant.
   const scopedUsers = users.filter(visibleByScope)
   const filteredUsers = scopedUsers.filter(u => {
-    const q = search.trim().toLowerCase()
+    // Sin distinguir mayúsculas ni acentos («jose» encuentra «José»).
+    const q = foldText(search)
     if (!q) return true
-    return u.nombre.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || ROLE_LABELS[u.rol].toLowerCase().includes(q)
+    return foldText(u.nombre).includes(q) || foldText(u.email).includes(q) || foldText(ROLE_LABELS[u.rol]).includes(q)
   })
 
   const showRoutes = form.rol !== 'superadmin'

@@ -15,6 +15,7 @@ import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import { logAction } from '@/services/auditService'
 import { nowISO } from '@/lib/formatters'
 import { formatClientName } from '@/lib/displayName'
+import { foldText } from '@/lib/searchFilter'
 import type { Client } from '@/models/types'
 
 /**
@@ -103,10 +104,11 @@ export default function SecretarioClientsPage() {
   // Contexto completo de la fila: la Oficina se DERIVA de la ruta del cliente.
   const routeName = (id: string) => officeFilter.labelFor(id)
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    // Sin distinguir mayúsculas ni acentos («joao» encuentra «JOÃO»).
+    const q = foldText(search)
     // Recorte por Oficina/Ruta ANTES de la búsqueda.
     return officeFilter.filterRows(clients)
-      .filter(c => !q || c.nombre.toLowerCase().includes(q) || c.documento.includes(q))
+      .filter(c => !q || foldText(c.nombre).includes(q) || c.documento.includes(q))
       .sort((a, b) => a.nombre.localeCompare(b.nombre))
   }, [clients, search, officeFilter])
 
