@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Creado | 2026-10-24 (el nombre del archivo conserva esa fecha para no romper referencias) |
-| Última actualización | **2026-10-27**: decisión 2.3.9 aprobada (no bloquear). Antes, 2026-10-26 (Ronda 76): precisiones del propietario, frente 2 (3.2 y 3.3) y propuesta de respaldos |
+| Última actualización | **2026-10-27**: decisiones 2.3.9 (no bloquear) y 2.1.15 (casilla «Para Cobradores», trabajo 3.14) aprobadas. Antes, 2026-10-26 (Ronda 76): precisiones del propietario, frente 2 (3.2 y 3.3) y propuesta de respaldos |
 | Enlazado desde | [Registro Maestro §G](./REGISTRO_MAESTRO_EVOLUCION_ADEX.md) |
 
 Es el **único** listado de pendientes del proyecto. No se crean versiones paralelas: se actualiza este archivo y se conservan los identificadores. Lo que deja de estar pendiente se marca, no se borra.
@@ -62,7 +62,7 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 | 2.1.12 | **D27.** ¿Puede el Cobrador pedir Base a su responsable desde la aplicación? | No existe la solicitud | Decisiones SaaS §3 |
 | 2.1.13 | **Medios de pago distintos del efectivo** (transferencia, PIX) | Solo efectivo. Habría que añadir una cuenta bancaria al libro | Fase 5 |
 | 2.1.14 | **Redondeo en pesos colombianos:** dos decimales técnicos frente a presentación sin centavos | Sin decidir | Visión §9, §16 |
-| 2.1.15 | **Nombres de los tipos de gasto** | Excepción vigente de la normalización: sin decisión | Auditoría de nombres |
+| 2.1.15 | **Tipos de gasto del Cobrador y del Administrador** | **APROBADO por el propietario (2026-10-27):** «Apruebo 2.1.15 como lo propones: un solo listado con casilla «Para Cobradores», el Supervisor igual que el Cobrador, y marcados al inicio Transporte, Alimentación y Combustible». Motivo (socio): los gastos del Cobrador deben ser mínimos; los del Administrador, amplios. Detalle aprobado: (1) un solo catálogo por empresa; el Administrador ve todos los tipos; (2) Cobrador y Supervisor solo ven y usan los marcados «Para Cobradores»; (3) en empresas nuevas nacen marcados Transporte, Alimentación y Combustible, y cada empresa cambia las casillas cuando quiera; (4) la regla la valida también el servidor; (5) desmarcar no altera los gastos ya registrados; (6) un gasto capturado sin conexión con un tipo desmarcado después se acepta al sincronizar, con aviso al Administrador. Los nombres de los 7 tipos iniciales no cambian. Implementación → **3.14** | Auditoría de nombres; decisión 2026-10-27 |
 | 2.1.16 | Rótulo del selector «Selecciona tu ruta» del Supervisor | **Ya no es una decisión:** los nombres están aprobados (N-1…N-6). Comprobado en el código el 2026-10-26: en **Online** (`online/src/bridge/pages/collector/CollectorSelectRoutePage.tsx`, `760722b`/`9ca7dc4`) muestra «Base disponible» (Base real de la ruta) y «Base del trabajador» por separado. El rótulo «Base de la ruta» solo sigue en el archivo original de CLEAN (`src/pages/collector/…`), que Online no sirve. Ver 3.11 | R74 §15.6 |
 
 ### 2.2 Datos, clientes y apertura
@@ -142,6 +142,7 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 | 3.11 | Archivo CLEAN `src/pages/collector/CollectorSelectRoutePage.tsx`: conserva «Base de la ruta» | Baja | Online usa su copia corregida, así que solo afecta a CLEAN, que está retirada. No exige decisión | R74 §15.6 |
 | 3.12 | **RB-D13 en la interfaz:** pantalla para que un Administrador reembolse a otro desde sus propias rutas (aprobado, 2.1.3) | Media | Pendiente; no implementado | R74 §15.7 |
 | 3.13 | Versionar el script de copia cifrada y su ensayo de restauración (propuesta de respaldos §3) | Alta | **HECHO** (`saas/scripts/backup/`). Activado el 2026-10-26 (clave y tareas) | R76 |
+| 3.14 | **Tipos de gasto «Para Cobradores» (2.1.15, aprobado):** casilla por tipo en «Categorías de gasto»; filtrar los tipos en la pantalla de gastos de Cobrador y Supervisor (también la captura sin conexión); validar en la API; nuevas empresas con Transporte, Alimentación y Combustible marcados; aceptar con aviso al Administrador las capturas offline con un tipo desmarcado después. Requiere migración (la ejecuta el propietario) y despliegue manual en Render. **Por definir en el chat Central:** qué casillas reciben las empresas existentes, como BlueLine (propuesta: las mismas tres, si existen con ese nombre) | Media | Pendiente; para el chat Central | Decisión 2026-10-27 |
 
 ## 4. Validaciones pendientes
 
@@ -209,7 +210,7 @@ Vienen de documentos de septiembre (etapa CLEAN). **No son defectos actuales con
 | Riesgos de concurrencia R1–R11 y fin de periodo por el reloj del dispositivo | Servidor (Fases 2–6) |
 | Indicadores «Asignado / En rutas / Colocado» | R59 y R74 (panel de rutas) |
 | Pruebas HIST-001/002/003 | `8d37c05` |
-| Normalización de nombres (N-1 a N-6) | `9ca7dc4`. **Excepción vigente:** nombres de los tipos de gasto (2.1.15). El rótulo de CLEAN (3.11) no afecta a Online |
+| Normalización de nombres (N-1 a N-6) | `9ca7dc4`. Los tipos de gasto (2.1.15) se decidieron el 2026-10-27: conservan sus nombres y se añade la casilla «Para Cobradores» (3.14). El rótulo de CLEAN (3.11) no afecta a Online |
 | Publicación de R73 y R74 | `2fa7152`, `8d37c05` |
 | Revisión personal general de Online (1.1) | Propietario, 2026-10-24/25 |
 | RB-D13 como decisión (la interfaz sigue en 3.12) | Propietario |
