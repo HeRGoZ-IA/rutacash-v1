@@ -21,11 +21,11 @@
 
 ## Dónde quedamos
 
-*Actualizado: 2026-10-28 (Ronda 81, en curso)*
+*Actualizado: 2026-10-28 (Ronda 81, publicada)*
 
-1. **Objetivo actual:** publicar la Ronda 81 (3.12, 3.18 y 3.19 juntas): implementadas y probadas en local, commit local **sin push**, **sin migración**. Orden: push (Vercel se publica solo) y despliegue manual de Render `adex-online-api` (lectura nueva `/v1/periods/closed-ranges`; sin ella, Gastos muestra todo junto como antes).
+1. **Objetivo actual:** sin trabajo en curso. Siguiente: actualizar la guía del socio (`docs/GUIA_SOCIO_LIQUIDACIONES_Y_CIERRES.md`) con los nombres nuevos, y el resto del listado canónico (`docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`).
 2. **Qué quedó hecho:**
-   * Ronda 81 (2026-10-28, local): 3.19 Liquidaciones con nombres nuevos, aviso del último cierre y fechas propuestas; 3.18 Gastos del Cobrador y Supervisor separados por el último cierre; 3.12 pago de la obligación de otro Administrador probado en pantalla. Probado: PostgreSQL 595/0/1, CLEAN, tipos, E2E 93/46/25. **No probado:** con BlueLine ni por el socio. El texto «Después del último cierre» se ajustó tras el E2E (solo tipos comprobados).
+   * Ronda 81 (2026-10-28, **publicada**: `a12d915`, Render y Vercel `index-DrdhlBol.js`, sin migración): 3.19 Liquidaciones con nombres nuevos, aviso del último cierre y fechas propuestas; 3.18 Gastos del Cobrador y Supervisor separados por el último cierre; 3.12 pago de la obligación de otro Administrador probado en pantalla. Probado: PostgreSQL 595/0/1, CLEAN, tipos, E2E 93/46/25. **No probado:** con BlueLine ni por el socio. El texto «Después del último cierre» se ajustó tras el E2E (solo tipos comprobados).
    * Ronda 80 (2026-10-28, **publicada**): 3.14 (`44f7bae`, migración 0040 aplicada por Helmer, respaldo previo `adex-20261028T1542`; Render y Vercel). Casilla «Para Cobradores» en Categorías de gasto; Cobrador y Supervisor solo ven y usan los marcados (lo valida la API); eliminar un tipo con gastos lo quita de la lista y conserva sus gastos; gasto sin conexión con un tipo desmarcado después se acepta y avisa al Administrador. Probado: PostgreSQL 595/0/1, E2E 93/41/25, reversión 11/11, CLEAN y tipos. BlueLine quedó con 3 de 7 tipos marcados. **No probado:** con BlueLine ni por el socio.
    * Ronda 79 (2026-10-28, **publicada**): 3.17, solo el Administrador anula (`ad1f4e9`, migración 0039 aplicada por Helmer). Respaldo previo `adex-20261028T1409` verificado; 0039 verificada en staging en solo lectura; Render `adex-online-api` Live con `1e0e8cf`; Vercel `index-sDnD_a1d.js`. Probado en local: PostgreSQL 590/0/1, E2E 89/41/25, reversión 10/10. **No probado:** con BlueLine ni por el socio.
    * Ronda 78 (`225dbc6`, Vercel, 2026-10-27): peticiones del socio 3.15 (campo «Cuotas a pagar» en el cobro del Cobrador/Supervisor y en «Registrar recaudo» del Administrador; el Secretario no registra abonos) y 3.16 (fecha del desembolso; columna «Inicio de cobro» corregida).
@@ -33,8 +33,8 @@
    * Ronda 76: mora al día (`865844a`, Render) y respaldos con la alternativa A activa (copias diarias cifradas en OneDrive, clave de recuperación comprobada, tareas registradas; primera copia automática `adex-20261027T1947`).
    * **Probado:** pruebas financieras (CUOTAS-001…003), las de CLEAN, los tipos y E2E 89/89, 41/41 y 25/25. **No probado:** con datos reales ni por el socio.
 3. **Qué falta:**
-   * Publicar la Ronda 81 (ver arriba).
-   * Que el socio valide 3.14 (categorías «Para Cobradores»), 3.15, 3.16, 3.17 (anulaciones), el cierre del mismo día y el buscador en su celular.
+   * Actualizar la guía del socio con los nombres nuevos de Liquidaciones (3.19).
+   * Que el socio valide 3.12, 3.14, 3.15, 3.16, 3.17, 3.18, 3.19, el cierre del mismo día y el buscador en su celular.
    * Siguen abiertas RS-4 (Supabase Pro antes de la primera empresa comercial) y RS-5 (PITR).
    * Grupo de chats «ADEX - RutaCash» (2026-10-27): Central, Errores o bugs, Peticiones del socio, Ideas y producto, Respaldos y operación, Decisiones pendientes. Solo Central y Errores tocan código.
    * Resto: `docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`, que es el **listado canónico**.
@@ -88,6 +88,10 @@ Si cambia su estado, su propósito, su despliegue o su ubicación, o si se elimi
 ## Changelog
 
 El historial detallado por rondas está en `docs/REGISTRO_MAESTRO_EVOLUCION_ADEX.md`.
+
+### 2026-10-28 — Ronda 81: Liquidaciones, gastos ya cerrados y RB-D13 (publicada)
+
+* 3.19, 3.18 y 3.12: `a12d915`, sin migración. Publicado en Render y Vercel.
 
 ### 2026-10-28 — Ronda 80: tipos de gasto «Para Cobradores» (publicada)
 
