@@ -15,6 +15,7 @@ import type pg from 'pg';
 import type { ActiveContext } from '../authz/context.ts';
 import { holds, memberNames, requestView, type RequestRow } from './requests.ts';
 import { jointToConfirm } from './corrections.ts';
+import { collectorCategoriesReady } from '../structure/categories.ts';
 
 const INFO_DAYS = 30;
 const INFO_LIMIT = 60;
@@ -168,6 +169,23 @@ export async function notifications(client: pg.PoolClient, ctx: ActiveContext) {
         actor: { membershipId: o.actor_membership_id, name: name(o.actor_membership_id), role: o.actor_role },
         adminId: o.admin_membership_id, adminName: name(o.admin_membership_id), workerId: o.worker_membership_id, workerName: name(o.worker_membership_id) },
     } });
+  }
+  // 0040 (3.14): gasto capturado sin conexión con un tipo que ya no estaba en la lista de Cobradores (se aceptó al sincronizar).
+  if (ctx.role === 'admin' && await collectorCategoriesReady(client)) {
+    const x = await client.query<{ entity_id: string; route_id: string; route_name: string; membership_id: string; received_at: Date; amount_minor: string; category_name: string | null }>(
+      `select oc.entity_id, oc.route_id, r.name route_name, oc.membership_id, oc.received_at, e.amount_minor, k.name category_name
+         from adex.offline_captures oc
+         join adex.expenses e on e.company_id = oc.company_id and e.id = oc.entity_id
+         join adex.routes r on r.company_id = oc.company_id and r.id = oc.route_id
+         left join adex.expense_categories k on k.company_id = e.company_id and k.id = e.category_id
+        where oc.company_id = $1 and oc.kind = 'expense' and oc.category_outside_list and oc.received_at > now() - make_interval(days => $2)
+        order by oc.received_at desc, oc.entity_id limit $3`, [ctx.companyId, INFO_DAYS, INFO_LIMIT]);
+    const who = await memberNames(client, ctx, x.rows.map((r) => r.membership_id));
+    for (const r of x.rows) {
+      info.push({ at: r.received_at.toISOString(), item: { type: 'offline-expense-outside-list', at: r.received_at.toISOString(),
+        expense: { id: r.entity_id, routeId: r.route_id, routeName: r.route_name, workerId: r.membership_id, workerName: who.get(r.membership_id) ?? null,
+          categoryName: r.category_name, amountMinor: Number(r.amount_minor) } } });
+    }
   }
   info.sort((a, b) => b.at.localeCompare(a.at));
   return { actionRequired, waiting, info: info.slice(0, INFO_LIMIT).map((x) => x.item), count: actionRequired.length, days: INFO_DAYS };

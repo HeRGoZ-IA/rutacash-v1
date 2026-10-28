@@ -27,6 +27,7 @@ import { loadMembers, need } from '../structure/common.ts';
 import { oneOf, optId, optText, PAGE_ORDER, pageFilters, pathId, reqId, reqText } from '../structure/input.ts';
 import { requireAuthority, requireCustodian, requireOperationId, routeOf } from '../capital/service.ts';
 import { parseOffline, requireOfflineActor, storeOfflineCapture } from '../offline/capture.ts';
+import { categoryForUse, collectorCategoriesReady } from '../structure/categories.ts';
 import { derivedOperationId, expenseDependencies, requireControlsAllRoutesOr, requireOpenPeriods } from '../capital/corrections.ts';
 import { capitalModelOf, contributionRoutes, entriesOf, expenseContributions, parseContributions, requireGeneralFundingActor, sumOf } from '../capital/generalFunding.ts';
 
@@ -144,8 +145,9 @@ async function createGeneralExpense(client: pg.PoolClient, ctx: ActiveContext, b
   } else if (contributions) {
     throw new ApiError(400, 'INVALID_INPUT', 'own money expenses have no route contributions', { field: 'contributions' });
   }
-  const cat = (await client.query<{ id: string }>('select id from adex.expense_categories where company_id = $1 and id = $2', [ctx.companyId, categoryId])).rows[0];
+  const cat = await categoryForUse(client, ctx, categoryId);
   if (!cat) throw new ApiError(400, 'CATEGORY_INVALID');
+  if (!cat.active) throw new ApiError(400, 'CATEGORY_INACTIVE', 'the expense category is inactive or was deleted');
   const names = contributions ? await contributionRoutes(client, ctx, contributions) : new Map<string, string>();
   const r = (await client.query<{ r: Record<string, unknown> }>('select adex.general_expense_post($1, $2, $3, $4, $5, $6, $7, $8) r',
     [opId, scope, categoryId, amount, description, reference, funding, contributions ? JSON.stringify(contributions) : null])).rows[0]!.r;
@@ -237,14 +239,23 @@ export async function createExpense(client: pg.PoolClient, ctx: ActiveContext, b
       }
     }
   }
-  const cat = (await client.query<{ id: string }>('select id from adex.expense_categories where company_id = $1 and id = $2', [ctx.companyId, categoryId])).rows[0];
+  const cat = await categoryForUse(client, ctx, categoryId);
   if (!cat) throw new ApiError(400, 'CATEGORY_INVALID');
+  // 0040 (3.14): el Cobrador y el Supervisor usan solo los tipos «Para Cobradores»; nadie usa uno inactivo o eliminado.
+  // Sin conexión se acepta igual (se capturó con la lista de entonces) y avisa al Administrador de la ruta.
+  const forbidden = !cat.active ? 'CATEGORY_INACTIVE' : (ctx.role === 'cobrador' || ctx.role === 'supervisor') && !cat.for_collectors ? 'CATEGORY_NOT_FOR_COLLECTORS' : null;
+  if (forbidden && !offline) {
+    throw forbidden === 'CATEGORY_INACTIVE'
+      ? new ApiError(400, forbidden, 'the expense category is inactive or was deleted')
+      : new ApiError(403, forbidden, 'collectors and supervisors use only the expense categories marked for collectors');
+  }
+  const outsideList = !!forbidden && await collectorCategoriesReady(client);
 
   const r = (await client.query<{ r: Record<string, unknown> }>('select adex.expense_post($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) r',
     [opId, scope, routeId, workerId, categoryId, amount, description, reference, funding, fundingAdmin])).rows[0]!.r;
   const expense = await loadExpense(client, ctx, r['expenseId'] as string);
   const offlineStatus = offline
-    ? await storeOfflineCapture(client, ctx, { operationId: opId, kind: 'expense', entityId: expense.id, routeId: routeId!, capture: offline })
+    ? await storeOfflineCapture(client, ctx, { operationId: opId, kind: 'expense', entityId: expense.id, routeId: routeId!, capture: offline, categoryOutsideList: outsideList })
     : null;
   await audit(client, ctx, {
     action: 'CREATE_EXPENSE', entityType: 'expense', entityId: expense.id, routeId,
@@ -252,7 +263,7 @@ export async function createExpense(client: pg.PoolClient, ctx: ActiveContext, b
       + `${funding === 'empresa' ? ' pagado con la bolsa de la empresa' : funding === 'admin' ? ' pagado con la bolsa del Administrador' : ''}: ${amount}.`,
     after: { scope, routeId, workerId, amountMinor: amount, categoryId, expenseDate: ymd(expense.expense_date), funding, fundingAdminId: fundingAdmin },
     metadata: { operationId: opId, ledgerOperationId: r['operationId'], kind: r['kind'],
-      ...(offline ? { offline: { deviceCapturedAt: offline.deviceCapturedAt, stored: offlineStatus } } : {}) },
+      ...(offline ? { offline: { deviceCapturedAt: offline.deviceCapturedAt, stored: offlineStatus, ...(outsideList ? { categoryOutsideList: true } : {}) } } : {}) },
   });
   return { expense: await viewOf(client, ctx, expense), entries: await visibleEntries(client, ctx, r['operationId'] as string),
     offline: offline ? { deviceCapturedAt: offline.deviceCapturedAt } : null };

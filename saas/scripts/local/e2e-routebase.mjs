@@ -528,6 +528,37 @@ try {
     ok('A-16b', ['C-01'], 'Clientes: buscar «joao» (sin tilde) encuentra al cliente «… Directa João»', foundFolded);
     await page.evaluate(() => { const el = document.querySelector('input[aria-label="Buscar clientes"]');
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ''); el.dispatchEvent(new Event('input', { bubbles: true })); });
+    // Pendiente 3.14 (0040): casilla «Para Cobradores» en Categorías de gasto y lista filtrada del Cobrador.
+    const catRow = (name) => one('select id, for_collectors from adex.expense_categories where company_id = $1 and name = $2 and deleted_at is null', [N, name]);
+    const papel = await catRow('Papelería'), transp = await catRow('Transporte');
+    await go('/admin/expense-categories'); await waitTestid(`cat-collectors-${papel.id}`);
+    const shownMarks = await page.evaluate((a, b) => [a, b].map((id) => document.querySelector(`[data-testid="cat-collectors-${id}"]`)?.checked ?? null), papel.id, transp.id);
+    await tap(`cat-collectors-${papel.id}`);
+    let marked = false;
+    for (let i = 0; i < 20 && !marked; i++) { await sleep(700); marked = (await catRow('Papelería')).for_collectors === true; }
+    await both('A-16c-categorias', () => waitTestid(`cat-collectors-${papel.id}`));
+    ok('A-16c', ['C-01'], 'Categorías: Transporte nace marcada «Para Cobradores» y Papelería no; el Administrador marca Papelería', shownMarks[0] === false && shownMarks[1] === true && marked, JSON.stringify({ shownMarks, marked }));
+    await clickText('button', /Nueva categoría/); await waitTestid('cat-form-collectors');
+    await setField('Nombre de la categoría', 'Peaje E2E'); await tap('cat-form-collectors'); await sleep(300); await tap('cat-save');
+    let peaje = null;
+    for (let i = 0; i < 20 && !peaje; i++) { await sleep(700); peaje = await catRow('Peaje E2E'); }
+    ok('A-16d', ['C-01'], 'Categorías: «Nueva categoría» con la casilla marcada la crea «Para Cobradores»', peaje?.for_collectors === true, JSON.stringify(peaje));
+    let peajeGone = false;
+    if (peaje) {
+      await waitTestid(`cat-delete-${peaje.id}`); await tap(`cat-delete-${peaje.id}`); await waitTestid('cat-delete-confirm');
+      const noHistoryText = !(await page.$('[data-testid="cat-delete-keeps"]'));
+      await tap('cat-delete-confirm');
+      for (let i = 0; i < 20 && !peajeGone; i++) { await sleep(700); peajeGone = !(await one('select id from adex.expense_categories where id = $1', [peaje.id])); }
+      peajeGone = peajeGone && noHistoryText && await gone(`cat-row-${peaje.id}`, 15_000);
+    }
+    ok('A-16e', ['C-01'], 'Categorías: eliminar una categoría sin gastos la borra y sale de la lista', peajeGone);
+    await login('cobrador1.norte@example.test');
+    await go('/collector/expenses'); await waitTestid('expense-new'); await tap('expense-new'); await waitTestid('expense-category');
+    const offered = await page.$$eval('[data-testid="expense-category"] option', (os) => os.map((o) => o.textContent.trim()).filter((t) => t && !t.startsWith('Seleccionar')));
+    await both('A-16f-cobrador-categorias', () => waitTestid('expense-category'));
+    ok('A-16f', ['C-01'], 'Gastos del Cobrador: solo ofrece las categorías marcadas (Alimentación, Combustible, Papelería, Transporte)',
+      JSON.stringify([...offered].sort()) === JSON.stringify(['Alimentación', 'Combustible', 'Papelería', 'Transporte']), JSON.stringify(offered));
+    await login('admin1.norte@example.test');
     const bC2 = await base(C2), bC1 = await base(C1);
     await go('/admin/active-sales'); await sleep(2000);
     await clickText('button', /^Nueva venta$/);

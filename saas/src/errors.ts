@@ -34,6 +34,7 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX101': return new ApiError(409, 'CAPITAL_CONTROLLER_INVALID'); // v16, comprobado al COMMIT
     case 'AX201': return new ApiError(400, 'INVALID_DOCUMENT_TYPE');
     case 'AX202': return new ApiError(400, 'INVALID_DOCUMENT');
+    case 'AX720': return new ApiError(409, 'CATEGORY_DELETED');        // 0040: un tipo de gasto eliminado no cambia
     case 'AX301': return new ApiError(409, 'ROUTE_NOT_OPERATIONAL');
     case 'AX302': return new ApiError(400, 'INVALID_COLLECTOR');
     // D74-H1/O7 (DS-05 enmendada): varios perfiles en una empresa solo para el Administrador; nunca con SuperAdmin.

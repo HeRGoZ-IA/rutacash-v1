@@ -201,7 +201,9 @@ export function expenseFrom(e: V): Expense {
 }
 
 export function categoryFrom(c: V): ExpenseCategory {
-  return { id: c.id, tenantId: tenantId(), nombre: c.name, icono: s(c.icon), activa: c.active !== false };
+  // 3.14 (0040): sin el dato (API anterior) el tipo sirve a todos, como antes; uno eliminado nunca está activo.
+  return { id: c.id, tenantId: tenantId(), nombre: c.name, icono: s(c.icon), activa: c.active !== false && c.deleted !== true,
+    paraCobradores: c.forCollectors !== false, eliminada: c.deleted === true };
 }
 
 export function saleRequestFrom(r: V): SaleRequest {

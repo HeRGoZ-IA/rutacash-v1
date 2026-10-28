@@ -403,7 +403,7 @@ describe('Fase 5 · recaudos', () => {
       assert.equal((await xavier.money(`/v1/collections/${p2}/reverse`, { reason: 'Admin sin la ruta' })).status, 404);
       await close(now, now);
       assert.equal((await $ana(`/v1/collections/${p2}/reverse`, { reason: 'Todo cerrado' })).body['error'], 'PERIOD_CLOSED');
-      assert.equal((await $ana('/v1/expenses', { scope: 'ruta', routeId: rD7, categoryId: (await db.admin.query(`select id from adex.expense_categories where company_id = $1 limit 1`, [c1])).rows[0].id, amountMinor: 100 })).body['error'], 'PERIOD_CLOSED');
+      assert.equal((await $ana('/v1/expenses', { scope: 'ruta', routeId: rD7, categoryId: (await db.admin.query(`select id from adex.expense_categories where company_id = $1 and active limit 1`, [c1])).rows[0].id, amountMinor: 100 })).body['error'], 'PERIOD_CLOSED');
     } finally {
       await tz('America/Sao_Paulo');
     }

@@ -27,6 +27,7 @@ import { createCompanyExecutor, createCompanyHandler } from '../http/companyApi.
 import { createDemoHandler } from '../http/demoApi.ts';
 import { createDemoService } from '../demo/service.ts';
 import { API_FEATURES, createOnlineServer } from './app.ts';
+import { collectorCategoriesReady } from '../structure/categories.ts';
 import { adminTransfersReady, capitalRequestsReady, offlineCollectorReady, offlineDisbursementsReady, paymentLocationsReady, routeMapReady, creditRectificationReady, rectificationPaymentsReady, routeBaseReady, singleSessionReady, generalExpensesReady, adminAuthorityReady, controllerAuthorityReady } from '../collections/location.ts';
 
 /** Configuración común a los dos servicios (empresa y Owner): TLS, CORS, proveedor, límites. */
@@ -117,6 +118,8 @@ export async function start(env: NodeJS.ProcessEnv = process.env) {
   if (!(await adminAuthorityReady(apiPool))) missing.add('admin-authority-v1');
   // R74 (0037): autocorrección del responsable de capital, anulación coordinada y reembolso de obligaciones concretas.
   if (!(await controllerAuthorityReady(apiPool))) missing.add('controller-authority-v1');
+  // 3.14 (0040): casilla «Para Cobradores» y eliminación de tipos de gasto con historia.
+  if (!(await collectorCategoriesReady(apiPool))) missing.add('collector-expense-categories-v1');
   const features = API_FEATURES.filter((f) => !missing.has(f));
   const server = createOnlineServer({
     company: createCompanyHandler(companyOpts), demo, readinessPool: apiPool, allowedOrigins: cfg.origins, trustProxy: cfg.trustProxy, rateLimit: cfg.rateLimit,

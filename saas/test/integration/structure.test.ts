@@ -159,7 +159,7 @@ describe('Fase 2 · estructura de empresa, Oficinas, rutas y categorías', () =>
     assert.equal((await fabio('POST', `/v1/routes/${routeId('c1', 1)}/status`, { status: 'inactiva' })).status, 403);
   });
 
-  test('STR-030 · categorías: nombre único sin mayúsculas, en paralelo; con gastos no se borran; sin gastos sí', async () => {
+  test('STR-030 · categorías: nombre único sin mayúsculas, en paralelo; con gastos salen de la lista y se conservan (0040); sin gastos se borran', async () => {
     const list = (await anaCob('GET', '/v1/expense-categories')).body['categories'] as { name: string }[];
     assert.deepEqual(list.map((c) => c.name).sort(), ['Combustible', 'Papelería']);
     assert.equal((await ana('POST', '/v1/expense-categories', { name: ' combustible ' })).body['error'], 'CATEGORY_NAME_DUPLICATE');
@@ -168,11 +168,12 @@ describe('Fase 2 · estructura de empresa, Oficinas, rutas y categorías', () =>
     const peajes = race.find((x) => x.status === 201)!.body;
     assert.equal((await ana('PATCH', `/v1/expense-categories/${peajes['id']}`, { active: false })).body['active'], false);
     assert.equal((await anaCob('POST', '/v1/expense-categories', { name: 'X' })).status, 403);
-    const used = await bruno('POST', `/v1/expense-categories/${uid('c1:cat:fuel')}/delete`, {});
-    assert.equal(used.body['error'], 'HAS_HISTORY');
-    assert.deepEqual((used.body['details'] as { references: string[] }).references, ['expenses.category_id']);
-    assert.equal((await bruno('POST', `/v1/expense-categories/${peajes['id']}/delete`, {})).status, 200);
     assert.equal((await carla('PATCH', `/v1/expense-categories/${uid('c1:cat:fuel')}`, { name: 'Robada' })).status, 404);
+    // 0040 (3.14): con gastos ya no se rechaza: sale de la lista y los gastos conservan su tipo (ver collector-expense-categories).
+    const used = await bruno('POST', `/v1/expense-categories/${uid('c1:cat:fuel')}/delete`, {});
+    assert.deepEqual([used.status, used.body['kept']], [200, true]);
+    assert.ok(await count(db.admin, 'select 1 from adex.expenses where category_id = $1', [uid('c1:cat:fuel')]) > 0);
+    assert.deepEqual((await bruno('POST', `/v1/expense-categories/${peajes['id']}/delete`, {})).body, { deleted: peajes['id'], kept: false });
   });
 
   test('CAT-001 · las categorías predeterminadas nacen con la empresa (mismos nombres que CLEAN)', async () => {

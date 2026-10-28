@@ -173,6 +173,7 @@ function key(n: Notice): string {
   if ('request' in n) return `r:${n.request.id}:${n.type}`;
   if ('transfer' in n) return `t:${n.transfer.id}:${n.type}`;
   if ('handover' in n) return `h:${n.handover.id}`;
+  if ('expense' in n) return `e:${n.expense.id}`;
   return `o:${n.operation.id}`;
 }
 
@@ -227,6 +228,12 @@ function InfoRow({ n, money, consultas }: { n: Notice; money: (n: number) => str
       : `Transferencia ${t.state === 'rejected' ? 'rechazada' : t.state === 'cancelled' ? 'cancelada' : 'aplicada'}`;
     return <Row icon={<ArrowDownLeft className="w-4 h-4 text-emerald-600" />} title={title} detail={[t.reason, t.closeReason ? `Motivo: ${t.closeReason}` : null].filter(Boolean).join(' · ')}
       amount={money(t.amount)} at={n.at} />;
+  }
+  if (n.type === 'offline-expense-outside-list') {
+    const e = n.expense;
+    return <Row icon={<Bell className="w-4 h-4 text-amber-600" />}
+      title={`Gasto sin conexión de ${formatPersonName(e.workerName) || 'un Cobrador'} con un tipo que ya no está en la lista de Cobradores`}
+      detail={[e.categoryName ? `Tipo: ${e.categoryName}` : null, e.routeName].filter(Boolean).join(' · ')} amount={money(e.amount)} at={n.at} />;
   }
   if ('operation' in n) {
     const o = n.operation;

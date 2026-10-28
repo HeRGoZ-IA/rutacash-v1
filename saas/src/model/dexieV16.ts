@@ -215,7 +215,12 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
   {
     dexieTable: 'expenseCategories', entity: 'ExpenseCategory', source: 'models', sqlTable: 'adex.expense_categories',
     fields: [id('id', 'id'), tenant, f('nombre', 'name'), f('icono', 'icon'), f('activa', 'active', 'bool')],
-    omitted: [], added: [
+    omitted: [
+      { field: 'paraCobradores', reason: '3.14 (0040): dato SOLO del servidor (casilla «Para Cobradores») que ADEX Online lee de la API; al importar, el disparador de 0040 marca Transporte, Alimentación y Combustible' },
+      { field: 'eliminada', reason: '3.14 (0040): dato SOLO del servidor (tipo eliminado de la lista con gastos registrados); CLEAN local no lo tiene y no se importa' },
+    ], added: [
+      { column: 'for_collectors', reason: '3.14 (0040): casilla «Para Cobradores» (lo que pueden usar Cobrador y Supervisor); al importar, por nombre (disparador)' },
+      { column: 'deleted_at', reason: '3.14 (0040): tipo eliminado de la lista que conserva sus gastos registrados' },
       { column: 'nature', reason: 'R74 Base por Ruta (0034, O4): naturaleza del gasto (operativo | bien_duradero | otro) para no presentar compras durables como gasto operativo. Toda importación es operativo' },
     ],
   },

@@ -135,6 +135,8 @@ export default function CollectorExpensesPage() {
   const pendientes = useMemo(() => offlineOps.filter(o => o.kind === 'expense' && o.routeId === routeId && isOpen(o)), [offlineOps, routeId])
   const todayTotal = mios.filter(e => e.fecha === today()).reduce((s, e) => s + e.valor, 0)
   const getCatName = (id: string) => categories.find(c => c.id === id)?.nombre ?? id
+  // 3.14 (0040): el Cobrador y el Supervisor solo usan los tipos activos marcados «Para Cobradores».
+  const usables = categories.filter(c => c.activa && c.paraCobradores !== false)
   const nombreDe = (id?: string) => formatPersonName(team.find(u => u.id === id)?.nombre) || 'Trabajador'
   /** Para el Supervisor: a quién se cargó cada gasto. */
   const etiqueta = (e: Expense) => {
@@ -151,7 +153,7 @@ export default function CollectorExpensesPage() {
           <h1 className="font-bold text-gray-900">Gastos</h1>
           <p className="text-xs text-gray-500">{veGastosDeRuta ? 'Con mi efectivo hoy' : 'Hoy'}: {formatCurrency(todayTotal, currency)}</p>
         </div>
-        <button onClick={() => { operacion.current = null; setShowForm(true) }} className="w-10 h-10 bg-primary-600 text-white rounded-full flex items-center justify-center">
+        <button onClick={() => { operacion.current = null; setShowForm(true) }} data-testid="expense-new" aria-label="Registrar gasto" className="w-10 h-10 bg-primary-600 text-white rounded-full flex items-center justify-center">
           <Plus className="w-5 h-5" />
         </button>
       </div>
@@ -159,19 +161,20 @@ export default function CollectorExpensesPage() {
       {showForm && (
         <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-3">
           <p className="font-semibold text-sm text-gray-700">Registrar gasto</p>
-          {categories.filter(c => c.activa).length === 0 ? (
-            <p className="text-xs text-amber-600">No hay categorías de gasto. Pide al administrador que configure las categorías.</p>
+          {usables.length === 0 ? (
+            <p className="text-xs text-amber-600">No hay categorías de gasto para Cobradores. Pide al administrador que marque «Para Cobradores» en las categorías.</p>
           ) : (
             // Selector expandible (dropdown): escala bien aunque haya muchas categorías.
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1.5">Categoría</label>
               <select
+                data-testid="expense-category"
                 value={form.categoryId}
                 onChange={e => setForm(f => ({ ...f, categoryId: e.target.value }))}
                 className="w-full h-12 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary-500"
               >
                 <option value="">Seleccionar categoría…</option>
-                {categories.filter(c => c.activa).map(c => (
+                {usables.map(c => (
                   <option key={c.id} value={c.id}>{c.nombre}</option>
                 ))}
               </select>

@@ -19,6 +19,10 @@ const ERRORS: Record<string, string> = {
   REGISTRANT_CANNOT_BE_PARTY: 'Quien registra la transferencia no puede ser una de las partes.',
   CAPITAL_AUTHORITY_REQUIRED: 'Solo el Administrador responsable de la ruta puede hacerlo.',
   CORRECTION_REQUEST_REQUIRED: 'Solo un Administrador corrige pagos directamente: envía una solicitud de ajuste.',
+  // 3.14 (0040) · tipos de gasto «Para Cobradores».
+  CATEGORY_NOT_FOR_COLLECTORS: 'Esa categoría ya no está disponible para Cobradores. Elige otra de la lista.',
+  CATEGORY_INACTIVE: 'Esa categoría está desactivada o se eliminó de la lista. Elige otra.',
+  CATEGORY_DELETED: 'Esa categoría se eliminó de la lista: ya no se puede cambiar.',
   SELF_APPROVAL_FORBIDDEN: 'Nadie puede resolver su propia solicitud (tampoco con otra membresía).',
   SELF_ASSIGNMENT_FORBIDDEN: 'Nadie se asigna a sí mismo un perfil, una reactivación ni rutas de otra de sus membresías. Debe hacerlo otra persona con autoridad.',
   SELF_DELIVERY_FORBIDDEN: 'Nadie entrega ni traspasa efectivo a su propia caja de cobro, tampoco con otra membresía.',

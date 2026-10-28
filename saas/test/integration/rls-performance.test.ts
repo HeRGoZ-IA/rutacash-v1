@@ -124,9 +124,12 @@ describe('Ronda 33 · RLS con contexto evaluado una vez (0020)', () => {
       + ' drop policy capital_operations_general_funding_ctx on adex.capital_operations;'
       // R74 (0036, RB-D3): conciliaciones, cuenta «faltante/sobrante conciliado» y su operación.
       + ' drop policy difference_conciliations_ctx on adex.difference_conciliations;'
-      + ' drop policy capital_accounts_route_difference_ctx on adex.capital_accounts; drop policy capital_operations_conciliation_ctx on adex.capital_operations;');
+      + ' drop policy capital_accounts_route_difference_ctx on adex.capital_accounts; drop policy capital_operations_conciliation_ctx on adex.capital_operations;'
+      // 3.14 (0040): el Administrador lee las capturas sin conexión de sus rutas (aviso de tipo de gasto fuera de la lista).
+      + ' drop policy offline_captures_admin_read on adex.offline_captures;');
     const LATER = [':client_locations', ':sale_locations', ':payment_locations', ':credit_rectifications', ':credit_rectification_cases',
-      ':route_handover_records', ':capital_model_activations', ':general_funding_contributions', ':admin_reimbursements', ':difference_conciliations'];
+      ':route_handover_records', ':capital_model_activations', ':general_funding_contributions', ':admin_reimbursements', ':difference_conciliations',
+      ':offline_captures'];
     // 0034 amplía a propósito lo que el Administrador y el Supervisor ven de las cuentas de SUS rutas (cartera, interés,
     // gastos, control, Base) y, con ellas, sus patas: no se comparan esas lecturas.
     const route034 = (k: string) => (k.startsWith('admin/') || k.startsWith('supervisor/')) && (k.endsWith(':capital_accounts') || k.endsWith(':capital_entries'));

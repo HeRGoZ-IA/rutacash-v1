@@ -135,7 +135,8 @@ function companyRecords(c: CompanySpec): DexieSnapshot {
   }));
   for (const route of routes) for (const k of Object.keys(route) as (keyof Route)[]) if (route[k] === undefined) delete route[k];
 
-  const categories: Required<ExpenseCategory>[] = [
+  // 3.14: `paraCobradores` y `eliminada` son datos solo del servidor (no se importan).
+  const categories: Required<Omit<ExpenseCategory, 'paraCobradores' | 'eliminada'>>[] = [
     { id: id('cat:fuel'), tenantId, nombre: 'Combustible', icono: 'fuel', activa: true },
     { id: id('cat:office'), tenantId, nombre: 'Papelería', icono: 'paper', activa: false },
   ];

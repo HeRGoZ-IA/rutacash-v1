@@ -75,13 +75,16 @@ export async function assertOfflineFits(client: pg.PoolClient, saleId: string, a
 /** Evidencia de la captura, en la misma transacción y bajo savepoint (un fallo no revierte el movimiento). */
 export async function storeOfflineCapture(client: pg.PoolClient, ctx: ActiveContext, c: {
   operationId: string; kind: OfflineKind; entityId: string; routeId: string; capture: OfflineCapture;
+  /** 0040: gasto con un tipo que ya no está en la lista de Cobradores (se acepta y avisa al Administrador). Solo con 0040. */
+  categoryOutsideList?: boolean;
 }): Promise<'stored' | 'not_stored'> {
   await client.query('savepoint offline_capture');
   try {
+    const flag = c.categoryOutsideList === true;
     await client.query(
       `insert into adex.offline_captures (company_id, operation_id, kind, entity_id, route_id, membership_id, device_captured_at,
-                                          known_balance_minor, note, received_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())`,
+                                          known_balance_minor, note, received_at${flag ? ', category_outside_list' : ''})
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now()${flag ? ', true' : ''})`,
       [ctx.companyId, c.operationId, c.kind, c.entityId, c.routeId, ctx.membershipId, c.capture.deviceCapturedAt,
        c.capture.knownBalanceMinor, c.capture.note]);
     await client.query('release savepoint offline_capture');

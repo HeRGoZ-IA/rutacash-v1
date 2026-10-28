@@ -34,7 +34,10 @@ export const API_FEATURES: readonly string[] = ['collections-v1', 'settlements-v
   'admin-authority-v1',
   // R74 (0037): regla definitiva del responsable de capital (autocorrección, anulación coordinada, obligaciones por gasto).
   // Solo si 0037 está aplicada (start.ts). Fuera de la puerta de Vercel.
-  'controller-authority-v1'];
+  'controller-authority-v1',
+  // 3.14 (0040): tipos de gasto «Para Cobradores» y eliminación con historia. Solo si 0040 está aplicada (start.ts).
+  // SÍ está en la puerta de Vercel: sin él, el Cobrador no vería tipos marcados y el Administrador no podría marcarlos.
+  'collector-expense-categories-v1'];
 
 /** Módulos del servicio Owner (servicio aparte, ver controlStart.ts). */
 // Ronda 54: `owner-email-v1` (cambio del correo del SuperAdmin) solo si 0024 está aplicada (controlStart.ts).

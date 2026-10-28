@@ -165,9 +165,9 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: ([id], provider) => async (c, ctx) => ok(await memberAccessLink(c, ctx, id!, provider)) },
   // ---------- Categorías de gasto ----------
   { method: 'GET', pattern: /^\/v1\/expense-categories$/, fields: null, handler: () => async (c, ctx) => ok({ categories: await listCategories(c, ctx) }) },
-  { method: 'POST', pattern: /^\/v1\/expense-categories$/, fields: ['name', 'icon', 'nature'], idempotent: 'expense_categories.create',
+  { method: 'POST', pattern: /^\/v1\/expense-categories$/, fields: ['name', 'icon', 'nature', 'forCollectors'], idempotent: 'expense_categories.create',
     handler: () => async (c, ctx, b) => created(await createCategory(c, ctx, b)) },
-  { method: 'PATCH', pattern: new RegExp(`^/v1/expense-categories/${ID}$`), fields: ['name', 'icon', 'active', 'nature'],
+  { method: 'PATCH', pattern: new RegExp(`^/v1/expense-categories/${ID}$`), fields: ['name', 'icon', 'active', 'nature', 'forCollectors'],
     handler: ([id]) => async (c, ctx, b) => ok(await updateCategory(c, ctx, id!, b)) },
   { method: 'POST', pattern: new RegExp(`^/v1/expense-categories/${ID}/delete$`), fields: [], handler: ([id]) => async (c, ctx) => ok(await deleteCategory(c, ctx, id!)) },
   // ---------- Clientes ----------

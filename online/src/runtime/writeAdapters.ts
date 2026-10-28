@@ -24,11 +24,15 @@ async function current(tableName: string, id: string): Promise<Changes> {
 
 // ---------- Categorías de gasto (ExpenseCategoriesPage) ----------
 registerWrites('expenseCategories', {
-  add: (row) => money('POST', '/v1/expense-categories', { name: row['nombre'] }, row['id']),
+  add: (row) => money('POST', '/v1/expense-categories', { name: row['nombre'], ...(typeof row['paraCobradores'] === 'boolean' ? { forCollectors: row['paraCobradores'] } : {}) }, row['id']),
   update: (id, changes) => {
     const k = keysOf(changes);
     if (k.length === 1 && k[0] === 'nombre') return plain('PATCH', `/v1/expense-categories/${id}`, { name: changes['nombre'] });
     if (k.length === 1 && k[0] === 'activa') return plain('PATCH', `/v1/expense-categories/${id}`, { active: changes['activa'] === true });
+    // 3.14: casilla «Para Cobradores» (sola o junto con el nombre, desde el formulario de edición).
+    if (k.every((x) => x === 'nombre' || x === 'paraCobradores') && k.includes('paraCobradores')) {
+      return plain('PATCH', `/v1/expense-categories/${id}`, { ...(k.includes('nombre') ? { name: changes['nombre'] } : {}), forCollectors: changes['paraCobradores'] === true });
+    }
     return reject('Ese cambio de categoría no está disponible en ADEX Online.');
   },
   delete: (id) => plain('POST', `/v1/expense-categories/${id}/delete`, {}),

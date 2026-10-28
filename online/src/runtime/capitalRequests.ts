@@ -111,12 +111,16 @@ export interface NoticeHandover { id: string; routeId: string; routeName: string
 /** R74 (0037): anulación conjunta que espera la confirmación de este responsable (vista del servidor). */
 export type NoticeJoint = import('./routeBase/api.ts').JointProposal;
 
+/** 0040 (3.14): gasto sin conexión aceptado con un tipo que ya no está en la lista de Cobradores. */
+export interface NoticeOfflineExpense { id: string; routeId: string; routeName: string; workerId: string; workerName: string | null; categoryName: string | null; amount: number }
+
 export type Notice =
   | { type: 'request'; at: string; request: CapitalRequest }
   | { type: 'joint-reversal-confirmation'; at: string; proposal: NoticeJoint }
   | { type: 'handover-confirmation'; at: string; handover: NoticeHandover }
   | { type: 'transfer-confirmation'; at: string; transfer: NoticeTransfer }
   | { type: 'request-resolved'; at: string; request: CapitalRequest }
+  | { type: 'offline-expense-outside-list'; at: string; expense: NoticeOfflineExpense }
   | { type: 'transfer-received' | 'transfer-closed'; at: string; transfer: NoticeTransfer }
   | { type: Exclude<NoticeType, 'request-resolved' | 'transfer-received' | 'transfer-closed'>; at: string; operation: NoticeOperation };
 
@@ -128,6 +132,7 @@ function mapNotice(n: any): Notice {
   if (n.transfer) return { ...n, transfer: { ...n.transfer, amount: toMajor(n.transfer.amountMinor) } };
   if (n.handover) return { ...n, handover: { ...n.handover, baseAtStart: toMajor(n.handover.baseAtStartMinor) } };
   if (n.proposal) return { ...n };
+  if (n.expense) return { ...n, expense: { ...n.expense, amount: toMajor(n.expense.amountMinor) } };
   // Tipo desconocido (API más nueva): sin operación no se rompe la bandeja.
   if (!n.operation) return { ...n, type: 'capital-received', operation: { id: String(n.at ?? ''), kind: '', amount: 0, routeId: null, reason: '', actor: { membershipId: '', name: null, role: '' }, adminName: null, workerName: null } };
   return { ...n, operation: { ...n.operation, amount: toMajor(n.operation.amountMinor) } };

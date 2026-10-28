@@ -646,6 +646,10 @@ export interface ExpenseCategory {
   nombre: string
   icono?: string
   activa: boolean
+  /** 3.14: el Cobrador y el Supervisor solo ven y usan los tipos marcados (sin el dato, todos). */
+  paraCobradores?: boolean
+  /** 3.14: eliminada de la lista con gastos registrados; se conserva para mostrar el nombre en el historial. */
+  eliminada?: boolean
 }
 
 /**
