@@ -90,6 +90,15 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
   - posiciones actuales de efectivo, sin duplicación.
 - El histórico completo lo conserva el usuario en Listos.
 
+**Segundo análisis de Listos (2026-10-28, autorizado por el propietario; solo estructura y cifras agregadas, sin copiar datos personales).** Archivos `ReporteExcelPlanillaRecaudador` del 2026-10-22 (corto y completo), ruta «CARTERA AGUAS LINDAS», en la carpeta Descargas del propietario (no se copiaron al repositorio):
+- Ambos tienen las mismas 35 ventas y los mismos saldos; el completo añade columnas. Columnas del completo: código de crédito, fecha de la venta, fecha del último pago, cuotas atrasadas, valor sin interés, valor del crédito, forma de pago, cliente, saldo, valor de la cuota, días vencidos, cuotas pactadas, canceladas y pendientes, día de pago, barrio, dirección, teléfono, celular, cantidad de créditos del cliente, código de afiliación, zona y artículos. Al final, «TOTAL SALDO» 48.539 y «TOTAL CUOTA» 10.435.
+- **Tasas:** 33 ventas al 20 % y 2 al 10 % (valor del crédito ÷ valor sin interés): todas caben en ADEX.
+- **Frecuencias:** 25 diarias, 8 semanales y 2 mensuales; ADEX las admite. El día de pago viene como día de la semana o, en las mensuales, día del mes.
+- **Coherencia:** en las 35, canceladas + pendientes = pactadas y cuota × pactadas = valor del crédito. Las **8 ventas que no cuadran** difieren en menos de una cuota (−200 a +160): son **abonos parciales** de la cuota en curso, explicables, no errores.
+- **Antigüedad:** 34 ventas de 2026 y 1 de 2024 (685 días vencidos, candidata a castigo, 2.1.10). 27 ventas con cuotas atrasadas.
+- **Faltan:** documento del cliente (el código de afiliación viene vacío, «--»), abonos individuales, calendario con fechas, Base y efectivo de los trabajadores. «Zona» y «Artículos» no aportan («SIN DEFINIR», «EFECTIVO»). Hay barrio, dirección y celular (11 dígitos, formato de Brasil) en todas.
+- **Moneda:** sigue sin confirmar; el celular y la ruta apuntan a reales (R$).
+
 ### 2.3 Plataforma, seguridad y normativa
 
 | # | Decisión | Fuente |
