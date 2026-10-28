@@ -371,16 +371,14 @@ describe('R74 · autoridad del Administrador y conciliación de diferencias (003
 
   test('AA-009 · RB-D7: corrección por el responsable VIGENTE; operación conjunta con responsables distintos → rechazo explicado; nunca parcial', async () => {
     const [b1, b2] = [await base(r1), await base(r2)];
-    // Conjunto r1 (Ana) + r2 (Fede): nadie lo anula mientras sean de distintos responsables.
-    for (const who of [$ana, fede.money]) {
-      const r = await who(`/v1/expenses/${jointExpense}/reverse`, { reason: 'Gasto conjunto registrado por error' });
-      assert.deepEqual([r.status, r.body['error']], [409, 'JOINT_OPERATION_MIXED_CONTROLLERS'], JSON.stringify(r.body));
-      const routes = ((r.body['details'] as Body | undefined)?.['routes'] ?? []) as Body[];
-      assert.ok(routes.length > 0, JSON.stringify(r.body));
-      assert.deepEqual(routes.map((x) => [x['routeId'], x['controllerId']]).sort(), [[r1, M.anaAdmin], [r2, fede.membershipId]].sort());
-    }
-    assert.equal(await pg({ identityId: identityOf('ana'), membershipId: M.anaAdmin }, c1, `select adex.expense_reverse($1, $2, 'Conjunto por SQL directo')`,
-      [randomUUID(), jointExpense]), 'AX434');
+    // Conjunto r1 (Ana) + r2 (Fede), registrado por Ana. 0039 (RB-D12, propietario 2026-10-27): lo anula COMPLETO Ana, que lo
+    // registró y sigue respondiendo por r1 (se hace en AA-010); Fede, no (API y segunda barrera). Nunca una anulación parcial.
+    const r = await fede.money(`/v1/expenses/${jointExpense}/reverse`, { reason: 'Gasto conjunto registrado por error' });
+    assert.deepEqual([r.status, r.body['error']], [403, 'CAPITAL_AUTHORITY_REQUIRED'], JSON.stringify(r.body));
+    assert.ok(JSON.stringify((r.body['details'] as Body | undefined)?.['authorizedAdmins'] ?? []).length > 2, `explica quién puede: ${JSON.stringify(r.body)}`);
+    assert.equal((await ana('GET', `/v1/corrections/preview?kind=expense&id=${jointExpense}`)).body['mode'], 'direct', 'Ana lo anularía directamente');
+    assert.equal(await pg({ identityId: fede.identityId, membershipId: fede.membershipId }, c1, `select adex.expense_reverse($1, $2, 'Conjunto por SQL directo')`,
+      [randomUUID(), jointExpense]), 'AX402');
     assert.deepEqual([await base(r1), await base(r2)], [b1, b2], 'sin anulación parcial');
     // Gasto de UNA ruta (r2) registrado por Ana: lo anula Fede (responsable vigente), no Ana.
     expectCode(await $ana(`/v1/expenses/${singleExpenseR2}/reverse`, { reason: 'Ya no soy la responsable' }), 403, 'CAPITAL_AUTHORITY_REQUIRED', 'responsable anterior');

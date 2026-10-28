@@ -125,7 +125,8 @@ export async function reverseRouteBase(client: pg.PoolClient, ctx: ActiveContext
   if (orig.kind === 'ROUTE_TRANSFER' && orig.route_id && orig.to_route_id) {
     requireAdmin(ctx);
     await requireControlsAllRoutesOr(client, ctx, [orig.route_id, orig.to_route_id],
-      { kind: 'route_transfer', id: orig.id, amountMinor: Number(orig.amount_minor), label: `Transferencia entre rutas: ${orig.reason}` });
+      { kind: 'route_transfer', id: orig.id, amountMinor: Number(orig.amount_minor), label: `Transferencia entre rutas: ${orig.reason}` },
+      orig.actor_membership_id);
     await requireOpenPeriods(client, ctx, [orig.route_id, orig.to_route_id]);
   } else if (orig.route_id) {
     await controlledRoute(client, ctx, orig.route_id);

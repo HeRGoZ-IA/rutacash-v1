@@ -72,6 +72,9 @@ export async function correctCollection(client: pg.PoolClient, ctx: ActiveContex
   if (!p) throw new ApiError(404, 'NOT_FOUND');
   await routeOf(client, ctx, p.route_id);
   need(ctx, 'payment.correct', { routeId: p.route_id });
+  // RB-D11 (propietario 2026-10-27): solo el Administrador anula o corrige un pago directamente; el Secretario envía
+  // una solicitud de ajuste (`POST /v1/payment-adjustments`) que aprueba un Administrador.
+  if (ctx.role !== 'admin') throw new ApiError(403, 'CORRECTION_REQUEST_REQUIRED', 'only an administrator corrects a payment directly: send an adjustment request');
   const newAmount = newAmountOf(body);
   const reason = reasonOf(body);
   const note = optText(body, 'note', 500);

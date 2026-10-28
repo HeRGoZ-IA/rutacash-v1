@@ -267,11 +267,12 @@ describe('Fase 3 · comandos de capital y custodia', () => {
     const w = await $bruno('/v1/capital/company/withdrawals', { amountMinor: 10_000, reason: 'Retiro sintético' });
     assert.equal((await $bruno(`/v1/capital/operations/${opOf(w)['id']}/reverse`, { reason: 'Revertir retiro' })).body['error'], 'REVERSAL_NOT_ALLOWED');
 
-    // Asignación cuyo capital ya salió de la bolsa: no vuelve a la empresa.
+    // Asignación de la empresa: 0039 (RB-D11, propietario 2026-10-27) el SuperAdmin ya no anula nada (antes: rechazo por
+    // capital ya consumido); la barrera final rechaza cualquier anulación que no registre un Administrador.
     const x = await xavier.money('/v1/capital/deliveries', { routeId: r6, workerId: fede.membershipId, amountMinor: 150_000, reason: 'Base Ruta Seis' });
     assert.equal(x.status, 201);
     const alloc = (await db.admin.query(`select id from adex.capital_operations where kind = 'ADMIN_ALLOCATION' and admin_membership_id = $1`, [xavier.membershipId])).rows[0].id as string;
-    assert.equal((await $bruno(`/v1/capital/operations/${alloc}/reverse`, { reason: 'Asignación duplicada' })).body['error'], 'INSUFFICIENT_FUNDS');
+    assert.equal((await $bruno(`/v1/capital/operations/${alloc}/reverse`, { reason: 'Asignación duplicada' })).body['error'], 'CAPITAL_AUTHORITY_REQUIRED');
 
     // Autoridad `correct`: solo el responsable; otro Administrador, no. R74 (cambio de regla en esta
     // intervención): el SuperAdmin tampoco anula operaciones de la ruta (antes sí).

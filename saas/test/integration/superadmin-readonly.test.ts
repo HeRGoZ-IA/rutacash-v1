@@ -193,11 +193,11 @@ describe('Ronda 67 · SuperAdmin: cartera de solo lectura', () => {
     assert.equal(exp.status, 201, JSON.stringify(exp.body));
     const ruta = await $ana('/v1/expenses', { scope: 'ruta', routeId: r1, categoryId: cat, amountMinor: 500, description: 'Gasto de ruta' });
     assert.equal(ruta.status, 201, JSON.stringify(ruta.body));
-    // R74 (cambio de regla en esta intervención): el SuperAdmin ya no anula gastos de RUTA; sí los de empresa.
+    // R74: el SuperAdmin ya no anula gastos de RUTA. 0039 (RB-D11, propietario 2026-10-27): tampoco los de empresa.
     const rutaRev = await $bruno(`/v1/expenses/${(ruta.body['expense'] as Body)['id']}/reverse`, { reason: 'Anulación de prueba' });
     assert.equal(rutaRev.body['error'], 'CAPITAL_AUTHORITY_REQUIRED', JSON.stringify(rutaRev.body));
     const rev = await $bruno(`/v1/expenses/${(exp.body['expense'] as Body)['id']}/reverse`, { reason: 'Anulación de prueba' });
-    assert.equal(rev.status, 201, `el SuperAdmin sigue anulando gastos de empresa: ${JSON.stringify(rev.body)}`);
+    assert.equal(rev.status, 403, `el SuperAdmin ya no anula gastos de empresa: ${JSON.stringify(rev.body)}`);
     assert.equal((await bruno('GET', '/v1/capital/summary')).status, 200);
   });
 

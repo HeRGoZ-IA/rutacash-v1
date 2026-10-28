@@ -93,15 +93,41 @@ async function pendingProposal(client: pg.PoolClient, ctx: ActiveContext, target
   return (await client.query<{ v: Body }>('select adex.joint_reversal_get($1) v', [r.rows[0].id])).rows[0]!.v;
 }
 
+/** ¿Está aplicada 0039 (anulaciones solo por el Administrador que registró, RB-D11/RB-D12)? */
+export async function registrarRuleApplied(client: pg.PoolClient): Promise<boolean> {
+  return (await client.query<{ ok: boolean }>("select to_regprocedure('adex.reversal_authorized_admins(text,text,text[])') is not null ok")).rows[0]!.ok;
+}
+
+/**
+ * 0039 (RB-D12, propietario 2026-10-27): quién anula una operación de varias rutas (gasto general con aportes,
+ * reembolso pagado con rutas, transferencia entre rutas): el Administrador que la registró, si sigue activo y
+ * responsable de alguna de esas rutas; si no, cualquiera de sus responsables vigentes. `null` sin 0039 (regla anterior).
+ */
+export async function reversalAuthorizedAdmins(client: pg.PoolClient, ctx: ActiveContext, registrar: string | null, routeIds: readonly string[]): Promise<string[] | null> {
+  if (!(await registrarRuleApplied(client))) return null;
+  return (await client.query<{ a: string[] }>('select adex.reversal_authorized_admins($1, $2, $3) a', [ctx.companyId, registrar, [...routeIds]])).rows[0]!.a;
+}
+
 /**
  * El actor debe ser el responsable VIGENTE de TODAS las rutas de la operación. Si no:
  *   · no controla ninguna → 403 CAPITAL_AUTHORITY_REQUIRED (con la lista);
  *   · controla algunas y hay otros responsables → 409 JOINT_OPERATION_MIXED_CONTROLLERS con la dependencia
  *     `joint_controllers` (proponer o confirmar la anulación coordinada).
  */
-export async function requireControlsAllRoutesOr(client: pg.PoolClient, ctx: ActiveContext, routeIds: readonly string[], target: JointTarget): Promise<void> {
+export async function requireControlsAllRoutesOr(client: pg.PoolClient, ctx: ActiveContext, routeIds: readonly string[], target: JointTarget,
+  registrar: string | null = null): Promise<void> {
   if (!routeIds.length) return;
   const routes = await routeControllers(client, routeIds);
+  // 0039: quien la registró (o, si ya no responde, un responsable vigente) la anula COMPLETA, sin anulación coordinada.
+  const allowed = await reversalAuthorizedAdmins(client, ctx, registrar, routeIds);
+  if (allowed) {
+    if (allowed.includes(ctx.membershipId)) return;
+    const names = (await client.query<{ n: string }>('select display_name n from adex.memberships where company_id = $1 and id = any($2) order by display_name',
+      [ctx.companyId, allowed])).rows.map((x) => x.n);
+    throw new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED',
+      'only the administrator who registered the operation (or, if no longer responsible, a current controller of its routes) reverses it',
+      { routes, authorizedAdmins: names });
+  }
   if (routes.every((x) => x.isActor)) return;
   if (!routes.some((x) => x.isActor)) {
     throw new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED', 'only the current capital controller of the routes corrects this operation', { routes });
@@ -190,10 +216,11 @@ export async function previewCorrection(client: pg.PoolClient, ctx: ActiveContex
   let deps: Dependency[] = [];
   let cascadeOps: string[] = [];
   let blocked: string | null = null;
+  let registrar: string | null = null;
   if (kind === 'expense') {
     const e = (await client.query<{ id: string; route_id: string | null; funding: string | null; amount_minor: string; reversal_id: string | null; reverses_id: string | null;
       refunds_expense_id: string | null; ledger_operation_id: string | null; description: string | null; scope: string | null; collector_membership_id: string | null;
-      responsible_admin_membership_id: string | null }>('select * from adex.expenses where company_id = $1 and id = $2', [ctx.companyId, id])).rows[0];
+      responsible_admin_membership_id: string | null; registered_by_membership_id: string | null }>('select * from adex.expenses where company_id = $1 and id = $2', [ctx.companyId, id])).rows[0];
     if (!e) throw new ApiError(404, 'NOT_FOUND');
     amount = Number(e.amount_minor);
     label = `Gasto ${e.description ? `«${e.description}»` : ''}`.trim();
@@ -204,6 +231,7 @@ export async function previewCorrection(client: pg.PoolClient, ctx: ActiveContex
         [ctx.companyId, e.id, 'GENERAL_EXPENSE_CONTRIBUTION'])).rows.map((x) => x.id);
       routeIds = (await client.query<{ r: string[] }>('select adex.general_funding_routes($1, null) r', [e.id])).rows[0]!.r;
       target = { kind: 'expense', id: e.id, amountMinor: amount, label };
+      registrar = e.registered_by_membership_id;
     } else {
       opIds = e.ledger_operation_id ? [e.ledger_operation_id] : [];
       if (e.route_id) routeIds = [e.route_id];
@@ -232,9 +260,10 @@ export async function previewCorrection(client: pg.PoolClient, ctx: ActiveContex
     if (r.source === 'routes') {
       routeIds = (await client.query<{ r: string[] }>('select adex.general_funding_routes(null, $1) r', [r.id])).rows[0]!.r;
       target = { kind: 'reimbursement', id: r.id, amountMinor: amount, label };
+      registrar = r.payer_membership_id;
     } else if (r.payer_membership_id !== ctx.membershipId && !blocked) blocked = 'CAPITAL_AUTHORITY_REQUIRED';
   } else {
-    const o = (await client.query<{ id: string; kind: string; amount_minor: string; route_id: string | null; to_route_id: string | null; reason: string }>(
+    const o = (await client.query<{ id: string; kind: string; amount_minor: string; route_id: string | null; to_route_id: string | null; reason: string; actor_membership_id: string }>(
       'select * from adex.capital_operations where company_id = $1 and id = $2', [ctx.companyId, id])).rows[0];
     if (!o) throw new ApiError(404, 'NOT_FOUND');
     amount = Number(o.amount_minor);
@@ -244,14 +273,24 @@ export async function previewCorrection(client: pg.PoolClient, ctx: ActiveContex
     if ((await client.query('select 1 from adex.capital_operations where company_id = $1 and reverses_operation_id = $2', [ctx.companyId, o.id])).rowCount) blocked = 'ALREADY_REVERSED';
     if (['REVERSAL', 'LOAN_DISBURSEMENT', 'DISBURSEMENT_ADJUSTMENT', 'PRINCIPAL_RECLASSIFICATION', 'PARTNER_CONTRIBUTION', 'COMPANY_WITHDRAWAL', 'LEGACY_POOL_TO_ROUTE',
       'DIFFERENCE_CONCILIATION'].includes(o.kind) || o.kind.startsWith('ADMIN_TRANSFER_')) blocked = blocked ?? 'REVERSAL_NOT_ALLOWED';
-    if (o.kind === 'ROUTE_TRANSFER') target = { kind: 'route_transfer', id: o.id, amountMinor: amount, label: `Transferencia entre rutas: ${o.reason}` };
+    if (o.kind === 'ROUTE_TRANSFER') { target = { kind: 'route_transfer', id: o.id, amountMinor: amount, label: `Transferencia entre rutas: ${o.reason}` }; registrar = o.actor_membership_id; }
   }
   const routes = await routeControllers(client, routeIds);
   const mixed = routes.length > 0 && !routes.every((x) => x.isActor) && routes.some((x) => x.isActor);
   if (!blocked && routes.length > 0 && !routes.some((x) => x.isActor) && kind !== 'reimbursement') blocked = 'CAPITAL_AUTHORITY_REQUIRED';
   if (!blocked && routes.length > 0 && !routes.some((x) => x.isActor) && kind === 'reimbursement' && target) blocked = 'CAPITAL_AUTHORITY_REQUIRED';
   let joint: Body | null = null;
-  if (!blocked && mixed && target) {
+  // 0039: en operaciones de varias rutas decide la regla del registrador; una propuesta coordinada abierta se puede confirmar.
+  const allowed = target ? await reversalAuthorizedAdmins(client, ctx, registrar, routeIds) : null;
+  if (allowed) {
+    if (!blocked && !allowed.includes(ctx.membershipId)) {
+      joint = await pendingProposal(client, ctx, target!);
+      if (joint?.['canConfirm']) {
+        deps.push({ kind: 'joint_controllers', id: target!.id, targetKind: target!.kind, label: target!.label, amountMinor: amount,
+          action: 'confirm_joint_reversal', proposalId: joint['id'] ?? null, routes });
+      } else blocked = 'CAPITAL_AUTHORITY_REQUIRED';
+    }
+  } else if (!blocked && mixed && target) {
     joint = await pendingProposal(client, ctx, target);
     deps.push({ kind: 'joint_controllers', id: target.id, targetKind: target.kind, label: target.label, amountMinor: amount,
       action: !joint ? 'propose_joint_reversal' : joint['canConfirm'] ? 'confirm_joint_reversal' : 'view_joint_reversal', proposalId: joint?.['id'] ?? null, routes });
@@ -265,6 +304,8 @@ export async function previewCorrection(client: pg.PoolClient, ctx: ActiveContex
         : deps.some((d) => d.kind === 'reimbursement') ? (cascadeBlocked ? 'blocked' : 'cascade') : 'direct';
   return {
     kind, id, label, amountMinor: amount, mode, blockedBy: blocked, dependencies: deps, routes,
+    authorizedAdmins: allowed ? (await client.query<{ n: string }>('select display_name n from adex.memberships where company_id = $1 and id = any($2) order by display_name',
+      [ctx.companyId, allowed])).rows.map((x) => x.n) : undefined,
     effects: await effectsOf(client, ctx, [...opIds, ...(mode === 'cascade' ? cascadeOps : [])]),
     jointProposal: joint, reasonMinLength: 3,
   };

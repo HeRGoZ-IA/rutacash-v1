@@ -173,12 +173,13 @@ describe('R74 · E1 · SuperAdmin supervisor, no operador financiero', () => {
     assert.equal((await $bruno('/v1/capital/company/deposits', { amountMinor: 100_000, reason: 'Más capital' })).status, 201);
     const alloc = await $bruno('/v1/capital/allocations', { adminId: M.anaAdmin, amountMinor: 20_000, reason: 'Asignación duplicada' });
     assert.equal(alloc.status, 201);
-    assert.equal((await $bruno(`/v1/capital/operations/${(alloc.body['operation'] as Body)['id']}/reverse`, { reason: 'Asignación duplicada' })).status, 201, 'anula operaciones de la EMPRESA');
+    // 0039 (RB-D11, propietario 2026-10-27): el SuperAdmin conserva el capital de la empresa pero ya NO anula nada.
+    assert.equal((await $bruno(`/v1/capital/operations/${(alloc.body['operation'] as Body)['id']}/reverse`, { reason: 'Asignación duplicada' })).status, 403, 'no anula operaciones de la EMPRESA');
     assert.equal((await $bruno('/v1/capital/admin-returns', { adminId: M.anaAdmin, amountMinor: 10_000, reason: 'Recoge capital' })).status, 201);
     assert.equal((await $bruno('/v1/capital/company/withdrawals', { amountMinor: 5_000, reason: 'Retiro sintético' })).status, 201);
     const exp = await $bruno('/v1/expenses', { scope: 'empresa', categoryId: cat, amountMinor: 1_000, description: 'Papelería', fundingSource: 'empresa' });
     assert.equal(exp.status, 201, JSON.stringify(exp.body));
-    assert.equal((await $bruno(`/v1/expenses/${(exp.body['expense'] as Body)['id']}/reverse`, { reason: 'Gasto duplicado' })).status, 201);
+    assert.equal((await $bruno(`/v1/expenses/${(exp.body['expense'] as Body)['id']}/reverse`, { reason: 'Gasto duplicado' })).status, 403, 'no anula gastos de empresa (RB-D11)');
     assert.deepEqual(await reconcile(db.admin, c1), CLEAN);
   });
 

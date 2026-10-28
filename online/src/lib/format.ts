@@ -18,6 +18,7 @@ const ERRORS: Record<string, string> = {
   DECISION_ALREADY_REGISTERED: 'Tu decisión ya estaba registrada.',
   REGISTRANT_CANNOT_BE_PARTY: 'Quien registra la transferencia no puede ser una de las partes.',
   CAPITAL_AUTHORITY_REQUIRED: 'Solo el Administrador responsable de la ruta puede hacerlo.',
+  CORRECTION_REQUEST_REQUIRED: 'Solo un Administrador corrige pagos directamente: envía una solicitud de ajuste.',
   SELF_APPROVAL_FORBIDDEN: 'Nadie puede resolver su propia solicitud (tampoco con otra membresía).',
   SELF_ASSIGNMENT_FORBIDDEN: 'Nadie se asigna a sí mismo un perfil, una reactivación ni rutas de otra de sus membresías. Debe hacerlo otra persona con autoridad.',
   SELF_DELIVERY_FORBIDDEN: 'Nadie entrega ni traspasa efectivo a su propia caja de cobro, tampoco con otra membresía.',
@@ -156,6 +157,11 @@ export function errorText(err: unknown): string {
   if (code === 'INVALID_INPUT') {
     const field = (err as { details?: { field?: unknown } })?.details?.field;
     return typeof field === 'string' ? `Revise el campo «${FIELD[field] ?? field}».` : 'Hay datos no válidos. Revise el formulario.';
+  }
+  // 0039 (RB-D12): una operación de varias rutas la anula quien la registró (o, si ya no responde, un responsable vigente).
+  const admins = (err as { details?: { authorizedAdmins?: unknown } })?.details?.authorizedAdmins;
+  if (code === 'CAPITAL_AUTHORITY_REQUIRED' && Array.isArray(admins) && admins.length > 0) {
+    return `Solo puede anularla ${admins.join(' o ')}: quien la registró o, si ya no responde por esas rutas, su responsable actual.`;
   }
   return ERRORS[code] ?? `No se pudo completar (${code}).`;
 }

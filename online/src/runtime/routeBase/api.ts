@@ -366,6 +366,8 @@ export interface CorrectionEffect {
 }
 export interface CorrectionPreview {
   kind: CorrectionKind; id: string; label: string; amountMinor: number; mode: 'direct' | 'cascade' | 'joint' | 'blocked'; blockedBy: string | null;
+  /** 0039 (RB-D12): en operaciones de varias rutas, quién puede anularla (nombres). */
+  authorizedAdmins?: string[];
   dependencies: CorrectionDependency[]; effects: CorrectionEffect[]; jointProposal: JointProposal | null; reasonMinLength: number;
   routes: { routeId: string; name: string; controllerId: string | null; controllerName: string | null; isActor: boolean }[];
 }

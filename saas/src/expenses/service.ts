@@ -291,12 +291,13 @@ export async function reverseExpense(client: pg.PoolClient, ctx: ActiveContext, 
       await requireOpenPeriods(client, ctx, [route.id]);
     }
   }
-  // R74 (0036, RB-D7 · 0037): un gasto general con aportes de rutas lo anula el responsable VIGENTE de TODAS las rutas
-  // aportantes (aunque no lo registrara); con rutas de distintos responsables, 409 con la anulación coordinada como camino.
+  // 0039 (RB-D12): un gasto general con aportes de rutas lo anula COMPLETO quien lo registró (o, si ya no responde, un
+  // responsable vigente de esas rutas). Sin 0039 aplicada: la regla anterior (responsable de todas o anulación coordinada).
   if (prev.funding === 'routes' && correctable) {
     if (ctx.role !== 'admin') throw new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED', 'only an administrator reverses general expenses');
     const routes = (await client.query<{ r: string[] }>('select adex.general_funding_routes($1, null) r', [prev.id])).rows[0]!.r;
-    await requireControlsAllRoutesOr(client, ctx, routes, { kind: 'expense', id: prev.id, amountMinor: Number(prev.amount_minor), label: prev.description ?? 'Gasto general' });
+    await requireControlsAllRoutesOr(client, ctx, routes, { kind: 'expense', id: prev.id, amountMinor: Number(prev.amount_minor), label: prev.description ?? 'Gasto general' },
+      prev.registered_by_membership_id ?? null);
     await requireOpenPeriods(client, ctx, routes);
   }
   const reason = reqText(body, 'reason', 200);

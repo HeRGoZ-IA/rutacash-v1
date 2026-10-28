@@ -110,7 +110,9 @@ describe('R74 · autoridad del responsable de capital de la ruta (0037)', () => 
     assert.equal(await count(`select count(*) n from pg_proc where proname = any($1)`, [fns]), fns.length);
     assert.equal(await count(`select count(*) n from pg_class where relname in ('joint_reversal_proposals', 'joint_reversal_parts', 'joint_reversal_events')`, []), 3);
     const body = (await db.admin.query(`select pg_get_functiondef('adex.expense_correctable(adex.money_ctx,text,boolean)'::regprocedure) d`)).rows[0].d as string;
-    assert.ok(!body.includes('e.registered_by_membership_id'), 'ya no compara con quien registró');
+    // 0039 (RB-D12): solo el gasto general mira a quien lo registró (para PERMITIR que lo anule); el de ruta no.
+    assert.ok(body.includes('adex.reversal_by_registrar_ok(x.company, e.registered_by_membership_id'), 'RB-D12: gasto general por quien lo registró');
+    assert.equal(body.split('e.registered_by_membership_id').length - 1, 1, 'ninguna otra comparación con quien registró');
     assert.ok(body.includes('e.collector_membership_id') && body.includes('AX717'), 'solo la propia custodia');
     await assert.rejects(db.admin.query('truncate adex.joint_reversal_events'), /./);
   });
@@ -314,10 +316,11 @@ describe('R74 · autoridad del responsable de capital de la ruta (0037)', () => 
     const b2h = await base(r2);
     assert.equal((await gael.money(`/v1/capital/handovers/${r2}/confirm`, { countedMinor: b2h, expectedSeenMinor: b2h })).status, 200);
     const [b1, b2] = [await base(r1), await base(r2)];
-    // Anular directamente: 409 con el camino «proponer».
-    const direct = await $ana(`/v1/expenses/${jointExpense}/reverse`, { reason: 'Gasto conjunto equivocado' });
-    expectCode(direct, 409, 'JOINT_OPERATION_MIXED_CONTROLLERS', 'directa');
-    assert.equal(deps(direct)[0]!['action'], 'propose_joint_reversal');
+    // 0039 (RB-D12): Gael (responsable de r2, no lo registró) no lo anula; Ana (lo registró) podría anularlo directamente
+    // (CA-020). La propuesta coordinada de 0037 sigue disponible y es lo que se prueba aquí.
+    const direct = await gael.money(`/v1/expenses/${jointExpense}/reverse`, { reason: 'Gasto conjunto equivocado' });
+    expectCode(direct, 403, 'CAPITAL_AUTHORITY_REQUIRED', 'directa por quien no lo registró');
+    assert.equal((await ana('GET', `/v1/corrections/preview?kind=expense&id=${jointExpense}`)).body['mode'], 'direct', 'Ana lo anularía directamente');
     // Quien no controla ninguna ruta afectada no propone (Edu) y Fede tampoco (alcance operativo, sin capital).
     expectCode(await edu.money('/v1/capital/joint-reversals', { targetKind: 'expense', targetId: jointExpense, reason: 'No es mío' }), 403, 'CAPITAL_AUTHORITY_REQUIRED', 'Edu propone');
     expectCode(await fede.money('/v1/capital/joint-reversals', { targetKind: 'expense', targetId: jointExpense, reason: 'No es mío' }), 403, 'CAPITAL_AUTHORITY_REQUIRED', 'Fede propone');
@@ -375,8 +378,10 @@ describe('R74 · autoridad del responsable de capital de la ruta (0037)', () => 
     const tr = await $ana('/v1/capital/route-base/transfers', { fromRouteId: r1, toRouteId: r3, amountMinor: 15_000, reason: 'Préstamo de caja a r3' });
     assert.equal(tr.status, 201, JSON.stringify(tr.body));
     const trId = (tr.body['operation'] as Body)['id'] as string;
-    expectCode(await $ana(`/v1/capital/operations/${trId}/reverse`, { reason: 'Transferencia equivocada' }), 409, 'JOINT_OPERATION_MIXED_CONTROLLERS', 'transferencia directa');
-    assert.equal(await pg(anaCtx, c1, `select adex.route_base_post($1, 'REVERSAL', null, 'Por SQL directo', $2, null, $3)`, [randomUUID(), r1, trId]), 'AX434');
+    // 0039: Edu (responsable del destino, no la registró) no la anula directamente: API y segunda barrera.
+    expectCode(await edu.money(`/v1/capital/operations/${trId}/reverse`, { reason: 'Transferencia equivocada' }), 403, 'CAPITAL_AUTHORITY_REQUIRED', 'transferencia: no la registró');
+    assert.equal(await pg({ identityId: edu.identityId, membershipId: edu.membershipId }, c1,
+      `select adex.route_base_post($1, 'REVERSAL', null, 'Por SQL directo', $2, null, $3)`, [randomUUID(), r3, trId]), 'AX402');
     const [t1, t3] = [await base(r1), await base(r3)];
     const p3 = await $ana('/v1/capital/joint-reversals', { targetKind: 'route_transfer', targetId: trId, reason: 'Transferencia equivocada' });
     assert.equal(p3.status, 201, JSON.stringify(p3.body));
@@ -435,6 +440,47 @@ describe('R74 · autoridad del responsable de capital de la ruta (0037)', () => 
     assert.equal(ro.status, 200, JSON.stringify(ro.body));
     const rv = await $ana(`/v1/capital/operations/${injId}/reverse`, { reason: 'Inyección equivocada' });
     assert.equal(rv.status, 201, JSON.stringify(rv.body));
+    await ledgerOk();
+  });
+
+  // 0039 · RB-D11/RB-D12 (propietario 2026-10-27): solo el Administrador anula; una operación de varias rutas la anula COMPLETA
+  // quien la registró aunque no controle todas; si ya no responde, cualquier responsable vigente; el SuperAdmin no anula.
+  test('CA-020 · RB-D12: quien registró anula completo; si deja de ser responsable, un responsable vigente; SuperAdmin fuera', async () => {
+    // Estado: r1 → Ana, r2 → Gael (CA-009), r3 → Edu. Ana registra un gasto con aportes de r1 y r2 (r2 ya es de Gael): no puede
+    // aportar desde una ruta ajena, así que se registra con r1 y se prueba la transferencia r1 → r3 para el caso mixto.
+    const tr = await $ana('/v1/capital/route-base/transfers', { fromRouteId: r1, toRouteId: r3, amountMinor: 7_000, reason: 'Préstamo de caja a r3 (CA-020)' });
+    assert.equal(tr.status, 201, JSON.stringify(tr.body));
+    const trId = (tr.body['operation'] as Body)['id'] as string;
+    const [t1, t3] = [await base(r1), await base(r3)];
+    const pvEdu = await edu.call('GET', `/v1/corrections/preview?kind=operation&id=${trId}`);
+    assert.deepEqual([pvEdu.body['mode'], pvEdu.body['blockedBy']], ['blocked', 'CAPITAL_AUTHORITY_REQUIRED'], JSON.stringify(pvEdu.body));
+    assert.equal((await ana('GET', `/v1/corrections/preview?kind=operation&id=${trId}`)).body['mode'], 'direct');
+    const rvTr = await $ana(`/v1/capital/operations/${trId}/reverse`, { reason: 'Transferencia equivocada (CA-020)' });
+    assert.equal(rvTr.status, 201, JSON.stringify(rvTr.body));
+    assert.deepEqual([await base(r1), await base(r3)], [t1 + 7_000, t3 - 7_000], 'la transferencia se deshace completa, sin confirmación de Edu');
+
+    // Gasto general de Ana con aportes de r1 (suyo). r1 pasa después a Fede: Ana ya no responde por ninguna ruta del gasto.
+    const g = await general($ana, { scope: 'administrador', fundingSource: 'routes', amountMinor: 3_000,
+      contributions: [{ routeId: r1, amountMinor: 3_000 }], description: 'Gasto CA-020' });
+    assert.equal(g.status, 201, JSON.stringify(g.body));
+    const gid = (g.body['expense'] as Body)['id'] as string;
+    assert.equal((await bruno('PUT', `/v1/routes/${r1}/capital-controller`, { membershipId: fede.membershipId, reason: 'Rotación CA-020' })).status, 200);
+    const b1h = await base(r1);
+    assert.equal((await fede.money(`/v1/capital/handovers/${r1}/confirm`, { countedMinor: b1h, expectedSeenMinor: b1h })).status, 200);
+    expectCode(await $ana(`/v1/expenses/${gid}/reverse`, { reason: 'Ya no respondo por r1' }), 403, 'CAPITAL_AUTHORITY_REQUIRED', 'registradora que ya no responde');
+    const byGael = await gael.money(`/v1/expenses/${gid}/reverse`, { reason: 'No es de mis rutas' });
+    assert.ok([403, 404].includes(byGael.status), `Gael sin r1 no lo anula (ni lo ve): ${JSON.stringify(byGael.body)}`);
+    const b1 = await base(r1);
+    const rvG = await fede.money(`/v1/expenses/${gid}/reverse`, { reason: 'Anulo como responsable vigente de r1' });
+    assert.equal(rvG.status, 201, JSON.stringify(rvG.body));
+    assert.equal(await base(r1), b1 + 3_000, 'el aporte vuelve a la Base de r1');
+
+    // El SuperAdmin no anula: c2 (bolsas) ya no le permite anular un depósito de la empresa (barrera final AX402).
+    const dep = await $carla('/v1/capital/company/deposits', { amountMinor: 1_000, reason: 'Depósito CA-020' });
+    assert.equal(dep.status, 201, JSON.stringify(dep.body));
+    const depId = (dep.body['operation'] as Body)['id'] as string;
+    expectCode(await $carla(`/v1/capital/operations/${depId}/reverse`, { reason: 'Depósito equivocado' }), 403, 'CAPITAL_AUTHORITY_REQUIRED', 'SuperAdmin anula');
+    assert.equal(Number((await db.admin.query('select count(*) n from adex.capital_operations where reverses_operation_id = $1', [depId])).rows[0].n), 0);
     await ledgerOk();
   });
 });

@@ -203,7 +203,10 @@ export function CorrectionDialog({ target, onClose }: { target: CorrectionTarget
               </div>
             )}
 
-            {preview.mode === 'blocked' && preview.blockedBy && <Notice tone="gray" testId="corr-blocked">{BLOCKED_TEXT[preview.blockedBy] ?? 'Esta operación no se puede corregir desde aquí.'}</Notice>}
+            {preview.mode === 'blocked' && preview.blockedBy && <Notice tone="gray" testId="corr-blocked">{
+              preview.blockedBy === 'CAPITAL_AUTHORITY_REQUIRED' && preview.authorizedAdmins?.length
+                ? `Solo puede anularla ${preview.authorizedAdmins.map((n) => formatPersonName(n)).join(' o ')}: quien la registró o, si ya no responde por esas rutas, su responsable actual.`
+                : BLOCKED_TEXT[preview.blockedBy] ?? 'Esta operación no se puede corregir desde aquí.'}</Notice>}
 
             {(preview.mode === 'direct' || preview.mode === 'cascade' || (preview.mode === 'joint' && !proposal)) && (
               <Textarea label={preview.mode === 'joint' ? 'Motivo de la anulación (lo verán los demás responsables)' : 'Motivo de la anulación'}

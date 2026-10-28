@@ -403,7 +403,10 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
     if (i === m45) {
       const dup = await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/allocations', operation: true, day, body: {
         adminId: m('admin-centro'), amountMinor: COP(1_500_000), reason: 'Asignación registrada dos veces' } });
-      await c({ seat: 'direccion', method: 'POST', path: `/v1/capital/operations/${str((dup['operation'] as Record<string, unknown>)?.['id'], 'op')}/reverse`, operation: true, day, body: { reason: 'Registro duplicado de la asignación' } });
+      // RB-D11 (0039): el SuperAdmin ya no anula; el Administrador devuelve a la empresa la asignación duplicada.
+      void dup;
+      await c({ seat: 'admin-centro', method: 'POST', path: '/v1/capital/admin-returns', operation: true, day, body: {
+        adminId: m('admin-centro'), amountMinor: COP(1_500_000), reason: 'Devolución de la asignación registrada dos veces' } });
     }
     if (i === m60) await c({ seat: 'direccion', method: 'POST', path: '/v1/capital/company/withdrawals', operation: true, day, body: { amountMinor: COP(2_000_000), reason: 'Distribución parcial de utilidades' } });
     // ---- Cambio de responsable de Ruta Norte (Jorge → Marta) y baja de Jorge.
@@ -467,9 +470,14 @@ export async function runHistoryScenario(call: StrictRunner, m: (seat: string) =
       if (p) await c({ seat: 'admin-centro', method: 'POST', path: `/v1/collections/${p.id}/reverse`, operation: true, day, body: { reason: 'Abono registrado a otro cliente' } });
     }
     if (i === m50 && wd !== 6) {
-      // Corrección de un abono por la Secretaria (semana abierta): valor mal digitado.
+      // Corrección de un abono (semana abierta): valor mal digitado. RB-D11 (0039): la Secretaria pide el ajuste y el
+      // Administrador de Ruta Norte lo aprueba (solo el Administrador anula o corrige pagos).
       const p = lastPayment.norte.filter((x) => x.day === day).pop();
-      if (p) await c({ seat: 'secretario-invitado', method: 'POST', path: `/v1/collections/${p.id}/correct`, operation: true, day, body: { newAmountMinor: 0 + (await paymentAmount(p.id)) - COP(1_000), reason: 'Valor mal digitado por el cobrador' } });
+      if (p) {
+        const req = await c({ seat: 'secretario-invitado', method: 'POST', path: '/v1/payment-adjustments', operation: true, day, body: {
+          paymentId: p.id, newAmountMinor: 0 + (await paymentAmount(p.id)) - COP(1_000), reason: 'Valor mal digitado por el cobrador' } });
+        await c({ seat: i < norteChange ? 'admin-anterior' : 'admin-norte', method: 'POST', path: `/v1/payment-adjustments/${str(req['id'], 'adj')}/approve`, operation: true, day, body: {} });
+      }
     }
     if (i === m60b || i === m75 || i === mLast) {
       // Solicitudes de ajuste de pagos de semanas CERRADAS: una aprobada, una rechazada, una pendiente.

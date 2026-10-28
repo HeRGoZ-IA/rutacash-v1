@@ -355,10 +355,10 @@ describe('R74 · Base por Ruta (0034)', () => {
     assert.ok((n.body['info'] as Body[]).some((x) => x['type'] === 'route-transfer-received'), JSON.stringify(n.body));
     // Sin negativos, sin anulación, y Edu no transfiere desde r1.
     expectCode(await $ana('/v1/capital/route-base/transfers', { fromRouteId: r1, toRouteId: r3, amountMinor: 10_000_000, reason: 'Más que la Base' }), 409, 'INSUFFICIENT_FUNDS', 'excesiva');
-    // R74 (0037): con responsables distintos, la anulación es coordinada (409 con el camino), nunca unilateral.
-    const jt = await $ana(`/v1/capital/operations/${o['id']}/reverse`, { reason: 'Deshacer transferencia' });
-    expectCode(jt, 409, 'JOINT_OPERATION_MIXED_CONTROLLERS', 'anular transferencia');
-    assert.equal((((jt.body['details'] as Body)['dependencies'] as Body[])[0]!)['action'], 'propose_joint_reversal');
+    // 0039 (decisión del propietario 2026-10-27): la anula COMPLETA quien la registró (Ana); Edu (destino) no.
+    // Aquí no se anula: Edu la devuelve en parte más abajo (la anulación directa se prueba en CA-020).
+    expectCode(await edu.money(`/v1/capital/operations/${o['id']}/reverse`, { reason: 'Deshacer transferencia' }), 403, 'CAPITAL_AUTHORITY_REQUIRED', 'anular transferencia (destino)');
+    assert.equal((await ana('GET', `/v1/corrections/preview?kind=operation&id=${o['id']}`)).body['mode'], 'direct', 'Ana la anularía directamente');
     assert.ok([403, 404].includes((await edu.money('/v1/capital/route-base/transfers', { fromRouteId: r1, toRouteId: r3, amountMinor: 1_000, reason: 'Desde ruta ajena' })).status));
     // Quien ahora tiene el dinero lo devuelve con otra transferencia.
     assert.equal((await edu.money('/v1/capital/route-base/transfers', { fromRouteId: r3, toRouteId: r1, amountMinor: 5_000, reason: 'Devolución parcial' })).status, 201);

@@ -140,7 +140,8 @@ describe('ADEX Online · capa operativa', () => {
   const payState = async (id: string) => (await db.admin.query('select state, amount_minor::int amt, payment_date::text d, corrected_by_payment_id cb, correction_of_payment_id co, collector_membership_id c from adex.payments where id = $1', [id])).rows[0];
   const custodyOf = async (m: string) => Number((await db.admin.query(`select coalesce(sum(balance_minor), 0)::bigint b from adex.capital_accounts where company_id = $1 and kind = 'custody' and membership_id = $2 and route_id = $3`, [c1, m, r1])).rows[0].b);
 
-  test('OF-005 · corrección (Secretaria, periodo abierto): reversión + reemplazo atómicos, mismo responsable, custodia por la diferencia, auditada', async () => {
+  // RB-D11 (propietario 2026-10-27): solo el Administrador anula o corrige pagos; la Secretaria SIEMPRE pide un ajuste.
+  test('OF-005 · corrección (Administrador, periodo abierto): reversión + reemplazo atómicos; la Secretaria solo pide ajuste', async () => {
     const s = await credit(r1, 20);
     const pay = await carlos.money('/v1/collections', { saleId: s, amountMinor: 5_000 });
     assert.equal(pay.status, 201);
@@ -148,11 +149,16 @@ describe('ADEX Online · capa operativa', () => {
     const c0 = await custodyOf(carlos.membershipId);
     // Sin `payment.reverse` ni `payment.register`, la Secretaria NO anula por la vía directa…
     assert.equal((await sec.money(`/v1/collections/${pid}/reverse`, { reason: 'Intento directo' })).status, 403);
-    // …pero SÍ corrige (`payment.correct`): un solo comando.
+    // …ni corrige directo (RB-D11): envía una solicitud de ajuste, también en periodo abierto.
+    const direct = await sec.money(`/v1/collections/${pid}/correct`, { newAmountMinor: 4_000, reason: 'Valor mal digitado' });
+    assert.deepEqual([direct.status, direct.body['error']], [403, 'CORRECTION_REQUEST_REQUIRED'], JSON.stringify(direct.body));
+    const req = await sec.money('/v1/payment-adjustments', { paymentId: pid, newAmountMinor: 4_000, reason: 'Valor mal digitado' });
+    assert.equal(req.status, 201, `solicitud en periodo abierto: ${JSON.stringify(req.body)}`);
+    // El Administrador corrige directo (un solo comando).
     const op = randomUUID();
-    const r = await sec.money(`/v1/collections/${pid}/correct`, { newAmountMinor: 4_000, reason: 'Valor mal digitado' }, op);
+    const r = await $ana(`/v1/collections/${pid}/correct`, { newAmountMinor: 4_000, reason: 'Valor mal digitado' }, op);
     assert.equal(r.status, 201, JSON.stringify(r.body));
-    const again = await sec.money(`/v1/collections/${pid}/correct`, { newAmountMinor: 4_000, reason: 'Valor mal digitado' }, op);
+    const again = await $ana(`/v1/collections/${pid}/correct`, { newAmountMinor: 4_000, reason: 'Valor mal digitado' }, op);
     assert.equal(again.body['correctedPaymentId'], r.body['correctedPaymentId'], 'mismo id → misma corrección');
     const orig = await payState(pid);
     const fixed = await payState(r.body['correctedPaymentId'] as string);
@@ -161,8 +167,8 @@ describe('ADEX Online · capa operativa', () => {
     assert.equal(await custodyOf(carlos.membershipId), c0 - 1_000, 'la custodia del Cobrador baja solo la diferencia');
     assert.equal(await count(db.admin, `select 1 from adex.payments where sale_id = $1`, [s]), 3, 'original, reversión y reemplazo');
     assert.equal(await count(db.admin, `select 1 from adex.audit_log where action = 'CORRECT_PAYMENT' and entity_id = $1`, [pid]), 1);
-    assert.equal((await sec.money(`/v1/collections/${pid}/correct`, { newAmountMinor: 3_000, reason: 'Otra vez' })).body['error'], 'ALREADY_REVERSED');
-    assert.equal((await sec.money(`/v1/collections/${r.body['correctedPaymentId']}/correct`, { newAmountMinor: 0, reason: 'Cero' })).status, 400);
+    assert.equal((await $ana(`/v1/collections/${pid}/correct`, { newAmountMinor: 3_000, reason: 'Otra vez' })).body['error'], 'ALREADY_REVERSED');
+    assert.equal((await $ana(`/v1/collections/${r.body['correctedPaymentId']}/correct`, { newAmountMinor: 0, reason: 'Cero' })).status, 400);
     assert.ok([403, 404].includes((await gil.money(`/v1/collections/${r.body['correctedPaymentId']}/correct`, { newAmountMinor: 3_000, reason: 'Ruta ajena' })).status));
     assert.equal(await count(db.admin, 'select 1 from adex.correction_steps'), 0, 'el permiso de un solo uso no sobrevive a la transacción');
     assert.deepEqual(await reconcile(db.admin, c1), CLEAN);
@@ -190,7 +196,7 @@ describe('ADEX Online · capa operativa', () => {
     const close = await $ana('/v1/periods/close', { routeId: r1, weekStart: '2026-09-28', weekEnd: '2026-10-03' });
     assert.equal(close.status, 201, JSON.stringify(close.body));
     // Corrección directa de la Secretaria: no en periodo cerrado.
-    assert.equal((await sec.money(`/v1/collections/${pids[0]}/correct`, { newAmountMinor: 4_500, reason: 'Valor mal digitado' })).body['error'], 'ADJUSTMENT_REQUIRED');
+    assert.equal((await sec.money(`/v1/collections/${pids[0]}/correct`, { newAmountMinor: 4_500, reason: 'Valor mal digitado' })).body['error'], 'CORRECTION_REQUEST_REQUIRED');
     const req = await sec.money('/v1/payment-adjustments', { paymentId: pids[0], newAmountMinor: 4_500, reason: 'Valor mal digitado' });
     assert.equal(req.status, 201, JSON.stringify(req.body));
     assert.deepEqual([req.body['status'], req.body['originalAmountMinor'], req.body['originalDate']], ['pending', 5_000, '2026-10-01']);

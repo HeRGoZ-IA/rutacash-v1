@@ -763,63 +763,34 @@ try {
     ok('D-08', ['C-01', 'C-08'], 'RB-D7: el Admin 2 anula el reembolso al Admin 1 que salió de Centro 2: vuelve a la Base y la obligación queda pendiente otra vez',
       canRevR && await waitToast('Anulación registrada') && await gone('corr-dialog') && (await base(C2)) === bc + seedReimb.a && (await payable(M.ad1)) === pA1 + seedReimb.a, JSON.stringify({ bc, after: await base(C2), pA1, pA1b: await payable(M.ad1) }));
 
-    // Operación conjunta: el gasto A con aportes de Centro 1 (Admin 1) y Centro 2 (ahora Admin 2).
-    const JOINT_REASON = 'Motivo de la anulación (lo verán los demás responsables)';
-    const proposalOf = async () => one(`select id, status, proposed_by_membership_id p from adex.joint_reversal_proposals where company_id = $1 and target_kind = 'expense' and target_id = $2 order by created_at desc limit 1`, [N, eA.id]);
-    const proposeJointUi = async (reason) => {
-      await toPanel(); await tab('gastos');
-      const opened = await rowClick(`ge-expense-${eA.id}`, 'ge-expense-reverse') && await corrReady();
-      const jointTxt = opened ? (await testid('corr-joint')) ?? '' : '';
-      const canPropose = !!(await page.$('[data-testid="corr-propose"]'));
-      await setField(JOINT_REASON, reason); await sleep(300);
-      return { opened, jointTxt, canPropose };
-    };
+    // Operación conjunta: el gasto A con aportes de Centro 1 (Admin 1) y Centro 2 (ahora Admin 2), REGISTRADO por el Admin 1.
+    // 0039 (RB-D12, propietario 2026-10-27): lo anula COMPLETO quien lo registró (Admin 1), sin anulación coordinada; el Admin 2 no.
     await sleep(800);
     let [j1, j2] = [await base(C1), await base(C2)];
-    const pr1 = await proposeJointUi('Papelería conjunta registrada por error (se cancela)');
-    await both('D-09-propuesta-conjunta', () => waitTestid('corr-joint'));
-    await tap('corr-propose');
-    const proposed1 = await waitToast('Anulación conjunta propuesta');
-    const prop1 = await proposalOf();
-    ok('D-09', ['C-08', 'C-10'], 'Operación conjunta (Centro 1 de Admin 1 + Centro 2 de Admin 2): el diálogo explica la anulación conjunta con rutas y responsables; el Admin 2 la propone y nada se asienta todavía',
-      pr1.opened && pr1.canPropose && pr1.jointTxt.includes('Ruta Centro 1') && pr1.jointTxt.includes('Ruta Centro 2') && /Norte Uno/i.test(pr1.jointTxt)
-      && proposed1 && prop1?.status === 'pending' && prop1.p === M.ad2 && (await base(C1)) === j1 && (await base(C2)) === j2, `${pr1.jointTxt.replace(/\n/g, ' | ')} · ${JSON.stringify(prop1)}`);
-    // Quien propone la cancela desde su Caja principal: no se mueve dinero y el gasto sigue vigente.
+    await toPanel(); await tab('gastos');
+    const openedA2 = await rowClick(`ge-expense-${eA.id}`, 'ge-expense-reverse') && await corrReady();
+    const blockedTxt = openedA2 ? (await testid('corr-blocked')) ?? '' : '';
+    const noConfirmA2 = !(await page.$('[data-testid="corr-confirm"]')) && !(await page.$('[data-testid="corr-propose"]'));
+    await both('D-09-conjunta-bloqueada', () => waitTestid('corr-blocked'));
+    ok('D-09', ['C-08', 'C-10'], 'Operación conjunta: el Admin 2 (no la registró) ve que solo la anula quien la registró, con su nombre; no puede anularla ni proponer',
+      openedA2 && noConfirmA2 && /Solo puede anularla/.test(blockedTxt) && /Norte Uno/i.test(blockedTxt) && (await base(C1)) === j1 && (await base(C2)) === j2, blockedTxt.replace(/\n/g, ' '));
     await page.keyboard.press('Escape').catch(() => undefined);
-    await toPanel();
-    await page.waitForSelector('[data-testid="joint-panel"] [data-testid="joint-cancel"]', { timeout: 20_000 }).catch(() => undefined);
-    const panelOk = !!(await testid('joint-panel'));
-    await tap('joint-cancel'); await sleep(300);
-    await setField('Motivo de la cancelación', 'Se revisó: el gasto conjunto es correcto'); await sleep(300);
-    await tap('joint-cancel-confirm');
-    const cancelled = await waitToast('Propuesta cancelada');
-    const prop1b = await one('select status from adex.joint_reversal_proposals where id = $1', [prop1?.id]);
-    ok('D-09b', ['C-08'], 'El Admin 2 cancela su propuesta desde la Caja principal: «cancelled», ningún dinero se movió y el gasto conjunto sigue vigente (sin anulación parcial)',
-      panelOk && cancelled && prop1b?.status === 'cancelled' && (await base(C1)) === j1 && (await base(C2)) === j2 && !(await one('select reversal_id from adex.expenses where id = $1', [eA.id])).reversal_id, JSON.stringify(prop1b));
-    // Nueva propuesta del Admin 2; el Admin 1 la confirma desde Notificaciones y se asienta todo junto.
-    await sleep(800);
-    [j1, j2] = [await base(C1), await base(C2)];
-    const pr2 = await proposeJointUi('Papelería conjunta duplicada: se anula entera');
-    await tap('corr-propose');
-    const proposed2 = await waitToast('Anulación conjunta propuesta');
-    const prop2 = await proposalOf();
-    // Por la API directa, el Admin 1 tampoco anula su parte suelta: 409 con la propuesta pendiente que debe confirmar.
-    const jApi = await (await apiAs('admin1.norte@example.test', M.ad1))('POST', `/v1/expenses/${eA.id}/reverse`, { reason: 'Intento de anulación parcial por la API' });
+    const jApi2 = await (await apiAs('admin2.norte@example.test', M.ad2))('POST', `/v1/expenses/${eA.id}/reverse`, { reason: 'Intento del Admin 2 por la API' });
+    ok('D-09b', ['C-08'], 'Por la API el Admin 2 tampoco la anula (403); el gasto conjunto sigue vigente y ningún dinero se movió',
+      jApi2.status === 403 && jApi2.text.includes('CAPITAL_AUTHORITY_REQUIRED') && !(await one('select reversal_id from adex.expenses where id = $1', [eA.id])).reversal_id
+      && (await base(C1)) === j1 && (await base(C2)) === j2, `${jApi2.status} ${jApi2.text.slice(0, 160)}`);
+    // El Admin 1 (lo registró y sigue respondiendo por Centro 1) la anula completa desde el mismo diálogo.
     await login('admin1.norte@example.test');
-    await go('/admin/notificaciones');
-    await waitTestid('notifications-page');
-    await page.waitForSelector('[data-testid="joint-attend"]', { timeout: 30_000 }).catch(() => undefined);
-    const notified = !!(await testid('joint-attend'));
-    await both('D-10-aviso-conjunta', () => waitTestid('notifications-page'));
-    await tap('joint-attend');
-    await waitTestid('joint-confirm');
-    await tap('joint-confirm');
-    const posted = await waitToast('Anulación conjunta asentada');
-    const prop2b = await one('select status from adex.joint_reversal_proposals where id = $1', [prop2?.id]);
+    await toPanel(); await tab('gastos');
+    const openedA1 = await rowClick(`ge-expense-${eA.id}`, 'ge-expense-reverse') && await corrReady();
+    const directA1 = openedA1 && !!(await page.$('[data-testid="corr-confirm"]'));
+    if (directA1) { await setField('Motivo de la anulación', 'Papelería conjunta duplicada: se anula entera'); await sleep(300); await tap('corr-confirm'); }
+    const postedA1 = directA1 && await waitToast('Anulación registrada') && await gone('corr-dialog');
+    await sleep(800);
     const revA = await one('select reversal_id from adex.expenses where id = $1', [eA.id]);
-    ok('D-10', ['C-08', 'C-10'], 'El Admin 2 propone otra vez; el Admin 1 recibe el aviso, confirma su parte y se asienta TODO junto: Centro 1 +R$ 60, Centro 2 +R$ 30, gasto anulado (la API rechaza la parte suelta con 409)',
-      pr2.canPropose && proposed2 && notified && posted && prop2b?.status === 'posted' && !!revA?.reversal_id && (await base(C1)) === j1 + 6_000 && (await base(C2)) === j2 + 3_000
-      && jApi.status === 409 && jApi.text.includes('JOINT_OPERATION_MIXED_CONTROLLERS'), JSON.stringify({ prop2b, revA, c1: [j1, await base(C1)], c2: [j2, await base(C2)], api: jApi.status }));
+    ok('D-10', ['C-08', 'C-10'], 'El Admin 1 (lo registró) anula el gasto conjunto COMPLETO sin confirmación del Admin 2: Centro 1 +R$ 60, Centro 2 +R$ 30, gasto anulado',
+      postedA1 && !!revA?.reversal_id && (await base(C1)) === j1 + 6_000 && (await base(C2)) === j2 + 3_000,
+      JSON.stringify({ revA, c1: [j1, await base(C1)], c2: [j2, await base(C2)] }));
     const consA = await consultasHas('Anulación · aporte de ruta a gasto general', C1);
     await shot('D-11-consultas-anulacion-conjunta');
     const rev = await one(`select count(*)::int n, count(distinct o.route_id)::int routes, coalesce(sum(o.amount_minor), 0)::int a from adex.capital_operations o

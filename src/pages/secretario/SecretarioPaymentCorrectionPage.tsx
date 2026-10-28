@@ -13,14 +13,14 @@ import { useTenant } from '@/hooks/useTenant'
 import { filterByAccessibleRoute } from '@/lib/permissions'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import { formatClientName } from '@/lib/displayName'
-import { correctPayment, requestPaymentAdjustment, isPaymentInClosedPeriod } from '@/services/paymentCorrectionService'
+import { requestPaymentAdjustment, isPaymentInClosedPeriod } from '@/services/paymentCorrectionService'
 import type { Payment, Client } from '@/models/types'
 
 /**
  * CORRECCIÓN CONTROLADA DE PAGOS (Secretario).
  * Muestra los pagos vigentes de las rutas autorizadas. Al corregir:
- *  - Periodo ABIERTO  → reversión + reemplazo inmediatos (no destructivo).
- *  - Periodo CERRADO  → genera Solicitud de ajuste para aprobación de Admin/Superadmin.
+ *  - RB-D11 (propietario 2026-10-27): solo el Administrador anula o corrige pagos. El Secretario SIEMPRE envía una
+ *    Solicitud de ajuste (periodo abierto o cerrado) que aprueba un Administrador; nunca corrige directo.
  * El pago original NUNCA se elimina.
  */
 export default function SecretarioPaymentCorrectionPage() {
@@ -71,13 +71,9 @@ export default function SecretarioPaymentCorrectionPage() {
         reason: form.reason.trim(),
         observacion: form.observacion.trim() || undefined,
       }
-      const res = closed
-        ? await requestPaymentAdjustment(user, target.id, input)
-        : await correctPayment(user, target.id, input)
+      const res = await requestPaymentAdjustment(user, target.id, input)
       if (!res.success) { toast.error(res.error ?? 'No se pudo procesar'); return }
-      toast.success(closed
-        ? 'Solicitud de ajuste enviada para aprobación'
-        : 'Pago corregido. Se creó reversión y pago corregido.')
+      toast.success('Solicitud de ajuste enviada: la aprueba un Administrador')
       setTarget(null)
       await load()
     } catch { toast.error('Error al procesar la corrección') } finally { setSaving(false) }
@@ -125,7 +121,7 @@ export default function SecretarioPaymentCorrectionPage() {
         footer={<>
           <Button variant="secondary" onClick={() => setTarget(null)}>Cancelar</Button>
           <Button onClick={handleSubmit} loading={saving} icon={<RotateCcw className="w-4 h-4" />}>
-            {closed ? 'Solicitar ajuste' : 'Corregir pago'}
+            Solicitar ajuste
           </Button>
         </>}>
         {target && (
@@ -139,12 +135,10 @@ export default function SecretarioPaymentCorrectionPage() {
               <p className="text-sm font-semibold text-gray-800 mt-1">{formatClientName(clientName(target.clientId))} · {formatCurrency(target.valor, currency)} · {formatDate(target.fecha)}</p>
             </div>
 
-            {closed && (
-              <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-xs">
-                <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                <span>Este pago está en un <b>periodo cerrado</b>. No puedes corregirlo directamente: se generará una <b>solicitud de ajuste</b> que debe aprobar un Administrador autorizado o el Super Admin.</span>
-              </div>
-            )}
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 text-xs" data-testid="correction-request-note">
+              <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <span>Solo un Administrador anula o corrige pagos. Tu corrección se envía como <b>solicitud de ajuste</b> y se aplica cuando un Administrador la aprueba{closed ? ' (el pago está en un periodo cerrado)' : ''}.</span>
+            </div>
 
             <MoneyInput label="Valor correcto" currency={currency} value={form.newValor} onValueChange={v => setForm(f => ({ ...f, newValor: v }))} required />
             <Input label="Fecha correcta (opcional)" type="date" max={today()} value={form.newFecha} onChange={e => setForm(f => ({ ...f, newFecha: e.target.value }))} />

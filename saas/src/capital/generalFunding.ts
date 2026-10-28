@@ -195,7 +195,8 @@ export async function reverseReimbursement(client: pg.PoolClient, ctx: ActiveCon
   // cerrado en una ruta aportante, 409 con la reapertura como camino.
   if (prev.source === 'routes' && prev.state === 'vigente') {
     const routes = (await client.query<{ r: string[] }>('select adex.general_funding_routes(null, $1) r', [prev.id])).rows[0]!.r;
-    await requireControlsAllRoutesOr(client, ctx, routes, { kind: 'reimbursement', id: prev.id, amountMinor: prev.amountMinor, label: `Reembolso: ${prev.reason}` });
+    await requireControlsAllRoutesOr(client, ctx, routes, { kind: 'reimbursement', id: prev.id, amountMinor: prev.amountMinor, label: `Reembolso: ${prev.reason}` },
+      prev.payerId ?? null);
     await requireOpenPeriods(client, ctx, routes);
   }
   const reason = reqText(body, 'reason', 300);

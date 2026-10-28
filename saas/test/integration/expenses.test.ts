@@ -255,16 +255,20 @@ describe('Fase 5 · gastos', () => {
     assert.equal(await pool(M.anaAdmin), before + 5_000, 'vuelve a la bolsa que pagó');
     assert.equal((await $ana(`/v1/expenses/${a['id']}/reverse`, { reason: 'Otra vez' })).body['error'], 'ALREADY_REVERSED');
     assert.equal((await $ana(`/v1/expenses/${(rv.body['reversal'] as Body)['id']}/reverse`, { reason: 'Anular la anulación' })).body['error'], 'REVERSAL_NOT_ALLOWED');
-    // Reintegros parciales hasta lo no reintegrado; después ya no se anula.
-    const b = (await spend($bruno, { scope: 'empresa', amountMinor: 9_000, description: 'Compra', fundingSource: 'empresa' })).body['expense'] as Body;
-    const comp = await companyAcc();
+    // 0039 (RB-D11, propietario 2026-10-27): el SuperAdmin ya no anula ni reintegra gastos (antes sí, los de la empresa).
+    const sb = (await spend($bruno, { scope: 'empresa', amountMinor: 9_000, description: 'Compra', fundingSource: 'empresa' })).body['expense'] as Body;
+    assert.equal((await $bruno(`/v1/expenses/${sb['id']}/refunds`, { amountMinor: 1_000, reason: 'Devolución del proveedor' })).status, 403, 'SuperAdmin no reintegra');
+    assert.equal((await $bruno(`/v1/expenses/${sb['id']}/reverse`, { reason: 'Compra equivocada' })).status, 403, 'SuperAdmin no anula');
+    // Reintegros parciales (gasto de la bolsa del propio Administrador) hasta lo no reintegrado; después ya no se anula.
+    const b = (await spend($ana, { scope: 'empresa', amountMinor: 9_000, description: 'Compra', fundingSource: 'admin', fundingAdminId: M.anaAdmin })).body['expense'] as Body;
+    const pool0 = await pool(M.anaAdmin);
     const op = randomUUID();
-    const f1 = await $bruno(`/v1/expenses/${b['id']}/refunds`, { amountMinor: 4_000, reason: 'Devolución del proveedor' }, op);
-    assert.deepEqual([f1.status, f1.body['remainingMinor']], [201, 5_000]);
-    assert.deepEqual((await $bruno(`/v1/expenses/${b['id']}/refunds`, { amountMinor: 4_000, reason: 'Devolución del proveedor' }, op)).body, f1.body, 'idempotente');
-    assert.equal((await $bruno(`/v1/expenses/${b['id']}/refunds`, { amountMinor: 5_001, reason: 'Demasiado' })).body['error'], 'REFUND_EXCEEDS_EXPENSE');
-    assert.equal((await $bruno(`/v1/expenses/${b['id']}/reverse`, { reason: 'Con reintegros' })).body['error'], 'EXPENSE_HAS_REFUNDS');
-    assert.equal(await companyAcc(), comp + 4_000);
+    const f1 = await $ana(`/v1/expenses/${b['id']}/refunds`, { amountMinor: 4_000, reason: 'Devolución del proveedor' }, op);
+    assert.deepEqual([f1.status, f1.body['remainingMinor']], [201, 5_000], JSON.stringify(f1.body));
+    assert.deepEqual((await $ana(`/v1/expenses/${b['id']}/refunds`, { amountMinor: 4_000, reason: 'Devolución del proveedor' }, op)).body, f1.body, 'idempotente');
+    assert.equal((await $ana(`/v1/expenses/${b['id']}/refunds`, { amountMinor: 5_001, reason: 'Demasiado' })).body['error'], 'REFUND_EXCEEDS_EXPENSE');
+    assert.equal((await $ana(`/v1/expenses/${b['id']}/reverse`, { reason: 'Con reintegros' })).body['error'], 'EXPENSE_HAS_REFUNDS');
+    assert.equal(await pool(M.anaAdmin), pool0 + 4_000);
     // Gastos de trabajador y de ruta: los anula el responsable (R74, 0037: también los que él registró).
     // R74 (cambio de regla en esta intervención): el SuperAdmin ya no los anula.
     const w = (await worker(carlos.money, carlos.membershipId, 700, { description: 'Mal cargado' })).body['expense'] as Body;
