@@ -62,7 +62,7 @@ export function PendingSettlementsNotice() {
           {pendientes.length > 4 ? ` y ${pendientes.length - 4} más` : ''}
         </p>
         <Link to="/admin/weekly-settlement" className="mt-1 inline-block text-xs font-medium text-amber-800 underline">
-          Ir a Liquidación semanal
+          Ir a Liquidaciones
         </Link>
       </div>
     </div>

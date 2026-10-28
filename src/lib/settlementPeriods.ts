@@ -113,7 +113,7 @@ export function periodNotEndedReason(semanaFin: string, ahora: string): string |
  * distintos y el motor financiero no asume días de la semana.
  */
 export function validateClosePeriod(semanaInicio: string, semanaFin: string): string | null {
-  if (!semanaInicio || !semanaFin) return 'Indica la fecha de inicio y de fin de la semana a cerrar.'
+  if (!semanaInicio || !semanaFin) return 'Indica las fechas «Desde» y «Hasta» del cierre.'
   if (semanaFin < semanaInicio) return 'La fecha de fin no puede ser anterior a la de inicio.'
   return null
 }
@@ -140,9 +140,9 @@ export function closureBlockedReason(
   if (!choque) return null
 
   if (choque.semanaInicio === semanaInicio && choque.semanaFin === semanaFin) {
-    return 'Esta semana ya está cerrada. Para modificarla debes reabrirla primero.'
+    return 'La ruta ya está cerrada en esas fechas. Para modificarlas debes reabrir ese cierre primero.'
   }
-  return `El rango se solapa con una semana ya cerrada (${choque.semanaInicio} a ${choque.semanaFin}). Reábrela o elige otro rango.`
+  return `Las fechas se solapan con un cierre ya realizado (${choque.semanaInicio} a ${choque.semanaFin}). Reábrelo o elige otras fechas.`
 }
 
 /**
@@ -269,6 +269,37 @@ export function settlementHistory(
       if (a.version !== b.version) return b.version - a.version
       return (b.settlement.createdAt ?? '') < (a.settlement.createdAt ?? '') ? -1 : 1
     })
+}
+
+/**
+ * 3.19 (socio, 2026-10-27/28): fechas propuestas para «Hacer cierre» en una ruta.
+ *   · Con cierres: «Desde» = día siguiente al ÚLTIMO cierre vigente, FIJO (no deja huecos ni solapes).
+ *   · Sin cierres (primer cierre): «Desde» = lunes de esta semana, EDITABLE.
+ *   · Con un cierre reabierto que aún no se volvió a cerrar: «Desde» EDITABLE (fechas libres; el servidor
+ *     sigue impidiendo solapes).
+ *   · «Hasta» = hoy, editable (nunca antes de «Desde»).
+ */
+export interface ClosureSuggestion {
+  desde: string
+  hasta: string
+  desdeFijo: boolean
+  ultimo: { desde: string; hasta: string } | null
+  reabiertos: number
+}
+
+export function suggestClosureRange(settlements: WeeklySettlement[], routeId: string, hoy: string, inicioSemana: string): ClosureSuggestion {
+  const deRuta = settlements.filter(s => s.routeId === routeId && !s.supersededBy)
+  const vigentes = deRuta.filter(s => isProtectingClosure(s))
+  const reabiertos = deRuta.filter(s => settlementStatus(s) === 'reabierta' && !vigentes.some(v => periodsOverlap(v, s))).length
+  const ultimoDoc = vigentes.reduce<WeeklySettlement | null>((m, s) => (!m || s.semanaFin > m.semanaFin ? s : m), null)
+  const desde = ultimoDoc ? diaSiguiente(ultimoDoc.semanaFin) : inicioSemana
+  return {
+    desde,
+    hasta: hoy < desde ? desde : hoy,
+    desdeFijo: Boolean(ultimoDoc) && reabiertos === 0,
+    ultimo: ultimoDoc ? { desde: ultimoDoc.semanaInicio, hasta: ultimoDoc.semanaFin } : null,
+    reabiertos,
+  }
 }
 
 /** Cierres VIGENTES (no sustituidos y no reabiertos) de un conjunto de rutas. */

@@ -754,5 +754,13 @@ describe('Fase 6 · cuadres y cierres', () => {
     // Lo que llegue después se registra mañana: hoy la ruta queda cerrada.
     const late = await $anaC1('/v1/capital/deliveries', { routeId: r, workerId: w.membershipId, amountMinor: 500, reason: 'Base tardía' });
     assert.deepEqual([late.status, late.body['error']], [409, 'PERIOD_CLOSED']);
+    // 3.18: el Cobrador (que no ve los documentos de cierre) lee SOLO las fechas de los cierres de SUS rutas, sin cifras.
+    assert.equal((await w.call('GET', '/v1/periods')).status, 403, 'el Cobrador no ve los documentos de cierre');
+    const ranges = await w.call('GET', `/v1/periods/closed-ranges?routeId=${r}`);
+    assert.equal(ranges.status, 200, JSON.stringify(ranges.body));
+    assert.deepEqual(ranges.body['ranges'], [{ routeId: r, from: day, to: day }]);
+    const all = (await w.call('GET', '/v1/periods/closed-ranges')).body['ranges'] as { routeId: string }[];
+    assert.ok(all.every((x) => x.routeId === r), 'solo sus rutas');
+    assert.equal(JSON.stringify(ranges.body).includes('Minor'), false, 'sin importes');
   });
 });

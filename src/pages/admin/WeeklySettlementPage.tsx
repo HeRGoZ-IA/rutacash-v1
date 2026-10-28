@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { CalendarRange, Download, RefreshCw, Lock, LockOpen, History } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
@@ -29,10 +29,11 @@ import {
   periodEndsToday,
   periodNotEndedReason,
   settlementHistory,
+  suggestClosureRange,
   type SettlementHistoryRow,
 } from '@/lib/settlementPeriods'
 import { filterAccessibleRoutes, canAccessRoute, can, canOperateRouteCash } from '@/lib/permissions'
-import { formatCurrency, formatDate, getWeekStart, getWeekEnd } from '@/lib/formatters'
+import { formatCurrency, formatDate, getWeekStart, getWeekEnd, today } from '@/lib/formatters'
 import { downloadCSV } from '@/lib/utils'
 import { WorkerCashSettlementPanel, PendingShortagesNotice } from '@/components/settlement/WorkerCashSettlementPanel'
 import { listCashSettlementsForUser } from '@/services/cashSettlementService'
@@ -152,12 +153,31 @@ export default function WeeklySettlementPage() {
   useEffect(() => { loadMeta() }, [tenantId, user])
 
   /** Historial de la ruta. Se recarga tras cada cierre o reapertura. */
+  const [historialDe, setHistorialDe] = useState('')
   const loadHistorial = useCallback(async () => {
-    if (!routeId || !canAccessRoute(user, routeId)) { setArchivadas([]); return }
-    setArchivadas(await listSettlementsOfRoute(routeId))
+    if (!routeId || !canAccessRoute(user, routeId)) { setArchivadas([]); setHistorialDe(''); return }
+    const lista = await listSettlementsOfRoute(routeId)
+    setArchivadas(lista)
+    setHistorialDe(routeId)
   }, [routeId, user])
 
   useEffect(() => { loadHistorial() }, [loadHistorial])
+
+  /**
+   * 3.19: fechas propuestas para «Hacer cierre». Con cierres, «Desde» = día siguiente al último (fijo); sin
+   * cierres o con un cierre reabierto, editable. «Hasta» = hoy. Solo se reaplican cuando cambia la ruta o su
+   * último cierre, para no pisar lo que la persona escribió al refrescarse los datos.
+   */
+  const sugerencia = routeId && historialDe === routeId ? suggestClosureRange(archivadas, routeId, today(), getWeekStart()) : null
+  const sugerenciaAplicada = useRef('')
+  useEffect(() => {
+    if (!sugerencia) return
+    const clave = `${routeId}|${sugerencia.ultimo?.hasta ?? ''}|${sugerencia.reabiertos}`
+    if (sugerenciaAplicada.current === clave) return
+    sugerenciaAplicada.current = clave
+    setSemanaInicio(sugerencia.desde)
+    setSemanaFin(sugerencia.hasta)
+  }, [sugerencia, routeId])
 
   useEffect(() => {
     let alive = true
@@ -265,13 +285,13 @@ export default function WeeklySettlementPage() {
     try {
       const doc = await closeSettlement({ actor: user, tenantId, routeId, semanaInicio, semanaFin })
       setConfirmCierre(null)
-      toast.success(`Semana cerrada (versión ${doc.version ?? 1}). Las cifras quedan congeladas.`)
+      toast.success(`Cierre realizado (versión ${doc.version ?? 1}). Las cifras quedan congeladas.`)
       setSettlement(doc)
       setPreviewKey(null)  // se muestra el documento archivado: ya no se recalcula
       setGeneratedRoute(routes.find(r => r.id === routeId) ?? null)
       await loadHistorial()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudo cerrar la semana.')
+      toast.error(e instanceof Error ? e.message : 'No se pudo hacer el cierre.')
     } finally { setClosing(false) }
   }
 
@@ -357,7 +377,7 @@ export default function WeeklySettlementPage() {
   return (
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-xl font-bold text-gray-900">Liquidación Semanal</h1><p className="text-sm text-gray-500 mt-0.5">Lunes a Sábado · por ruta</p></div>
+        <div><h1 className="text-xl font-bold text-gray-900">Liquidaciones</h1><p className="text-sm text-gray-500 mt-0.5">Cierre de ruta y cuadre por trabajador</p></div>
         {vista === 'ruta' && <div className="flex gap-2">
           {settlement && <Button variant="secondary" onClick={exportCSV} icon={<Download className="w-4 h-4" />}>CSV</Button>}
           <Button onClick={generate} loading={loading} disabled={!routeId} icon={<RefreshCw className="w-4 h-4" />}>Generar</Button>
@@ -366,10 +386,11 @@ export default function WeeklySettlementPage() {
               onClick={pedirCierre}
               loading={preparandoCierre}
               disabled={!routeId || Boolean(bloqueoCierre) || closing}
-              title={bloqueoCierre ?? 'Archiva la semana y congela sus cifras'}
+              title={bloqueoCierre ?? 'Archiva el periodo y congela sus cifras'}
               icon={<Lock className="w-4 h-4" />}
+              data-testid="settlement-close"
             >
-              Cerrar semana
+              Hacer cierre
             </Button>
           )}
         </div>}
@@ -377,7 +398,7 @@ export default function WeeklySettlementPage() {
 
       {puedeVerCuadres && (
         <div className="flex gap-1 border-b border-gray-200">
-          {([['ruta', 'Liquidación de ruta'], ['trabajadores', 'Cuadre por trabajador']] as const).map(([k, label]) => (
+          {([['ruta', 'Cierre de ruta'], ['trabajadores', 'Cuadre por trabajador']] as const).map(([k, label]) => (
             <button key={k} onClick={() => setVista(k)}
               className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${vista === k ? 'border-primary-600 text-primary-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
               {label}
@@ -409,16 +430,35 @@ export default function WeeklySettlementPage() {
           includeUnassigned={hasUnassigned} className="w-full sm:w-56" />
         <RouteSelector routes={routesInOffice} value={routeId} onChange={setRouteId} className="w-full sm:w-64" />
         <div>
-          <label className="block text-xs text-gray-500 mb-1.5">Inicio semana</label>
-          <input type="date" value={semanaInicio} onChange={e => setSemanaInicio(e.target.value)}
-            className="h-9 rounded-lg border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
+          <label htmlFor="settlement-from" className="block text-xs text-gray-500 mb-1.5">Desde</label>
+          <input id="settlement-from" type="date" value={semanaInicio} onChange={e => setSemanaInicio(e.target.value)}
+            readOnly={sugerencia?.desdeFijo === true} data-testid="settlement-from"
+            title={sugerencia?.desdeFijo ? 'Día siguiente al último cierre: así no quedan días sin cerrar' : undefined}
+            className={`h-9 rounded-lg border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 ${sugerencia?.desdeFijo ? 'bg-gray-50 text-gray-600' : ''}`} />
         </div>
         <div>
-          <label className="block text-xs text-gray-500 mb-1.5">Fin semana</label>
-          <input type="date" value={semanaFin} onChange={e => setSemanaFin(e.target.value)}
+          <label htmlFor="settlement-to" className="block text-xs text-gray-500 mb-1.5">Hasta</label>
+          <input id="settlement-to" type="date" value={semanaFin} onChange={e => setSemanaFin(e.target.value)} data-testid="settlement-to"
             className="h-9 rounded-lg border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
         </div>
       </div>
+
+      {sugerencia && (
+        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 space-y-1" data-testid="settlement-last-closure">
+          <p className="font-medium text-gray-900">
+            {sugerencia.ultimo
+              ? `Último cierre: ${formatDate(sugerencia.ultimo.desde)} – ${formatDate(sugerencia.ultimo.hasta)}`
+              : 'Esta ruta aún no tiene cierres'}
+          </p>
+          <p className="text-xs text-gray-500">
+            {sugerencia.reabiertos > 0
+              ? 'Hay un cierre reabierto: elige las fechas del nuevo cierre (no pueden solaparse con otros cierres).'
+              : sugerencia.ultimo
+                ? '«Desde» empieza el día siguiente al último cierre para que no queden días sin cerrar. Ajusta «Hasta» si hace falta.'
+                : 'Elige desde qué día empieza el primer cierre de esta ruta.'}
+          </p>
+        </div>
+      )}
 
       {routes.length === 0 && (
         <p className="text-sm text-amber-600">No tienes rutas autorizadas: no hay nada que liquidar.</p>
@@ -507,7 +547,7 @@ export default function WeeklySettlementPage() {
       ) : (
         <div className="flex flex-col items-center justify-center py-16 text-gray-400">
           <CalendarRange className="w-10 h-10 mb-3" />
-          <p className="text-sm">Selecciona la ruta y el rango de la semana, luego haz clic en Generar</p>
+          <p className="text-sm">Selecciona la ruta y las fechas, luego haz clic en Generar</p>
         </div>
       )}
 
@@ -515,13 +555,13 @@ export default function WeeklySettlementPage() {
       {routeId && historial.length > 0 && (
         <div className="space-y-2">
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-            <History className="w-4 h-4 text-gray-400" /> Liquidaciones archivadas
+            <History className="w-4 h-4 text-gray-400" /> Cierres realizados
           </h2>
           <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-xs text-gray-500">
                 <tr>
-                  <th className="text-left font-medium px-4 py-2.5">Semana</th>
+                  <th className="text-left font-medium px-4 py-2.5">Periodo</th>
                   <th className="text-left font-medium px-4 py-2.5">Oficina al cierre</th>
                   <th className="text-left font-medium px-4 py-2.5">Estado</th>
                   <th className="text-right font-medium px-4 py-2.5">Base del trabajador al cierre</th>
@@ -576,12 +616,12 @@ export default function WeeklySettlementPage() {
       <Modal
         open={Boolean(confirmCierre)}
         onClose={() => { if (!closing) setConfirmCierre(null) }}
-        title="Cerrar semana"
+        title="Hacer cierre"
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setConfirmCierre(null)} disabled={closing} autoFocus>Cancelar</Button>
             <Button onClick={cerrarSemana} loading={closing} icon={<Lock className="w-4 h-4" />} data-testid="settlement-close-confirm">
-              Cerrar y congelar semana
+              Hacer cierre y congelar cifras
             </Button>
           </div>
         }
@@ -637,7 +677,7 @@ export default function WeeklySettlementPage() {
               <div className="flex items-start gap-2 rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600">
                 <Lock className="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-400" />
                 <p>
-                  Al cerrar, la semana se archiva{previos > 0 ? ' como una versión nueva' : ''} y <span className="font-medium text-gray-800">sus cifras quedan congeladas</span>.
+                  Al cerrar, el periodo se archiva{previos > 0 ? ' como una versión nueva' : ''} y <span className="font-medium text-gray-800">sus cifras quedan congeladas</span>.
                   Los pagos de esas fechas dejarán de ser corregibles directamente: pasarán por Solicitud de ajuste o por una reapertura con motivo.
                   El sistema vuelve a calcular al cerrar; si entra un movimiento mientras tanto, vale el documento archivado.
                 </p>
@@ -669,7 +709,7 @@ export default function WeeklySettlementPage() {
         {reabrir && (
           <div className="space-y-3">
             <p className="text-sm text-gray-600">
-              Semana {formatDate(reabrir.semanaInicio)} – {formatDate(reabrir.semanaFin)}.
+              Periodo {formatDate(reabrir.semanaInicio)} – {formatDate(reabrir.semanaFin)}.
               Los pagos de esas fechas volverán a ser corregibles directamente.
             </p>
             <div>

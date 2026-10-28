@@ -26,6 +26,10 @@ import { isOpen, shouldCaptureOffline, useOffline } from '../../../offline/state
 import { captureOfflineExpense } from '../../../offline/captures.ts'
 import { OpStatusBadge, useReachable } from '../../../offline/ui.tsx'
 import { toMajor } from '../../../runtime/mappers.ts'
+// ADEX Online (3.18): fechas de los cierres de ruta (sin cifras) para separar los gastos ya cerrados.
+import { serverView } from '../../../runtime/projection.ts'
+
+interface ClosedRange { routeId: string; from: string; to: string }
 
 /** Opción "caja de la ruta" del selector de quién pagó (no es un id de usuario). */
 const CAJA_RUTA = '__ruta__'
@@ -68,6 +72,28 @@ export default function CollectorExpensesPage() {
 
   // Un gasto registrado en otra pestaña (Admin, Supervisor) se refleja sin F5.
   const revision = useDataRevision(['expenses', 'users'])
+
+  // ADEX Online (3.18, opción A del socio): arriba los gastos del periodo abierto; abajo, plegados, los que ya
+  // entraron en un cierre de ruta. El corte es el ÚLTIMO cierre de ruta (Liquidación → Cierre de ruta), de
+  // cualquier rango. Solo presentación: no se oculta ni se borra nada. Sin el dato (API anterior o sin
+  // conexión) se muestran todos juntos, como antes.
+  const [cierres, setCierres] = useState<ClosedRange[] | null>(null)
+  useEffect(() => {
+    if (!routeId) { setCierres(null); return }
+    let alive = true
+    serverView<{ ranges: ClosedRange[] }>(`/v1/periods/closed-ranges?routeId=${encodeURIComponent(routeId)}`)
+      .then(r => { if (alive) setCierres(r.ranges.filter(x => x.routeId === routeId)) })
+      .catch(() => { if (alive) setCierres(null) })
+    return () => { alive = false }
+  }, [routeId, revision])
+  const ultimoCierre = cierres && cierres.length ? cierres.reduce((m, c) => (c.to > m ? c.to : m), '') : null
+  const enCierre = (e: Expense) => ultimoCierre !== null && e.fecha.slice(0, 10) <= ultimoCierre
+  const abiertos = expenses.filter(e => !enCierre(e))
+  const cerrados = expenses.filter(enCierre)
+  const notaCierre = (e: Expense) => {
+    const c = cierres?.find(x => x.from <= e.fecha.slice(0, 10) && e.fecha.slice(0, 10) <= x.to)
+    return c ? `Incluido en el cierre del ${formatDate(c.to, 'dd/MM')}` : 'Anterior al último cierre'
+  }
   useEffect(() => { load() }, [user, routeId, revision])
 
   async function load() {
@@ -145,6 +171,30 @@ export default function CollectorExpensesPage() {
     if (a.scope === 'trabajador') return `Base del trabajador · ${nombreDe(a.cashHolderId)}`
     return 'Base disponible'
   }
+
+  const fila = (e: Expense, nota?: string) => (
+    <div key={e.id} className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center justify-between" data-testid={nota ? 'expense-closed-item' : 'expense-item'}>
+      <div className="flex items-center gap-3">
+        <div className="w-9 h-9 bg-red-50 rounded-xl flex items-center justify-center">
+          <DollarSign className="w-4 h-4 text-red-500" />
+        </div>
+        <div>
+          <p className="text-sm font-medium text-gray-700">{getCatName(e.categoryId)}</p>
+          <p className="text-xs text-gray-500">{formatDate(e.fecha)}{e.descripcion ? ` · ${e.descripcion}` : ''}</p>
+          {veGastosDeRuta && <p className="text-[11px] font-medium text-gray-500">{etiqueta(e)}</p>}
+          {nota && <p className="text-[11px] font-medium text-gray-500" data-testid="expense-closed-note">{nota}</p>}
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        {e.receiptPhotoDataUrl && (
+          <a href={e.receiptPhotoDataUrl} target="_blank" rel="noreferrer" className="text-gray-400 hover:text-primary-600" aria-label="Ver soporte">
+            <ImageIcon className="w-4 h-4" />
+          </a>
+        )}
+        <span className="text-sm font-bold text-red-500">-{formatCurrency(e.valor, currency)}</span>
+      </div>
+    </div>
+  )
 
   return (
     <div className="p-4 space-y-4">
@@ -234,32 +284,25 @@ export default function CollectorExpensesPage() {
         </div>
       )}
 
-      <div className="space-y-2">
-        {expenses.length === 0 ? (
-          <div className="text-center py-8 text-gray-400 text-sm">No hay gastos registrados</div>
-        ) : expenses.map(e => (
-          <div key={e.id} className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-red-50 rounded-xl flex items-center justify-center">
-                <DollarSign className="w-4 h-4 text-red-500" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-700">{getCatName(e.categoryId)}</p>
-                <p className="text-xs text-gray-500">{formatDate(e.fecha)}{e.descripcion ? ` · ${e.descripcion}` : ''}</p>
-                {veGastosDeRuta && <p className="text-[11px] font-medium text-gray-500">{etiqueta(e)}</p>}
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {e.receiptPhotoDataUrl && (
-                <a href={e.receiptPhotoDataUrl} target="_blank" rel="noreferrer" className="text-gray-400 hover:text-primary-600" aria-label="Ver soporte">
-                  <ImageIcon className="w-4 h-4" />
-                </a>
-              )}
-              <span className="text-sm font-bold text-red-500">-{formatCurrency(e.valor, currency)}</span>
-            </div>
-          </div>
-        ))}
+      <div className="space-y-2" data-testid="expense-open-list">
+        {cerrados.length > 0 && <p className="text-xs font-semibold text-gray-500">Después del último cierre ({formatDate(ultimoCierre!, 'dd/MM')})</p>}
+        {abiertos.length === 0 ? (
+          <div className="text-center py-8 text-gray-400 text-sm">{cerrados.length > 0 ? 'No hay gastos después del último cierre' : 'No hay gastos registrados'}</div>
+        ) : abiertos.map(e => fila(e))}
       </div>
+
+      {cerrados.length > 0 && (
+        <details className="group rounded-2xl border border-gray-200 bg-gray-50" data-testid="expense-closed-block">
+          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-gray-700 flex items-center justify-between">
+            <span>Ya incluidos en cierres ({cerrados.length})</span>
+            <span className="text-xs text-gray-500 group-open:hidden">Ver</span>
+            <span className="text-xs text-gray-500 hidden group-open:inline">Ocultar</span>
+          </summary>
+          <div className="space-y-2 px-3 pb-3">
+            {cerrados.map(e => fila(e, notaCierre(e)))}
+          </div>
+        </details>
+      )}
     </div>
   )
 }

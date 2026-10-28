@@ -429,7 +429,7 @@ export default function OfficeDetailPage() {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-700">Liquidaciones</h2>
-            <Link to="/admin/weekly-settlement" className="text-xs text-primary-600 hover:underline">Ver liquidación semanal</Link>
+            <Link to="/admin/weekly-settlement" className="text-xs text-primary-600 hover:underline">Ver liquidaciones</Link>
           </div>
           <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-x-auto">
             <table className="w-full text-sm">

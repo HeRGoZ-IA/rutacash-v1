@@ -344,6 +344,20 @@ export async function listClosures(client: pg.PoolClient, ctx: ActiveContext, q:
   return r.rows.map((c) => ({ ...closureView(c), figures: undefined }));
 }
 
+/**
+ * 3.18 (socio): fechas de los cierres de ruta VIGENTES de las rutas del alcance, sin cifras. Lo usa la pantalla
+ * de Gastos del Cobrador y del Supervisor para separar los gastos ya incluidos en un cierre. Cualquier membresía
+ * activa (también el Cobrador, que no ve los documentos de cierre): `ctx_closed_weeks` (0020) aplica el alcance.
+ */
+export async function listClosedRanges(client: pg.PoolClient, _ctx: ActiveContext, q: URLSearchParams) {
+  const routeId = q.get('routeId');
+  if (routeId !== null) pathId(routeId);
+  const r = await client.query<{ route_id: string; f: string; t: string }>(
+    `select route_id, week_start::text f, week_end::text t from adex.ctx_closed_weeks() ${routeId ? 'where route_id = $1' : ''}
+      order by week_end desc, route_id limit 500`, routeId ? [routeId] : []);
+  return r.rows.map((x) => ({ routeId: x.route_id, from: x.f, to: x.t }));
+}
+
 export async function getClosure(client: pg.PoolClient, ctx: ActiveContext, id: string) {
   pathId(id);
   if (!allowed(ctx, 'cashbox.viewRoute')) throw new ApiError(403, 'PERMISSION_DENIED');

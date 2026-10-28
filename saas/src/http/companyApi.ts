@@ -69,7 +69,7 @@ import { CLIENT_LOCATION_FIELDS, getClientLocation, routeMap, setClientLocation 
 import { listMovements } from '../movements/service.ts';
 import { listActivity, listCashMovements, listPerspectives, movementDetail } from '../movements/consultas.ts';
 import {
-  PERIOD_CLOSE_FIELDS, SETTLEMENT_FIELDS, closePeriod, closeSettlement, getClosure, getSettlement, liquidation, listClosures, listSettlements, reopenPeriod,
+  PERIOD_CLOSE_FIELDS, SETTLEMENT_FIELDS, closePeriod, closeSettlement, getClosure, getSettlement, liquidation, listClosedRanges, listClosures, listSettlements, reopenPeriod,
   periodCalendar, previewSettlement, reopenSettlement, settleableWorkers,
 } from '../settlements/service.ts';
 import { checkFields, readJson, readJsonObject, scopeOf, send } from './common.ts';
@@ -358,6 +358,8 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'GET', pattern: new RegExp(`^/v1/settlements/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getSettlement(c, ctx, id!)) },
   { method: 'POST', pattern: new RegExp(`^/v1/settlements/${ID}/reopen$`), fields: ['reason'], idempotent: 'settlements.reopen', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => created(await reopenSettlement(c, ctx, id!, b, op)) },
+  // 3.18: fechas de los cierres de ruta del alcance (sin cifras), también para el Cobrador.
+  { method: 'GET', pattern: /^\/v1\/periods\/closed-ranges$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ ranges: await listClosedRanges(c, ctx, q) }) },
   { method: 'GET', pattern: /^\/v1\/periods\/calendar$/, fields: null, handler: () => async (c, ctx) => ok(await periodCalendar(c, ctx)) },
   { method: 'GET', pattern: /^\/v1\/periods\/liquidation$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await liquidation(c, ctx, q)) },
   { method: 'GET', pattern: /^\/v1\/periods$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ closures: await listClosures(c, ctx, q) }) },

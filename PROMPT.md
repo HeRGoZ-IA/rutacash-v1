@@ -21,10 +21,11 @@
 
 ## Dónde quedamos
 
-*Actualizado: 2026-10-28 (Ronda 80, publicada)*
+*Actualizado: 2026-10-28 (Ronda 81, en curso)*
 
-1. **Objetivo actual:** siguiente pendiente: 3.12 (interfaz RB-D13), después las peticiones del socio 3.18 (gastos ya cerrados aparte) y 3.19 (Liquidaciones).
+1. **Objetivo actual:** publicar la Ronda 81 (3.12, 3.18 y 3.19 juntas): implementadas y probadas en local, commit local **sin push**, **sin migración**. Orden: push (Vercel se publica solo) y despliegue manual de Render `adex-online-api` (lectura nueva `/v1/periods/closed-ranges`; sin ella, Gastos muestra todo junto como antes).
 2. **Qué quedó hecho:**
+   * Ronda 81 (2026-10-28, local): 3.19 Liquidaciones con nombres nuevos, aviso del último cierre y fechas propuestas; 3.18 Gastos del Cobrador y Supervisor separados por el último cierre; 3.12 pago de la obligación de otro Administrador probado en pantalla. Probado: PostgreSQL 595/0/1, CLEAN, tipos, E2E 93/46/25. **No probado:** con BlueLine ni por el socio. El texto «Después del último cierre» se ajustó tras el E2E (solo tipos comprobados).
    * Ronda 80 (2026-10-28, **publicada**): 3.14 (`44f7bae`, migración 0040 aplicada por Helmer, respaldo previo `adex-20261028T1542`; Render y Vercel). Casilla «Para Cobradores» en Categorías de gasto; Cobrador y Supervisor solo ven y usan los marcados (lo valida la API); eliminar un tipo con gastos lo quita de la lista y conserva sus gastos; gasto sin conexión con un tipo desmarcado después se acepta y avisa al Administrador. Probado: PostgreSQL 595/0/1, E2E 93/41/25, reversión 11/11, CLEAN y tipos. BlueLine quedó con 3 de 7 tipos marcados. **No probado:** con BlueLine ni por el socio.
    * Ronda 79 (2026-10-28, **publicada**): 3.17, solo el Administrador anula (`ad1f4e9`, migración 0039 aplicada por Helmer). Respaldo previo `adex-20261028T1409` verificado; 0039 verificada en staging en solo lectura; Render `adex-online-api` Live con `1e0e8cf`; Vercel `index-sDnD_a1d.js`. Probado en local: PostgreSQL 590/0/1, E2E 89/41/25, reversión 10/10. **No probado:** con BlueLine ni por el socio.
    * Ronda 78 (`225dbc6`, Vercel, 2026-10-27): peticiones del socio 3.15 (campo «Cuotas a pagar» en el cobro del Cobrador/Supervisor y en «Registrar recaudo» del Administrador; el Secretario no registra abonos) y 3.16 (fecha del desembolso; columna «Inicio de cobro» corregida).
@@ -32,13 +33,13 @@
    * Ronda 76: mora al día (`865844a`, Render) y respaldos con la alternativa A activa (copias diarias cifradas en OneDrive, clave de recuperación comprobada, tareas registradas; primera copia automática `adex-20261027T1947`).
    * **Probado:** pruebas financieras (CUOTAS-001…003), las de CLEAN, los tipos y E2E 89/89, 41/41 y 25/25. **No probado:** con datos reales ni por el socio.
 3. **Qué falta:**
-   * Implementar 3.12 (ver arriba).
-   * Peticiones del socio (alta), para el chat Central: 3.18 en Gastos del Cobrador y del Supervisor, separar los gastos hasta el último cierre de ruta (toca la misma pantalla que 3.14); 3.19 Liquidaciones con nombres nuevos, aviso «Último cierre» y fechas desde el último cierre. Guía para el socio: `docs/GUIA_SOCIO_LIQUIDACIONES_Y_CIERRES.md`.
+   * Publicar la Ronda 81 (ver arriba).
    * Que el socio valide 3.14 (categorías «Para Cobradores»), 3.15, 3.16, 3.17 (anulaciones), el cierre del mismo día y el buscador en su celular.
    * Siguen abiertas RS-4 (Supabase Pro antes de la primera empresa comercial) y RS-5 (PITR).
    * Grupo de chats «ADEX - RutaCash» (2026-10-27): Central, Errores o bugs, Peticiones del socio, Ideas y producto, Respaldos y operación, Decisiones pendientes. Solo Central y Errores tocan código.
    * Resto: `docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`, que es el **listado canónico**.
 4. **Decisiones tomadas:**
+   * 2026-10-28: Liquidaciones (3.19): el primer cierre de una ruta tiene «Desde» editable; un cierre reabierto se vuelve a cerrar con fechas libres (el servidor impide solapes).
    * 2026-10-28: tipos de gasto (3.14): BlueLine y las empresas existentes quedan con Transporte, Alimentación y Combustible marcados; el Administrador organiza la lista; eliminar un tipo con gastos nunca borra esos gastos (sale de la lista y conserva el nombre en el historial).
    * 2026-10-27:
      * No se bloquea la desactivación de trabajadores con efectivo (2.3.9, opción A).
@@ -57,11 +58,10 @@
      * Los riesgos no están aceptados salvo que Helmer lo diga.
    * 2026-10-25: cierre del mismo día con el día bloqueado después.
    * En BlueLine nunca se crean datos ficticios ni se hace una purga global.
-5. **Archivos tocados (R80):**
-   * `saas/db/migrations/0040_collector_expense_categories.sql` y su reversión en `saas/db/rollback/`
-   * `saas/src/structure/categories.ts`, `saas/src/expenses/service.ts`, `saas/src/offline/capture.ts`, `saas/src/capital/notifications.ts`, `saas/src/server/{app,start}.ts`, `saas/src/http/companyApi.ts`, `saas/src/errors.ts`, `saas/src/model/dexieV16.ts`
-   * `online/src/bridge/pages/admin/ExpenseCategoriesPage.tsx` (nuevo), `online/src/bridge/pages/collector/CollectorExpensesPage.tsx`, `online/src/runtime/{mappers,writeAdapters,capitalRequests}.ts`, `NotificationsPage.tsx`, `online/src/lib/format.ts`, `online/scripts/deploy-gate.mjs`, `src/models/types.ts`
-   * Pruebas: `saas/test/integration/collector-expense-categories.test.ts` (nuevo) y ajustes; E2E A-16c…A-16f. Evidencias en `tmp/r80/`.
+5. **Archivos tocados (R81):**
+   * `src/pages/admin/WeeklySettlementPage.tsx`, `src/lib/settlementPeriods.ts` (`suggestClosureRange`), `src/components/ui/PendingSettlementsNotice.tsx`, `src/pages/admin/OfficeDetailPage.tsx`
+   * `online/src/bridge/pages/collector/CollectorExpensesPage.tsx`; `saas/src/settlements/service.ts` (`listClosedRanges`), `saas/src/http/companyApi.ts`
+   * Pruebas: `tests/settlements.test.ts` (SUGGEST-001…004), `saas/test/integration/settlements.test.ts` (DS4-002), E2E I-02a, F-04b, J-01…J-03. Evidencias en `tmp/r80/`.
 
 ## Reglas del proyecto
 

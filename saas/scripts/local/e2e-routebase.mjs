@@ -989,6 +989,26 @@ try {
     }
     ok('F-04', ['C-05', 'C-08'], `PENDING_REIMBURSEMENT: el Admin 2 paga cada obligación suya (total R$ ${p2 / 100}) con aporte de Oeste 2 (RB-D8)`,
       paid2.length > 0 && paid2.every((x) => x.endsWith(':true')) && (await payable(M.ad2)) === 0 && (await base(O2)) === bO2r - p2, `${paid2.join(' | ')} · ${p2} → ${await payable(M.ad2)} · ${(await toasts()).slice(0, 200)}`);
+    // F-04b · 3.12 (RB-D13): el Admin 2 paga, desde SU ruta Oeste 2, una obligación del Admin 1 («Pagar») sin ver ni tocar
+    // las rutas del Admin 1. El Admin 1 registra por la API un gasto con su dinero propio (eso cierra la sesión del navegador).
+    const otros = (await one(`select id from adex.expense_categories where company_id = $1 and name = 'Otros' and deleted_at is null`, [N])).id;
+    const taxi = await (await apiAs('admin1.norte@example.test', M.ad1))('POST', '/v1/expenses', { scope: 'administrador', fundingSource: 'own_money',
+      categoryId: otros, amountMinor: 3_000, description: 'Taxi a la oficina del Admin 1 (E2E 3.12)' });
+    const taxiId = taxi.body?.expense?.id;
+    await login('admin2.norte@example.test');
+    const pA1 = await payable(M.ad1); const bO2t = await base(O2); const bC1t = await base(C1);
+    const openedT = !!taxiId && await openObligation(taxiId);
+    const notSelf = openedT && !(await page.$('[data-testid="ge-self-note"]'));
+    const pendT = openedT ? minorOf(await testid('ge-reimb-pending')) : null;
+    if (openedT) { await setField('Aporte de Ruta Oeste 2', '30'); await setField('Motivo', 'Pago del taxi del Admin 1 (RB-D13)'); await sleep(300); }
+    await both('F-04b-pago-a-otro-admin', () => waitTestid('ge-reimb-form'));
+    if (openedT) await tap('ge-reimb-save');
+    const savedT = openedT && await gone('ge-reimb-form') && await waitToast('Reembolso registrado');
+    await sleep(800);
+    const rowT = taxiId ? await one('select admin_membership_id a, payer_membership_id p from adex.admin_reimbursements where company_id = $1 and expense_id = $2 and reversed_at is null', [N, taxiId]).catch(() => null) : null;
+    ok('F-04b', ['C-08'], '3.12 (RB-D13): el Admin 2 paga desde Oeste 2 la obligación del Admin 1 (R$ 30): pendiente del Admin 1 −30, Oeste 2 −30, Centro 1 intacta',
+      taxi.status === 201 && notSelf && pendT === 3_000 && savedT && (await payable(M.ad1)) === pA1 - 3_000 && (await base(O2)) === bO2t - 3_000 && (await base(C1)) === bC1t && rowT?.a === M.ad1 && rowT?.p === M.ad2,
+      JSON.stringify({ status: taxi.status, notSelf, pendT, savedT, rowT, pA1, now: await payable(M.ad1) }));
     // F-05: CAPITAL_CONTROLLER → el SuperAdmin asigna Oeste 1/2 al Admin 1 y le cambia el responsable de las tres rutas del Admin 2.
     await login('sa.norte@example.test');
     const dMid = await toggleUserUi('admin2.norte@example.test');
@@ -1040,13 +1060,20 @@ try {
     const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     await go('/admin/weekly-settlement'); await sleep(2000);
     await pick('Ruta', 'Ruta Centro 1'); await sleep(800);
+    // 3.19: nombres nuevos y aviso del último cierre; en el primer cierre «Desde» es editable.
+    const firstNotice = await waitTestid('settlement-last-closure', 15_000) ? (await testid('settlement-last-closure')) ?? '' : '';
+    const fromEditable = await page.$eval('[data-testid="settlement-from"]', (el) => !el.readOnly).catch(() => false);
+    const names319 = await text();
+    ok('I-02a', ['C-01'], '3.19: «Liquidaciones», pestaña «Cierre de ruta», «Desde»/«Hasta», «Hacer cierre»; sin cierres: «Esta ruta aún no tiene cierres» y «Desde» editable',
+      firstNotice.includes('Esta ruta aún no tiene cierres') && fromEditable && /Liquidaciones/.test(names319) && /Cierre de ruta/.test(names319) && /Hacer cierre/.test(names319) && !/Cerrar semana|Inicio semana/.test(names319),
+      firstNotice.replace(/\n/g, ' '));
     await page.evaluate((a, b) => {
       const ins = [...document.querySelectorAll('input[type=date]')];
       for (const [el, v] of [[ins[0], a], [ins[1], b]]) { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }
     }, iso(mon), iso(sat));
     await sleep(600);
     await clickText('button', /^Generar$/); await sleep(2500);
-    await clickText('button', /^Cerrar semana$/);
+    await tap('settlement-close');
     await waitTestid('settlement-close-dialog', 15_000);
     await both('I-02-cierre-semana', () => waitTestid('settlement-close-dialog'));
     await tap('settlement-close-confirm');
@@ -1223,6 +1250,44 @@ try {
     const drain = await Promise.all([1, 2].map((i) => ad1('POST', '/v1/expenses', { scope: 'administrador', fundingSource: 'routes', categoryId: cat, amountMinor: chunk, description: `Concurrencia: aporte ${i} que vacía la Base (E2E)`, contributions: [{ routeId: O2, amountMinor: chunk }] })));
     ok('H-10', ['C-09', 'C-06'], 'Dos aportes en paralelo que vacían la misma Base (70 % cada uno): uno entra, el otro se rechaza y la Base nunca queda negativa', drain.filter((x) => x.status < 300).length === 1 && (await base(O2)) === bDrain - chunk && (await base(O2)) >= 0,
       `${drain.map((x) => x.status).join('/')} base ${bDrain} → ${await base(O2)}`);
+
+    // ======================================================================================================
+    // J · 3.19 segundo cierre (Desde fijo = día siguiente al último) y 3.18 gastos ya cerrados del Cobrador
+    // ======================================================================================================
+    stage = 'J';
+    const isoJ = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const todayJ = isoJ(new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })));
+    const lastC1 = await one(`select week_end::text we from adex.weekly_settlements where company_id = $1 and route_id = $2 and coalesce(status, 'cerrada') = 'cerrada' order by week_end desc limit 1`, [N, C1]);
+    const nextDay = (s) => { const d = new Date(`${s}T12:00:00`); d.setDate(d.getDate() + 1); return isoJ(d); };
+    await login('admin1.norte@example.test');
+    await go('/admin/weekly-settlement'); await sleep(2000);
+    await pick('Ruta', 'Ruta Centro 1'); await sleep(1500);
+    await waitTestid('settlement-last-closure', 15_000);
+    const notice2 = (await testid('settlement-last-closure')) ?? '';
+    const [fromV, fromRO, toV] = await page.evaluate(() => { const f = document.querySelector('[data-testid="settlement-from"]'); const t = document.querySelector('[data-testid="settlement-to"]'); return [f?.value, f?.readOnly, t?.value]; });
+    await both('J-01-ultimo-cierre', () => waitTestid('settlement-last-closure'));
+    ok('J-01', ['C-01'], '3.19: con un cierre previo, aviso «Último cierre: …», «Desde» = día siguiente (fijo) y «Hasta» = hoy',
+      !!lastC1 && notice2.includes('Último cierre:') && fromV === nextDay(lastC1.we) && fromRO === true && toV === todayJ, JSON.stringify({ notice2: notice2.replace(/\n/g, ' '), fromV, fromRO, toV, last: lastC1?.we, todayJ }));
+    await clickText('button', /^Generar$/); await sleep(2500);
+    await tap('settlement-close'); await waitTestid('settlement-close-dialog', 15_000);
+    await tap('settlement-close-confirm'); await sleep(3000);
+    const closedToday = await one(`select week_start::text ws, week_end::text we from adex.weekly_settlements where company_id = $1 and route_id = $2 and coalesce(status, 'cerrada') = 'cerrada' order by week_end desc limit 1`, [N, C1]);
+    ok('J-02', ['C-01'], '3.19: «Hacer cierre» con las fechas propuestas cierra desde el día siguiente al último hasta hoy (sin huecos)',
+      closedToday?.ws === nextDay(lastC1?.we ?? '') && closedToday?.we === todayJ, JSON.stringify({ closedToday, toasts: (await toasts()).slice(0, 120) }));
+    // 3.18: el Cobrador 1 ve sus gastos de hoy en el bloque plegado «Ya incluidos en cierres» con su etiqueta.
+    const cobExp = await one(`select count(*)::int n from adex.expenses where company_id = $1 and route_id = $2 and collector_membership_id = $3 and reverses_id is null`, [N, C1, M.cob1]);
+    await login('cobrador1.norte@example.test');
+    await go('/collector/expenses'); await waitTestid('expense-new');
+    const hasBlock = await waitTestid('expense-closed-block', 20_000);
+    if (hasBlock) await page.$eval('[data-testid="expense-closed-block"]', (d) => { d.open = true; });
+    await sleep(500);
+    const closedNotes = await page.$$eval('[data-testid="expense-closed-note"]', (els) => els.map((e) => e.textContent.trim()));
+    const openItems = await page.$$eval('[data-testid="expense-item"]', (els) => els.length);
+    const ddmm = `${todayJ.slice(8, 10)}/${todayJ.slice(5, 7)}`;
+    await both('J-03-gastos-cerrados-cobrador', () => waitTestid('expense-closed-block'));
+    ok('J-03', ['C-01'], '3.18: Gastos del Cobrador: lo ya cerrado va aparte y plegado, con «Incluido en el cierre del dd/mm»; nada desaparece',
+      cobExp.n > 0 && hasBlock && closedNotes.length > 0 && closedNotes.every((t) => t === `Incluido en el cierre del ${ddmm}`) && openItems === 0,
+      JSON.stringify({ cobExp: cobExp.n, closedNotes, openItems }));
 
     // ======================================================================================================
     // Z · Conciliación del libro y criterios globales

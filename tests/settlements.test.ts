@@ -42,9 +42,10 @@ import {
   protectingClosureFor,
   settlementHistory,
   settlementStatus,
+  suggestClosureRange,
 } from '@/lib/settlementPeriods'
 import { can } from '@/lib/permissions'
-import type { Payment, User } from '@/models/types'
+import type { Payment, User, WeeklySettlement } from '@/models/types'
 
 // ============================================================
 // Mini-runner (mismo formato que las otras suites)
@@ -287,6 +288,42 @@ await spec('SETTLEMENT-REOPEN-005', 'Reapertura', 'la reapertura queda en audito
   metric('motivo en auditoría', evento?.motivo)
   assert(Boolean(evento), 'reabrir debe dejar un evento SETTLEMENT_REOPENED')
   assert(evento!.motivo === 'Se corrige un cobro duplicado', 'el motivo viaja a la auditoría')
+})
+
+// ============================================================
+// SETTLEMENT-SUGGEST — 3.19: fechas propuestas para «Hacer cierre»
+// ============================================================
+await spec('SETTLEMENT-SUGGEST-001', 'Fechas propuestas', 'sin cierres: «Desde» = lunes de la semana (editable), «Hasta» = hoy', () => {
+  const s = suggestClosureRange([], R_NORTE, '2026-10-28', '2026-10-26')
+  metric('sugerencia', JSON.stringify(s))
+  assert(s.desde === '2026-10-26' && s.hasta === '2026-10-28' && !s.desdeFijo && s.ultimo === null, 'primer cierre: lunes editable hasta hoy')
+})
+
+await spec('SETTLEMENT-SUGGEST-002', 'Fechas propuestas', 'con cierres: «Desde» = día siguiente al ÚLTIMO (fijo), aunque sea domingo; otras rutas no cuentan', () => {
+  const doc = (id: string, routeId: string, ini: string, fin: string, status = 'cerrada') =>
+    ({ id, routeId, semanaInicio: ini, semanaFin: fin, status }) as unknown as WeeklySettlement
+  const s = suggestClosureRange([doc('a', R_NORTE, '2026-10-12', '2026-10-17'), doc('b', R_NORTE, '2026-10-19', '2026-10-24'), doc('c', 'otra', '2026-10-25', '2026-10-27')],
+    R_NORTE, '2026-10-28', '2026-10-26')
+  metric('sugerencia', JSON.stringify(s))
+  assert(s.desde === '2026-10-25' && s.hasta === '2026-10-28' && s.desdeFijo, 'el domingo 25 no queda sin cierre')
+  assert(s.ultimo?.desde === '2026-10-19' && s.ultimo?.hasta === '2026-10-24', 'aviso «Último cierre» con el más reciente de la ruta')
+})
+
+await spec('SETTLEMENT-SUGGEST-003', 'Fechas propuestas', 'cierre reabierto sin volver a cerrar: «Desde» editable; cerrado de nuevo, vuelve a ser fijo', () => {
+  const doc = (id: string, ini: string, fin: string, status: string, extra: Record<string, unknown> = {}) =>
+    ({ id, routeId: R_NORTE, semanaInicio: ini, semanaFin: fin, status, ...extra }) as unknown as WeeklySettlement
+  const abierto = suggestClosureRange([doc('a', '2026-10-12', '2026-10-17', 'cerrada'), doc('b', '2026-10-19', '2026-10-24', 'reabierta')], R_NORTE, '2026-10-28', '2026-10-26')
+  assert(!abierto.desdeFijo && abierto.reabiertos === 1 && abierto.desde === '2026-10-18', 'con un reabierto pendiente las fechas son libres')
+  const recerrado = suggestClosureRange([doc('a', '2026-10-12', '2026-10-17', 'cerrada'), doc('b', '2026-10-19', '2026-10-24', 'reabierta'),
+    doc('c', '2026-10-19', '2026-10-25', 'cerrada')], R_NORTE, '2026-10-28', '2026-10-26')
+  metric('reabierto / recerrado', `${JSON.stringify(abierto)} / ${JSON.stringify(recerrado)}`)
+  assert(recerrado.desdeFijo && recerrado.reabiertos === 0 && recerrado.desde === '2026-10-26', 'vuelto a cerrar (otras fechas), «Desde» vuelve a ser fijo')
+})
+
+await spec('SETTLEMENT-SUGGEST-004', 'Fechas propuestas', 'cierre que termina hoy: «Hasta» nunca queda antes de «Desde»', () => {
+  const s = suggestClosureRange([({ id: 'a', routeId: R_NORTE, semanaInicio: '2026-10-26', semanaFin: '2026-10-28', status: 'cerrada' }) as unknown as WeeklySettlement],
+    R_NORTE, '2026-10-28', '2026-10-26')
+  assert(s.desde === '2026-10-29' && s.hasta === '2026-10-29', 'el siguiente cierre empieza mañana')
 })
 
 // ============================================================
@@ -607,7 +644,7 @@ await spec('SETTLEMENT-PURE-004', 'Módulo puro', 'el bloqueo de cierre explica 
   const invertido = closureBlockedReason([], R_NORTE, S1, L1)
   metric('sin fechas', vacio)
   metric('invertido', invertido)
-  assert(vacio !== null && vacio.includes('inicio'), 'sin fechas se explica qué falta')
+  assert(vacio !== null && vacio.includes('«Desde»') && vacio.includes('«Hasta»'), 'sin fechas se explica qué falta (3.19: Desde/Hasta)')
   assert(invertido !== null && invertido.includes('anterior'), 'con el rango invertido se explica el error')
 })
 
