@@ -21,20 +21,20 @@
 
 ## Dónde quedamos
 
-*Actualizado: 2026-10-28 (Ronda 80, en curso)*
+*Actualizado: 2026-10-28 (Ronda 80, publicada)*
 
-1. **Objetivo actual:** publicar 3.14 (tipos de gasto «Para Cobradores»): implementado y probado en local, commit local **sin push**, migración `0040_collector_expense_categories.sql` **sin aplicar**. Orden: respaldo previo, Helmer ejecuta `npm run staging:migrate`, push (Render despliega desde GitHub), Render `adex-online-api` a mano, Vercel (la puerta espera `collector-expense-categories-v1`). Después: 3.12, 3.18 y 3.19.
+1. **Objetivo actual:** siguiente pendiente: 3.12 (interfaz RB-D13), después las peticiones del socio 3.18 (gastos ya cerrados aparte) y 3.19 (Liquidaciones).
 2. **Qué quedó hecho:**
-   * Ronda 80 (2026-10-28, local): 3.14. Casilla «Para Cobradores» en Categorías de gasto; Cobrador y Supervisor solo ven y usan los marcados (lo valida la API); eliminar un tipo con gastos lo quita de la lista y conserva sus gastos; gasto sin conexión con un tipo desmarcado después se acepta y avisa al Administrador. Probado: PostgreSQL 595/0/1, E2E 93/41/25, reversión 11/11, CLEAN y tipos. **No probado:** en staging ni con BlueLine.
+   * Ronda 80 (2026-10-28, **publicada**): 3.14 (`44f7bae`, migración 0040 aplicada por Helmer, respaldo previo `adex-20261028T1542`; Render y Vercel). Casilla «Para Cobradores» en Categorías de gasto; Cobrador y Supervisor solo ven y usan los marcados (lo valida la API); eliminar un tipo con gastos lo quita de la lista y conserva sus gastos; gasto sin conexión con un tipo desmarcado después se acepta y avisa al Administrador. Probado: PostgreSQL 595/0/1, E2E 93/41/25, reversión 11/11, CLEAN y tipos. BlueLine quedó con 3 de 7 tipos marcados. **No probado:** con BlueLine ni por el socio.
    * Ronda 79 (2026-10-28, **publicada**): 3.17, solo el Administrador anula (`ad1f4e9`, migración 0039 aplicada por Helmer). Respaldo previo `adex-20261028T1409` verificado; 0039 verificada en staging en solo lectura; Render `adex-online-api` Live con `1e0e8cf`; Vercel `index-sDnD_a1d.js`. Probado en local: PostgreSQL 590/0/1, E2E 89/41/25, reversión 10/10. **No probado:** con BlueLine ni por el socio.
    * Ronda 78 (`225dbc6`, Vercel, 2026-10-27): peticiones del socio 3.15 (campo «Cuotas a pagar» en el cobro del Cobrador/Supervisor y en «Registrar recaudo» del Administrador; el Secretario no registra abonos) y 3.16 (fecha del desembolso; columna «Inicio de cobro» corregida).
    * Ronda 77 (`bffdfc1`): búsqueda sin acentos en Clientes y Usuarios.
    * Ronda 76: mora al día (`865844a`, Render) y respaldos con la alternativa A activa (copias diarias cifradas en OneDrive, clave de recuperación comprobada, tareas registradas; primera copia automática `adex-20261027T1947`).
    * **Probado:** pruebas financieras (CUOTAS-001…003), las de CLEAN, los tipos y E2E 89/89, 41/41 y 25/25. **No probado:** con datos reales ni por el socio.
 3. **Qué falta:**
-   * Publicar 3.14 (ver arriba) e implementar 3.12.
+   * Implementar 3.12 (ver arriba).
    * Peticiones del socio (alta), para el chat Central: 3.18 en Gastos del Cobrador y del Supervisor, separar los gastos hasta el último cierre de ruta (toca la misma pantalla que 3.14); 3.19 Liquidaciones con nombres nuevos, aviso «Último cierre» y fechas desde el último cierre. Guía para el socio: `docs/GUIA_SOCIO_LIQUIDACIONES_Y_CIERRES.md`.
-   * Que el socio valide 3.15, 3.16, 3.17 (anulaciones), el cierre del mismo día y el buscador en su celular.
+   * Que el socio valide 3.14 (categorías «Para Cobradores»), 3.15, 3.16, 3.17 (anulaciones), el cierre del mismo día y el buscador en su celular.
    * Siguen abiertas RS-4 (Supabase Pro antes de la primera empresa comercial) y RS-5 (PITR).
    * Grupo de chats «ADEX - RutaCash» (2026-10-27): Central, Errores o bugs, Peticiones del socio, Ideas y producto, Respaldos y operación, Decisiones pendientes. Solo Central y Errores tocan código.
    * Resto: `docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`, que es el **listado canónico**.
@@ -88,6 +88,10 @@ Si cambia su estado, su propósito, su despliegue o su ubicación, o si se elimi
 ## Changelog
 
 El historial detallado por rondas está en `docs/REGISTRO_MAESTRO_EVOLUCION_ADEX.md`.
+
+### 2026-10-28 — Ronda 80: tipos de gasto «Para Cobradores» (publicada)
+
+* 3.14: `44f7bae` + migración 0040. Publicado en Render y Vercel tras respaldo verificado.
 
 ### 2026-10-28 — Ronda 79: solo el Administrador anula (publicada)
 
