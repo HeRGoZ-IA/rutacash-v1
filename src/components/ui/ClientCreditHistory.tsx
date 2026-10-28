@@ -95,7 +95,8 @@ export function ClientCreditHistory({ client, title = 'Historial de ventas' }: P
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
               <th className="text-left px-3 py-2">Valor de la venta</th>
-              <th className="text-left px-3 py-2 whitespace-nowrap">Fecha de creación</th>
+              <th className="text-left px-3 py-2 whitespace-nowrap">Desembolso</th>
+              <th className="text-left px-3 py-2 whitespace-nowrap">Inicio de cobro</th>
               <th className="text-left px-3 py-2 whitespace-nowrap">Fin estimado</th>
               <th className="text-left px-3 py-2 whitespace-nowrap">Finalización real</th>
               <th className="text-left px-3 py-2">Estado</th>
@@ -107,6 +108,7 @@ export function ClientCreditHistory({ client, title = 'Historial de ventas' }: P
             {history.entries.map(e => (
               <tr key={e.saleId} className="hover:bg-gray-50">
                 <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{formatCurrency(e.valorVenta, currency)}</td>
+                <td className="px-3 py-2 text-gray-600 whitespace-nowrap" data-testid="credit-history-disbursed">{e.fechaDesembolso ? formatDate(e.fechaDesembolso) : '—'}</td>
                 <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{formatDate(e.fechaInicio)}</td>
                 <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{formatDate(e.fechaFinEstimada)}</td>
                 {/* "—" cuando no hay fecha REAL: activo, perdido, refinanciado o

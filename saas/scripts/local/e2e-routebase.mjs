@@ -489,6 +489,15 @@ try {
     const pay0 = Number((await one('select count(*)::int n from adex.payments where sale_id = $1', [saleA.id])).n);
     await go(`/collector/payment/${saleA.id}`);
     await page.waitForFunction(() => { const b = document.querySelector('[data-testid="payment-submit"]'); return b && !b.disabled; }, { timeout: 45_000 }).catch(() => undefined);
+    // Pendientes 3.15 y 3.16 (socio): «Cuotas a pagar» llena el valor y la pantalla muestra el día del desembolso.
+    const two = Number((await one(`select coalesce(sum(balance_minor), 0)::int s from (select balance_minor from adex.installments
+      where sale_id = $1 and status not in ('pagada', 'sustituida') and balance_minor > 0 order by number limit 2) x`, [saleA.id])).s);
+    await setInput('#payment-installments', '2'); await sleep(500);
+    const filled = minorOf('R$ ' + await page.$eval('#payment-amount', (el) => el.value));
+    ok('A-14b', ['C-01'], 'Cobro: «Cuotas a pagar» = 2 llena el valor con la suma de las dos cuotas pendientes', two > 0 && filled === Math.round(two / 100) * 100, JSON.stringify({ two, filled }));
+    const dd = (await one('select to_char(disbursement_date, \'DD/MM/YYYY\') d from adex.sales where id = $1', [saleA.id])).d;
+    const shownDate = await page.$eval('[data-testid="payment-disbursed-date"]', (el) => el.innerText).catch(() => '');
+    ok('A-14c', ['C-01'], 'Cobro: muestra «Desembolsada el» con el día del desembolso', !!dd && shownDate.includes(dd), JSON.stringify({ dd, shownDate }));
     await setInput('#payment-amount', '60'); await sleep(400);
     await both('A-14-cobro', () => waitTestid('payment-submit'));
     await tap('payment-submit');

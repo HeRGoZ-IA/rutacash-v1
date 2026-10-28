@@ -62,6 +62,8 @@ export interface CreditHistoryEntry {
   numeroCuotas: number
   /** Fecha comercial de arranque del crédito (NO `createdAt`). */
   fechaInicio: string
+  /** Día en que se entregó el dinero (desembolso). `undefined` si aún no se desembolsó. */
+  fechaDesembolso?: string
   /** Cuándo DEBERÍA terminar. */
   fechaFinEstimada: string
   /** Cuándo terminó REALMENTE. `undefined` = no aplica o no determinable. */
@@ -128,6 +130,7 @@ export function buildClientCreditHistory(
       totalAbonado: abonadoPorVenta.get(s.id) ?? 0,
       numeroCuotas: s.numeroCuotas,
       fechaInicio: s.fechaInicio,
+      fechaDesembolso: s.fechaDesembolso || undefined,
       fechaFinEstimada: s.fechaFinalEstimada,
       // Solo un crédito FINALIZADO puede tener fecha real de finalización. Un crédito
       // activo NUNCA aparece como finalizado, y uno perdido no inventa fecha.

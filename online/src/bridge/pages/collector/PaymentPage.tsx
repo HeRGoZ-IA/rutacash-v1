@@ -19,7 +19,7 @@ import { formatCurrency, formatCurrencyInput, parseCurrencyInput, getCurrencySym
 import { formatBusinessName, formatClientName } from '@/lib/displayName'
 import { calculateCurrentInstallment } from '@/services/installmentEngine'
 import {
-  registerPayment, quickAmounts, getUnconfirmedPayment, checkUnconfirmedPayment,
+  registerPayment, quickAmounts, amountForInstallments, pendingInstallments, getUnconfirmedPayment, checkUnconfirmedPayment,
   type RegisterPaymentSuccess, type UnconfirmedPayment,
 } from '@/services/paymentService'
 import { CollectorPicker } from '@/components/ui/CollectorPicker'
@@ -30,7 +30,7 @@ import {
 } from '@/lib/geolocation'
 import type { Sale, Client, Installment } from '@/models/types'
 // ADEX Online (Ronda 62): modo sin conexión.
-import { formatDateTime } from '@/lib/formatters'
+import { formatDateTime, formatDate } from '@/lib/formatters'
 import { captureOfflinePayment } from '@/services/paymentService'
 import { isOpen, shouldCaptureOffline, useOffline } from '../../../offline/state.ts'
 import { OpStatusBadge, useReachable } from '../../../offline/ui.tsx'
@@ -49,6 +49,9 @@ export default function PaymentPage() {
   const [client, setClient] = useState<Client | null>(null)
   const [installments, setInstallments] = useState<Installment[]>([])
   const [valor, setValor] = useState(0)
+  // Petición del socio (3.15): «Cuotas a pagar» llena el valor; escribir el valor o usar un botón rápido lo vacía.
+  const [cuotas, setCuotas] = useState('')
+  const setValorManual = (v: number) => { setCuotas(''); setValor(v) }
   const [observacion, setObservacion] = useState('')
   /** Cobrador RESPONSABLE del recaudo. El propio cobrador no lo elige: es él. */
   const [collectorId, setCollectorId] = useState('')
@@ -116,6 +119,7 @@ export default function PaymentPage() {
     const c = await db.clients.get(fresh.sale.clientId)
     setClient(c ?? null)
     setValor(quickAmounts(fresh.sale, fresh.insts).parcela)
+    setCuotas('')
   }
 
   /** Paso previo: si el abono liquida toda la deuda, primero se confirma. */
@@ -278,6 +282,7 @@ export default function PaymentPage() {
   // Montos rápidos: fuente única `quickAmounts` (saldo REAL de la parcela actual,
   // no el nominal `valorCuota`). Idéntico criterio que en el panel Admin.
   const qa = quickAmounts(sale, installments)
+  const pendientes = pendingInstallments(installments).length
   // Vista previa SOLO de presentación (Ronda 48): el servicio aplica, topa y calcula
   // el saldo real; esta cifra solo anticipa el resultado para evitar errores de digitación.
   const aRegistrar = Math.min(valor, qa.total)
@@ -300,6 +305,8 @@ export default function PaymentPage() {
           <div className="text-center"><p className="text-xs text-gray-500">Parcela</p><p className="font-bold text-primary-700 tabular-nums">{formatCurrency(qa.parcela, currency)}</p></div>
           <div className="text-center"><p className="text-xs text-gray-500">N° parcela</p><p className="font-bold text-gray-700"><span className="text-primary-700">{parcelaNumero ?? '-'}</span>/{sale.numeroCuotas}</p></div>
         </div>
+        {/* Petición del socio (3.16): día en que se entregó el dinero. */}
+        {sale.fechaDesembolso && <p className="mt-2 text-center text-xs text-primary-700" data-testid="payment-disbursed-date">Desembolsada el {formatDate(sale.fechaDesembolso)}</p>}
       </div>
 
       {sale.disbursementStatus === 'pendiente' ? (
@@ -439,7 +446,7 @@ export default function PaymentPage() {
                 type="text"
                 inputMode="numeric"
                 value={formatCurrencyInput(valor, currency)}
-                onChange={e => setValor(parseCurrencyInput(e.target.value))}
+                onChange={e => setValorManual(parseCurrencyInput(e.target.value))}
                 placeholder="0"
                 className="w-full h-14 text-2xl font-bold text-center rounded-xl border-2 border-gray-200 focus:border-primary-500 focus:outline-none tabular-nums"
               />
@@ -447,13 +454,36 @@ export default function PaymentPage() {
 
             {/* Quick amounts — sobre el saldo REAL de la parcela actual. El elegido queda marcado. */}
             <div className="grid grid-cols-3 gap-2">
-              <button type="button" aria-pressed={valor === qa.parcela} onClick={() => setValor(qa.parcela)}
+              <button type="button" aria-pressed={valor === qa.parcela} onClick={() => setValorManual(qa.parcela)}
                 className={chip(valor === qa.parcela, 'py-2 bg-primary-50 text-primary-700 rounded-xl text-xs font-medium')}>Completar parcela<br />{formatCurrency(qa.parcela, currency)}</button>
-              <button type="button" aria-pressed={valor === qa.mitad} onClick={() => setValor(qa.mitad)}
+              <button type="button" aria-pressed={valor === qa.mitad} onClick={() => setValorManual(qa.mitad)}
                 className={chip(valor === qa.mitad, 'py-2 bg-gray-50 text-gray-600 rounded-xl text-xs font-medium')}>Mitad<br />{formatCurrency(qa.mitad, currency)}</button>
-              <button type="button" aria-pressed={valor === qa.total} onClick={() => setValor(qa.total)}
+              <button type="button" aria-pressed={valor === qa.total} onClick={() => setValorManual(qa.total)}
                 className={chip(valor === qa.total, 'py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-medium')}>Total deuda<br />{formatCurrency(qa.total, currency)}</button>
             </div>
+            {/* Petición del socio (3.15): pagar por número de cuotas. Solo propone el valor; el servicio lo aplica como siempre. */}
+            <div className="flex items-center gap-3">
+              <label htmlFor="payment-installments" className="text-sm text-gray-600 whitespace-nowrap">Cuotas a pagar</label>
+              <input
+                id="payment-installments"
+                data-testid="payment-installments"
+                type="text"
+                inputMode="numeric"
+                value={cuotas}
+                onChange={e => {
+                  const t = e.target.value.replace(/\D/g, '').slice(0, 3)
+                  setCuotas(t)
+                  const n = Number(t)
+                  if (n > 0) setValor(amountForInstallments(sale, installments, n))
+                }}
+                placeholder="0"
+                className="w-20 h-10 text-center text-lg font-bold rounded-xl border-2 border-gray-200 focus:border-primary-500 focus:outline-none tabular-nums"
+              />
+              <span className="text-xs text-gray-500">de {pendientes} pendiente{pendientes === 1 ? '' : 's'}</span>
+            </div>
+            {Number(cuotas) > pendientes && pendientes > 0 && (
+              <p className="text-xs text-amber-600">Solo quedan {pendientes} cuota{pendientes === 1 ? '' : 's'}: se propone el total de la deuda.</p>
+            )}
             {offlineNow && valor > limiteSinConexion ? (
               <p className="text-xs text-red-600">Sin conexión no se puede registrar más que el saldo conocido ({formatCurrency(limiteSinConexion, currency)}).</p>
             ) : valor > qa.total && (

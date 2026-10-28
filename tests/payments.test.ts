@@ -19,7 +19,7 @@ import {
   calculateSaleBalance, calculateCurrentInstallment, getLastPaidInstallmentNumber,
   recalculateSaleFromPayments,
 } from '../src/services/installmentEngine'
-import { quickAmounts, registerPayment, type PaymentDatabase, type AuditSink } from '../src/services/paymentService'
+import { amountForInstallments, pendingInstallments, quickAmounts, registerPayment, type PaymentDatabase, type AuditSink } from '../src/services/paymentService'
 import {
   reconcileFinancials, formatReconciliationReport, LEGACY_ISSUES,
   type ReconciliationDatabase, type LegacyIssueCode,
@@ -546,6 +546,41 @@ await spec('RC-BUG-006', 'Bugs', 'el monto rápido usa el saldo real de la parce
   metric('excedente', r.result ? r.result.cappedAmount : '—')
   assert(st.totalRegistradoEnPayments === 34284, 'payments debía registrar exactamente el saldo real')
   assert(st.saleSaldo === 0 && st.saleStatus === 'finalizada', 'la venta debía cerrarse exactamente en 0')
+})
+
+// ############################################################
+// PAGO POR NÚMERO DE CUOTAS (pendiente 3.15, petición del socio)
+// ############################################################
+await spec('CUOTAS-001', 'Pago por cuotas', 'N cuotas = lo que falta de la actual + las siguientes, con saldo real; nunca más que la deuda', async () => {
+  const sc = buildScenario({ ...ESC_REDONDEO, parcelasPagadas: 4 })
+  const pend = pendingInstallments(sc.installments)
+  const total = quickAmounts(sc.sale, sc.installments).total
+  metric('parcelas pendientes', pend.length)
+  assert(amountForInstallments(sc.sale, sc.installments, 1) === pend[0].saldo, '1 cuota = saldo de la actual')
+  assert(amountForInstallments(sc.sale, sc.installments, 2) === pend[0].saldo + pend[1].saldo, '2 cuotas = actual + siguiente')
+  // Incluye la última parcela con el redondeo (saldo real, no el nominal).
+  assert(amountForInstallments(sc.sale, sc.installments, pend.length) === total, 'todas las pendientes = total de la deuda')
+  assert(amountForInstallments(sc.sale, sc.installments, pend.length + 5) === total, 'más cuotas de las que quedan = total, nunca más')
+  for (const bad of [0, -1, 1.5, Number.NaN]) assert(amountForInstallments(sc.sale, sc.installments, bad) === 0, `${bad} no propone nada`)
+})
+
+await spec('CUOTAS-002', 'Pago por cuotas', 'con abono parcial en la actual, cuenta solo lo que falta de ella', async () => {
+  const sc = buildScenario({ ...ESC_REDONDEO, parcelasPagadas: 2 })
+  const actual = pendingInstallments(sc.installments)[0]
+  const parcial = { ...actual, pagado: 10000, saldo: actual.saldo - 10000, status: 'parcial' as const }
+  const insts = sc.installments.map((i) => (i.id === actual.id ? parcial : i))
+  const siguiente = pendingInstallments(insts)[1]
+  assert(amountForInstallments(sc.sale, insts, 1) === parcial.saldo, 'lo que falta de la actual')
+  assert(amountForInstallments(sc.sale, insts, 2) === parcial.saldo + siguiente.saldo, 'lo que falta + la siguiente')
+})
+
+await spec('CUOTAS-003', 'Pago por cuotas', 'el valor propuesto se registra y paga exactamente esas cuotas', async () => {
+  const sc = buildScenario({ ...ESC_REDONDEO, parcelasPagadas: 1 })
+  const v = amountForInstallments(sc.sale, sc.installments, 3)
+  const r = await adminQuickPaymentFlow(sc.db, { paymentValor: v, paymentSale: sc.sale, user: USER_ADMIN })
+  const st = await readFinancialState(sc.db)
+  metric('propuesto para 3 cuotas', v)
+  assert(st.totalRegistradoEnPayments === v && (r.result?.cappedAmount ?? 0) === 0, 'se registra el valor propuesto, sin tope')
 })
 
 await spec('RC-BUG-006-NOMINAL', 'Bugs', 'aunque se escriba el nominal, el servicio lo topa al saldo real', async () => {

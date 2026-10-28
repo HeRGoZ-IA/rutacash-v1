@@ -596,3 +596,25 @@ export function quickAmounts(
     total,
   }
 }
+
+/** Parcelas que aún deben algo, en orden (la actual primero). */
+export function pendingInstallments(installments: Installment[]): Installment[] {
+  return [...installments].filter((i) => i.status !== 'pagada' && i.saldo > 0).sort((a, b) => a.numero - b.numero)
+}
+
+/**
+ * Valor para pagar N cuotas (petición del socio, pendiente 3.15; regla aprobada por el propietario
+ * el 2026-10-27): lo que falta de la parcela actual (si tiene abono parcial) más las N − 1
+ * siguientes, con el SALDO REAL de cada una y nunca por encima del total de la deuda. Solo propone
+ * el valor: el servicio aplica, topa y reparte el abono como siempre. 0 si N no es un entero positivo.
+ */
+export function amountForInstallments(
+  sale: Pick<Sale, 'valorCuota' | 'saldo'>,
+  installments: Installment[],
+  count: number,
+): number {
+  if (!Number.isInteger(count) || count <= 0) return 0
+  const total = quickAmounts(sale, installments).total
+  const sum = pendingInstallments(installments).slice(0, count).reduce((s, i) => s + i.saldo, 0)
+  return Math.max(0, Math.min(sum, total))
+}

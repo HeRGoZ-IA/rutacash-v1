@@ -31,7 +31,7 @@ import { compareByCreation } from '@/lib/eventOrder'
 import {
   AnnulPaymentButton, AnnulPaymentModal, PaymentAnnulmentDetail, PaymentStateBadge, type AnnulPaymentTarget,
 } from '@/components/ui/PaymentAnnulment'
-import { registerPayment, quickAmounts } from '@/services/paymentService'
+import { registerPayment, quickAmounts, amountForInstallments, pendingInstallments } from '@/services/paymentService'
 import { CollectorPicker } from '@/components/ui/CollectorPicker'
 import { createDirectSale, findActiveSaleForClient, markSaleLost } from '@/services/saleRequestService'
 import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
@@ -80,6 +80,9 @@ export default function ActiveSalesPage() {
   const [saving, setSaving] = useState(false)
   const [paymentSale, setPaymentSale] = useState<Sale | null>(null)
   const [paymentValor, setPaymentValor] = useState(0)
+  // Petición del socio (3.15): «Cuotas a pagar» llena el valor; escribir el valor o usar un botón rápido lo vacía.
+  const [paymentCuotas, setPaymentCuotas] = useState('')
+  const setPaymentValorManual = (v: number) => { setPaymentCuotas(''); setPaymentValor(v) }
   /** Cobrador RESPONSABLE del recaudo (quien recibió el dinero), no quien lo digita. */
   const [paymentCollectorId, setPaymentCollectorId] = useState('')
   const [payingQuick, setPayingQuick] = useState(false)
@@ -316,6 +319,7 @@ export default function ActiveSalesPage() {
       }
       setPaymentSale(null)
       setPaymentValor(0)
+      setPaymentCuotas('')
       setPaymentCollectorId('')
       setDetailSale(null)
       await load()
@@ -541,7 +545,7 @@ export default function ActiveSalesPage() {
             <>
               <Button variant="secondary" onClick={() => setDetailSale(null)}>Cerrar</Button>
               {detailSale.status === 'activa' && (
-                <Button onClick={() => { setPaymentSale(detailSale); setPaymentValor(quickAmounts(detailSale, detailInstallments).parcela) }} icon={<DollarSign className="w-4 h-4" />}>Registrar pago</Button>
+                <Button onClick={() => { setPaymentSale(detailSale); setPaymentCuotas(''); setPaymentValor(quickAmounts(detailSale, detailInstallments).parcela) }} icon={<DollarSign className="w-4 h-4" />}>Registrar pago</Button>
               )}
               {detailSale.status === 'activa' && (
                 <Button variant="danger" onClick={() => { setLostSale(detailSale); setLostOpen(true) }} icon={<XCircle className="w-4 h-4" />}>Marcar perdida</Button>
@@ -659,11 +663,27 @@ export default function ActiveSalesPage() {
               <div><p className="text-xs text-gray-500">Saldo pendiente</p><p className="font-bold text-amber-600">{formatCurrency(paymentQuick.total, currency)}</p></div>
             </div>
             <div className="grid grid-cols-3 gap-2">
-              <button type="button" onClick={() => setPaymentValor(paymentQuick.parcela)} className="py-2 bg-primary-50 text-primary-700 rounded-xl text-xs font-medium hover:bg-primary-100">Completar parcela<br />{formatCurrency(paymentQuick.parcela, currency)}</button>
-              <button type="button" onClick={() => setPaymentValor(paymentQuick.mitad)} className="py-2 bg-gray-50 text-gray-600 rounded-xl text-xs font-medium hover:bg-gray-100">Mitad<br />{formatCurrency(paymentQuick.mitad, currency)}</button>
-              <button type="button" onClick={() => setPaymentValor(paymentQuick.total)} className="py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-medium hover:bg-emerald-100">Total saldo<br />{formatCurrency(paymentQuick.total, currency)}</button>
+              <button type="button" onClick={() => setPaymentValorManual(paymentQuick.parcela)} className="py-2 bg-primary-50 text-primary-700 rounded-xl text-xs font-medium hover:bg-primary-100">Completar parcela<br />{formatCurrency(paymentQuick.parcela, currency)}</button>
+              <button type="button" onClick={() => setPaymentValorManual(paymentQuick.mitad)} className="py-2 bg-gray-50 text-gray-600 rounded-xl text-xs font-medium hover:bg-gray-100">Mitad<br />{formatCurrency(paymentQuick.mitad, currency)}</button>
+              <button type="button" onClick={() => setPaymentValorManual(paymentQuick.total)} className="py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-medium hover:bg-emerald-100">Total saldo<br />{formatCurrency(paymentQuick.total, currency)}</button>
             </div>
-            <MoneyInput label="Valor del recaudo" currency={currency} value={paymentValor} onValueChange={setPaymentValor} required
+            {/* Petición del socio (3.15): pagar por número de cuotas. Solo propone el valor; el servicio lo aplica como siempre. */}
+            {(() => {
+              const pendientes = pendingInstallments(detailInstallments).length
+              return (
+                <Input label="Cuotas a pagar" inputMode="numeric" placeholder="0" data-testid="payment-installments" value={paymentCuotas}
+                  onChange={e => {
+                    const t = e.target.value.replace(/\D/g, '').slice(0, 3)
+                    setPaymentCuotas(t)
+                    const n = Number(t)
+                    if (n > 0) setPaymentValor(amountForInstallments(paymentSale, detailInstallments, n))
+                  }}
+                  hint={Number(paymentCuotas) > pendientes && pendientes > 0
+                    ? `Solo quedan ${pendientes} cuota${pendientes === 1 ? '' : 's'}: se propone el total de la deuda.`
+                    : `De ${pendientes} pendiente${pendientes === 1 ? '' : 's'}. Llena el valor con lo que falta de la cuota actual y las siguientes.`} />
+              )
+            })()}
+            <MoneyInput label="Valor del recaudo" currency={currency} value={paymentValor} onValueChange={setPaymentValorManual} required
               hint={paymentValor > paymentQuick.total ? `Supera el saldo: se registrará ${formatCurrency(paymentQuick.total, currency)}` : undefined} />
             {/* El efectivo se carga a la caja del cobrador que lo recibió, no del
                 usuario que registra la operación. */}

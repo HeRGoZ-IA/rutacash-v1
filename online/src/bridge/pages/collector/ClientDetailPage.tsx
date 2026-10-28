@@ -183,6 +183,10 @@ export default function ClientDetailPage() {
                 <p className="text-sm font-bold text-gray-700">{lastPaidNumber}/{selectedSale.numeroCuotas}</p>
               </div>
             </div>
+            {/* Petición del socio (3.16): día en que se entregó el dinero. */}
+            {selectedSale.fechaDesembolso && (
+              <p className="text-xs text-gray-500" data-testid="client-sale-disbursed-date">Desembolsada el {formatDate(selectedSale.fechaDesembolso)}</p>
+            )}
 
             {selectedSale.status === 'activa' && (
               <div className="flex gap-2">
