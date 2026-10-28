@@ -35,12 +35,14 @@
 3. **Qué falta:**
    * Actualizar la guía del socio con los nombres nuevos de Liquidaciones (3.19).
    * Que el socio valide 3.12, 3.14, 3.15, 3.16, 3.17, 3.18, 3.19, el cierre del mismo día y el buscador en su celular.
+   * **Para el chat Central:** implementar 3.20, enlace de restablecimiento de contraseña para usuarios activos (2.3.4 aprobada).
    * RS-4 aprobada: trasladar el proyecto a Supabase Pro de Starcli **solo cuando Helmer lo ordene** (no mientras se prueba la app).
    * Grupo de chats «ADEX - RutaCash» (2026-10-27): Central, Errores o bugs, Peticiones del socio, Ideas y producto, Respaldos y operación, Decisiones pendientes. Solo Central y Errores tocan código.
    * Resto: `docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`, que es el **listado canónico**.
 4. **Decisiones tomadas:**
    * 2026-10-28: respaldos RS-5, PITR no por ahora; RS-4, el proyecto actual se trasladará a la organización Pro de Starcli como proyecto propio de ADEX, sin mezclar nada con Starcli Loyalty, cuando valga la pena (aún se prueba la app). Antes de cualquier pago se le dice a Helmer el costo.
    * 2026-10-28: Supabase y Render, proveedores oficiales (2.3.2, DS-02); el nombre «ADEX-Staging» se cambia al trasladar (RS-4). Render sigue Free durante las pruebas; luego solo `adex-online-api` a Starter, ~US$ 7/mes, con orden expresa de Helmer (2.3.3).
+   * 2026-10-28: contraseña olvidada (2.3.4, opción B): quien da de alta emite un enlace de restablecimiento auditado para usuarios activos; el correo automático (SMTP) queda para cuando haya dominio propio. Trabajo 3.20 para Central.
    * 2026-10-28: Liquidaciones (3.19): el primer cierre de una ruta tiene «Desde» editable; un cierre reabierto se vuelve a cerrar con fechas libres (el servidor impide solapes).
    * 2026-10-28: tipos de gasto (3.14): BlueLine y las empresas existentes quedan con Transporte, Alimentación y Combustible marcados; el Administrador organiza la lista; eliminar un tipo con gastos nunca borra esos gastos (sale de la lista y conserva el nombre en el historial).
    * 2026-10-27:
