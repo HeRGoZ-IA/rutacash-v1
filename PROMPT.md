@@ -43,6 +43,7 @@
    * 2026-10-28: respaldos RS-5, PITR no por ahora; RS-4, el proyecto actual se trasladará a la organización Pro de Starcli como proyecto propio de ADEX, sin mezclar nada con Starcli Loyalty, cuando valga la pena (aún se prueba la app). Antes de cualquier pago se le dice a Helmer el costo.
    * 2026-10-28: Supabase y Render, proveedores oficiales (2.3.2, DS-02); el nombre «ADEX-Staging» se cambia al trasladar (RS-4). Render sigue Free durante las pruebas; luego solo `adex-online-api` a Starter, ~US$ 7/mes, con orden expresa de Helmer (2.3.3).
    * 2026-10-28: contraseña olvidada (2.3.4, opción B): quien da de alta emite un enlace de restablecimiento auditado para usuarios activos; el correo automático (SMTP) queda para cuando haya dominio propio. Trabajo 3.20 para Central.
+   * 2026-10-28: revisión de seguridad profunda una sola vez antes de la primera empresa comercial, y rápida en cambios grandes con dinero; nunca sin que Helmer la pida (2.3.8, opción B).
    * 2026-10-28: Liquidaciones (3.19): el primer cierre de una ruta tiene «Desde» editable; un cierre reabierto se vuelve a cerrar con fechas libres (el servidor impide solapes).
    * 2026-10-28: tipos de gasto (3.14): BlueLine y las empresas existentes quedan con Transporte, Alimentación y Combustible marcados; el Administrador organiza la lista; eliminar un tipo con gastos nunca borra esos gastos (sale de la lista y conserva el nombre en el historial).
    * 2026-10-27:

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Creado | 2026-10-24 (el nombre del archivo conserva esa fecha para no romper referencias) |
-| Última actualización | **2026-10-28**: RS-4 y RS-5 aprobadas (2.3.1); 2.3.2 (proveedores) y 2.3.3 (Render Free durante las pruebas) y 2.3.4 (enlace de restablecimiento, trabajo 3.20) aprobadas. **2026-10-27**: decisiones 2.3.9 (no bloquear), 2.1.15 (casilla «Para Cobradores», trabajo 3.14) RB-D10 (opción A), RB-D11 y RB-D12 (anulaciones solo por el Administrador, trabajo 3.17) aprobadas; peticiones del socio 3.15 (pagar por cuotas), 3.16 (fecha del desembolso) 3.18 (gastos ya cerrados en Gastos) y 3.19 (Liquidaciones: nombres y último cierre). Antes, 2026-10-26 (Ronda 76): precisiones del propietario, frente 2 (3.2 y 3.3) y propuesta de respaldos |
+| Última actualización | **2026-10-28**: RS-4 y RS-5 aprobadas (2.3.1); 2.3.2 (proveedores) y 2.3.3 (Render Free durante las pruebas) y 2.3.4 (enlace de restablecimiento, trabajo 3.20) y 2.3.8 (revisión de seguridad antes de la primera empresa comercial) aprobadas. **2026-10-27**: decisiones 2.3.9 (no bloquear), 2.1.15 (casilla «Para Cobradores», trabajo 3.14) RB-D10 (opción A), RB-D11 y RB-D12 (anulaciones solo por el Administrador, trabajo 3.17) aprobadas; peticiones del socio 3.15 (pagar por cuotas), 3.16 (fecha del desembolso) 3.18 (gastos ya cerrados en Gastos) y 3.19 (Liquidaciones: nombres y último cierre). Antes, 2026-10-26 (Ronda 76): precisiones del propietario, frente 2 (3.2 y 3.3) y propuesta de respaldos |
 | Enlazado desde | [Registro Maestro §G](./REGISTRO_MAESTRO_EVOLUCION_ADEX.md) |
 
 Es el **único** listado de pendientes del proyecto. No se crean versiones paralelas: se actualiza este archivo y se conservan los identificadores. Lo que deja de estar pendiente se marca, no se borra.
@@ -101,7 +101,7 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 | 2.3.5 | **Privacidad y retención de datos (DS-14):** auditoría y coordenadas GPS (plazo, borrado, quién las consulta), con revisión de LGPD (Brasil) y Ley 1581 (Colombia) | R48 §4, R67 §5 |
 | 2.3.6 | **DS-13.** Residencia de datos y normativa | Visión §16 |
 | 2.3.7 | Mapas y direcciones: proveedor de búsqueda por dirección (D73-05) y proveedor de mapas para uso comercial | R73 §7, R67 §5 |
-| 2.3.8 | Revisión de seguridad antes de abrir el producto al público (recomendada, no ejecutada) | Reglas del espacio de trabajo |
+| 2.3.8 | Revisión de seguridad antes de abrir el producto al público (recomendada, no ejecutada). **APROBADO por el propietario (2026-10-28): «tiene sentido tu recomendación, apruebo la opción B»** = una revisión **profunda y completa una sola vez, justo antes de recibir la primera empresa comercial** (claude-security o `/security-review`), más una revisión rápida cuando haya un cambio grande con dinero. **Ninguna se ejecuta sin que el propietario la pida en ese momento** (regla del espacio de trabajo). Sin auditoría externa de pago por ahora. Los hallazgos se corregirían en el chat Central | Reglas del espacio de trabajo; decisión 2026-10-28 |
 | 2.3.9 | **Desactivación de trabajadores con efectivo.** **APROBADO por el propietario (2026-10-27): «Me quedo con la opción A»** = **no se bloquea**. Se mantiene el comportamiento vigente de 3.3: desactivar corta el acceso al instante y el efectivo sigue visible, cuadrable y a nombre del trabajador. Sin trabajo técnico | R76; decisión 2026-10-27 |
 
 ### 2.4 Comercial SaaS
