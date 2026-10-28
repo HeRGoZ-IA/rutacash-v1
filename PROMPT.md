@@ -21,18 +21,19 @@
 
 ## Dónde quedamos
 
-*Actualizado: 2026-10-27 (Ronda 79, en curso)*
+*Actualizado: 2026-10-28 (Ronda 79, publicada)*
 
-1. **Objetivo actual:** publicar 3.17 (anulaciones solo por el Administrador, RB-D11/RB-D12): implementado y probado en local, commit `ad1f4e9` **sin push**, migración `0039_admin_only_reversals.sql` **sin aplicar**. Espera la confirmación de Helmer. Orden: respaldo previo (`npm run backup -- crear --motivo pre-migracion` + `verificar`), Helmer ejecuta `npm run staging:migrate`, Render `adex-online-api`, push (Vercel). Después: 3.14 y 3.12.
+1. **Objetivo actual:** siguiente pendiente: 3.14 (casilla «Para Cobradores» en tipos de gasto; necesita migración y decidir con Helmer qué casillas recibe BlueLine) y después 3.12 (interfaz RB-D13), 3.18 y 3.19.
 2. **Qué quedó hecho:**
+   * Ronda 79 (2026-10-28, **publicada**): 3.17, solo el Administrador anula (`ad1f4e9`, migración 0039 aplicada por Helmer). Respaldo previo `adex-20261028T1409` verificado; 0039 verificada en staging en solo lectura; Render `adex-online-api` Live con `1e0e8cf`; Vercel `index-sDnD_a1d.js`. Probado en local: PostgreSQL 590/0/1, E2E 89/41/25, reversión 10/10. **No probado:** con BlueLine ni por el socio.
    * Ronda 78 (`225dbc6`, Vercel, 2026-10-27): peticiones del socio 3.15 (campo «Cuotas a pagar» en el cobro del Cobrador/Supervisor y en «Registrar recaudo» del Administrador; el Secretario no registra abonos) y 3.16 (fecha del desembolso; columna «Inicio de cobro» corregida).
    * Ronda 77 (`bffdfc1`): búsqueda sin acentos en Clientes y Usuarios.
    * Ronda 76: mora al día (`865844a`, Render) y respaldos con la alternativa A activa (copias diarias cifradas en OneDrive, clave de recuperación comprobada, tareas registradas; primera copia automática `adex-20261027T1947`).
    * **Probado:** pruebas financieras (CUOTAS-001…003), las de CLEAN, los tipos y E2E 89/89, 41/41 y 25/25. **No probado:** con datos reales ni por el socio.
 3. **Qué falta:**
-   * Implementar 3.17, 3.14 y 3.12 (ver arriba). En 3.14, decidir con Helmer qué casillas recibe BlueLine.
+   * Implementar 3.14 y 3.12 (ver arriba). En 3.14, decidir con Helmer qué casillas recibe BlueLine.
    * Peticiones del socio (alta), para el chat Central: 3.18 en Gastos del Cobrador y del Supervisor, separar los gastos hasta el último cierre de ruta (toca la misma pantalla que 3.14); 3.19 Liquidaciones con nombres nuevos, aviso «Último cierre» y fechas desde el último cierre. Guía para el socio: `docs/GUIA_SOCIO_LIQUIDACIONES_Y_CIERRES.md`.
-   * Que el socio valide 3.15, 3.16, el cierre del mismo día y el buscador en su celular.
+   * Que el socio valide 3.15, 3.16, 3.17 (anulaciones), el cierre del mismo día y el buscador en su celular.
    * Siguen abiertas RS-4 (Supabase Pro antes de la primera empresa comercial) y RS-5 (PITR).
    * Grupo de chats «ADEX - RutaCash» (2026-10-27): Central, Errores o bugs, Peticiones del socio, Ideas y producto, Respaldos y operación, Decisiones pendientes. Solo Central y Errores tocan código.
    * Resto: `docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`, que es el **listado canónico**.
@@ -54,15 +55,12 @@
      * Los riesgos no están aceptados salvo que Helmer lo diga.
    * 2026-10-25: cierre del mismo día con el día bloqueado después.
    * En BlueLine nunca se crean datos ficticios ni se hace una purga global.
-5. **Archivos tocados (R76):**
-   * `saas/src/credits/service.ts`
-   * `saas/src/collections/service.ts`
-   * `saas/test/integration/overdue-live.test.ts` (nuevo)
-   * `saas/test/integration/r74-route-base.test.ts`
-   * `docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`
-   * `docs/ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md` (nuevo)
-   * `docs/REGISTRO_MAESTRO_EVOLUCION_ADEX.md`
-   * Evidencias en `tmp/r76/`.
+5. **Archivos tocados (R79):**
+   * `saas/db/migrations/0039_admin_only_reversals.sql` y su reversión en `saas/db/rollback/`
+   * `saas/src/capital/corrections.ts`, `generalFunding.ts`, `routeBase.ts`; `saas/src/expenses/service.ts`; `saas/src/collections/adjustments.ts`; `saas/src/demo/history.ts`
+   * `online/src/runtime/routeBase/Corrections.tsx`, `api.ts`; `online/src/lib/format.ts`; `src/pages/secretario/SecretarioPaymentCorrectionPage.tsx`
+   * Pruebas en `saas/test/integration/` y `saas/scripts/local/e2e-routebase.mjs`
+   * Documentos: listado canónico, Registro Maestro. Evidencias en `tmp/r79/`.
 
 ## Reglas del proyecto
 
@@ -89,6 +87,10 @@ Si cambia su estado, su propósito, su despliegue o su ubicación, o si se elimi
 ## Changelog
 
 El historial detallado por rondas está en `docs/REGISTRO_MAESTRO_EVOLUCION_ADEX.md`.
+
+### 2026-10-28 — Ronda 79: solo el Administrador anula (publicada)
+
+* 3.17 (RB-D11/RB-D12): `ad1f4e9` + migración 0039. Publicado en Render y Vercel tras respaldo verificado.
 
 ### 2026-10-26 — Ronda 76.1: respaldos
 
