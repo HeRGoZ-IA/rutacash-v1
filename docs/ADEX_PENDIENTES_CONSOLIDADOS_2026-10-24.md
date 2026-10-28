@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Creado | 2026-10-24 (el nombre del archivo conserva esa fecha para no romper referencias) |
-| Última actualización | **2026-10-28**: RS-4 y RS-5 aprobadas (2.3.1); 2.3.2 (proveedores) y 2.3.3 (Render Free durante las pruebas) y 2.3.4 (enlace de restablecimiento, trabajo 3.20) y 2.3.8 (revisión de seguridad antes de la primera empresa comercial) aprobadas. **2026-10-27**: decisiones 2.3.9 (no bloquear), 2.1.15 (casilla «Para Cobradores», trabajo 3.14) RB-D10 (opción A), RB-D11 y RB-D12 (anulaciones solo por el Administrador, trabajo 3.17) aprobadas; peticiones del socio 3.15 (pagar por cuotas), 3.16 (fecha del desembolso) 3.18 (gastos ya cerrados en Gastos) y 3.19 (Liquidaciones: nombres y último cierre). Antes, 2026-10-26 (Ronda 76): precisiones del propietario, frente 2 (3.2 y 3.3) y propuesta de respaldos |
+| Última actualización | **2026-10-28**: DS-06 en espera de la opinión del socio (preferida la opción A, sin decidir); RS-4 y RS-5 aprobadas (2.3.1); 2.3.2 (proveedores) y 2.3.3 (Render Free durante las pruebas) y 2.3.4 (enlace de restablecimiento, trabajo 3.20) y 2.3.8 (revisión de seguridad antes de la primera empresa comercial) aprobadas. **2026-10-27**: decisiones 2.3.9 (no bloquear), 2.1.15 (casilla «Para Cobradores», trabajo 3.14) RB-D10 (opción A), RB-D11 y RB-D12 (anulaciones solo por el Administrador, trabajo 3.17) aprobadas; peticiones del socio 3.15 (pagar por cuotas), 3.16 (fecha del desembolso) 3.18 (gastos ya cerrados en Gastos) y 3.19 (Liquidaciones: nombres y último cierre). Antes, 2026-10-26 (Ronda 76): precisiones del propietario, frente 2 (3.2 y 3.3) y propuesta de respaldos |
 | Enlazado desde | [Registro Maestro §G](./REGISTRO_MAESTRO_EVOLUCION_ADEX.md) |
 
 Es el **único** listado de pendientes del proyecto. No se crean versiones paralelas: se actualiza este archivo y se conservan los identificadores. Lo que deja de estar pendiente se marca, no se borra.
@@ -70,7 +70,7 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 
 | # | Decisión | Fuente |
 |---|---|---|
-| 2.2.1 | **DS-06.** Cómo se carga la cartera existente de una empresa nueva: importador de saldos iniciales o importación de historia | R39 §6, R40 §8 |
+| 2.2.1 | **DS-06.** Cómo se carga la cartera existente de una empresa nueva: importador de saldos iniciales o importación de historia. **EN ESPERA (2026-10-28):** Helmer: «mantengamos la Opción A mientras el socio da su opinión, hasta entonces no tomaremos una decisión». Opción A preferida (saldos de apertura a una fecha de corte; la historia queda en Listos), **sin aprobar**; no se crea trabajo para Central hasta que se decida | R39 §6, R40 §8 |
 | 2.2.2 | Procedimiento escrito para resolver diferencias entre ADEX y el sistema oficial durante el piloto (bloqueo 6 del piloto) | R39 §6, R40 §8 |
 | 2.2.3 | **Listos: análisis inicial HECHO; falta definir la incorporación** (DS-06). No autoriza importar ni volver a analizar los Excel. Ver el análisis conservado abajo | R74 §0.2; análisis comunicado por el propietario (2026-10) |
 | 2.2.4 | **SOC-10** (documento de 7 dígitos, CPF/RG): suspendida hasta confirmar el documento real del caso | R73 |

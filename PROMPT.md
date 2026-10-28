@@ -36,6 +36,7 @@
    * Actualizar la guía del socio con los nombres nuevos de Liquidaciones (3.19).
    * Que el socio valide 3.12, 3.14, 3.15, 3.16, 3.17, 3.18, 3.19, el cierre del mismo día y el buscador en su celular.
    * **Para el chat Central:** implementar 3.20, enlace de restablecimiento de contraseña para usuarios activos (2.3.4 aprobada).
+   * DS-06 (cargar la cartera de una empresa nueva): en espera de la opinión del socio; preferida la opción A (saldos de apertura), sin aprobar. El archivo completo de Listos sirve para esa opción.
    * RS-4 aprobada: trasladar el proyecto a Supabase Pro de Starcli **solo cuando Helmer lo ordene** (no mientras se prueba la app).
    * Grupo de chats «ADEX - RutaCash» (2026-10-27): Central, Errores o bugs, Peticiones del socio, Ideas y producto, Respaldos y operación, Decisiones pendientes. Solo Central y Errores tocan código.
    * Resto: `docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`, que es el **listado canónico**.
