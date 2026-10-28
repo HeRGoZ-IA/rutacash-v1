@@ -21,7 +21,7 @@
 
 ## Dónde quedamos
 
-*Actualizado: 2026-10-27 (Ronda 77)*
+*Actualizado: 2026-10-27 (Ronda 78)*
 
 1. **Objetivo actual:** R76 cerrada.
    * Listado canónico de pendientes al día.
