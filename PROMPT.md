@@ -21,9 +21,9 @@
 
 ## Dónde quedamos
 
-*Actualizado: 2026-10-27 (Ronda 78)*
+*Actualizado: 2026-10-27 (Ronda 79, en curso)*
 
-1. **Objetivo actual:** implementar en el chat Central los pendientes aprobados. Orden recomendado: 3.17 (anulaciones solo por el Administrador, RB-D11/RB-D12; lleva migración y Render), 3.14 (casilla «Para Cobradores» en tipos de gasto; lleva migración) y 3.12 (RB-D13, reembolso entre Administradores).
+1. **Objetivo actual:** publicar 3.17 (anulaciones solo por el Administrador, RB-D11/RB-D12): implementado y probado en local, commit `ad1f4e9` **sin push**, migración `0039_admin_only_reversals.sql` **sin aplicar**. Espera la confirmación de Helmer. Orden: respaldo previo (`npm run backup -- crear --motivo pre-migracion` + `verificar`), Helmer ejecuta `npm run staging:migrate`, Render `adex-online-api`, push (Vercel). Después: 3.14 y 3.12.
 2. **Qué quedó hecho:**
    * Ronda 78 (`225dbc6`, Vercel, 2026-10-27): peticiones del socio 3.15 (campo «Cuotas a pagar» en el cobro del Cobrador/Supervisor y en «Registrar recaudo» del Administrador; el Secretario no registra abonos) y 3.16 (fecha del desembolso; columna «Inicio de cobro» corregida).
    * Ronda 77 (`bffdfc1`): búsqueda sin acentos en Clientes y Usuarios.
