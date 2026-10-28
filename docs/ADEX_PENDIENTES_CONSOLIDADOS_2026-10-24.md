@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Creado | 2026-10-24 (el nombre del archivo conserva esa fecha para no romper referencias) |
-| Última actualización | **2026-10-27**: decisiones 2.3.9 (no bloquear) y 2.1.15 (casilla «Para Cobradores», trabajo 3.14) aprobadas. Antes, 2026-10-26 (Ronda 76): precisiones del propietario, frente 2 (3.2 y 3.3) y propuesta de respaldos |
+| Última actualización | **2026-10-27**: decisiones 2.3.9 (no bloquear), 2.1.15 (casilla «Para Cobradores», trabajo 3.14) y RB-D10 (opción A) aprobadas; RB-D11 añadida. Antes, 2026-10-26 (Ronda 76): precisiones del propietario, frente 2 (3.2 y 3.3) y propuesta de respaldos |
 | Enlazado desde | [Registro Maestro §G](./REGISTRO_MAESTRO_EVOLUCION_ADEX.md) |
 
 Es el **único** listado de pendientes del proyecto. No se crean versiones paralelas: se actualiza este archivo y se conservan los identificadores. Lo que deja de estar pendiente se marca, no se borra.
@@ -48,7 +48,8 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 
 | # | Decisión | Situación actual | Fuente |
 |---|---|---|---|
-| 2.1.1 | **RB-D10.** ¿Un faltante en el acta de entrega de una ruta se carga al Administrador saliente? | Queda como «faltante de la ruta» | R74 §15.7 |
+| 2.1.1 | **RB-D10.** ¿Un faltante en el acta de entrega de una ruta se carga al Administrador saliente? | **APROBADO por el propietario (2026-10-27): «RB-D10: A»** = se mantiene como «faltante de la ruta», visible y pendiente de conciliar (RB-D3); **no** se carga automáticamente al Administrador saliente ni se crea una cuenta por cobrar. Sin trabajo técnico | R74 §15.7; decisión 2026-10-27 |
+| 2.1.1b | **RB-D11.** ¿Quién anula un gasto de ruta registrado por el propio responsable de capital? (la regla de independencia F5-D02 impide que lo anule él mismo, y hoy nadie puede). Faltaba en este listado; se añade el 2026-10-27 | Propietario eligió la opción B el 2026-10-27 («El super admin pueda anularlo, aun siendo el mismo quien registra el gasto»); **pendiente de aclarar el alcance** antes de anotarlo como aprobado | R74 §15.7 |
 | 2.1.2 | **RB-D12.** ¿Anular por partes una operación conjunta de varias rutas con responsables distintos? | Se rechaza salvo que el actor controle todas las rutas | R74 §15.7 |
 | 2.1.3 | **RB-D13.** Reembolso de un Administrador a otro | **APROBADO** por el propietario: un Administrador puede reembolsar a otro **desde las rutas propias del pagador**, sin adquirir acceso financiero a las rutas del beneficiario. La decisión ya no está abierta; lo que falta es la interfaz → **3.12** | R74 §15.7 |
 | 2.1.4 | **O10.** ¿Qué es «ganancia retirable»? | Existe un solo «Retiro de Base». Diferida | R74 §13.1 |
@@ -214,6 +215,7 @@ Vienen de documentos de septiembre (etapa CLEAN). **No son defectos actuales con
 | Publicación de R73 y R74 | `2fa7152`, `8d37c05` |
 | Revisión personal general de Online (1.1) | Propietario, 2026-10-24/25 |
 | RB-D13 como decisión (la interfaz sigue en 3.12) | Propietario |
+| RB-D10: faltante de acta queda como faltante de la ruta | Propietario, 2026-10-27 |
 | Transferencias entre rutas inmediatas (regla vigente) | R59 / R74 |
 | Crear clientes o ventas sin conexión: **prohibido** | R65 (decisión vigente) |
 | Cierre de periodo que incluye el día en curso | `bca28d3` + 0038 (2026-10-26) |

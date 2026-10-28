@@ -52,6 +52,7 @@
    * 2026-10-27:
      * No se bloquea la desactivación de trabajadores con efectivo (2.3.9, opción A).
      * Tipos de gasto: un solo listado con casilla «Para Cobradores»; el Supervisor igual que el Cobrador; marcados al inicio Transporte, Alimentación y Combustible (2.1.15).
+     * El faltante de un acta de entrega queda como faltante de la ruta; no se carga al Administrador saliente (RB-D10, opción A).
    * 2026-10-26:
      * Respaldos: alternativa A con OneDrive y clave de recuperación en el gestor de Helmer (RS-1…RS-3).
      * RB-D13 está aprobado (falta su interfaz).
