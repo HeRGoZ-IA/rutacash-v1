@@ -45,7 +45,7 @@
    * **Respaldos: alternativa A activa (2026-10-26).** Clave de recuperación creada y comprobada (en Bitwarden y en la libreta de Helmer). Tareas registradas: copia diaria a las 21:30, ensayo los lunes a las 10:00 y vigilancia. Revisar el primer resultado automático (`npm run backup -- estado` y `ADEX-respaldos/registro.log`).
    * **Siguiente trabajo propuesto (3.1):** búsqueda sin acentos en Clientes del Administrador (`online/src/bridge/pages/admin/ClientsPage.tsx`), Clientes del Secretario (`src/pages/secretario/SecretarioClientsPage.tsx`) y Usuarios (`online/src/bridge/pages/admin/UsersPage.tsx`). Usar `foldText` de `src/lib/searchFilter.ts`. Verificado en el código el 2026-10-26: no está hecho. Espera el «sí» de Helmer.
    * **Para el chat Central:** implementar 3.14, la casilla «Para Cobradores» de los tipos de gasto (2.1.15 aprobada), y 3.17, anulaciones solo por el Administrador (RB-D11 y RB-D12).
-   * **Peticiones del socio (2026-10-27), para el chat Central:** 3.16 mostrar la fecha del desembolso (prioridad alta) y 3.15 pagar por número de cuotas, en todos los roles que registran abonos (falta confirmar la urgencia).
+   * **Peticiones del socio (2026-10-27), para el chat Central:** 3.16 mostrar la fecha del desembolso y 3.15 pagar por número de cuotas en todos los roles que registran abonos. Las dos con prioridad alta y ya definidas.
    * Siguen abiertas RS-4 (Supabase Pro antes de la primera empresa comercial) y RS-5 (PITR).
    * El socio prueba un cierre real del mismo día y el buscador en el celular.
    * Resto: `docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`, que es el **listado canónico**.
