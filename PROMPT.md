@@ -31,7 +31,7 @@
    * **Probado:** pruebas financieras (CUOTAS-001…003), las de CLEAN, los tipos y E2E 89/89, 41/41 y 25/25. **No probado:** con datos reales ni por el socio.
 3. **Qué falta:**
    * Implementar 3.17, 3.14 y 3.12 (ver arriba). En 3.14, decidir con Helmer qué casillas recibe BlueLine.
-   * Petición del socio 3.18 (alta): en Gastos del Cobrador y del Supervisor, separar los gastos ya cerrados en un bloque plegado. Toca la misma pantalla que 3.14.
+   * Peticiones del socio (alta), para el chat Central: 3.18 en Gastos del Cobrador y del Supervisor, separar los gastos hasta el último cierre de ruta (toca la misma pantalla que 3.14); 3.19 Liquidaciones con nombres nuevos, aviso «Último cierre» y fechas desde el último cierre. Guía para el socio: `docs/GUIA_SOCIO_LIQUIDACIONES_Y_CIERRES.md`.
    * Que el socio valide 3.15, 3.16, el cierre del mismo día y el buscador en su celular.
    * Siguen abiertas RS-4 (Supabase Pro antes de la primera empresa comercial) y RS-5 (PITR).
    * Grupo de chats «ADEX - RutaCash» (2026-10-27): Central, Errores o bugs, Peticiones del socio, Ideas y producto, Respaldos y operación, Decisiones pendientes. Solo Central y Errores tocan código.
@@ -44,6 +44,7 @@
      * Solo el Administrador anula o reversa movimientos y gastos, también los que registró él mismo; sustituye en parte a F5-D02 (RB-D11). Un gasto general se anula completo y solo por el Administrador que lo registró; si ya no está, por el responsable vigente de las rutas (RB-D12).
      * Pagar por cuotas: «N cuotas» = lo que falta de la parcela actual más las siguientes, sin pasar del total; aplica a todos los roles que registran abonos (3.15). El Secretario no registra abonos.
      * Gastos ya cerrados: se muestran aparte y plegados, no se ocultan (3.18, opción A).
+     * «Cierre» = cierre de ruta de cualquier rango (no solo semanal); «Cuadre» = entrega del trabajador. Menú «Liquidación», ventana «Liquidaciones», pestañas «Cierre de ruta» y «Cuadre por trabajador» (3.19).
    * 2026-10-26:
      * Respaldos: alternativa A con OneDrive y clave de recuperación en el gestor de Helmer (RS-1…RS-3).
      * RB-D13 está aprobado (falta su interfaz).
