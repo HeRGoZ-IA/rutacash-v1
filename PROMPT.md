@@ -44,7 +44,7 @@
 3. **Qué falta:**
    * **Respaldos: alternativa A activa (2026-10-26).** Clave de recuperación creada y comprobada (en Bitwarden y en la libreta de Helmer). Tareas registradas: copia diaria a las 21:30, ensayo los lunes a las 10:00 y vigilancia. Revisar el primer resultado automático (`npm run backup -- estado` y `ADEX-respaldos/registro.log`).
    * **Siguiente trabajo propuesto (3.1):** búsqueda sin acentos en Clientes del Administrador (`online/src/bridge/pages/admin/ClientsPage.tsx`), Clientes del Secretario (`src/pages/secretario/SecretarioClientsPage.tsx`) y Usuarios (`online/src/bridge/pages/admin/UsersPage.tsx`). Usar `foldText` de `src/lib/searchFilter.ts`. Verificado en el código el 2026-10-26: no está hecho. Espera el «sí» de Helmer.
-   * **Para el chat Central:** implementar 3.14, la casilla «Para Cobradores» de los tipos de gasto (2.1.15 aprobada).
+   * **Para el chat Central:** implementar 3.14, la casilla «Para Cobradores» de los tipos de gasto (2.1.15 aprobada), y 3.17, anulaciones solo por el Administrador (RB-D11 y RB-D12).
    * **Peticiones del socio (2026-10-27), para el chat Central:** 3.16 mostrar la fecha del desembolso (prioridad alta) y 3.15 pagar por número de cuotas (falta confirmar si aplica también a Administrador y Secretario, y la urgencia).
    * Siguen abiertas RS-4 (Supabase Pro antes de la primera empresa comercial) y RS-5 (PITR).
    * El socio prueba un cierre real del mismo día y el buscador en el celular.
@@ -54,6 +54,7 @@
      * No se bloquea la desactivación de trabajadores con efectivo (2.3.9, opción A).
      * Tipos de gasto: un solo listado con casilla «Para Cobradores»; el Supervisor igual que el Cobrador; marcados al inicio Transporte, Alimentación y Combustible (2.1.15).
      * El faltante de un acta de entrega queda como faltante de la ruta; no se carga al Administrador saliente (RB-D10, opción A).
+     * Solo el Administrador anula o reversa movimientos y gastos, también los que registró él mismo; sustituye en parte a F5-D02 (RB-D11). Un gasto general se anula completo y solo por el Administrador que lo registró (RB-D12).
      * Pagar por cuotas: «N cuotas» = lo que falta de la parcela actual más las siguientes, sin pasar del total (3.15).
    * 2026-10-26:
      * Respaldos: alternativa A con OneDrive y clave de recuperación en el gestor de Helmer (RS-1…RS-3).
