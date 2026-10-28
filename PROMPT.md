@@ -23,31 +23,17 @@
 
 *Actualizado: 2026-10-27 (Ronda 78)*
 
-1. **Objetivo actual:** R76 cerrada.
-   * Listado canónico de pendientes al día.
-   * Mora al día publicada.
-   * Desactivación de trabajadores con efectivo resuelta por diseño.
-   * Propuesta de respaldos lista. Falta que Helmer decida RS-1…RS-5.
+1. **Objetivo actual:** implementar en el chat Central los pendientes aprobados. Orden recomendado: 3.17 (anulaciones solo por el Administrador, RB-D11/RB-D12; lleva migración y Render), 3.14 (casilla «Para Cobradores» en tipos de gasto; lleva migración) y 3.12 (RB-D13, reembolso entre Administradores).
 2. **Qué quedó hecho:**
-   * `865844a`: la API calcula el estado «vencida» y los días de mora al leer, con la fecha contable de la empresa.
-     * No escribe nada ni mueve dinero.
-     * Desplegado a mano en Render `adex-online-api`.
-   * Prueba RB-021: un Cobrador desactivado sigue en el cuadre («· inactivo») y su efectivo se puede recibir.
-     * Sin cambios funcionales.
-   * Antes, en R75: cierre del mismo día publicado (`bca28d3`, migración 0038 en staging).
-   * **Probado:**
-     * PostgreSQL: 589 aprobadas, 0 fallidas, 1 omitida.
-     * Pruebas unitarias 31/31.
-     * E2E 86/86, 41/41 y 25/25.
-     * Pruebas nuevas MORA-001…003 y RB-021.
-   * **No probado:** la mora con datos reales de BlueLine (no se escribió nada en BlueLine).
+   * Ronda 78 (`225dbc6`, Vercel, 2026-10-27): peticiones del socio 3.15 (campo «Cuotas a pagar» en el cobro del Cobrador/Supervisor y en «Registrar recaudo» del Administrador; el Secretario no registra abonos) y 3.16 (fecha del desembolso; columna «Inicio de cobro» corregida).
+   * Ronda 77 (`bffdfc1`): búsqueda sin acentos en Clientes y Usuarios.
+   * Ronda 76: mora al día (`865844a`, Render) y respaldos con la alternativa A activa (copias diarias cifradas en OneDrive, clave de recuperación comprobada, tareas registradas; primera copia automática `adex-20261027T1947`).
+   * **Probado:** pruebas financieras (CUOTAS-001…003), las de CLEAN, los tipos y E2E 89/89, 41/41 y 25/25. **No probado:** con datos reales ni por el socio.
 3. **Qué falta:**
-   * **Respaldos: alternativa A activa (2026-10-26).** Clave de recuperación creada y comprobada (en Bitwarden y en la libreta de Helmer). Tareas registradas: copia diaria a las 21:30, ensayo los lunes a las 10:00 y vigilancia. Revisar el primer resultado automático (`npm run backup -- estado` y `ADEX-respaldos/registro.log`).
-   * **Siguiente trabajo propuesto (3.1):** búsqueda sin acentos en Clientes del Administrador (`online/src/bridge/pages/admin/ClientsPage.tsx`), Clientes del Secretario (`src/pages/secretario/SecretarioClientsPage.tsx`) y Usuarios (`online/src/bridge/pages/admin/UsersPage.tsx`). Usar `foldText` de `src/lib/searchFilter.ts`. Verificado en el código el 2026-10-26: no está hecho. Espera el «sí» de Helmer.
-   * **Para el chat Central:** implementar 3.14, la casilla «Para Cobradores» de los tipos de gasto (2.1.15 aprobada), y 3.17, anulaciones solo por el Administrador (RB-D11 y RB-D12).
-   * **Peticiones del socio (2026-10-27), para el chat Central:** 3.16 mostrar la fecha del desembolso y 3.15 pagar por número de cuotas en todos los roles que registran abonos. Las dos con prioridad alta y ya definidas.
+   * Implementar 3.17, 3.14 y 3.12 (ver arriba). En 3.14, decidir con Helmer qué casillas recibe BlueLine.
+   * Que el socio valide 3.15, 3.16, el cierre del mismo día y el buscador en su celular.
    * Siguen abiertas RS-4 (Supabase Pro antes de la primera empresa comercial) y RS-5 (PITR).
-   * El socio prueba un cierre real del mismo día y el buscador en el celular.
+   * Grupo de chats «ADEX - RutaCash» (2026-10-27): Central, Errores o bugs, Peticiones del socio, Ideas y producto, Respaldos y operación, Decisiones pendientes. Solo Central y Errores tocan código.
    * Resto: `docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`, que es el **listado canónico**.
 4. **Decisiones tomadas:**
    * 2026-10-27:
@@ -55,7 +41,7 @@
      * Tipos de gasto: un solo listado con casilla «Para Cobradores»; el Supervisor igual que el Cobrador; marcados al inicio Transporte, Alimentación y Combustible (2.1.15).
      * El faltante de un acta de entrega queda como faltante de la ruta; no se carga al Administrador saliente (RB-D10, opción A).
      * Solo el Administrador anula o reversa movimientos y gastos, también los que registró él mismo; sustituye en parte a F5-D02 (RB-D11). Un gasto general se anula completo y solo por el Administrador que lo registró; si ya no está, por el responsable vigente de las rutas (RB-D12).
-     * Pagar por cuotas: «N cuotas» = lo que falta de la parcela actual más las siguientes, sin pasar del total; aplica a Cobrador, Administrador y Secretario (3.15).
+     * Pagar por cuotas: «N cuotas» = lo que falta de la parcela actual más las siguientes, sin pasar del total; aplica a todos los roles que registran abonos (3.15). El Secretario no registra abonos.
    * 2026-10-26:
      * Respaldos: alternativa A con OneDrive y clave de recuperación en el gestor de Helmer (RS-1…RS-3).
      * RB-D13 está aprobado (falta su interfaz).
