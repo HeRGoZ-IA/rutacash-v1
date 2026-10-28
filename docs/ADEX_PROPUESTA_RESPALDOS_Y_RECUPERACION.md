@@ -5,7 +5,7 @@
 | Fecha | 2026-10-26 (Ronda 76) |
 | Naturaleza | Propuesta del 2026-10-26. **Alternativa A aprobada el mismo día** (RS-1 OneDrive, RS-2 clave de recuperación en el gestor de contraseñas del propietario, RS-3 copia inmediata) e implementada: ver §8. No se contrató nada ni se activó PITR; las copias anteriores se conservan |
 | Pendiente que atiende | P-05 / DS-02 / DS-14 (listado consolidado §2.3.1) |
-| Decisiones requeridas | §7 (RS-1…RS-3 aprobadas; RS-4 y RS-5 abiertas) |
+| Decisiones requeridas | §7 (RS-1…RS-3 aprobadas el 2026-10-26; RS-4 y RS-5 aprobadas el 2026-10-28) |
 
 Los objetivos de RPO y RTO de este documento son **propuestos**, no capacidades demostradas. Lo único demostrado hasta hoy es la restauración aislada de copias puntuales (R73 §8.1, R74 §16.3).
 
@@ -107,8 +107,8 @@ No contrata planes, no activa PITR, no crea cuentas en servicios nuevos (R2, One
 | RS-1 | Aprobar la alternativa A con el segundo destino. ¿OneDrive personal o disco USB? | A con OneDrive |
 | RS-2 | Aprobar la clave de recuperación y dónde se guarda (gestor de contraseñas o sobre impreso) | Gestor de contraseñas |
 | RS-3 | Autorizar la copia nueva inmediata (no hay ninguna posterior a la activación) | Sí, ya |
-| RS-4 | Supabase Pro antes de la primera empresa comercial, y en qué organización | Sí, en una organización o proyecto propio de ADEX |
-| RS-5 | PITR: no por ahora; volver a evaluarlo con la primera empresa comercial | No por ahora |
+| RS-4 | Supabase Pro antes de la primera empresa comercial, y en qué organización | Sí, en una organización o proyecto propio de ADEX. **APROBADA (2026-10-28):** trasladar el proyecto actual a la organización Pro de Starcli como proyecto propio de ADEX, sin mezclar nada con Starcli Loyalty, cuando valga la pena (no mientras se prueba la app). Costo estimado ~US$ 10/mes de cómputo adicional, a confirmar antes de mover |
+| RS-5 | PITR: no por ahora; volver a evaluarlo con la primera empresa comercial | No por ahora. **APROBADA (2026-10-28): no por ahora** |
 
 ## 8. Implementación de la alternativa A (2026-10-26)
 

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Creado | 2026-10-24 (el nombre del archivo conserva esa fecha para no romper referencias) |
-| Última actualización | **2026-10-27**: decisiones 2.3.9 (no bloquear), 2.1.15 (casilla «Para Cobradores», trabajo 3.14) RB-D10 (opción A), RB-D11 y RB-D12 (anulaciones solo por el Administrador, trabajo 3.17) aprobadas; peticiones del socio 3.15 (pagar por cuotas), 3.16 (fecha del desembolso) 3.18 (gastos ya cerrados en Gastos) y 3.19 (Liquidaciones: nombres y último cierre). Antes, 2026-10-26 (Ronda 76): precisiones del propietario, frente 2 (3.2 y 3.3) y propuesta de respaldos |
+| Última actualización | **2026-10-28**: RS-4 y RS-5 aprobadas (2.3.1). **2026-10-27**: decisiones 2.3.9 (no bloquear), 2.1.15 (casilla «Para Cobradores», trabajo 3.14) RB-D10 (opción A), RB-D11 y RB-D12 (anulaciones solo por el Administrador, trabajo 3.17) aprobadas; peticiones del socio 3.15 (pagar por cuotas), 3.16 (fecha del desembolso) 3.18 (gastos ya cerrados en Gastos) y 3.19 (Liquidaciones: nombres y último cierre). Antes, 2026-10-26 (Ronda 76): precisiones del propietario, frente 2 (3.2 y 3.3) y propuesta de respaldos |
 | Enlazado desde | [Registro Maestro §G](./REGISTRO_MAESTRO_EVOLUCION_ADEX.md) |
 
 Es el **único** listado de pendientes del proyecto. No se crean versiones paralelas: se actualiza este archivo y se conservan los identificadores. Lo que deja de estar pendiente se marca, no se borra.
@@ -94,7 +94,7 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 
 | # | Decisión | Fuente |
 |---|---|---|
-| 2.3.1 | **P-05 / DS-02 / DS-14 · Respaldos.** Las copias puntuales y su restauración aislada **están verificadas** (`adex-20261024T1408` y `adex-20261024T1551`). Lo pendiente es la **política recurrente**: frecuencia, retención, destino independiente, recuperación de la clave, ensayos, RPO/RTO y PITR. **Propuesta lista:** [ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md](./ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md). **RS-1…RS-3 aprobadas e implementadas el 2026-10-26** (copia `adex-20261026T1535` verificada y en OneDrive). Activación **completada** por el propietario: clave de recuperación creada y comprobada («CORRECTA»), guardada en Bitwarden y en su libreta; tareas programadas registradas (§8 de la propuesta). Siguen abiertas RS-4 (Supabase Pro) y RS-5 (PITR) | R74 §0.2, R40 §8, R76 |
+| 2.3.1 | **P-05 / DS-02 / DS-14 · Respaldos.** Las copias puntuales y su restauración aislada **están verificadas** (`adex-20261024T1408` y `adex-20261024T1551`). Lo pendiente es la **política recurrente**: frecuencia, retención, destino independiente, recuperación de la clave, ensayos, RPO/RTO y PITR. **Propuesta lista:** [ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md](./ADEX_PROPUESTA_RESPALDOS_Y_RECUPERACION.md). **RS-1…RS-3 aprobadas e implementadas el 2026-10-26** (copia `adex-20261026T1535` verificada y en OneDrive). Activación **completada** por el propietario: clave de recuperación creada y comprobada («CORRECTA»), guardada en Bitwarden y en su libreta; tareas programadas registradas (§8 de la propuesta). **RS-4 y RS-5 APROBADAS por el propietario (2026-10-28):** «Si esas decisiones ya están aprobadas RS-5 no por ahora y RS-4 dentro de Starcli como proyecto propio de ADEX sin mezclar nada, haríamos el traslado del proyecto actual, pero cuando valga la pena hacerlo en realidad, aún estamos probando la app». RS-5 = PITR **no por ahora**. RS-4 = Supabase Pro mediante la organización Pro de Starcli, con ADEX como **proyecto propio** y **sin mezclar nada** con Starcli Loyalty (proyecto, esquemas ni secretos); se **trasladará el proyecto actual** (no se crea uno nuevo) **cuando valga la pena**, no mientras se prueba la app. Costo estimado al trasladar: ~US$ 10 al mes de cómputo adicional (a confirmar en la factura antes de mover nada). Nada se traslada ni se contrata sin una nueva orden expresa del propietario | R74 §0.2, R40 §8, R76 |
 | 2.3.2 | **Proveedor (DS-02, DS-03):** Supabase y Render operan sin aprobación escrita. Además, el proyecto se llama «ADEX-Staging» y aloja una empresa real | Registro §G |
 | 2.3.3 | **Render Free:** se suspende tras 15 minutos sin uso y tarda en despertar. ¿Pasar a un plan de pago antes de abrir a más empresas? | ADEX_ONLINE_RENDER |
 | 2.3.4 | **SMTP real** para recuperar contraseñas. Decidir también si un administrador puede restablecer la contraseña de un usuario activo | R40 §8 |
@@ -113,7 +113,7 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 | 2.4.3 | Internacionalización: interfaz en portugués (BlueLine opera en Brasil; la interfaz solo está en español) | Visión §9 |
 | 2.4.4 | Empresas con rutas en varias zonas horarias | Visión §9 |
 | 2.4.5 | **DS-08, DS-09 y DS-12** (piloto): siguen sin aprobación escrita | Registro §E |
-| 2.4.6 | Capacidad multiempresa: prueba de carga (4.4) y plan de Render y Supabase (2.3.3, RS-4) antes de incorporar empresas comerciales | R40 §9, R76 |
+| 2.4.6 | Capacidad multiempresa: prueba de carga (4.4) y plan de Render (2.3.3) y traslado a Supabase Pro de Starcli (RS-4, aprobado; se hace cuando valga la pena) antes de incorporar empresas comerciales | R40 §9, R76 |
 
 ### 2.5 Ampliaciones del modo offline (propuestas, no tareas)
 
