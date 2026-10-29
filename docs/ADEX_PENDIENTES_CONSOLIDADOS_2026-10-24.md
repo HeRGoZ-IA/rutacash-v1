@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Creado | 2026-10-24 (el nombre del archivo conserva esa fecha para no romper referencias) |
-| Última actualización | **2026-10-28**: DS-06 en espera de la opinión del socio (preferida la opción A, sin decidir); RS-4 y RS-5 aprobadas (2.3.1); 2.3.2 (proveedores) y 2.3.3 (Render Free durante las pruebas) y 2.3.4 (enlace de restablecimiento, trabajo 3.20) y 2.3.8 (revisión de seguridad antes de la primera empresa comercial) aprobadas. **2026-10-27**: decisiones 2.3.9 (no bloquear), 2.1.15 (casilla «Para Cobradores», trabajo 3.14) RB-D10 (opción A), RB-D11 y RB-D12 (anulaciones solo por el Administrador, trabajo 3.17) aprobadas; peticiones del socio 3.15 (pagar por cuotas), 3.16 (fecha del desembolso) 3.18 (gastos ya cerrados en Gastos) y 3.19 (Liquidaciones: nombres y último cierre). Antes, 2026-10-26 (Ronda 76): precisiones del propietario, frente 2 (3.2 y 3.3) y propuesta de respaldos |
+| Última actualización | **2026-10-28**: decisiones que no afectan a BlueLine hoy marcadas «PARA DESPUÉS» con su momento de regreso (siguen abiertas 2.1.4, 2.1.11, 2.1.12 y 2.1.13); DS-06 en espera de la opinión del socio (preferida la opción A, sin decidir); RS-4 y RS-5 aprobadas (2.3.1); 2.3.2 (proveedores) y 2.3.3 (Render Free durante las pruebas) y 2.3.4 (enlace de restablecimiento, trabajo 3.20) y 2.3.8 (revisión de seguridad antes de la primera empresa comercial) aprobadas. **2026-10-27**: decisiones 2.3.9 (no bloquear), 2.1.15 (casilla «Para Cobradores», trabajo 3.14) RB-D10 (opción A), RB-D11 y RB-D12 (anulaciones solo por el Administrador, trabajo 3.17) aprobadas; peticiones del socio 3.15 (pagar por cuotas), 3.16 (fecha del desembolso) 3.18 (gastos ya cerrados en Gastos) y 3.19 (Liquidaciones: nombres y último cierre). Antes, 2026-10-26 (Ronda 76): precisiones del propietario, frente 2 (3.2 y 3.3) y propuesta de respaldos |
 | Enlazado desde | [Registro Maestro §G](./REGISTRO_MAESTRO_EVOLUCION_ADEX.md) |
 
 Es el **único** listado de pendientes del proyecto. No se crean versiones paralelas: se actualiza este archivo y se conservan los identificadores. Lo que deja de estar pendiente se marca, no se borra.
@@ -54,15 +54,15 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 | 2.1.3 | **RB-D13.** Reembolso de un Administrador a otro | **APROBADO** por el propietario: un Administrador puede reembolsar a otro **desde las rutas propias del pagador**, sin adquirir acceso financiero a las rutas del beneficiario. La decisión ya no está abierta; lo que falta es la interfaz → **3.12** | R74 §15.7 |
 | 2.1.4 | **O10.** ¿Qué es «ganancia retirable»? | Existe un solo «Retiro de Base». Diferida | R74 §13.1 |
 | 2.1.5 | **D74-O11T.** Transferencias entre rutas | **Regla vigente: inmediatas** (se aplican en el acto y se avisan al destino). Un estado «en tránsito» con confirmación queda como **propuesta opcional futura** (2.5.6), no como decisión pendiente | R74 §13.2 |
-| 2.1.6 | **Indicador «Necesidad de capital» por ruta:** ¿se muestra y cómo se calcula? | Sin definir | R74 §4.7 |
-| 2.1.7 | **D74-A2.** ¿Rectificar ventas de periodos ya cerrados? | Bloqueado a propósito | R74 §13.1 |
-| 2.1.8 | **D74-A3.** ¿Qué pasa si el total corregido de una venta queda por debajo de lo ya pagado (sobrepagos y devoluciones)? | Bloqueado a propósito | R74 §13.1 |
-| 2.1.9 | **P-04 / D73-03.** Conciliaciones excepcionales: reaplicar un pago cuya anulación ya entró en un cuadre, y los casos excepcionales registrados | Bloqueadas | R74 §0.2, R73 §7 |
-| 2.1.10 | **Castigo de crédito («marcar perdido»):** cuándo se da por perdida una venta y cómo afecta al resultado | No existe; tampoco se guarda la fecha de pérdida | R24 §5, Fase 4 |
+| 2.1.6 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve cuando aparezca un caso real.** **Indicador «Necesidad de capital» por ruta:** ¿se muestra y cómo se calcula? | Sin definir | R74 §4.7 |
+| 2.1.7 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve cuando aparezca un caso real.** **D74-A2.** ¿Rectificar ventas de periodos ya cerrados? | Bloqueado a propósito | R74 §13.1 |
+| 2.1.8 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve cuando aparezca un caso real.** **D74-A3.** ¿Qué pasa si el total corregido de una venta queda por debajo de lo ya pagado (sobrepagos y devoluciones)? | Bloqueado a propósito | R74 §13.1 |
+| 2.1.9 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve cuando aparezca un caso real.** **P-04 / D73-03.** Conciliaciones excepcionales: reaplicar un pago cuya anulación ya entró en un cuadre, y los casos excepcionales registrados | Bloqueadas | R74 §0.2, R73 §7 |
+| 2.1.10 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve al cargar la cartera de Listos (DS-06).** **Castigo de crédito («marcar perdido»):** cuándo se da por perdida una venta y cómo afecta al resultado | No existe; tampoco se guarda la fecha de pérdida | R24 §5, Fase 4 |
 | 2.1.11 | **F6-D03.** ¿Se reembolsa al trabajador el dinero propio que puso para gastos (Base del trabajador negativa)? | Sin reembolso implícito | Decisiones SaaS §6 |
 | 2.1.12 | **D27.** ¿Puede el Cobrador pedir Base a su responsable desde la aplicación? | No existe la solicitud | Decisiones SaaS §3 |
 | 2.1.13 | **Medios de pago distintos del efectivo** (transferencia, PIX) | Solo efectivo. Habría que añadir una cuenta bancaria al libro | Fase 5 |
-| 2.1.14 | **Redondeo en pesos colombianos:** dos decimales técnicos frente a presentación sin centavos | Sin decidir | Visión §9, §16 |
+| 2.1.14 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve cuando haya una empresa colombiana.** **Redondeo en pesos colombianos:** dos decimales técnicos frente a presentación sin centavos | Sin decidir | Visión §9, §16 |
 | 2.1.15 | **Tipos de gasto del Cobrador y del Administrador** | **APROBADO por el propietario (2026-10-27):** «Apruebo 2.1.15 como lo propones: un solo listado con casilla «Para Cobradores», el Supervisor igual que el Cobrador, y marcados al inicio Transporte, Alimentación y Combustible». Motivo (socio): los gastos del Cobrador deben ser mínimos; los del Administrador, amplios. Detalle aprobado: (1) un solo catálogo por empresa; el Administrador ve todos los tipos; (2) Cobrador y Supervisor solo ven y usan los marcados «Para Cobradores»; (3) en empresas nuevas nacen marcados Transporte, Alimentación y Combustible, y cada empresa cambia las casillas cuando quiera; (4) la regla la valida también el servidor; (5) desmarcar no altera los gastos ya registrados; (6) un gasto capturado sin conexión con un tipo desmarcado después se acepta al sincronizar, con aviso al Administrador. Los nombres de los 7 tipos iniciales no cambian. Implementación → **3.14** | Auditoría de nombres; decisión 2026-10-27 |
 | 2.1.16 | Rótulo del selector «Selecciona tu ruta» del Supervisor | **Ya no es una decisión:** los nombres están aprobados (N-1…N-6). Comprobado en el código el 2026-10-26: en **Online** (`online/src/bridge/pages/collector/CollectorSelectRoutePage.tsx`, `760722b`/`9ca7dc4`) muestra «Base disponible» (Base real de la ruta) y «Base del trabajador» por separado. El rótulo «Base de la ruta» solo sigue en el archivo original de CLEAN (`src/pages/collector/…`), que Online no sirve. Ver 3.11 | R74 §15.6 |
 
@@ -71,11 +71,11 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 | # | Decisión | Fuente |
 |---|---|---|
 | 2.2.1 | **DS-06.** Cómo se carga la cartera existente de una empresa nueva: importador de saldos iniciales o importación de historia. **EN ESPERA (2026-10-28):** Helmer: «mantengamos la Opción A mientras el socio da su opinión, hasta entonces no tomaremos una decisión». Opción A preferida (saldos de apertura a una fecha de corte; la historia queda en Listos), **sin aprobar**; no se crea trabajo para Central hasta que se decida | R39 §6, R40 §8 |
-| 2.2.2 | Procedimiento escrito para resolver diferencias entre ADEX y el sistema oficial durante el piloto (bloqueo 6 del piloto) | R39 §6, R40 §8 |
+| 2.2.2 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve al cargar la cartera de Listos (DS-06).** Procedimiento escrito para resolver diferencias entre ADEX y el sistema oficial durante el piloto (bloqueo 6 del piloto) | R39 §6, R40 §8 |
 | 2.2.3 | **Listos: análisis inicial HECHO; falta definir la incorporación** (DS-06). No autoriza importar ni volver a analizar los Excel. Ver el análisis conservado abajo | R74 §0.2; análisis comunicado por el propietario (2026-10) |
-| 2.2.4 | **SOC-10** (documento de 7 dígitos, CPF/RG): suspendida hasta confirmar el documento real del caso | R73 |
-| 2.2.5 | **DS-16.** Exportación de datos locales | Registro §E |
-| 2.2.6 | ¿Se recrea una Empresa Demo? | R53 |
+| 2.2.4 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve al cargar la cartera de Listos (DS-06).** **SOC-10** (documento de 7 dígitos, CPF/RG): suspendida hasta confirmar el documento real del caso | R73 |
+| 2.2.5 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve al abrir a otras empresas.** **DS-16.** Exportación de datos locales | Registro §E |
+| 2.2.6 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve al abrir a otras empresas.** ¿Se recrea una Empresa Demo? | R53 |
 
 **Análisis conocido de Listos (2.2.3).** Se conserva tal como se comunicó; no se volvió a analizar:
 - Dos exportaciones con las mismas 35 ventas. El archivo corto tiene 12 columnas y el completo 24.
@@ -107,9 +107,9 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 | 2.3.2 | **Proveedor (DS-02, DS-03):** Supabase y Render operan sin aprobación escrita. Además, el proyecto se llama «ADEX-Staging» y aloja una empresa real. **APROBADO por el propietario (2026-10-28):** «Si apruebo las dos recomendaciones pero seguimos trabajando como estamos mientras concluimos pruebas». **DS-02:** Supabase (datos) y Render (API) son los proveedores oficiales, también para operación real; sus planes de pago siguen RS-4 y 2.3.3. **DS-03** ya estaba aprobada (Supabase Auth, 2026-10-14). El nombre del proyecto «ADEX-Staging» se cambiará **al hacer el traslado de RS-4**, no antes. Sin costo y sin trabajo técnico ahora | Registro §G; decisión 2026-10-28 |
 | 2.3.3 | **Render Free:** se suspende tras 15 minutos sin uso y tarda en despertar. ¿Pasar a un plan de pago antes de abrir a más empresas? **APROBADO por el propietario (2026-10-28):** «Si apruebo las dos recomendaciones pero seguimos trabajando como estamos mientras concluimos pruebas». Se sigue en **Render Free** mientras duran las pruebas; cuando valga la pena (primera empresa comercial o si la espera afecta la operación diaria) se pasa **solo la API de empresas** (`adex-online-api`) a Starter, ~US$ 7/mes (precio a confirmar en render.com/pricing antes de pagar); la API Owner sigue Free. Nada se contrata sin una nueva orden expresa del propietario | ADEX_ONLINE_RENDER; decisión 2026-10-28 |
 | 2.3.4 | **SMTP real** para recuperar contraseñas. Decidir también si un administrador puede restablecer la contraseña de un usuario activo. **APROBADO por el propietario (2026-10-28): «Me parece bien, la opción B es la mejor por ahora»** = **opción B:** quien da de alta emite también un **enlace de restablecimiento** para un usuario **activo** (el Owner para el SuperAdmin; el SuperAdmin o un Administrador para los usuarios de su empresa), de un solo uso, entregado por canal privado y **auditado**. Sustituye el bloqueo deliberado de R40 §8 («ni el Owner ni la empresa pueden hacerlo»). El correo automático (SMTP, opción A) queda **para más adelante**, cuando haya dominio propio (~US$ 10–15/año, sin contratar). Implementación → **3.20** | R40 §8; decisión 2026-10-28 |
-| 2.3.5 | **Privacidad y retención de datos (DS-14):** auditoría y coordenadas GPS (plazo, borrado, quién las consulta), con revisión de LGPD (Brasil) y Ley 1581 (Colombia) | R48 §4, R67 §5 |
-| 2.3.6 | **DS-13.** Residencia de datos y normativa | Visión §16 |
-| 2.3.7 | Mapas y direcciones: proveedor de búsqueda por dirección (D73-05) y proveedor de mapas para uso comercial | R73 §7, R67 §5 |
+| 2.3.5 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve al abrir a otras empresas.** **Privacidad y retención de datos (DS-14):** auditoría y coordenadas GPS (plazo, borrado, quién las consulta), con revisión de LGPD (Brasil) y Ley 1581 (Colombia) | R48 §4, R67 §5 |
+| 2.3.6 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve al abrir a otras empresas.** **DS-13.** Residencia de datos y normativa | Visión §16 |
+| 2.3.7 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve al abrir a otras empresas.** Mapas y direcciones: proveedor de búsqueda por dirección (D73-05) y proveedor de mapas para uso comercial | R73 §7, R67 §5 |
 | 2.3.8 | Revisión de seguridad antes de abrir el producto al público (recomendada, no ejecutada). **APROBADO por el propietario (2026-10-28): «tiene sentido tu recomendación, apruebo la opción B»** = una revisión **profunda y completa una sola vez, justo antes de recibir la primera empresa comercial** (claude-security o `/security-review`), más una revisión rápida cuando haya un cambio grande con dinero. **Ninguna se ejecuta sin que el propietario la pida en ese momento** (regla del espacio de trabajo). Sin auditoría externa de pago por ahora. Los hallazgos se corregirían en el chat Central | Reglas del espacio de trabajo; decisión 2026-10-28 |
 | 2.3.9 | **Desactivación de trabajadores con efectivo.** **APROBADO por el propietario (2026-10-27): «Me quedo con la opción A»** = **no se bloquea**. Se mantiene el comportamiento vigente de 3.3: desactivar corta el acceso al instante y el efectivo sigue visible, cuadrable y a nombre del trabajador. Sin trabajo técnico | R76; decisión 2026-10-27 |
 
@@ -117,23 +117,23 @@ Los pendientes ya cerrados figuran al final para que no se vuelvan a abrir.
 
 | # | Decisión | Fuente |
 |---|---|---|
-| 2.4.1 | Suscripciones, planes, precios y fecha de lanzamiento; cobro por ruta (`billableRouteCount`, DS-17) | Visión §3, §20 |
-| 2.4.2 | Moneda de facturación del SaaS | Visión §9 |
-| 2.4.3 | Internacionalización: interfaz en portugués (BlueLine opera en Brasil; la interfaz solo está en español) | Visión §9 |
-| 2.4.4 | Empresas con rutas en varias zonas horarias | Visión §9 |
-| 2.4.5 | **DS-08, DS-09 y DS-12** (piloto): siguen sin aprobación escrita | Registro §E |
+| 2.4.1 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve al abrir a otras empresas.** Suscripciones, planes, precios y fecha de lanzamiento; cobro por ruta (`billableRouteCount`, DS-17) | Visión §3, §20 |
+| 2.4.2 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve al abrir a otras empresas.** Moneda de facturación del SaaS | Visión §9 |
+| 2.4.3 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve sin fecha; antes si el socio o los cobradores lo piden.** Internacionalización: interfaz en portugués (BlueLine opera en Brasil; la interfaz solo está en español) | Visión §9 |
+| 2.4.4 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve al abrir a otras empresas.** Empresas con rutas en varias zonas horarias | Visión §9 |
+| 2.4.5 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve al abrir a otras empresas.** **DS-08, DS-09 y DS-12** (piloto): siguen sin aprobación escrita | Registro §E |
 | 2.4.6 | Capacidad multiempresa: prueba de carga (4.4) y plan de Render (2.3.3, aprobado: Starter cuando valga la pena) y traslado a Supabase Pro de Starcli (RS-4, aprobado; se hace cuando valga la pena) antes de incorporar empresas comerciales | R40 §9, R76 |
 
 ### 2.5 Ampliaciones del modo offline (propuestas, no tareas)
 
 | # | Propuesta | Fuente |
 |---|---|---|
-| 2.5.1 | Registro en el servidor de las capturas offline que no se aplicaron | R62 §5 |
-| 2.5.2 | Fotos de gastos | R62 §5 |
-| 2.5.3 | Ubicación de las visitas (requiere autorización) | R65 §6 |
+| 2.5.1 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve sin fecha; antes si el socio o los cobradores lo piden.** Registro en el servidor de las capturas offline que no se aplicaron | R62 §5 |
+| 2.5.2 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve sin fecha; antes si el socio o los cobradores lo piden.** Fotos de gastos | R62 §5 |
+| 2.5.3 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve sin fecha; antes si el socio o los cobradores lo piden.** Ubicación de las visitas (requiere autorización) | R65 §6 |
 | 2.5.4 | ~~Venta directa del Cobrador sin conexión~~ → **Retirado:** crear clientes o ventas sin conexión está **prohibido por decisión vigente** (R65). No es una ampliación pendiente; ver §8 | R65 §6 |
-| 2.5.5 | Qué hacer si la fecha de inicio de una venta venció al sincronizar | R65 §6 |
-| 2.5.6 | Estado «en tránsito» con confirmación del destino en las transferencias entre rutas (opcional, futuro; ver 2.1.5) | R74 §13.2 |
+| 2.5.5 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve sin fecha; antes si el socio o los cobradores lo piden.** Qué hacer si la fecha de inicio de una venta venció al sincronizar | R65 §6 |
+| 2.5.6 | **PARA DESPUÉS (2026-10-28, por decisión del propietario): vuelve sin fecha; antes si el socio o los cobradores lo piden.** Estado «en tránsito» con confirmación del destino en las transferencias entre rutas (opcional, futuro; ver 2.1.5) | R74 §13.2 |
 
 ## 3. Trabajo técnico (no depende de decisiones)
 
