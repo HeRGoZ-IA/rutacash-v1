@@ -49,11 +49,11 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
   const me = useRuntime((s) => s.ctx);
   const isSa = me?.role === 'superadmin';
   const timezone = me?.company.timezone ?? 'UTC';
-  const today = useMemo(() => todayIn(timezone), [timezone]);
+  const revision = useDataRevision();
+  const today = useMemo(() => todayIn(timezone), [timezone, revision]);
   const money = useMoney();
   const navigate = useNavigate();
   const officeFilter = useOfficeRouteFilter();
-  const revision = useDataRevision();
 
   const [period, setPeriod] = useState<PanelPeriod>('hoy');
   const [custom, setCustom] = useState({ from: '', to: '' });

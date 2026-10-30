@@ -20,6 +20,7 @@
 
 import { ApiFailure } from '../lib/client.ts';
 import { buildCapitalRecords, fetchOperations, type CapitalRecords } from './capitalRecords.ts';
+import { todayIn } from './consultasModel.ts';
 import { api, useRuntime } from './session.ts';
 import {
   adjustmentFrom, cashSettlementFrom, controllerEventFrom, categoryFrom, clientFrom, companyFromContext, expenseFrom, weeklySettlementFrom, installmentFrom, noPaymentVisitFrom, officeFrom, paymentFrom, pendingSaleFrom,
@@ -464,12 +465,40 @@ export async function pollOnce(): Promise<void> {
   }
 }
 
+/**
+ * CAMBIO DE DÍA (Errores, 2026-10-29): «hoy» (pagó hoy, cobrar hoy, cuotas atrasadas, rangos
+ * de Consultas y Caja) se calcula en el navegador. Si la app queda abierta o en segundo plano
+ * de un día a otro sin señal, o nadie registró nada (datos releídos iguales), la pantalla seguía
+ * mostrando el día anterior hasta volver a iniciar sesión. Al cambiar la fecha del dispositivo
+ * o la de la empresa, se relee todo como tras un comando.
+ */
+let lastDay: string | null = null;
+function dayKey(): string {
+  const d = new Date();
+  const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // Sin empresa elegida aún se repite la fecha del dispositivo (elegirla no cuenta como cambio salvo otro huso).
+  const tz = useRuntime.getState().ctx?.company.timezone;
+  return `${local}|${tz ? todayIn(tz, d) : local}`;
+}
+
+/** true si cambió el día desde la última comprobación (y ya se pidió releer todo). */
+export function checkDayChange(): boolean {
+  const day = dayKey();
+  const changed = lastDay !== null && day !== lastDay;
+  lastDay = day;
+  if (changed) invalidate();
+  return changed;
+}
+
 let poller = 0;
 export function startPolling(ms = 20_000): void {
   window.clearInterval(poller);
+  lastDay = dayKey();
   const tick = () => {
-    if (document.visibilityState === 'visible' && useRuntime.getState().ctx) void pollOnce();
+    if (document.visibilityState !== 'visible' || !useRuntime.getState().ctx) return;
+    if (!checkDayChange()) void pollOnce();
   };
   poller = window.setInterval(tick, ms);
   document.addEventListener('visibilitychange', tick);
+  window.addEventListener('focus', tick);
 }

@@ -63,7 +63,7 @@ export function TransferenciasRB({ model }: { model: CapitalModel }) {
   const me = useRuntime((s) => s.ctx);
   const money = useMoney();
   const revision = useDataRevision();
-  const today = useMemo(() => todayIn(me?.company.timezone ?? 'UTC'), [me?.company.timezone]);
+  const today = useMemo(() => todayIn(me?.company.timezone ?? 'UTC'), [me?.company.timezone, revision]);
   const [params, setParams] = useSearchParams();
   const [panel, setPanel] = useState<RoutePanel | null>(null);
   const [positions, setPositions] = useState<CustodyPosition[]>([]);

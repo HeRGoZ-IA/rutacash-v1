@@ -62,7 +62,7 @@ export default function ConsultasPage() {
   const minorUnits = company?.minorUnits ?? 2;
   const { tenantId, currency } = useTenant();
   const revision = useDataRevision();
-  const today = useMemo(() => todayIn(timezone), [timezone]);
+  const today = useMemo(() => todayIn(timezone), [timezone, revision]);
 
   const [perspectives, setPerspectives] = useState<Perspectives | null>(null);
   const [perspError, setPerspError] = useState<string | null>(null);

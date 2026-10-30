@@ -505,6 +505,24 @@ try {
     let paid = false;
     for (let i = 0; i < 20 && !paid; i++) { await sleep(1000); paid = Number((await one('select count(*)::int n from adex.payments where sale_id = $1', [saleA.id])).n) === pay0 + 1; }
     ok('A-15', ['C-01'], 'Cobro de R$ 60 en «Centro A» desde la pantalla de cobro: custodia +60', paid && (await custody(M.cob1, C1)) === k0 + 6_000, `custodia ${k0} → ${await custody(M.cob1, C1)}`);
+    // Error reportado (2026-10-29): la app abierta de un día a otro seguía mostrando el día anterior hasta volver a
+    // iniciar sesión. Se adelanta el reloj del navegador un día SIN recargar ni tocar datos y se vuelve a la pestaña.
+    // Sin señal (como al abrir la app en la calle): el sondeo al servidor no corre y antes nada se recalculaba; con
+    // señal el refresco de 5 min solo lo arreglaba si algún dato releído cambiaba (p. ej. una cuota que vence).
+    const cardA = () => page.evaluate(() => [...document.querySelectorAll('div.rounded-2xl')].find((d) => /centro a\b/i.test(d.innerText))?.innerText ?? '');
+    await go('/collector/route');
+    const abonadoHoy = await page.waitForFunction(() => [...document.querySelectorAll('div.rounded-2xl')].some((d) => /centro a\b/i.test(d.innerText) && d.innerText.includes('Abonado')), { timeout: 30_000 }).then(() => true, () => false);
+    await page.setOfflineMode(true);
+    await page.evaluate(() => {
+      const Real = Date, shift = 24 * 3600_000;
+      class Tomorrow extends Real { constructor(...a) { if (a.length) super(...a); else super(Real.now() + shift); } static now() { return Real.now() + shift; } }
+      window.__RealDate = Real; window.Date = Tomorrow;
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    const nextDay = await page.waitForFunction(() => { const c = [...document.querySelectorAll('div.rounded-2xl')].find((d) => /centro a\b/i.test(d.innerText)); return !!c && !c.innerText.includes('Abonado'); }, { timeout: 15_000 }).then(() => true, () => false);
+    ok('A-15b', ['C-01'], 'Cobrador con la app abierta y sin señal: al pasar al día siguiente, «Abonado» de ayer desaparece sin cerrar sesión', abonadoHoy && nextDay, JSON.stringify({ abonadoHoy, nextDay, card: (await cardA()).slice(0, 120) }));
+    await page.evaluate(() => { if (window.__RealDate) window.Date = window.__RealDate; });
+    await page.setOfflineMode(false);
 
     // Venta directa del Administrador desde la Base de Centro 2 (ruta sin Cobrador): nuevo cliente y venta.
     await login('admin1.norte@example.test');

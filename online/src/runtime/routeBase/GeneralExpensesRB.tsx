@@ -77,7 +77,7 @@ export function GeneralExpensesPanel({ model, panel, periodText }: { model: Capi
   const money = useMoney();
   const revision = useDataRevision();
   const rb = routeBaseUi(model);
-  const today = useMemo(() => todayIn(me?.company.timezone ?? 'UTC'), [me?.company.timezone]);
+  const today = useMemo(() => todayIn(me?.company.timezone ?? 'UTC'), [me?.company.timezone, revision]);
 
   const [expenses, setExpenses] = useState<ServerExpense[] | null>(null);
   const [payables, setPayables] = useState<Payables | null>(null);
