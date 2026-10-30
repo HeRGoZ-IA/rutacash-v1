@@ -21,10 +21,11 @@
 
 ## Dónde quedamos
 
-*Actualizado: 2026-10-28 (Ronda 81, publicada)*
+*Actualizado: 2026-10-29 (error 3.21 corregido, chat Errores o bugs)*
 
 1. **Objetivo actual:** sin trabajo en curso. Siguiente: actualizar la guía del socio (`docs/GUIA_SOCIO_LIQUIDACIONES_Y_CIERRES.md`) con los nombres nuevos, y el resto del listado canónico (`docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`).
 2. **Qué quedó hecho:**
+   * Error 3.21 (2026-10-29, **publicado**: `de7fca0`, Vercel `index-D6d9WyFz.js`, sin migración ni Render): la app del Cobrador abierta o en segundo plano de un día a otro seguía mostrando el día anterior hasta cerrar sesión. Ahora detecta el cambio de fecha (dispositivo y empresa) y relee todo, también sin señal. Probado: E2E 137/137 y 25/25 (A-15b falló sin la corrección), CLEAN, tipos. **No probado:** en el celular del socio.
    * Ronda 81 (2026-10-28, **publicada**: `a12d915`, Render y Vercel `index-DrdhlBol.js`, sin migración): 3.19 Liquidaciones con nombres nuevos, aviso del último cierre y fechas propuestas; 3.18 Gastos del Cobrador y Supervisor separados por el último cierre; 3.12 pago de la obligación de otro Administrador probado en pantalla. Probado: PostgreSQL 595/0/1, CLEAN, tipos, E2E 93/46/25. **No probado:** con BlueLine ni por el socio. El texto «Después del último cierre» se ajustó tras el E2E (solo tipos comprobados).
    * Ronda 80 (2026-10-28, **publicada**): 3.14 (`44f7bae`, migración 0040 aplicada por Helmer, respaldo previo `adex-20261028T1542`; Render y Vercel). Casilla «Para Cobradores» en Categorías de gasto; Cobrador y Supervisor solo ven y usan los marcados (lo valida la API); eliminar un tipo con gastos lo quita de la lista y conserva sus gastos; gasto sin conexión con un tipo desmarcado después se acepta y avisa al Administrador. Probado: PostgreSQL 595/0/1, E2E 93/41/25, reversión 11/11, CLEAN y tipos. BlueLine quedó con 3 de 7 tipos marcados. **No probado:** con BlueLine ni por el socio.
    * Ronda 79 (2026-10-28, **publicada**): 3.17, solo el Administrador anula (`ad1f4e9`, migración 0039 aplicada por Helmer). Respaldo previo `adex-20261028T1409` verificado; 0039 verificada en staging en solo lectura; Render `adex-online-api` Live con `1e0e8cf`; Vercel `index-sDnD_a1d.js`. Probado en local: PostgreSQL 590/0/1, E2E 89/41/25, reversión 10/10. **No probado:** con BlueLine ni por el socio.
@@ -33,6 +34,7 @@
    * Ronda 76: mora al día (`865844a`, Render) y respaldos con la alternativa A activa (copias diarias cifradas en OneDrive, clave de recuperación comprobada, tareas registradas; primera copia automática `adex-20261027T1947`).
    * **Probado:** pruebas financieras (CUOTAS-001…003), las de CLEAN, los tipos y E2E 89/89, 41/41 y 25/25. **No probado:** con datos reales ni por el socio.
 3. **Qué falta:**
+   * Que el socio compruebe 3.21 (4.9): dejar la app abierta hasta el día siguiente.
    * Actualizar la guía del socio con los nombres nuevos de Liquidaciones (3.19).
    * Que el socio valide 3.12, 3.14, 3.15, 3.16, 3.17, 3.18, 3.19, el cierre del mismo día y el buscador en su celular.
    * **Para el chat Central:** implementar 3.20, enlace de restablecimiento de contraseña para usuarios activos (2.3.4 aprobada).
@@ -65,10 +67,9 @@
      * Los riesgos no están aceptados salvo que Helmer lo diga.
    * 2026-10-25: cierre del mismo día con el día bloqueado después.
    * En BlueLine nunca se crean datos ficticios ni se hace una purga global.
-5. **Archivos tocados (R81):**
-   * `src/pages/admin/WeeklySettlementPage.tsx`, `src/lib/settlementPeriods.ts` (`suggestClosureRange`), `src/components/ui/PendingSettlementsNotice.tsx`, `src/pages/admin/OfficeDetailPage.tsx`
-   * `online/src/bridge/pages/collector/CollectorExpensesPage.tsx`; `saas/src/settlements/service.ts` (`listClosedRanges`), `saas/src/http/companyApi.ts`
-   * Pruebas: `tests/settlements.test.ts` (SUGGEST-001…004), `saas/test/integration/settlements.test.ts` (DS4-002), E2E I-02a, F-04b, J-01…J-03. Evidencias en `tmp/r80/`.
+5. **Archivos tocados (error 3.21):**
+   * `online/src/runtime/projection.ts` (`checkDayChange`), `online/src/runtime/ConsultasPage.tsx`, `online/src/runtime/routeBase/CajaPrincipalRB.tsx`, `GeneralExpensesRB.tsx`, `TransferenciasRB.tsx`
+   * Prueba: `saas/scripts/local/e2e-routebase.mjs` (A-15b). Antes, R81: ver Changelog.
 
 ## Reglas del proyecto
 
