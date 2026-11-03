@@ -84,6 +84,20 @@ export async function issueSuperadminAccessLink(companyId: string, membershipId:
 }
 
 /**
+ * 3.20: enlace de RESTABLECIMIENTO de contraseña de un Super Admin que ya inició sesión. Solo lo
+ * emite el Owner; al usarlo, el Super Admin elige una contraseña nueva y se cierran sus sesiones.
+ */
+export async function issueSuperadminResetLink(companyId: string, membershipId: string): Promise<AccessLinkResult> {
+  try {
+    const r = await ownerApiOrFail().send<{ status: 'issued'; tokenHash: string }>('POST',
+      `/control/v1/companies/${encodeURIComponent(companyId)}/superadmins/${encodeURIComponent(membershipId)}/reset-link`, {});
+    return { status: 'issued', url: accessLinkUrl(r.tokenHash) };
+  } catch (e) {
+    return { status: 'failed', message: ownerErrorText(e) };
+  }
+}
+
+/**
  * Ronda 54: cambia el correo de ACCESO de un Super Admin. Misma persona para ADEX (identidad,
  * permisos, contraseña e información no cambian); a partir de ahora entra con el correo nuevo.
  */

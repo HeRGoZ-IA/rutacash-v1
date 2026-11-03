@@ -169,6 +169,24 @@ export async function superadminAccessLink(client: pg.PoolClient, companyId: str
 }
 
 /**
+ * Enlace de RESTABLECIMIENTO de contraseña de un SuperAdmin (3.20): solo lo emite el Owner. Mismas
+ * reglas que el de primer acceso (membresía activa, identidad exclusiva, token sin guardar), pero
+ * también para quien ya inició sesión. Queda en el historial como evento propio (0041).
+ */
+export async function superadminResetLink(client: pg.PoolClient, companyId: string, membershipId: string, provider: IdentityProvider) {
+  await getCompany(client, companyId);
+  const r = await client.query<{ identity_id: string; email: string; status: string; exclusive: boolean }>(
+    'select identity_id, email, status, exclusive from adex_control.company_superadmins($1) where membership_id = $2', [companyId, membershipId]);
+  const t = r.rows[0];
+  if (!t) throw new ApiError(404, 'NOT_FOUND');
+  if (t.status !== 'activo') throw new ApiError(409, 'MEMBERSHIP_INACTIVE');
+  if (!t.exclusive) throw new ApiError(409, 'IDENTITY_SHARED');
+  const out = await provider.issueResetLink(t.identity_id, t.email);
+  await client.query('select adex_control.record_reset_link($1, $2)', [companyId, membershipId]);
+  return { status: 'issued' as const, tokenHash: out.tokenHash };
+}
+
+/**
  * Cambio del CORREO de acceso de un SuperAdmin (Ronda 54, 0024). La identidad no cambia (mismo
  * `sub`): conserva membresías, permisos, contraseña e historial. Solo identidades exclusivas de
  * la empresa. Primero ADEX (en esta transacción) y después el proveedor: si el proveedor lo

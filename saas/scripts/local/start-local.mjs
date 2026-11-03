@@ -185,10 +185,18 @@ function makeProvider() {
       ids.set(e, id);
       return { identityId: id, created: true };
     },
+    // Como Supabase (`last_sign_in_at`): a quien ya entró no se le emite el de primer acceso (3.20).
+    signedIn: new Set(),
     async issueAccessLink(identityId) {
+      if (this.signedIn.has(identityId)) return { status: 'already_active' };
       const tokenHash = randomUUID().replaceAll('-', '');
       links.set(tokenHash, identityId);
       return { status: 'issued', tokenHash };
+    },
+    async issueResetLink(identityId) {
+      const tokenHash = randomUUID().replaceAll('-', '');
+      links.set(tokenHash, identityId);
+      return { tokenHash };
     },
     async changeEmail(identityId, email) {
       const e = email.trim().toLowerCase();
@@ -387,6 +395,7 @@ async function authRoute(req, res, u) {
         return sendJson(res, 400, { error: 'invalid_grant', error_description: 'Invalid login credentials' });
       }
       logOnly(`[auth] inicio de sesión: ${email}`);
+      provider.signedIn.add(id);
       return sendJson(res, 200, tokenSet(id));
     }
     if (grant === 'refresh_token') {

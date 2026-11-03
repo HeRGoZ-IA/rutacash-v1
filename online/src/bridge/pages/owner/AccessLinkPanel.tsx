@@ -7,7 +7,8 @@ import { useState } from 'react'
 import { Copy, Check } from 'lucide-react'
 import type { AccessLinkResult } from '@/platform/companyControlService'
 
-export function AccessLinkPanel({ result }: { result: AccessLinkResult }) {
+/** `reset` (3.20): enlace para cambiar la contraseña de quien ya inició sesión. */
+export function AccessLinkPanel({ result, reset = false }: { result: AccessLinkResult; reset?: boolean }) {
   const [copied, setCopied] = useState(false)
 
   if (result.status === 'existing' || result.status === 'already_active') {
@@ -15,7 +16,7 @@ export function AccessLinkPanel({ result }: { result: AccessLinkResult }) {
       <p className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-xl p-3">
         {result.status === 'existing'
           ? 'Esta persona ya tiene cuenta en ADEX: entra por /login con su contraseña de siempre y elige esta empresa.'
-          : 'Esta persona ya inició sesión en ADEX: entra con su propia contraseña. Nadie puede fijársela desde fuera.'}
+          : 'Esta persona ya inició sesión en ADEX: entra con su propia contraseña. Si la olvidó, genera un enlace para que elija una nueva.'}
       </p>
     )
   }
@@ -35,11 +36,13 @@ export function AccessLinkPanel({ result }: { result: AccessLinkResult }) {
   return (
     <div className="space-y-3">
       <p className="text-sm text-gray-600">
-        Entrega este enlace al Super Admin. Con él fijará su propia contraseña y después entrará por{' '}
+        {reset
+          ? 'Entrega este enlace al Super Admin por un canal privado. Con él elegirá una contraseña nueva; al guardarla se cierran todas sus sesiones abiertas y vuelve a entrar por '
+          : 'Entrega este enlace al Super Admin. Con él fijará su propia contraseña y después entrará por '}
         <span className="font-mono">/login</span>.
       </p>
       <div className="rounded-xl bg-gray-50 border border-gray-200 p-3 flex items-start gap-2">
-        <p className="font-mono text-xs text-gray-800 break-all flex-1 select-all" data-testid="access-link">{result.url}</p>
+        <p className="font-mono text-xs text-gray-800 break-all flex-1 select-all" data-testid={reset ? 'reset-link' : 'access-link'}>{result.url}</p>
         <button type="button" onClick={copy} className="flex-shrink-0 text-gray-500 hover:text-gray-800" aria-label="Copiar enlace">
           {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
         </button>

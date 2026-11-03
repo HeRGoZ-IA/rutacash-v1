@@ -199,7 +199,17 @@ export class OnlineClient {
     }
     if (res.status === 401 || res.status === 403) throw new ApiFailure(res.status, 'LINK_EXPIRED');
     if (!res.ok) throw new ApiFailure(res.status, 'AUTH_UNAVAILABLE');
-    await this.authFetch('/auth/v1/logout?scope=local', { method: 'POST', token: accessToken }).catch(() => undefined);
+    // 3.20: con la contraseña nueva se cierran TODAS las sesiones de la persona (ADEX y proveedor),
+    // incluida esta temporal. Primero esta sesión se reclama como la vigente (SOC-01: fijar la
+    // contraseña es un acceso explícito; revoca la sesión que tuviera abierta y, sin reclamarla, el
+    // servidor la tendría por no vigente) y después el cierre global corta todo. Si la API no
+    // responde, al menos se cierra esta; la próxima entrada por /login revoca igualmente la anterior.
+    const adex = (path: string, body: unknown) => fetch(`${this.cfg.apiBase}${path}`, {
+      method: 'POST', cache: 'no-store', body: JSON.stringify(body),
+      headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+    }).then((r) => r.ok || r.status === 404).catch(() => false);
+    const closed = await adex('/v1/session/claim', {}) && await adex('/v1/session/logout', { scope: 'global' });
+    if (!closed) await this.authFetch('/auth/v1/logout?scope=local', { method: 'POST', token: accessToken }).catch(() => undefined);
   }
 
   /** Enlace de primer acceso de un usuario de la empresa (lo emite el servidor; no se guarda). */
@@ -208,6 +218,12 @@ export class OnlineClient {
     return body['status'] === 'issued'
       ? { status: 'issued', url: `${window.location.origin}/activar#t=${encodeURIComponent(String(body['tokenHash']))}` }
       : { status: 'already_active' };
+  }
+
+  /** 3.20: enlace de restablecimiento para un usuario activo (lo emite el servidor; no se guarda). */
+  async memberResetLink(membershipId: string): Promise<{ url: string }> {
+    const body = await this.request('POST', `/v1/members/${encodeURIComponent(membershipId)}/reset-link`, { body: {} });
+    return { url: `${window.location.origin}/activar#t=${encodeURIComponent(String(body['tokenHash']))}` };
   }
 
   private async authFetch(path: string, o: { method: string; body?: string; token?: string }): Promise<Response> {

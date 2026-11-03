@@ -7,6 +7,8 @@
 //     por nadie; la persona la fija con el flujo de recuperación del proveedor.
 //   · issueAccessLink: enlace de PRIMER ACCESO de un solo uso (Ronda 40) para quien
 //     nunca ha iniciado sesión; la persona fija su propia contraseña con él.
+//   · issueResetLink: enlace de RESTABLECIMIENTO de un solo uso (3.20) para quien ya tiene
+//     acceso y olvidó su contraseña; lo emite quien la dio de alta.
 //   · changeEmail: cambiar el correo de acceso de una identidad (Ronda 54) sin cambiar su
 //     `sub` ni su contraseña.
 //   · signOut: revocar la sesión en el proveedor (el refresco deja de funcionar).
@@ -28,6 +30,13 @@ export interface IdentityProvider {
    * devuelve a quien lo pidió para que se lo entregue a la persona.
    */
   issueAccessLink(identityId: string, email: string): Promise<{ status: 'issued'; tokenHash: string } | { status: 'already_active' }>;
+  /**
+   * Enlace de RESTABLECIMIENTO (3.20, decisión 2.3.4 opción B). Mismo token de un solo uso que el
+   * de primer acceso, pero también para quien ya inició sesión. Quién puede pedirlo lo decide la
+   * API (jerarquía y empresa exclusiva); al canjearlo, la pantalla /activar cierra todas las
+   * sesiones de la persona.
+   */
+  issueResetLink(identityId: string, email: string): Promise<{ tokenHash: string }>;
   /**
    * Cambia el correo de acceso de la identidad (Ronda 54). Mismo `sub`, misma contraseña; el
    * correo nuevo queda confirmado (lo decide un Owner, no la persona). `taken`: el proveedor ya
@@ -60,6 +69,28 @@ export function createSupabaseProvider(cfg: SupabaseProviderConfig): IdentityPro
     return id.toLowerCase();
   }
 
+  async function userOf(identityId: string): Promise<{ last_sign_in_at?: unknown }> {
+    const got = await f(`${base}/auth/v1/admin/users/${encodeURIComponent(identityId)}`, { headers: admin });
+    if (!got.ok) throw new ApiError(502, 'IDENTITY_PROVIDER_ERROR');
+    const user = (await got.json()) as { id?: unknown; email?: unknown; last_sign_in_at?: unknown };
+    if (String(user.id).toLowerCase() !== identityId.toLowerCase()) throw new ApiError(502, 'IDENTITY_PROVIDER_ERROR');
+    return user;
+  }
+
+  /** Token de recuperación de un solo uso (no envía correo; emitir otro invalida el anterior). */
+  async function recoveryToken(identityId: string, email: string): Promise<string> {
+    const link = await f(`${base}/auth/v1/admin/generate_link`, {
+      method: 'POST', headers: admin, body: JSON.stringify({ type: 'recovery', email: email.trim().toLowerCase() }),
+    });
+    if (!link.ok) throw new ApiError(502, 'IDENTITY_PROVIDER_ERROR');
+    const body = (await link.json()) as { id?: unknown; hashed_token?: unknown; properties?: { hashed_token?: unknown } };
+    const tokenHash = body.hashed_token ?? body.properties?.hashed_token;
+    if (String(body.id).toLowerCase() !== identityId.toLowerCase() || typeof tokenHash !== 'string' || !/^[0-9a-f]{20,}$/i.test(tokenHash)) {
+      throw new ApiError(502, 'IDENTITY_PROVIDER_ERROR');
+    }
+    return tokenHash;
+  }
+
   return {
     async ensureIdentity(email) {
       const normalized = email.trim().toLowerCase();
@@ -77,21 +108,13 @@ export function createSupabaseProvider(cfg: SupabaseProviderConfig): IdentityPro
       return { identityId: await userIdFrom(link), created: false };
     },
     async issueAccessLink(identityId, email) {
-      const got = await f(`${base}/auth/v1/admin/users/${encodeURIComponent(identityId)}`, { headers: admin });
-      if (!got.ok) throw new ApiError(502, 'IDENTITY_PROVIDER_ERROR');
-      const user = (await got.json()) as { id?: unknown; email?: unknown; last_sign_in_at?: unknown };
-      if (String(user.id).toLowerCase() !== identityId.toLowerCase()) throw new ApiError(502, 'IDENTITY_PROVIDER_ERROR');
+      const user = await userOf(identityId);
       if (user.last_sign_in_at) return { status: 'already_active' };
-      const link = await f(`${base}/auth/v1/admin/generate_link`, {
-        method: 'POST', headers: admin, body: JSON.stringify({ type: 'recovery', email: email.trim().toLowerCase() }),
-      });
-      if (!link.ok) throw new ApiError(502, 'IDENTITY_PROVIDER_ERROR');
-      const body = (await link.json()) as { id?: unknown; hashed_token?: unknown; properties?: { hashed_token?: unknown } };
-      const tokenHash = body.hashed_token ?? body.properties?.hashed_token;
-      if (String(body.id).toLowerCase() !== identityId.toLowerCase() || typeof tokenHash !== 'string' || !/^[0-9a-f]{20,}$/i.test(tokenHash)) {
-        throw new ApiError(502, 'IDENTITY_PROVIDER_ERROR');
-      }
-      return { status: 'issued', tokenHash };
+      return { status: 'issued', tokenHash: await recoveryToken(identityId, email) };
+    },
+    async issueResetLink(identityId, email) {
+      await userOf(identityId);
+      return { tokenHash: await recoveryToken(identityId, email) };
     },
     async changeEmail(identityId, email) {
       const res = await f(`${base}/auth/v1/admin/users/${encodeURIComponent(identityId)}`, {

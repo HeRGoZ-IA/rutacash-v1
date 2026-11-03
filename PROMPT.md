@@ -21,10 +21,11 @@
 
 ## Dónde quedamos
 
-*Actualizado: 2026-11-03 (barrido de pendientes, grupo A)*
+*Actualizado: 2026-11-03 (barrido de pendientes: grupo A publicado; 3.20 implementado sin publicar)*
 
-1. **Objetivo actual:** barrido de pendientes mientras el socio prueba con BlueLine (va bien: los reportes semanales cuadran igual que en Listos). Grupo A hecho; siguen el grupo B (3.20, 3.5, 3.4, 3.10) y el D (revisar vigencia de 7.1…7.6, solo lectura).
+1. **Objetivo actual:** barrido de pendientes mientras el socio prueba con BlueLine (va bien: los reportes semanales cuadran igual que en Listos). Grupo B **punto por punto** (pedido de Helmer): 3.20 implementado y probado en local, **sin publicar**; siguen 3.5, 3.4 y 3.10.
 2. **Qué quedó hecho:**
+   * 3.20 (2026-11-03, **commit local, sin push**): enlace para cambiar la contraseña de un usuario activo (Usuarios → llave; panel Owner para el SuperAdmin). Al usarlo se reclama la sesión del enlace y se cierran todas las de la persona (ADEX y Supabase). Migración **0041** (evento del Owner). Probado: PostgreSQL 599/0/1, E2E 94/46/29, tipos (3), unitarias 31/31. **No probado:** pantalla Owner en navegador, reversión de 0041, BlueLine.
    * Barrido grupo A (2026-11-03): 3.7 `npm run verify:deploy` comprueba ADEX Online (commit servido, /owner, iconos, módulos de la API; probado contra lo publicado) y `smoke:prod` exige URL de CLEAN local; 3.8 `test:auth-real` bloqueado (escribiría en ADEX-Staging); 3.9 TLS verificado siempre en los scripts de staging (probado con `select 1`); 3.6 lista duplicada `OPERATION_KIND` eliminada (no se usaba); 3.11 «Base disponible» en CLEAN; 6.5 rama y stash de Git limpiados (stash exportado a `tmp/ronda23-respaldo/`). Probado: tipos (3), build Online, CLEAN completa, unitarias saas 31/31. No hace falta Render; no toca a BlueLine.
    * Error 3.21 (2026-10-29, **publicado**: `de7fca0`, Vercel `index-D6d9WyFz.js`, sin migración ni Render): la app del Cobrador abierta o en segundo plano de un día a otro seguía mostrando el día anterior hasta cerrar sesión. Ahora detecta el cambio de fecha (dispositivo y empresa) y relee todo, también sin señal. Probado: E2E 137/137 y 25/25 (A-15b falló sin la corrección), CLEAN, tipos. **No probado:** en el celular del socio.
    * Ronda 81 (2026-10-28, **publicada**: `a12d915`, Render y Vercel `index-DrdhlBol.js`, sin migración): 3.19 Liquidaciones con nombres nuevos, aviso del último cierre y fechas propuestas; 3.18 Gastos del Cobrador y Supervisor separados por el último cierre; 3.12 pago de la obligación de otro Administrador probado en pantalla. Probado: PostgreSQL 595/0/1, CLEAN, tipos, E2E 93/46/25. **No probado:** con BlueLine ni por el socio. El texto «Después del último cierre» se ajustó tras el E2E (solo tipos comprobados).
@@ -38,13 +39,14 @@
    * Que el socio compruebe 3.21 (4.9): dejar la app abierta hasta el día siguiente.
    * Actualizar la guía del socio con los nombres nuevos de Liquidaciones (3.19): Helmer dijo «Ahora no» (2026-10-28).
    * Que el socio valide 3.12, 3.14, 3.15, 3.16, 3.17, 3.18, 3.19, el cierre del mismo día y el buscador en su celular.
-   * **Para el chat Central:** implementar 3.20, enlace de restablecimiento de contraseña para usuarios activos (2.3.4 aprobada).
+   * **Publicar 3.20** (espera el «sí» de Helmer). Orden: respaldo → Helmer aplica 0041 (`cd saas`; `npm run staging:migrate`) → push → Render `adex-online-api` y `adex-owner-api` → push de docs (la puerta de Vercel exige `reset-links-v1` y `owner-reset-link-v1`).
    * DS-06 (cargar la cartera de una empresa nueva): en espera de la opinión del socio; preferida la opción A (saldos de apertura), sin aprobar. El archivo completo de Listos sirve para esa opción.
    * RS-4 aprobada: trasladar el proyecto a Supabase Pro de Starcli **solo cuando Helmer lo ordene** (no mientras se prueba la app).
    * Grupo de chats «ADEX - RutaCash» (2026-10-27): Central, Errores o bugs, Peticiones del socio, Ideas y producto, Respaldos y operación, Decisiones pendientes. Solo Central y Errores tocan código.
    * Barrido: grupo B (3.20 con 2 detalles por confirmar, 3.5, 3.4, 3.10), grupo D (vigencia de 7.1…7.6) y al final la limpieza 6.1…6.4, que necesita permiso. Decisiones abiertas: 2.1.4, 2.1.11, 2.1.12, 2.1.13 y 2.2.1.
    * Resto: `docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`, que es el **listado canónico**.
 4. **Decisiones tomadas:**
+   * 2026-11-03 (3.20): al usar el enlace de restablecimiento se cierran todas las sesiones de la persona; el enlace de un Administrador solo lo emite el SuperAdmin, el de un SuperAdmin solo el Owner.
    * 2026-11-03: la normativa (SOC 2, ISO 27001/27701) se toma solo como guía de calidad, sin certificarse; el análisis de brechas queda para después de la prueba de BlueLine.
    * 2026-10-28: solo se deciden ahora las que afectan a BlueLine hoy (2.1.13 PIX, 2.1.11, 2.1.4, 2.1.12); el resto quedó marcado «PARA DESPUÉS» en el listado canónico con su momento de regreso. No volver a proponerlas antes de ese momento.
    * 2026-10-28: respaldos RS-5, PITR no por ahora; RS-4, el proyecto actual se trasladará a la organización Pro de Starcli como proyecto propio de ADEX, sin mezclar nada con Starcli Loyalty, cuando valga la pena (aún se prueba la app). Antes de cualquier pago se le dice a Helmer el costo.
@@ -70,10 +72,10 @@
      * Los riesgos no están aceptados salvo que Helmer lo diga.
    * 2026-10-25: cierre del mismo día con el día bloqueado después.
    * En BlueLine nunca se crean datos ficticios ni se hace una purga global.
-5. **Archivos tocados (grupo A):**
-   * `scripts/verify-deploy.mjs` (reescrito para Online), `scripts/prod-smoke.mjs`, `docs/PRODUCTION_SMOKE.md`, `tests/centralcapital.test.ts` (CC-F03)
-   * `saas/scripts/auth-real-guard.mjs` (nuevo), `saas/package.json`, `saas/scripts/{staging,demo-accounts,demo-provision,demo-purge-retired}.ts`
-   * `online/src/lib/format.ts`, `src/pages/collector/CollectorSelectRoutePage.tsx`
+5. **Archivos tocados (3.20):**
+   * API: `saas/src/auth/provider.ts` (`issueResetLink`), `saas/src/identity/service.ts` (`memberResetLink`), `saas/src/control/service.ts` (`superadminResetLink`), `saas/src/http/{companyApi,controlApi}.ts`, `saas/src/server/{app,controlStart}.ts`; migración `saas/db/migrations/0041_superadmin_reset_link.sql` (+ rollback)
+   * Web: `online/src/lib/client.ts` (`memberResetLink`, cierre de sesiones en `setOwnPassword`), `online/src/bridge/pages/admin/UsersPage.tsx`, `online/src/bridge/pages/owner/{OwnerCompanyDetailPage,AccessLinkPanel}.tsx`, `online/src/bridge/platform/companyControlService.ts`, `online/scripts/deploy-gate.mjs`
+   * Pruebas: `saas/test/integration/reset-links.test.ts` (nuevo), `render-resilience.test.ts`, `saas/test/helpers/auth.ts`; E2E etapa K y proveedor local en `saas/scripts/local/`
 
 ## Reglas del proyecto
 

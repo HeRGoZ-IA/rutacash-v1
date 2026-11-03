@@ -89,13 +89,15 @@ export default function UsersPage() {
   const { currency } = useTenant()
   const [resetPass, setResetPass] = useState(generateTemporaryPassword)
   // ADEX Online: estado del enlace de primer acceso del usuario de la llave.
-  const [accessLink, setAccessLink] = useState<{ status: 'idle' | 'loading' | 'issued' | 'already_active' | 'error'; url?: string; message?: string }>({ status: 'idle' })
+  // 3.20: `reset` = enlace de restablecimiento para quien ya inició sesión.
+  const [accessLink, setAccessLink] = useState<{ status: 'idle' | 'loading' | 'issued' | 'already_active' | 'error'; url?: string; message?: string; reset?: boolean }>({ status: 'idle' })
   const [linkCopied, setLinkCopied] = useState(false)
 
   const LINK_ERRORS: Record<string, string> = {
     IDENTITY_SHARED: 'Esta persona ya usa ADEX en otra empresa: entra con su propia contraseña y elige esta empresa.',
     MEMBERSHIP_INACTIVE: 'El usuario está inactivo: actívalo antes de generar el enlace.',
     PERMISSION_DENIED: 'No tienes permiso sobre este usuario.',
+    RESET_BY_OWNER_ONLY: 'Al SuperAdmin solo le puede entregar este enlace el Owner de ADEX.',
     NETWORK: 'Sin conexión con el servidor. Intenta de nuevo.',
   }
   async function issueAccessLink(id: string) {
@@ -107,6 +109,18 @@ export default function UsersPage() {
     } catch (e) {
       const code = (e as { code?: string })?.code ?? ''
       setAccessLink({ status: 'error', message: LINK_ERRORS[code] ?? 'No se pudo generar el enlace. Intenta de nuevo.' })
+    }
+  }
+  /** 3.20: enlace para que un usuario activo que olvidó su contraseña elija una nueva. */
+  async function issueResetLink(id: string) {
+    setAccessLink({ status: 'loading', reset: true })
+    setLinkCopied(false)
+    try {
+      const r = await api().memberResetLink(memberId(id))
+      setAccessLink({ status: 'issued', url: r.url, reset: true })
+    } catch (e) {
+      const code = (e as { code?: string })?.code ?? ''
+      setAccessLink({ status: 'error', reset: true, message: LINK_ERRORS[code] ?? 'No se pudo generar el enlace. Intenta de nuevo.' })
     }
   }
 
@@ -560,9 +574,11 @@ export default function UsersPage() {
           {accessLink.status === 'loading' && <p className="text-sm text-gray-500">Generando enlace…</p>}
           {accessLink.status === 'issued' && (
             <>
-              <p className="text-sm text-gray-600">Entrega este enlace a la persona. Con él fijará su propia contraseña y después entrará por <span className="font-mono">/login</span>.</p>
+              <p className="text-sm text-gray-600">{accessLink.reset
+                ? <>Entrega este enlace a la persona por un canal privado. Con él elegirá una contraseña nueva; al guardarla se cierran todas sus sesiones abiertas y vuelve a entrar por <span className="font-mono">/login</span>.</>
+                : <>Entrega este enlace a la persona. Con él fijará su propia contraseña y después entrará por <span className="font-mono">/login</span>.</>}</p>
               <div className="rounded-xl bg-gray-50 border border-gray-200 p-3 flex items-start gap-2">
-                <p className="font-mono text-xs text-gray-800 break-all flex-1 select-all" data-testid="access-link">{accessLink.url}</p>
+                <p className="font-mono text-xs text-gray-800 break-all flex-1 select-all" data-testid={accessLink.reset ? 'reset-link' : 'access-link'}>{accessLink.url}</p>
                 <button type="button" className="text-xs font-medium text-primary-600 hover:underline flex-shrink-0"
                   onClick={async () => { try { await navigator.clipboard.writeText(accessLink.url ?? ''); setLinkCopied(true) } catch { /* sigue visible */ } }}>
                   {linkCopied ? 'Copiado' : 'Copiar'}
@@ -573,9 +589,14 @@ export default function UsersPage() {
               </p>
             </>
           )}
-          {accessLink.status === 'already_active' && (
-            <p className="text-sm text-gray-600">Esta persona ya inició sesión: entra con su propia contraseña. Si la olvidó, la recupera con «¿Olvidaste tu contraseña?» en el acceso.</p>
-          )}
+          {accessLink.status === 'already_active' && (resetTarget?.rol === 'superadmin' ? (
+            <p className="text-sm text-gray-600">Esta persona ya inició sesión: entra con su propia contraseña. Si la olvidó, el enlace para cambiarla se lo entrega el Owner de ADEX.</p>
+          ) : (
+            <>
+              <p className="text-sm text-gray-600">Esta persona ya inició sesión y entra con su propia contraseña. Si la olvidó, genera un enlace para que elija una nueva: al usarlo se cierran todas sus sesiones abiertas.</p>
+              <Button onClick={() => resetTarget && issueResetLink(resetTarget.id)} icon={<KeyRound className="w-4 h-4" />} data-testid="reset-link-issue">Generar enlace para cambiar la contraseña</Button>
+            </>
+          ))}
           {accessLink.status === 'error' && (
             <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">{accessLink.message}</p>
           )}

@@ -28,12 +28,15 @@ const REQUIRED = ['settlements-v1', 'clean-online-v1', 'access-links-v1', 'payme
   // Bloque A post-R73 (0032): rectificación con pagos y reaplicación de pagos anulados.
   'rectification-payments-v1',
   // 3.14 (0040): tipos de gasto «Para Cobradores» y eliminación con historia.
-  'collector-expense-categories-v1'];
+  'collector-expense-categories-v1',
+  // 3.20: enlace de restablecimiento de contraseña para usuarios activos (sin migración).
+  'reset-links-v1'];
 // Ronda 40: si este despliegue activa la Plataforma Owner (VITE_ADEX_CONTROL_URL), el
 // servicio Owner publicado tiene que servir la versión que usan las pantallas originales.
 const CONTROL = (process.env.VITE_ADEX_CONTROL_URL ?? '').replace(/\/$/, '');
 // Ronda 54: la ficha permite cambiar el correo del Super Admin (0024 → servicio Owner → frontend).
-const CONTROL_REQUIRED = ['owner-clean-v1', 'owner-email-v1'];
+// 3.20 (0041): el Owner emite el enlace de restablecimiento de un SuperAdmin (0041 → servicio Owner → frontend).
+const CONTROL_REQUIRED = ['owner-clean-v1', 'owner-email-v1', 'owner-reset-link-v1'];
 
 async function features(base, signal) {
   const res = await fetch(`${base}/healthz`, { signal });

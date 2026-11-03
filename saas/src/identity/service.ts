@@ -202,6 +202,30 @@ export async function memberAccessLink(client: pg.PoolClient, ctx: ActiveContext
   return { status: 'issued' as const, tokenHash: out.tokenHash };
 }
 
+/**
+ * Enlace de RESTABLECIMIENTO de contraseña (3.20, decisión 2.3.4 opción B, detalles del
+ * propietario 2026-11-03). Para un usuario ACTIVO que olvidó su contraseña: lo emite quien puede
+ * gestionarlo (`user.resetPassword` + jerarquía: el SuperAdmin para Administradores y demás; el
+ * Administrador solo para Supervisores, Secretarios y Cobradores, nunca para otro Administrador).
+ * A un SuperAdmin solo se lo emite el Owner (`superadminResetLink`). Mismas reglas que el de primer
+ * acceso: identidad exclusiva de la empresa, un solo uso y token sin guardar; auditoría propia.
+ * Al canjearlo, /activar cierra todas las sesiones de la persona.
+ */
+export async function memberResetLink(client: pg.PoolClient, ctx: ActiveContext, membershipId: string, provider: IdentityProvider) {
+  const target = await loadMember(client, ctx, membershipId);
+  if (target.role === 'superadmin') throw new ApiError(403, 'RESET_BY_OWNER_ONLY');
+  if (!allowed(ctx, 'user.resetPassword', { targetRole: target.role }) || !mayManage(ctx, target)) throw new ApiError(403, 'PERMISSION_DENIED');
+  const r = await client.query<{ identity_id: string; email: string; exclusive: boolean }>(
+    'select identity_id, email, exclusive from adex.access_link_target($1)', [target.membershipId]);
+  const t = r.rows[0];
+  if (!t) throw new ApiError(409, 'MEMBERSHIP_INACTIVE');
+  if (!t.exclusive) throw new ApiError(409, 'IDENTITY_SHARED');
+  const out = await provider.issueResetLink(t.identity_id, t.email);
+  await audit(client, ctx, { action: 'ISSUE_RESET_LINK', entityType: 'membership', entityId: target.membershipId,
+    description: 'Enlace de restablecimiento de contraseña emitido' });
+  return { status: 'issued' as const, tokenHash: out.tokenHash };
+}
+
 async function companyMembers(client: pg.PoolClient, ctx: ActiveContext): Promise<MembershipFacts[]> {
   const r = await client.query<{ id: string; role: UserRole; status: 'activo' | 'inactivo'; display_name: string }>(
     'select id, role, status, display_name from adex.memberships where company_id = $1', [ctx.companyId]);

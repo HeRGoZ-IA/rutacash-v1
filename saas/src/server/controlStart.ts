@@ -43,6 +43,13 @@ export async function superadminEmailReady(pool: pg.Pool): Promise<boolean> {
   return r.rows[0]?.ok === true;
 }
 
+/** 3.20: la función de 0041 existe y `adex_control` puede ejecutarla. */
+export async function superadminResetReady(pool: pg.Pool): Promise<boolean> {
+  const r = await pool.query<{ ok: boolean }>(`select coalesce(has_function_privilege(
+    to_regprocedure('adex_control.record_reset_link(text,text)'), 'EXECUTE'), false) ok`);
+  return r.rows[0]?.ok === true;
+}
+
 export async function startControl(env: NodeJS.ProcessEnv = process.env) {
   const cfg = readControlConfig(env);
   const pool = new pg.Pool({ connectionString: cfg.controlUrl, ssl: cfg.ssl, max: 3, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 10_000 });
@@ -51,7 +58,8 @@ export async function startControl(env: NodeJS.ProcessEnv = process.env) {
   const verifyToken = createTokenVerifier({ issuer: `${cfg.supabaseUrl}/auth/v1` });
   const provider = createSupabaseProvider({ url: cfg.supabaseUrl, publishableKey: cfg.publishableKey, secretKey: cfg.secretKey });
   const emailReady = await superadminEmailReady(pool);
-  const features = CONTROL_FEATURES.filter((f) => f !== 'owner-email-v1' || emailReady);
+  const resetReady = await superadminResetReady(pool);
+  const features = CONTROL_FEATURES.filter((f) => (f !== 'owner-email-v1' || emailReady) && (f !== 'owner-reset-link-v1' || resetReady));
   const server = createOnlineServer({
     company: null, demo: null, control: createControlHandler({ pool, verifyToken, provider, onError: logError }), features,
     readinessPool: pool, allowedOrigins: cfg.origins, trustProxy: cfg.trustProxy, rateLimit: { perIpPerMinute: 120, perTokenPerMinute: 120 },

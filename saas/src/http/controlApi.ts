@@ -29,7 +29,7 @@ import { bearer, type TokenVerifier } from '../auth/jwt.ts';
 import type { IdentityProvider } from '../auth/provider.ts';
 import {
   addSuperadmin, changeSuperadminEmail, companyDetail, createCompany, listCompanies, listOperators, listPayments, operatorLogout, operatorProfile, recordOperatorLogin,
-  refreshRouteCounts, registerPayment, resolveOperator, setCompanyStatus, setPaymentStatus, superadminAccessLink, updateBilling, updateProfile,
+  refreshRouteCounts, registerPayment, resolveOperator, setCompanyStatus, setPaymentStatus, superadminAccessLink, superadminResetLink, updateBilling, updateProfile,
 } from '../control/service.ts';
 import { readJson, scopeOf, send } from './common.ts';
 import { claimSession } from '../identity/service.ts';
@@ -58,6 +58,7 @@ export function createControlHandler(opts: ControlApiOptions): (req: http.Incomi
       const one = /^\/control\/v1\/companies\/([^/]+)(?:\/(superadmins|status|route-counts|billing|payments|profile))?$/.exec(p);
       const link = /^\/control\/v1\/companies\/([^/]+)\/superadmins\/([^/]+)\/access-link$/.exec(p);
       const saEmail = /^\/control\/v1\/companies\/([^/]+)\/superadmins\/([^/]+)\/email$/.exec(p);
+      const saReset = /^\/control\/v1\/companies\/([^/]+)\/superadmins\/([^/]+)\/reset-link$/.exec(p);
       const payment = /^\/control\/v1\/payments\/([^/]+)\/status$/.exec(p);
 
       let fields: string[] | null = null;
@@ -79,6 +80,11 @@ export function createControlHandler(opts: ControlApiOptions): (req: http.Incomi
         const mid = decodeURIComponent(link[2]!);
         fields = [];
         handler = async (c) => ({ status: 200, body: await superadminAccessLink(c, id, mid, opts.provider) });
+      } else if (method === 'POST' && saReset) {
+        const id = decodeURIComponent(saReset[1]!);
+        const mid = decodeURIComponent(saReset[2]!);
+        fields = [];
+        handler = async (c) => ({ status: 200, body: await superadminResetLink(c, id, mid, opts.provider) });
       } else if (method === 'PUT' && saEmail) {
         const id = decodeURIComponent(saEmail[1]!);
         const mid = decodeURIComponent(saEmail[2]!);

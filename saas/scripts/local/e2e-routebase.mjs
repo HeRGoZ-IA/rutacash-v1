@@ -1491,6 +1491,64 @@ try {
       `tarjeta=${surCard} · ruta=${await pathNow()}`);
     await shot('T-17-supervisor-selecciona-ruta-sur');
 
+    // ======================================================================================================
+    // K · 3.20: enlace para cambiar la contraseña de un usuario ACTIVO. El Cobrador ya entró (su sesión queda
+    //     abierta en otro navegador); el Administrador genera el enlace; el Cobrador elige una contraseña nueva
+    //     con él y TODAS sus sesiones se cierran; después entra con la nueva.
+    // ======================================================================================================
+    stage = 'K';
+    const K_COB_T = 'cobrador.transicion@example.test';
+    await login(K_COB_T);
+    const kCobPage = page, kCobCtx = ctx;
+    const kCobIn = (await pathNow()) !== '/login';
+    page = null; ctx = null; // la sesión del Cobrador sigue abierta en su propio navegador
+    await login('admin.transicion@example.test', 'Transición');
+    await go('/admin/users');
+    await page.waitForFunction((e) => document.body.innerText.includes(e), { timeout: 30_000 }, K_COB_T);
+    await sleep(500);
+    await page.evaluate((e) => { const row = [...document.querySelectorAll('div')].filter((d) => d.innerText?.includes(e) && d.querySelector('button[title="Acceso del usuario"]'))
+      .sort((a, b) => a.innerText.length - b.innerText.length)[0]; row?.querySelector('button[title="Acceso del usuario"]')?.click(); }, K_COB_T);
+    await waitText('Generar enlace de primer acceso', 15_000);
+    await clickText('button', /Generar enlace de primer acceso/);
+    const kOffered = await waitTestid('reset-link-issue', 20_000);
+    const kActiveTxt = kOffered ? await text() : '';
+    await tap('reset-link-issue');
+    const kLinkOk = await waitTestid('reset-link', 20_000);
+    const kUrl = kLinkOk ? (await testid('reset-link'))?.trim() ?? '' : '';
+    const kAuditK = await one(`select count(*)::int n from adex.audit_log where company_id = $1 and action = 'ISSUE_RESET_LINK' and entity_id = $2`, [T, mT.cob]);
+    ok('K-01', ['C-05'], '3.20: el Cobrador ya entró → el Administrador ve «Generar enlace para cambiar la contraseña» y obtiene el enlace (auditado)',
+      kCobIn && kOffered && /ya inició sesión/.test(kActiveTxt) && /\/activar#t=[0-9a-f]{20,}$/.test(kUrl) && kAuditK?.n === 1, JSON.stringify({ kCobIn, kOffered, kUrl: kUrl.replace(/t=.*/, 't=…'), audit: kAuditK?.n }));
+    ok('K-02', ['C-01'], 'Diálogo del enlace sin desbordamiento a 390 y 1280 px', await both('K-02-enlace-cambiar-contrasena', () => waitTestid('reset-link')));
+    // El Cobrador abre el enlace en otro navegador y elige una contraseña nueva.
+    const K_NEW_PASS = `Nueva-${Date.now().toString(36)}!`;
+    await session();
+    await page.goto(kUrl, { waitUntil: 'domcontentloaded' });
+    await waitText('Guardar contraseña', 20_000);
+    await page.evaluate((v) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      for (const i of document.querySelectorAll('input[autocomplete="new-password"]')) { set.call(i, v); i.dispatchEvent(new Event('input', { bubbles: true })); } }, K_NEW_PASS);
+    await page.$eval('form', (f) => f.requestSubmit());
+    const kFixed = await waitText('Contraseña fijada', 30_000);
+    const kCut = await one(`select i.sessions_valid_after is not null and i.sessions_valid_after > now() - interval '5 minutes' ok
+      from adex.identities i where lower(i.email) = $1`, [K_COB_T]);
+    // La sesión que el Cobrador tenía abierta deja de servir: al recargar vuelve al acceso.
+    await kCobPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
+    const kKicked = await kCobPage.waitForFunction(() => location.pathname === '/login', { timeout: 45_000 }).then(() => true, () => false);
+    await kCobCtx.close().catch(() => undefined);
+    ok('K-03', ['C-05'], '3.20: con el enlace fija su contraseña nueva y su sesión anterior queda cerrada (corte por identidad en PostgreSQL)',
+      kFixed && kCut?.ok === true && kKicked, JSON.stringify({ kFixed, kCut: kCut?.ok, kKicked }));
+    // Entra con la contraseña nueva (y la anterior ya no sirve).
+    await session();
+    await go('/login');
+    await page.waitForSelector('input[type=email]');
+    await setInput('input[type=email]', K_COB_T);
+    await setInput('input[type=password]', PASS);
+    await page.$eval('form', (f) => f.requestSubmit());
+    const kOldRejected = await waitText('Credenciales', 15_000) || (await pathNow()) === '/login';
+    await setInput('input[type=password]', K_NEW_PASS);
+    await page.$eval('form', (f) => f.requestSubmit());
+    const kNewIn = await page.waitForFunction(() => location.pathname !== '/login', { timeout: 45_000 }).then(() => true, () => false);
+    ok('K-04', ['C-05'], '3.20: la contraseña anterior ya no entra y la nueva sí', kOldRejected && kNewIn, JSON.stringify({ kOldRejected, kNewIn, path: await pathNow() }));
+
     stage = 'TZ';
     for (const [c, name] of [[N, 'Norte'], [T, 'Transición']]) {
       const l = await ledgerClean(c);

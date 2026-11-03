@@ -37,11 +37,15 @@ export const API_FEATURES: readonly string[] = ['collections-v1', 'settlements-v
   'controller-authority-v1',
   // 3.14 (0040): tipos de gasto «Para Cobradores» y eliminación con historia. Solo si 0040 está aplicada (start.ts).
   // SÍ está en la puerta de Vercel: sin él, el Cobrador no vería tipos marcados y el Administrador no podría marcarlos.
-  'collector-expense-categories-v1'];
+  'collector-expense-categories-v1',
+  // 3.20: enlace de restablecimiento de contraseña para usuarios activos (sin migración). En la puerta de Vercel.
+  'reset-links-v1'];
 
 /** Módulos del servicio Owner (servicio aparte, ver controlStart.ts). */
 // Ronda 54: `owner-email-v1` (cambio del correo del SuperAdmin) solo si 0024 está aplicada (controlStart.ts).
-export const CONTROL_FEATURES: readonly string[] = ['owner-v1', 'owner-clean-v1', 'owner-email-v1'];
+export const CONTROL_FEATURES: readonly string[] = ['owner-v1', 'owner-clean-v1', 'owner-email-v1',
+  // 3.20 (0041): el Owner emite enlaces de restablecimiento para SuperAdmins. Solo si 0041 está aplicada.
+  'owner-reset-link-v1'];
 
 export interface OnlineServerOptions {
   company: Handler | null;

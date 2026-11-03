@@ -25,7 +25,7 @@ import {
 import type { CompanyControlRecord, ControlEvent, SaaSPayment, SaaSPaymentStatus } from '@/platform/types'
 // ADEX Online: país/moneda/zona y Super Admins (servidor Owner) y enlace de primer acceso.
 import { companyDetail, type ServerLocale, type ServerSuperadmin } from '@/platform/controlPlane'
-import { changeSuperadminEmail, issueSuperadminAccessLink, type AccessLinkResult } from '@/platform/companyControlService'
+import { changeSuperadminEmail, issueSuperadminAccessLink, issueSuperadminResetLink, type AccessLinkResult } from '@/platform/companyControlService'
 import { AccessLinkPanel } from '@/pages/owner/AccessLinkPanel'
 import { formatPersonName } from '@/lib/displayName'
 
@@ -58,7 +58,7 @@ export default function OwnerCompanyDetailPage() {
   // ADEX Online: datos de aprovisionamiento de la ficha del servidor.
   const [locale, setLocale] = useState<ServerLocale | null>(null)
   const [superadmins, setSuperadmins] = useState<ServerSuperadmin[]>([])
-  const [acceso, setAcceso] = useState<{ nombre: string; result: AccessLinkResult } | null>(null)
+  const [acceso, setAcceso] = useState<{ sa: ServerSuperadmin; nombre: string; result: AccessLinkResult; reset?: boolean } | null>(null)
   const [linking, setLinking] = useState<string | null>(null)
   // ADEX Online (Ronda 54): cambio del correo de acceso del Super Admin.
   const [emailTarget, setEmailTarget] = useState<ServerSuperadmin | null>(null)
@@ -99,7 +99,17 @@ export default function OwnerCompanyDetailPage() {
     setLinking(sa.id)
     const result = await issueSuperadminAccessLink(record.companyId, sa.id)
     setLinking(null)
-    setAcceso({ nombre: sa.displayName, result })
+    setAcceso({ sa, nombre: sa.displayName, result })
+    await load()
+  }
+
+  // 3.20: el Super Admin ya inició sesión y olvidó su contraseña.
+  async function handleResetLink(sa: ServerSuperadmin) {
+    if (!record) return
+    setLinking(sa.id)
+    const result = await issueSuperadminResetLink(record.companyId, sa.id)
+    setLinking(null)
+    setAcceso({ sa, nombre: sa.displayName, result, reset: true })
     await load()
   }
 
@@ -326,7 +336,12 @@ export default function OwnerCompanyDetailPage() {
         {acceso && (
           <div className="space-y-3">
             <p className="text-sm text-gray-600">Super Admin: <span className="font-semibold text-gray-900">{formatPersonName(acceso.nombre)}</span></p>
-            <AccessLinkPanel result={acceso.result} />
+            <AccessLinkPanel result={acceso.result} reset={acceso.reset} />
+            {acceso.result.status === 'already_active' && (
+              <Button variant="secondary" loading={linking === acceso.sa.id} onClick={() => handleResetLink(acceso.sa)} data-testid="owner-reset-link-issue">
+                Generar enlace para cambiar la contraseña
+              </Button>
+            )}
           </div>
         )}
       </Modal>

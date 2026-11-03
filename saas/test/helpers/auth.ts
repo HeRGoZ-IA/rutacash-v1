@@ -86,6 +86,11 @@ export function createMemoryProvider(): IdentityProvider & { signOuts: { scope: 
       links.push(identityId);
       return { status: 'issued', tokenHash };
     },
+    async issueResetLink(identityId) {
+      const tokenHash = randomUUID().replaceAll('-', '');
+      links.push(identityId);
+      return { tokenHash };
+    },
     async ensureIdentity(email) {
       const e = email.trim().toLowerCase();
       const existing = ids.get(e);

@@ -21,7 +21,7 @@ import type { IdentityProvider } from '../auth/provider.ts';
 import { listOwnMemberships, resolveContext, resolveIdentity, type ActiveContext } from '../authz/context.ts';
 import { capabilitiesOf } from '../authz/cleanRules.ts';
 import {
-  claimSession, createMember, deleteMember, listMembers, logout, memberAccessLink, setMemberOfficeRoutes, setMemberRoutes, setMemberStatus, updateMember,
+  claimSession, createMember, deleteMember, listMembers, logout, memberAccessLink, memberResetLink, setMemberOfficeRoutes, setMemberRoutes, setMemberStatus, updateMember,
 } from '../identity/service.ts';
 import { COMPANY_FIELDS, getCompany, updateCompany } from '../structure/company.ts';
 import {
@@ -163,6 +163,9 @@ const ENDPOINTS: readonly Endpoint[] = [
   // Ronda 40: enlace de primer acceso (no idempotente: el token nunca se guarda en `operations`).
   { method: 'POST', pattern: new RegExp(`^/v1/members/${ID}/access-link$`), fields: [],
     handler: ([id], provider) => async (c, ctx) => ok(await memberAccessLink(c, ctx, id!, provider)) },
+  // 3.20: enlace de restablecimiento para un usuario activo (tampoco idempotente: el token no se guarda).
+  { method: 'POST', pattern: new RegExp(`^/v1/members/${ID}/reset-link$`), fields: [],
+    handler: ([id], provider) => async (c, ctx) => ok(await memberResetLink(c, ctx, id!, provider)) },
   // ---------- Categorías de gasto ----------
   { method: 'GET', pattern: /^\/v1\/expense-categories$/, fields: null, handler: () => async (c, ctx) => ok({ categories: await listCategories(c, ctx) }) },
   { method: 'POST', pattern: /^\/v1\/expense-categories$/, fields: ['name', 'icon', 'nature', 'forCollectors'], idempotent: 'expense_categories.create',
