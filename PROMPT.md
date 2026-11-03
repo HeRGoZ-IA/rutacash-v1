@@ -21,10 +21,11 @@
 
 ## Dónde quedamos
 
-*Actualizado: 2026-10-29 (error 3.21 corregido, chat Errores o bugs)*
+*Actualizado: 2026-11-03 (barrido de pendientes, grupo A)*
 
-1. **Objetivo actual:** sin trabajo en curso. Siguiente: actualizar la guía del socio (`docs/GUIA_SOCIO_LIQUIDACIONES_Y_CIERRES.md`) con los nombres nuevos, y el resto del listado canónico (`docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`).
+1. **Objetivo actual:** barrido de pendientes mientras el socio prueba con BlueLine (va bien: los reportes semanales cuadran igual que en Listos). Grupo A hecho; siguen el grupo B (3.20, 3.5, 3.4, 3.10) y el D (revisar vigencia de 7.1…7.6, solo lectura).
 2. **Qué quedó hecho:**
+   * Barrido grupo A (2026-11-03): 3.7 `npm run verify:deploy` comprueba ADEX Online (commit servido, /owner, iconos, módulos de la API; probado contra lo publicado) y `smoke:prod` exige URL de CLEAN local; 3.8 `test:auth-real` bloqueado (escribiría en ADEX-Staging); 3.9 TLS verificado siempre en los scripts de staging (probado con `select 1`); 3.6 lista duplicada `OPERATION_KIND` eliminada (no se usaba); 3.11 «Base disponible» en CLEAN; 6.5 rama y stash de Git limpiados (stash exportado a `tmp/ronda23-respaldo/`). Probado: tipos (3), build Online, CLEAN completa, unitarias saas 31/31. No hace falta Render; no toca a BlueLine.
    * Error 3.21 (2026-10-29, **publicado**: `de7fca0`, Vercel `index-D6d9WyFz.js`, sin migración ni Render): la app del Cobrador abierta o en segundo plano de un día a otro seguía mostrando el día anterior hasta cerrar sesión. Ahora detecta el cambio de fecha (dispositivo y empresa) y relee todo, también sin señal. Probado: E2E 137/137 y 25/25 (A-15b falló sin la corrección), CLEAN, tipos. **No probado:** en el celular del socio.
    * Ronda 81 (2026-10-28, **publicada**: `a12d915`, Render y Vercel `index-DrdhlBol.js`, sin migración): 3.19 Liquidaciones con nombres nuevos, aviso del último cierre y fechas propuestas; 3.18 Gastos del Cobrador y Supervisor separados por el último cierre; 3.12 pago de la obligación de otro Administrador probado en pantalla. Probado: PostgreSQL 595/0/1, CLEAN, tipos, E2E 93/46/25. **No probado:** con BlueLine ni por el socio. El texto «Después del último cierre» se ajustó tras el E2E (solo tipos comprobados).
    * Ronda 80 (2026-10-28, **publicada**): 3.14 (`44f7bae`, migración 0040 aplicada por Helmer, respaldo previo `adex-20261028T1542`; Render y Vercel). Casilla «Para Cobradores» en Categorías de gasto; Cobrador y Supervisor solo ven y usan los marcados (lo valida la API); eliminar un tipo con gastos lo quita de la lista y conserva sus gastos; gasto sin conexión con un tipo desmarcado después se acepta y avisa al Administrador. Probado: PostgreSQL 595/0/1, E2E 93/41/25, reversión 11/11, CLEAN y tipos. BlueLine quedó con 3 de 7 tipos marcados. **No probado:** con BlueLine ni por el socio.
@@ -35,14 +36,16 @@
    * **Probado:** pruebas financieras (CUOTAS-001…003), las de CLEAN, los tipos y E2E 89/89, 41/41 y 25/25. **No probado:** con datos reales ni por el socio.
 3. **Qué falta:**
    * Que el socio compruebe 3.21 (4.9): dejar la app abierta hasta el día siguiente.
-   * Actualizar la guía del socio con los nombres nuevos de Liquidaciones (3.19).
+   * Actualizar la guía del socio con los nombres nuevos de Liquidaciones (3.19): Helmer dijo «Ahora no» (2026-10-28).
    * Que el socio valide 3.12, 3.14, 3.15, 3.16, 3.17, 3.18, 3.19, el cierre del mismo día y el buscador en su celular.
    * **Para el chat Central:** implementar 3.20, enlace de restablecimiento de contraseña para usuarios activos (2.3.4 aprobada).
    * DS-06 (cargar la cartera de una empresa nueva): en espera de la opinión del socio; preferida la opción A (saldos de apertura), sin aprobar. El archivo completo de Listos sirve para esa opción.
    * RS-4 aprobada: trasladar el proyecto a Supabase Pro de Starcli **solo cuando Helmer lo ordene** (no mientras se prueba la app).
    * Grupo de chats «ADEX - RutaCash» (2026-10-27): Central, Errores o bugs, Peticiones del socio, Ideas y producto, Respaldos y operación, Decisiones pendientes. Solo Central y Errores tocan código.
+   * Barrido: grupo B (3.20 con 2 detalles por confirmar, 3.5, 3.4, 3.10), grupo D (vigencia de 7.1…7.6) y al final la limpieza 6.1…6.4, que necesita permiso. Decisiones abiertas: 2.1.4, 2.1.11, 2.1.12, 2.1.13 y 2.2.1.
    * Resto: `docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`, que es el **listado canónico**.
 4. **Decisiones tomadas:**
+   * 2026-11-03: la normativa (SOC 2, ISO 27001/27701) se toma solo como guía de calidad, sin certificarse; el análisis de brechas queda para después de la prueba de BlueLine.
    * 2026-10-28: solo se deciden ahora las que afectan a BlueLine hoy (2.1.13 PIX, 2.1.11, 2.1.4, 2.1.12); el resto quedó marcado «PARA DESPUÉS» en el listado canónico con su momento de regreso. No volver a proponerlas antes de ese momento.
    * 2026-10-28: respaldos RS-5, PITR no por ahora; RS-4, el proyecto actual se trasladará a la organización Pro de Starcli como proyecto propio de ADEX, sin mezclar nada con Starcli Loyalty, cuando valga la pena (aún se prueba la app). Antes de cualquier pago se le dice a Helmer el costo.
    * 2026-10-28: Supabase y Render, proveedores oficiales (2.3.2, DS-02); el nombre «ADEX-Staging» se cambia al trasladar (RS-4). Render sigue Free durante las pruebas; luego solo `adex-online-api` a Starter, ~US$ 7/mes, con orden expresa de Helmer (2.3.3).
@@ -67,9 +70,10 @@
      * Los riesgos no están aceptados salvo que Helmer lo diga.
    * 2026-10-25: cierre del mismo día con el día bloqueado después.
    * En BlueLine nunca se crean datos ficticios ni se hace una purga global.
-5. **Archivos tocados (error 3.21):**
-   * `online/src/runtime/projection.ts` (`checkDayChange`), `online/src/runtime/ConsultasPage.tsx`, `online/src/runtime/routeBase/CajaPrincipalRB.tsx`, `GeneralExpensesRB.tsx`, `TransferenciasRB.tsx`
-   * Prueba: `saas/scripts/local/e2e-routebase.mjs` (A-15b). Antes, R81: ver Changelog.
+5. **Archivos tocados (grupo A):**
+   * `scripts/verify-deploy.mjs` (reescrito para Online), `scripts/prod-smoke.mjs`, `docs/PRODUCTION_SMOKE.md`, `tests/centralcapital.test.ts` (CC-F03)
+   * `saas/scripts/auth-real-guard.mjs` (nuevo), `saas/package.json`, `saas/scripts/{staging,demo-accounts,demo-provision,demo-purge-retired}.ts`
+   * `online/src/lib/format.ts`, `src/pages/collector/CollectorSelectRoutePage.tsx`
 
 ## Reglas del proyecto
 
@@ -96,6 +100,10 @@ Si cambia su estado, su propósito, su despliegue o su ubicación, o si se elimi
 ## Changelog
 
 El historial detallado por rondas está en `docs/REGISTRO_MAESTRO_EVOLUCION_ADEX.md`.
+
+### 2026-11-03 — Barrido de pendientes, grupo A
+
+* 3.6, 3.7, 3.8, 3.9, 3.11 y 6.5: scripts de verificación para Online, candados contra el servidor real, TLS verificado, limpieza de código y de Git. Sin migración ni Render.
 
 ### 2026-10-28 — Ronda 81: Liquidaciones, gastos ya cerrados y RB-D13 (publicada)
 

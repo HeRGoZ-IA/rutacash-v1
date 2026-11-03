@@ -1,8 +1,7 @@
 // ============================================================
 // RUTACASH — SMOKE E2E BLACK-BOX CONTRA PRODUCCIÓN
 // ------------------------------------------------------------
-//   npm run smoke:prod
-//   RUTACASH_SMOKE_URL=https://preview.example.app npm run smoke:prod
+//   RUTACASH_SMOKE_URL=http://localhost:5173 npm run smoke:prod   (solo CLEAN; ver URL_BASE)
 //
 // Recorre la aplicación PUBLICADA como lo haría una persona: formularios,
 // botones y navegación del DOM. No importa ningún módulo de `src/`, no llama
@@ -36,7 +35,15 @@ import * as os from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
-const URL_BASE = (process.env.RUTACASH_SMOKE_URL ?? 'https://rutacash-clean.vercel.app').replace(/\/+$/, '')
+// CLEAN (rutacash-clean.vercel.app) se retiró en la Ronda 59 y ADEX Online guarda los datos en el
+// servidor real, no en el navegador: este recorrido crearía empresas y dinero ficticios allí. Solo se
+// ejecuta contra una copia de CLEAN indicada a mano (p. ej. `npm run dev` en local). Para comprobar lo
+// publicado en Online: `npm run verify:deploy`.
+if (!process.env.RUTACASH_SMOKE_URL) {
+  console.error('CLEAN está retirada: indica RUTACASH_SMOKE_URL con una copia local de CLEAN. Para Online usa npm run verify:deploy.')
+  process.exit(2)
+}
+const URL_BASE = process.env.RUTACASH_SMOKE_URL.replace(/\/+$/, '')
 const RUN_ID = `${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}-${randomBytes(2).toString('hex')}`
 // La evidencia se ancla a la raíz del proyecto (no al cwd) y nunca sale de RutaCash/tmp/
 // ni del temporal del sistema: así ninguna ejecución deja basura junto a /RutaCash.

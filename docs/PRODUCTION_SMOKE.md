@@ -1,5 +1,7 @@
 # Smoke E2E black-box de producción
 
+> **Solo CLEAN (retirada en la Ronda 59).** ADEX Online guarda los datos en el servidor real, así que este recorrido no se ejecuta contra Online: crearía empresas y dinero ficticios. Desde 2026-11-03 el script exige `RUTACASH_SMOKE_URL` (una copia local de CLEAN). Para comprobar lo publicado en Online: `npm run verify:deploy` (commit servido y módulos de la API).
+
 ```bash
 npm run smoke:prod
 ```
@@ -59,7 +61,7 @@ Código de salida: 0 solo si A–H pasan y no hubo errores de página. Un fallo 
 
 | Variable | Default | Uso |
 |---|---|---|
-| `RUTACASH_SMOKE_URL` | `https://rutacash-clean.vercel.app` | Otra URL (preview o staging) |
+| `RUTACASH_SMOKE_URL` | **Obligatoria** (sin valor por defecto desde 2026-11-03) | Copia local de CLEAN, p. ej. `http://localhost:5173` |
 | `CHROME_PATH` | Chrome instalado (detección automática) | Ruta del navegador |
 | `RUTACASH_SMOKE_OUT` | `tmp/prod-smoke/<run-id>` | Carpeta de evidencia |
 | `RUTACASH_SMOKE_TIMEOUT` | `15000` | Espera máxima por condición (ms) |

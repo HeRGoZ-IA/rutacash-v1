@@ -137,7 +137,8 @@ async function demoMembership(token: string) {
 }
 
 async function setup() {
-  const db = new pg.Client({ connectionString: `postgres://postgres.${STAGING_REF}:${encodeURIComponent(env['SUPABASE_DB_PASSWORD']!)}@${env['SUPABASE_POOLER_HOST']}:5432/postgres`, ssl: { rejectUnauthorized: false } });
+  const db = new pg.Client({ connectionString: `postgres://postgres.${STAGING_REF}:${encodeURIComponent(env['SUPABASE_DB_PASSWORD']!)}@${env['SUPABASE_POOLER_HOST']}:5432/postgres`,
+    ssl: { ca: readFileSync(env['ADEX_PG_SSL_CA'] || fail('falta ADEX_PG_SSL_CA en saas/.env.staging'), 'utf8'), rejectUnauthorized: true } });
   await db.connect();
   try {
     const slot = (await db.query<{ state: string }>('select state from adex_demo.slots where slot = $1', [SLOT])).rows[0];

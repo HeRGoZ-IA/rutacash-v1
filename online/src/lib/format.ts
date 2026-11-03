@@ -217,18 +217,3 @@ export const REQUEST_STATUS: Record<string, string> = {
 export const FREQUENCY: Record<string, string> = {
   diaria: 'Diaria', semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual', personalizada: 'Personalizada',
 };
-
-export const OPERATION_KIND: Record<string, string> = {
-  COMPANY_DEPOSIT: 'Aporte a la empresa', COMPANY_WITHDRAWAL: 'Retiro de la empresa', ADMIN_ALLOCATION: 'Asignación a bolsa',
-  ADMIN_RETURN: 'Devolución de bolsa', PARTNER_CONTRIBUTION: 'Aporte externo (histórico)', WORKER_DELIVERY: 'Entrega al trabajador',
-  WORKER_RETURN: 'Devolución del trabajador', WORKER_TRANSFER: 'Traspaso entre trabajadores', ROUTE_REASSIGNMENT: 'Reasignación entre rutas',
-  REVERSAL: 'Anulación', LOAN_DISBURSEMENT: 'Desembolso de venta',
-  COLLECTION: 'Recaudo', WORKER_EXPENSE: 'Gasto de trabajador', ROUTE_EXPENSE: 'Gasto de la ruta', COMPANY_EXPENSE: 'Gasto administrativo',
-  EXPENSE_REFUND: 'Reintegro de gasto', SETTLEMENT_RETURN: 'Efectivo entregado en cuadre', SETTLEMENT_SURPLUS: 'Sobrante de cuadre (en control)',
-  ADMIN_TRANSFER_HOLD: 'Transferencia a otro Administrador (comprometida)', ADMIN_TRANSFER_APPLY: 'Transferencia recibida de otro Administrador',
-  ADMIN_TRANSFER_RELEASE: 'Transferencia entre Administradores liberada',
-  ROUTE_BASE_INJECTION: 'Inyección de Base', ROUTE_BASE_WITHDRAWAL: 'Retiro de Base', ROUTE_TRANSFER: 'Transferencia entre rutas',
-  LEGACY_POOL_TO_ROUTE: 'Reparto de saldo sin asignar',
-  GENERAL_EXPENSE_CONTRIBUTION: 'Aporte de ruta a gasto general', GENERAL_EXPENSE_OWN_MONEY: 'Gasto general con dinero propio',
-  ADMIN_REIMBURSEMENT: 'Reembolso a Administrador',
-};

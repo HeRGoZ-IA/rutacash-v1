@@ -896,9 +896,10 @@ await spec('CC-F03', 'contratos de pantalla: servicios C1 en la interfaz, sin c√
   ]
   for (const [k, v] of checks) metric(k, v)
   assert(checks.every(([, v]) => v), 'contrato de pantalla incumplido')
-  // Marcadores de despliegue para C2 (presentes en el bundle cuando se publique).
-  const marcadores = src('scripts/verify-deploy.mjs')
-  assert(marcadores.includes('Capital centralizado') && marcadores.includes('Base recibida y devuelta en este periodo'), 'faltan marcadores de despliegue de C2')
+  // Textos visibles de C2. Antes se buscaban en scripts/verify-deploy.mjs (marcadores del bundle de CLEAN); desde
+  // 2026-11-03 ese script comprueba ADEX Online por commit, as√≠ que se comprueban en las pantallas.
+  assert(src('src/pages/admin/CentralCapitalTransitionPage.tsx').includes('Capital centralizado')
+    && src('src/pages/collector/CollectorCashClosePage.tsx').includes('Base recibida y devuelta en este periodo'), 'faltan los textos visibles de C2')
 })
 
 // ============================================================

@@ -107,7 +107,8 @@ const foreign = list.filter((u) => !(u.email ?? '').endsWith('@example.test') &&
 const realDataMigration = mode === '--migrate' && !process.argv.includes('--seed');
 if (foreign.length && !realDataMigration) blocked(`Auth tiene ${foreign.length} usuario(s) no sintético(s)`);
 
-const ssl = env['ADEX_PG_SSL_CA'] ? { ca: readFileSync(env['ADEX_PG_SSL_CA'], 'utf8'), rejectUnauthorized: true } : { rejectUnauthorized: false };
+// TLS siempre verificado con el certificado raíz de Supabase (pendiente 3.9: sin él no se conecta).
+const ssl = { ca: readFileSync(need('ADEX_PG_SSL_CA'), 'utf8'), rejectUnauthorized: true };
 const host = need('SUPABASE_POOLER_HOST');
 const adminUrl = `postgres://postgres.${ref}:${encodeURIComponent(need('SUPABASE_DB_PASSWORD'))}@${host}:5432/postgres`;
 const admin = new pg.Client({ connectionString: adminUrl, ssl });

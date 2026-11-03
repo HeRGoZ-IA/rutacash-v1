@@ -36,7 +36,8 @@ const expected = expectIdx > 0 ? Number(process.argv[expectIdx + 1]) : NaN;
 if (!Number.isInteger(expected) || expected < 1) fail('indique --expect <n> (número exacto de Demos retiradas)');
 const commit = process.argv.includes('--commit');
 
-const ssl = env['ADEX_PG_SSL_CA'] ? { ca: readFileSync(env['ADEX_PG_SSL_CA'], 'utf8'), rejectUnauthorized: true } : { rejectUnauthorized: false };
+// TLS siempre verificado con el certificado raíz de Supabase (pendiente 3.9).
+const ssl = { ca: readFileSync(env['ADEX_PG_SSL_CA'] || fail('falta ADEX_PG_SSL_CA en saas/.env.staging'), 'utf8'), rejectUnauthorized: true };
 const c = new pg.Client({ connectionString: `postgres://postgres.${STAGING_REF}:${encodeURIComponent(env['SUPABASE_DB_PASSWORD'] ?? '')}@${env['SUPABASE_POOLER_HOST']}:5432/postgres`, ssl });
 await c.connect();
 const q = async <T extends Record<string, unknown>>(sql: string, p: unknown[] = []) => (await c.query<T>(sql, p)).rows;

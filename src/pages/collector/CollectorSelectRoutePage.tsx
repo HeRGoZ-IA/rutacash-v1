@@ -144,7 +144,7 @@ export default function CollectorSelectRoutePage() {
                   ) : (
                     <div className="bg-primary-50 rounded-xl p-2 text-center">
                       <p className="text-[clamp(11px,3.4vw,14px)] font-bold text-primary-700 leading-tight break-all">{formatCurrency(base, currency)}</p>
-                      <p className="text-xs text-primary-500">Base de la ruta</p>
+                      <p className="text-xs text-primary-500">Base disponible</p>
                     </div>
                   )}
                 </div>

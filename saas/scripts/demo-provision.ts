@@ -49,9 +49,10 @@ const mode = args[0];
 const days = Number(args[args.indexOf('--days') + 1] ?? 182) || 182;
 if (!['--status', '--reset', '--abort'].includes(mode ?? '')) fail('uso: --status | --reset [--days N] | --abort');
 
-// TLS estricto si el certificado del proyecto está disponible; si no, el modo de prueba de staging.
-const caFile = [env['ADEX_PG_SSL_CA_FILE'], path.join(os.homedir(), 'Downloads', 'prod-ca-2021.crt')].find((f) => f && existsSync(f));
-const ssl = caFile ? { ca: readFileSync(caFile, 'utf8'), rejectUnauthorized: true } : { rejectUnauthorized: false };
+// TLS siempre verificado con el certificado raíz de Supabase (pendiente 3.9: sin él no se conecta).
+const caFile = [env['ADEX_PG_SSL_CA'], env['ADEX_PG_SSL_CA_FILE'], path.join(os.homedir(), 'Downloads', 'prod-ca-2021.crt')].find((f) => f && existsSync(f))
+  ?? fail('falta el certificado de Supabase (ADEX_PG_SSL_CA)');
+const ssl = { ca: readFileSync(caFile, 'utf8'), rejectUnauthorized: true };
 // Tope de 30 s por sentencia pedido al conectar. El pooler de Supabase no lo aplica (rige el
 // tope del rol, 2 min); se deja por si se conecta directo. Los 57014 se reintentan igual.
 const apiPool = new pg.Pool({ connectionString: env['ADEX_API_DATABASE_URL'], ssl, max: 8, statement_timeout: 30_000, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 20_000 });
