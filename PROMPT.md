@@ -23,7 +23,7 @@
 
 *Actualizado: 2026-11-03 (barrido de pendientes: grupo A y 3.20 publicados)*
 
-1. **Objetivo actual:** barrido de pendientes mientras el socio prueba con BlueLine (va bien: los reportes semanales cuadran igual que en Listos). Grupo B **punto por punto** (pedido de Helmer): 3.20 publicado; siguen 3.5, 3.4 y 3.10. Pendiente aparte: respaldos nocturnos fallando por DNS de la Wi-Fi.
+1. **Objetivo actual:** barrido de pendientes mientras el socio prueba con BlueLine (va bien: los reportes semanales cuadran igual que en Listos). Grupo B **punto por punto** (pedido de Helmer): 3.20 publicado; siguen 3.5, 3.4 y 3.10. Respaldos nocturnos: DNS corregido (confirmar el de esta noche).
 2. **Qué quedó hecho:**
    * 3.20 (2026-11-03, **publicado**: `ed237fd1`, 0041 aplicada con respaldo previo `adex-20261103T1532`, Render ambos servicios desplegados a mano por Helmer, Vercel): enlace para cambiar la contraseña de un usuario activo (Usuarios → llave; panel Owner para el SuperAdmin). Al usarlo se reclama la sesión del enlace y se cierran todas las de la persona (ADEX y Supabase). Migración **0041** (evento del Owner). Probado: PostgreSQL 599/0/1, E2E 94/46/29, tipos (3), unitarias 31/31. **No probado:** pantalla Owner en navegador, reversión de 0041, BlueLine.
    * Barrido grupo A (2026-11-03): 3.7 `npm run verify:deploy` comprueba ADEX Online (commit servido, /owner, iconos, módulos de la API; probado contra lo publicado) y `smoke:prod` exige URL de CLEAN local; 3.8 `test:auth-real` bloqueado (escribiría en ADEX-Staging); 3.9 TLS verificado siempre en los scripts de staging (probado con `select 1`); 3.6 lista duplicada `OPERATION_KIND` eliminada (no se usaba); 3.11 «Base disponible» en CLEAN; 6.5 rama y stash de Git limpiados (stash exportado a `tmp/ronda23-respaldo/`). Probado: tipos (3), build Online, CLEAN completa, unitarias saas 31/31. No hace falta Render; no toca a BlueLine.
@@ -39,7 +39,7 @@
    * Que el socio compruebe 3.21 (4.9): dejar la app abierta hasta el día siguiente.
    * Actualizar la guía del socio con los nombres nuevos de Liquidaciones (3.19): Helmer dijo «Ahora no» (2026-10-28).
    * Que el socio valide 3.12, 3.14, 3.15, 3.16, 3.17, 3.18, 3.19, el cierre del mismo día y el buscador en su celular.
-   * **Respaldos nocturnos:** fallaron 31/10, 1/11, 2/11 y 3/11 (`ENOTFOUND` del pooler). Causa probable: los DNS del proveedor en la Wi-Fi (200.29.96.24) rechazan esa dirección; el router (192.168.40.1) y 1.1.1.1/8.8.8.8 sí la resuelven. Solución propuesta: Helmer cambia los DNS de la Wi-Fi (ajuste de Windows, lo hace él).
+   * **Respaldos nocturnos:** fallaron del 31/10 al 3/11 por el DNS del proveedor (rechazaba la dirección del pooler). **Corregido 2026-11-03:** Helmer puso DNS 1.1.1.1 y 8.8.8.8 en Ethernet y Wi-Fi; 20/20 búsquedas bien y respaldo diario lanzado a mano OK (`adex-20261103T1703`). Confirmar mañana que el de las 9:30 pm salió bien.
    * DS-06 (cargar la cartera de una empresa nueva): en espera de la opinión del socio; preferida la opción A (saldos de apertura), sin aprobar. El archivo completo de Listos sirve para esa opción.
    * RS-4 aprobada: trasladar el proyecto a Supabase Pro de Starcli **solo cuando Helmer lo ordene** (no mientras se prueba la app).
    * Grupo de chats «ADEX - RutaCash» (2026-10-27): Central, Errores o bugs, Peticiones del socio, Ideas y producto, Respaldos y operación, Decisiones pendientes. Solo Central y Errores tocan código.
