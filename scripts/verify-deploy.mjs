@@ -97,11 +97,22 @@ async function main() {
     ok(r.status === 200 && r.type.startsWith('image/'), `${icono} → HTTP ${r.status} ${r.type}`)
   }
 
-  // Render Free puede tardar en despertar: un intento largo antes de dar la API por caída.
+  // Render Free puede tardar en despertar, y mientras despierta corta la primera conexión
+  // («fetch failed»): se reintenta durante un máximo de 2 minutos antes de dar la API por caída.
   const ctl = new AbortController()
   const timer = setTimeout(() => ctl.abort(), 120_000)
+  const healthz = async () => {
+    for (;;) {
+      try {
+        return await fetch(`${API}/healthz`, { signal: ctl.signal })
+      } catch (e) {
+        if (ctl.signal.aborted) throw e
+        await new Promise((r) => setTimeout(r, 5_000))
+      }
+    }
+  }
   try {
-    const res = await fetch(`${API}/healthz`, { signal: ctl.signal })
+    const res = await healthz()
     const list = (await res.json())?.features ?? []
     const missing = requiredFeatures().filter((f) => !list.includes(f))
     ok(res.ok && missing.length === 0, missing.length ? `a la API le falta: ${missing.join(', ')}` : `la API anuncia los ${list.length} módulos (incluidos todos los que exige la puerta)`)
