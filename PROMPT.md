@@ -37,6 +37,7 @@
    * Ronda 76: mora al día (`865844a`, Render) y respaldos con la alternativa A activa (copias diarias cifradas en OneDrive, clave de recuperación comprobada, tareas registradas; primera copia automática `adex-20261027T1947`).
    * **Probado:** pruebas financieras (CUOTAS-001…003), las de CLEAN, los tipos y E2E 89/89, 41/41 y 25/25. **No probado:** con datos reales ni por el socio.
 3. **Qué falta:**
+   * **Para el chat Central:** 3.22, hacer ADEX Online instalable como app (manifiesto web). Esperando la respuesta del socio: Android o iPhone, impresión de recibos y recorrido en mapa.
    * Que el socio compruebe 3.21 (4.9): dejar la app abierta hasta el día siguiente.
    * Actualizar la guía del socio con los nombres nuevos de Liquidaciones (3.19): Helmer dijo «Ahora no» (2026-10-28).
    * Que el socio valide 3.12, 3.14, 3.15, 3.16, 3.17, 3.18, 3.19, el cierre del mismo día y el buscador en su celular.
@@ -47,6 +48,7 @@
    * Barrido: grupo B (3.20 con 2 detalles por confirmar, 3.5, 3.4, 3.10), grupo D (vigencia de 7.1…7.6) y al final la limpieza 6.1…6.4, que necesita permiso. Decisiones abiertas: 2.1.4, 2.1.11, 2.1.12, 2.1.13 y 2.2.1.
    * Resto: `docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`, que es el **listado canónico**.
 4. **Decisiones tomadas:**
+   * 2026-11-03: una sola aplicación web instalable para todos los roles; sin programa de escritorio; apps de tienda solo si hacen falta, construidas sobre la misma web (2.4.7, trabajo 3.22).
    * 2026-11-03 (3.20): al usar el enlace de restablecimiento se cierran todas las sesiones de la persona; el enlace de un Administrador solo lo emite el SuperAdmin, el de un SuperAdmin solo el Owner.
    * 2026-11-03: la normativa (SOC 2, ISO 27001/27701) se toma solo como guía de calidad, sin certificarse; el análisis de brechas queda para después de la prueba de BlueLine.
    * 2026-10-28: solo se deciden ahora las que afectan a BlueLine hoy (2.1.13 PIX, 2.1.11, 2.1.4, 2.1.12); el resto quedó marcado «PARA DESPUÉS» en el listado canónico con su momento de regreso. No volver a proponerlas antes de ese momento.
