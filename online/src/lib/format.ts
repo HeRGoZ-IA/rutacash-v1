@@ -156,8 +156,46 @@ const FIELD: Record<string, string> = {
   sourceKind: 'Origen de la diferencia', sourceId: 'Diferencia', resolution: 'Resolución',
 };
 
+/**
+ * 3.5: qué impide eliminar (referencias «tabla.columna» de `details.references`, DS-11), agrupado en
+ * palabras del usuario. Una tabla nueva sin grupo cae en «otros registros»: el mensaje nunca se rompe.
+ */
+const HISTORY_GROUP: [RegExp, string][] = [
+  [/^(payments|payment_locations|payment_adjustment_requests)$/, 'recaudos'],
+  [/^(sales|sale_requests|sale_locations|credit_rectification\w*)$/, 'ventas o solicitudes de venta'],
+  [/^(clients|client_locations)$/, 'clientes'],
+  [/^no_payment_visits$/, 'visitas de cobro'],
+  [/^(expenses|general_funding_contributions|admin_reimbursements)$/, 'gastos'],
+  [/^(capital_\w+|transfers|withdrawals|admin_transfers|partner_cash_movements|joint_reversal_\w+)$/, 'movimientos de dinero'],
+  [/^(cash_custody_movements|cash_settlements|custody_settlements|difference_conciliations)$/, 'entregas de Base, cuadres o conciliaciones'],
+  [/^(weekly_settlements|period_closures)$/, 'cierres o liquidaciones'],
+  [/^(membership_routes|routes)$/, 'asignaciones de rutas a personas'],
+  [/^(route_capital_controller_events|route_handover_records)$/, 'cambios de responsable o actas de entrega'],
+  [/^(offline_captures|offline_keys)$/, 'registros sin conexión'],
+  [/^(audit_log|operations)$/, 'acciones registradas en el historial'],
+];
+
+export function historyReasons(references: unknown): string[] {
+  if (!Array.isArray(references)) return [];
+  const out: string[] = [];
+  for (const ref of references) {
+    // El servidor envía «tabla.columna» (p. ej. `membership_routes.membership_id`), a veces con el esquema delante.
+    const table = String(ref).replace(/^adex\./, '').split('.')[0] ?? '';
+    const label = HISTORY_GROUP.find(([re]) => re.test(table))?.[1] ?? 'otros registros';
+    if (!out.includes(label)) out.push(label);
+  }
+  return out;
+}
+
 export function errorText(err: unknown): string {
   const code = (err as { code?: string })?.code ?? (err as Error)?.message ?? 'ERROR';
+  if (code === 'HAS_HISTORY') {
+    const reasons = historyReasons((err as { details?: { references?: unknown } })?.details?.references);
+    if (reasons.length) {
+      const list = reasons.length === 1 ? reasons[0] : `${reasons.slice(0, -1).join(', ')} y ${reasons.at(-1)}`;
+      return `No se puede eliminar porque ya tiene ${list}. Desactívelo en su lugar: la historia se conserva.`;
+    }
+  }
   if (code === 'INVALID_INPUT') {
     const field = (err as { details?: { field?: unknown } })?.details?.field;
     return typeof field === 'string' ? `Revise el campo «${FIELD[field] ?? field}».` : 'Hay datos no válidos. Revise el formulario.';

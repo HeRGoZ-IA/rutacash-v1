@@ -1549,6 +1549,26 @@ try {
     const kNewIn = await page.waitForFunction(() => location.pathname !== '/login', { timeout: 45_000 }).then(() => true, () => false);
     ok('K-04', ['C-05'], '3.20: la contraseña anterior ya no entra y la nueva sí', kOldRejected && kNewIn, JSON.stringify({ kOldRejected, kNewIn, path: await pathNow() }));
 
+    // 3.5: al rechazar una eliminación, la pantalla dice QUÉ historia la impide. Usuario nuevo con una ruta asignada y
+    // sin dinero: la comprobación local de la pantalla lo deja pasar y el servidor responde HAS_HISTORY con la causa.
+    stage = 'K35';
+    const K35_EMAIL = 'cobrador.k35@example.test';
+    const k35Api = await apiAs('sa.transicion@example.test', mT.sa);
+    const k35 = await k35Api('POST', '/v1/members', { email: K35_EMAIL, role: 'cobrador', displayName: 'Cobrador Historia', routeIds: [T1r] });
+    await login('sa.transicion@example.test', 'Transición');
+    await go('/admin/users');
+    await page.waitForFunction((e) => document.body.innerText.includes(e), { timeout: 30_000 }, K35_EMAIL);
+    await sleep(500);
+    await page.evaluate((e) => { const row = [...document.querySelectorAll('div')].filter((d) => d.innerText?.includes(e) && d.querySelector('[data-testid="user-delete"]'))
+      .sort((a, b) => a.innerText.length - b.innerText.length)[0]; row?.querySelector('[data-testid="user-delete"]')?.click(); }, K35_EMAIL);
+    await waitText('Sí, eliminar', 15_000);
+    await clickText('button', /Sí, eliminar/);
+    const k35Msg = await waitToast('No se puede eliminar porque ya tiene', 20_000);
+    const k35Toast = await page.evaluate(() => (document.querySelector('[aria-label="Notificaciones"]')?.innerText ?? '').replace(/\u00a0/g, ' '));
+    const k35Still = await one('select count(*)::int n from adex.memberships where id = $1', [k35?.body?.membershipId ?? '']);
+    ok('K-05', ['C-05'], '3.5: eliminar un usuario con historia dice la causa («asignaciones de rutas a personas») y no lo borra',
+      k35?.body?.membershipId && k35Msg && /asignaciones de rutas a personas/.test(k35Toast) && k35Still?.n === 1, JSON.stringify({ created: Boolean(k35?.body?.membershipId), k35Msg, toast: k35Toast.slice(0, 200), kept: k35Still?.n }));
+
     stage = 'TZ';
     for (const [c, name] of [[N, 'Norte'], [T, 'Transición']]) {
       const l = await ledgerClean(c);

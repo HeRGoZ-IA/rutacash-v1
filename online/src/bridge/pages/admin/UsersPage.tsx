@@ -462,7 +462,7 @@ export default function UsersPage() {
                     <Button variant="ghost" size="sm" disabled={!manageable} onClick={(e) => { e.stopPropagation(); toggleStatus(u) }}
                       title={u.status === 'activo' ? 'Desactivar' : 'Activar'} data-testid="user-toggle"
                       icon={u.status === 'activo' ? <ToggleRight className="w-3.5 h-3.5 text-emerald-500" /> : <ToggleLeft className="w-3.5 h-3.5 text-gray-400" />} />
-                    <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); requestDelete(u) }} loading={checkingId === u.id}
+                    <Button variant="ghost" size="sm" title="Eliminar" data-testid="user-delete" onClick={(e) => { e.stopPropagation(); requestDelete(u) }} loading={checkingId === u.id}
                       disabled={u.id === currentUser?.id || currentUser?.rol !== 'superadmin'}
                       icon={<Trash2 className="w-3.5 h-3.5 text-red-400" />} className="text-red-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-30" />
                   </div>

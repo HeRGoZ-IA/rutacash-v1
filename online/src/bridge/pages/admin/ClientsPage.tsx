@@ -306,7 +306,7 @@ export default function ClientsPage() {
       toast.success('Cliente eliminado')
       setDeleteTarget(null)
       await load()
-    } catch { toast.error('Error al eliminar') } finally { setDeleting(false) }
+    } catch (e) { toast.error(e instanceof Error && e.message ? e.message : 'Error al eliminar') } finally { setDeleting(false) }
   }
 
   const getRouteName = (id: string) => routes.find(r => r.id === id)?.nombre ?? id

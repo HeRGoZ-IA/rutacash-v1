@@ -23,8 +23,9 @@
 
 *Actualizado: 2026-11-03 (barrido de pendientes: grupo A y 3.20 publicados)*
 
-1. **Objetivo actual:** barrido de pendientes mientras el socio prueba con BlueLine (va bien: los reportes semanales cuadran igual que en Listos). Grupo B **punto por punto** (pedido de Helmer): 3.20 publicado; siguen 3.5, 3.4 y 3.10. Respaldos nocturnos: DNS corregido (confirmar el de esta noche).
+1. **Objetivo actual:** barrido de pendientes mientras el socio prueba con BlueLine (va bien: los reportes semanales cuadran igual que en Listos). Grupo B **punto por punto** (pedido de Helmer): 3.20 publicado; 3.5 implementado (commit local, sin push, solo web); siguen 3.4 y 3.10. Respaldos nocturnos: DNS corregido (confirmar el de esta noche).
 2. **Qué quedó hecho:**
+   * 3.5 (2026-11-03, **commit local, sin push**): el aviso de «no se puede eliminar» dice la causa (recaudos, ventas, rutas asignadas…); Rutas y Clientes muestran el aviso del servidor. Las «dos operaciones» de Oficinas ya no existían (pantalla retirada en R26). Solo web. Probado: tipos, CLEAN, E2E 94/46/30. No probado con BlueLine.
    * 3.20 (2026-11-03, **publicado**: `ed237fd1`, 0041 aplicada con respaldo previo `adex-20261103T1532`, Render ambos servicios desplegados a mano por Helmer, Vercel): enlace para cambiar la contraseña de un usuario activo (Usuarios → llave; panel Owner para el SuperAdmin). Al usarlo se reclama la sesión del enlace y se cierran todas las de la persona (ADEX y Supabase). Migración **0041** (evento del Owner). Probado: PostgreSQL 599/0/1, E2E 94/46/29, tipos (3), unitarias 31/31. **No probado:** pantalla Owner en navegador, reversión de 0041, BlueLine.
    * Barrido grupo A (2026-11-03): 3.7 `npm run verify:deploy` comprueba ADEX Online (commit servido, /owner, iconos, módulos de la API; probado contra lo publicado) y `smoke:prod` exige URL de CLEAN local; 3.8 `test:auth-real` bloqueado (escribiría en ADEX-Staging); 3.9 TLS verificado siempre en los scripts de staging (probado con `select 1`); 3.6 lista duplicada `OPERATION_KIND` eliminada (no se usaba); 3.11 «Base disponible» en CLEAN; 6.5 rama y stash de Git limpiados (stash exportado a `tmp/ronda23-respaldo/`). Probado: tipos (3), build Online, CLEAN completa, unitarias saas 31/31. No hace falta Render; no toca a BlueLine.
    * Error 3.21 (2026-10-29, **publicado**: `de7fca0`, Vercel `index-D6d9WyFz.js`, sin migración ni Render): la app del Cobrador abierta o en segundo plano de un día a otro seguía mostrando el día anterior hasta cerrar sesión. Ahora detecta el cambio de fecha (dispositivo y empresa) y relee todo, también sin señal. Probado: E2E 137/137 y 25/25 (A-15b falló sin la corrección), CLEAN, tipos. **No probado:** en el celular del socio.
@@ -72,10 +73,9 @@
      * Los riesgos no están aceptados salvo que Helmer lo diga.
    * 2026-10-25: cierre del mismo día con el día bloqueado después.
    * En BlueLine nunca se crean datos ficticios ni se hace una purga global.
-5. **Archivos tocados (3.20):**
-   * API: `saas/src/auth/provider.ts` (`issueResetLink`), `saas/src/identity/service.ts` (`memberResetLink`), `saas/src/control/service.ts` (`superadminResetLink`), `saas/src/http/{companyApi,controlApi}.ts`, `saas/src/server/{app,controlStart}.ts`; migración `saas/db/migrations/0041_superadmin_reset_link.sql` (+ rollback)
-   * Web: `online/src/lib/client.ts` (`memberResetLink`, cierre de sesiones en `setOwnPassword`), `online/src/bridge/pages/admin/UsersPage.tsx`, `online/src/bridge/pages/owner/{OwnerCompanyDetailPage,AccessLinkPanel}.tsx`, `online/src/bridge/platform/companyControlService.ts`, `online/scripts/deploy-gate.mjs`
-   * Pruebas: `saas/test/integration/reset-links.test.ts` (nuevo), `render-resilience.test.ts`, `saas/test/helpers/auth.ts`; E2E etapa K y proveedor local en `saas/scripts/local/`
+5. **Archivos tocados (3.5):**
+   * `online/src/lib/format.ts` (`historyReasons`, `errorText`), `online/src/bridge/pages/admin/{ClientsPage,UsersPage}.tsx`, `src/pages/admin/RoutesPage.tsx`
+   * E2E `saas/scripts/local/e2e-routebase.mjs` (K-05). Antes, 3.20: ver Changelog y Registro.
 
 ## Reglas del proyecto
 
