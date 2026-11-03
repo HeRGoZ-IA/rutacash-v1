@@ -12,10 +12,13 @@ import { CleanOnlineApp } from './runtime/CleanOnlineApp.tsx';
 
 // ADEX Online: el frontend de CLEAN conectado a la API SaaS. Configuración pública de
 // compilación (Vite); ningún secreto: la clave PUBLICABLE de Supabase es para el navegador.
-const env = import.meta.env as Record<string, string | undefined>;
-const apiBase = (env['VITE_ADEX_API_URL'] ?? '').replace(/\/$/, '');
-const supabaseUrl = (env['VITE_SUPABASE_URL'] ?? '').replace(/\/$/, '');
-const publishableKey = env['VITE_SUPABASE_PUBLISHABLE_KEY'] ?? '';
+// 3.10: cada variable se lee por su nombre. Leer `import.meta.env` entero incrusta en el código
+// público TODAS las VITE_* (Vercel añade el mensaje y el autor del commit, el repositorio…).
+const apiBase = ((import.meta.env.VITE_ADEX_API_URL as string | undefined) ?? '').replace(/\/$/, '');
+const supabaseUrl = ((import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? '').replace(/\/$/, '');
+const publishableKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ?? '';
+// Solo el commit queda a la vista: `npm run verify:deploy` lo lee para saber qué versión se sirve.
+document.documentElement.dataset.adexCommit = (import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA as string | undefined) ?? 'local';
 
 const root = ReactDOM.createRoot(document.getElementById('root')!);
 if (!apiBase || !supabaseUrl || !publishableKey) {

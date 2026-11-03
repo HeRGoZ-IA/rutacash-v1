@@ -86,9 +86,11 @@ async function main() {
   const { code, files } = await bundle()
   const entry = files.find((f) => /\/index-/.test(f)) ?? files[0]
   console.log(`  paquete principal: ${entry} · ${files.length} archivo(s) · ${(code.length / 1024).toFixed(0)} KB`)
-  const sha = code.match(/VITE_VERCEL_GIT_COMMIT_SHA["']?\s*:\s*["'`]([0-9a-f]{7,40})["'`]/)?.[1]
+  // 3.10: el paquete ya no trae todas las VITE_*; el commit va en `dataset.adexCommit`. Se acepta
+  // también la forma anterior para poder verificar despliegues viejos.
+  const sha = (code.match(/adexCommit\s*=\s*["'`]([0-9a-f]{7,40})["'`]/) ?? code.match(/VITE_VERCEL_GIT_COMMIT_SHA["']?\s*:\s*["'`]([0-9a-f]{7,40})["'`]/))?.[1]
   if (sha) ok(sha.startsWith(expected) || expected.startsWith(sha), `commit servido ${sha.slice(0, 7)} · esperado ${expected.slice(0, 7)}`)
-  else ok(false, 'el paquete no trae VITE_VERCEL_GIT_COMMIT_SHA (¿se ocultaron los metadatos de Git? compara a mano)')
+  else ok(false, 'el paquete no trae el commit (adexCommit) · compara a mano en Vercel')
 
   const owner = await get(`${url}/owner`)
   ok(owner.status === 200 && owner.type.includes('html'), `/owner responde HTTP ${owner.status}`)

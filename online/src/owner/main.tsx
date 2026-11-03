@@ -69,10 +69,10 @@ function OwnerApp() {
 
 // Configuración pública de compilación. `VITE_ADEX_CONTROL_URL` es el SERVICIO OWNER
 // (separado de la API de empresas). Sin ella, el portal no se activa.
-const env = import.meta.env as Record<string, string | undefined>;
-const controlBase = (env['VITE_ADEX_CONTROL_URL'] ?? '').replace(/\/$/, '');
-const supabaseUrl = (env['VITE_SUPABASE_URL'] ?? '').replace(/\/$/, '');
-const publishableKey = env['VITE_SUPABASE_PUBLISHABLE_KEY'] ?? '';
+// 3.10: por nombre, no `import.meta.env` entero (incrustaría todas las VITE_* de Vercel).
+const controlBase = ((import.meta.env.VITE_ADEX_CONTROL_URL as string | undefined) ?? '').replace(/\/$/, '');
+const supabaseUrl = ((import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? '').replace(/\/$/, '');
+const publishableKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ?? '';
 
 const root = createRoot(document.getElementById('root')!);
 if (!controlBase || !supabaseUrl || !publishableKey) {
