@@ -182,6 +182,16 @@ export async function fetchHandovers(q: { routeId?: string; status?: Handover['s
   return (await serverView<{ handovers: Handover[] }>(`/v1/capital/handovers${s ? `?${s}` : ''}`)).handovers;
 }
 
+/** 3.4: cambios de responsable de capital de una ruta (el servidor filtra por rol: SuperAdmin todos, Administrador los suyos). */
+export interface ControllerEvent {
+  id: string; routeId: string; kind: 'MIGRATION' | 'FIRST_ADMIN' | 'CHANGE' | 'RELEASE'; fromAdminId: string | null; toAdminId: string | null;
+  reason: string | null; createdAt: string; actorId: string | null; actorSystem: string | null;
+}
+
+export async function fetchControllerEvents(routeId: string): Promise<ControllerEvent[]> {
+  return (await serverView<{ events: ControllerEvent[] }>(`/v1/capital/controller-events?routeId=${encodeURIComponent(routeId)}`)).events;
+}
+
 export function confirmHandover(routeId: string, body: { countedMinor: number; expectedSeenMinor: number; note?: string }, operationId: string) {
   return money<{ differenceMinor: number; result: 'exacto' | 'faltante' | 'sobrante' }>('POST', `/v1/capital/handovers/${encodeURIComponent(routeId)}/confirm`,
     { countedMinor: body.countedMinor, expectedSeenMinor: body.expectedSeenMinor, ...(body.note?.trim() ? { note: body.note.trim() } : {}) }, operationId);

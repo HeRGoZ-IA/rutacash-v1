@@ -795,6 +795,16 @@ try {
     ok('D-05', ['C-01'], 'Admin 2 confirma el conteo con faltante de R$ 10 (acta con diferencia; la Base no se mueve)', hv.saved && (await controller(C2)).h === 'normal' && (await base(C2)) === bHand, JSON.stringify(hv));
     const hrec = await one(`select id, difference_minor::int d from adex.route_handover_records where route_id = $1 and status = 'confirmada' order by confirmed_at desc limit 1`, [C2]);
     ok('D-06', ['C-01'], 'PostgreSQL: acta confirmada de Centro 2', !!hrec, JSON.stringify(hrec));
+    // 3.4: el detalle de la ruta muestra el historial de responsables con el motivo y el resultado del conteo.
+    await go('/admin/capital'); await waitTestid('rb-consolidated');
+    await page.waitForSelector(`[data-testid="rb-route-${C2}"]`);
+    await rowClick(`rb-route-${C2}`, 'rb-route-detail'); await waitTestid('rb-route-drawer'); await sleep(500);
+    await tap('rb-controller-history-open');
+    await page.waitForSelector('[data-testid="rb-controller-event"]', { timeout: 20_000 }).catch(() => undefined);
+    const histTxt = (await testid('rb-controller-history')) ?? '';
+    ok('D-06b', ['C-01'], '3.4: Detalle de Centro 2 → «Ver historial de responsables»: el cambio con su motivo y el conteo con faltante',
+      /Cambio de responsable: .+ → .+/.test(histTxt) && histTxt.includes('El Admin 2 asume Centro 2') && /Conteo confirmado.*faltante de R\$ 10/.test(histTxt), histTxt.replace(/\s+/g, ' ').slice(0, 300));
+    await page.keyboard.press('Escape').catch(() => undefined);
     // El nuevo responsable anula el gasto A solo de Centro 2 y el reembolso sembrado al Admin 1 desde Centro 2 (diálogo de corrección).
     await toPanel(); await tab('gastos');
     const eOnlyC2 = await one(`select id from adex.expenses where company_id = $1 and description = 'Servicio solo de Centro 2 E2E (A)'`, [N]);

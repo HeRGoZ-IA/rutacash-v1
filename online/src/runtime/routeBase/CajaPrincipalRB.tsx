@@ -34,7 +34,7 @@ import type { Office, Route, User } from '@/models/types';
 import { todayIn } from '../../lib/format.ts';
 import { useRuntime } from '../session.ts';
 import {
-  fetchHandovers, fetchPanel, routeExpenses, sumRows, type CapitalModel, type Handover, type PanelRoute, type RoutePanel,
+  fetchControllerEvents, fetchHandovers, fetchPanel, routeExpenses, type ControllerEvent, sumRows, type CapitalModel, type Handover, type PanelRoute, type RoutePanel,
 } from './api.ts';
 import {
   AlertChip, Notice, PERIOD_LABEL, StateBadge, activeStates, num, otherAlerts, periodDates, stateHelp, stateLabel, useMoney, type PanelPeriod,
@@ -430,6 +430,72 @@ function RouteRow({ r, mine, office, onOpen, onConfirm, canConfirm }: {
 }
 
 // ---------------------------------------------------------------------------
+// 3.4 · Historial de responsables de una ruta: cada cambio (quién, cuándo, motivo) con el
+// resultado de su entrega (conteo de la Base). Solo lectura; se carga al abrirlo.
+// ---------------------------------------------------------------------------
+
+const CONTROLLER_KIND: Record<ControllerEvent['kind'], string> = {
+  MIGRATION: 'Responsable inicial',
+  FIRST_ADMIN: 'Primer responsable',
+  CHANGE: 'Cambio de responsable',
+  RELEASE: 'Ruta sin responsable',
+};
+
+function ControllerHistory({ routeId, users }: { routeId: string; users: User[] }) {
+  const money = useMoney();
+  const revision = useDataRevision();
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<{ events: ControllerEvent[]; handovers: Handover[] } | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setOpen(false); setData(null); }, [routeId]);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setFailed(false);
+    Promise.all([fetchControllerEvents(routeId), fetchHandovers({ routeId })])
+      .then(([events, handovers]) => { if (alive) setData({ events, handovers }); })
+      .catch(() => { if (alive) setFailed(true); });
+    return () => { alive = false; };
+  }, [open, routeId, revision]);
+  const name = (id: string | null) => (id ? formatPersonName(users.find((u) => u.id === id)?.nombre ?? '') || 'Administrador' : 'nadie');
+  // El acta de entrega nace en la misma transacción que el cambio: mismo destino y misma hora.
+  const handoverOf = (e: ControllerEvent) => data?.handovers.find((h) => h.toId === e.toAdminId
+    && Math.abs(new Date(h.startedAt).getTime() - new Date(e.createdAt).getTime()) < 60_000);
+  const result = (h: Handover | undefined) => {
+    if (!h) return null;
+    if (h.status === 'pendiente') return 'Entrega pendiente: falta el conteo del nuevo responsable.';
+    if (h.status === 'sustituida') return 'Entrega sustituida por un cambio posterior.';
+    const diff = h.differenceMinor ?? 0;
+    return `Conteo confirmado${h.confirmedAt ? ` el ${formatDateTime(h.confirmedAt)}` : ''}: esperado ${money(h.expectedBaseMinor ?? 0)}, contado ${money(h.countedMinor ?? 0)}`
+      + (diff < 0 ? `, faltante de ${money(-diff)}.` : diff > 0 ? `, sobrante de ${money(diff)}.` : ', sin diferencia.');
+  };
+  if (!open) {
+    return <button type="button" className="text-sm text-primary-700 hover:underline inline-flex items-center gap-1" onClick={() => setOpen(true)} data-testid="rb-controller-history-open">
+      <History className="w-4 h-4" aria-hidden />Ver historial de responsables</button>;
+  }
+  return (
+    <div className="rounded-xl border border-gray-200 p-3" data-testid="rb-controller-history">
+      <p className="text-sm font-medium text-gray-900 mb-1">Historial de responsables</p>
+      {failed ? <p className="text-sm text-red-700">No se pudo cargar el historial. Inténtalo de nuevo.</p>
+        : !data ? <p className="text-sm text-gray-500" role="status">Cargando…</p>
+        : data.events.length === 0 ? <p className="text-sm text-gray-500">Sin cambios de responsable registrados.</p>
+        : (
+          <ol className="divide-y divide-gray-100">
+            {data.events.map((e) => (
+              <li key={e.id} className="py-2" data-testid="rb-controller-event">
+                <p className="text-sm text-gray-900">{CONTROLLER_KIND[e.kind]}: {name(e.fromAdminId)} → {name(e.toAdminId)}</p>
+                <p className="text-xs text-gray-500">{formatDateTime(e.createdAt)} · registró {e.actorSystem ? 'el sistema' : name(e.actorId)}{e.reason ? ` · Motivo: ${e.reason}` : ''}</p>
+                {result(handoverOf(e)) && <p className="text-xs text-gray-600">{result(handoverOf(e))}</p>}
+              </li>
+            ))}
+          </ol>
+        )}
+      <button type="button" className="mt-1 text-xs text-gray-500 hover:underline" onClick={() => setOpen(false)}>Ocultar historial</button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Detalle de una ruta (drill-down de cada cifra)
 // ---------------------------------------------------------------------------
 
@@ -555,6 +621,7 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
           {r.lastHandover && r.lastHandover.status === 'confirmada' && (
             <p className="text-xs text-gray-600">Última entrega confirmada {r.lastHandover.confirmed_at ? formatDateTime(r.lastHandover.confirmed_at) : ''}: esperado {money(r.lastHandover.expected_base_minor)}, contado {money(r.lastHandover.counted_minor)}{r.lastHandover.difference_minor ? `, diferencia ${money(r.lastHandover.difference_minor)}` : ', sin diferencia'}.</p>
           )}
+          <ControllerHistory routeId={r.routeId} users={users} />
           <div className="flex flex-wrap gap-2">
             {canConfirm && <Button size="sm" onClick={() => onConfirm(r)} icon={<Handshake className="w-3.5 h-3.5" />}>Confirmar conteo</Button>}
             {isSa && !changing && (
