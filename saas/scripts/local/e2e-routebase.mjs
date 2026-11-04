@@ -523,6 +523,32 @@ try {
     ok('A-15b', ['C-01'], 'Cobrador con la app abierta y sin señal: al pasar al día siguiente, «Abonado» de ayer desaparece sin cerrar sesión', abonadoHoy && nextDay, JSON.stringify({ abonadoHoy, nextDay, card: (await cardA()).slice(0, 120) }));
     await page.evaluate(() => { if (window.__RealDate) window.Date = window.__RealDate; });
     await page.setOfflineMode(false);
+    // Pendiente 3.23 (socio): «Informe del día» con fecha elegible (hoy por defecto, cualquier fecha pasada, nunca
+    // futura) y la hora en la del teléfono (antes salía la hora UTC del servidor).
+    const bizToday = (await one('select adex.business_today($1)::text d', [N])).d;
+    const lastPay = await one('select created_at from adex.payments where sale_id = $1 order by created_at desc limit 1', [saleA.id]);
+    await go('/collector/daily-report'); await waitTestid('daily-report-date');
+    await page.waitForFunction(() => !document.querySelector('.animate-spin') && !!document.querySelector('[data-testid="daily-report-list"]'), { timeout: 30_000 }).catch(() => undefined);
+    await sleep(1500);
+    const dr = await page.evaluate((iso) => ({
+      date: document.querySelector('[data-testid="daily-report-date"]')?.value, max: document.querySelector('[data-testid="daily-report-date"]')?.getAttribute('max'),
+      sub: document.querySelector('[data-testid="daily-report-subtitle"]')?.innerText ?? '', list: document.querySelector('[data-testid="daily-report-list"]')?.innerText ?? '',
+      local: new Date(iso).toTimeString().slice(0, 5) }), lastPay.created_at.toISOString());
+    await both('A-15c-informe-del-dia', () => waitTestid('daily-report-date'));
+    ok('A-15c', ['C-01'], 'Informe del día: abre en hoy (fecha de la empresa, sin fechas futuras), con el recaudo y el desembolso del Cobrador y la hora local',
+      dr.date === bizToday && dr.max === bizToday && dr.sub.includes('de hoy') && /Recaudo/.test(dr.list) && /Desembolso/.test(dr.list) && dr.list.includes(`${dr.local} · Recaudo`), JSON.stringify(dr));
+    const [yy, mm, ddd] = bizToday.split('-').map(Number);
+    const ayer = new Date(Date.UTC(yy, mm - 1, ddd - 1)).toISOString().slice(0, 10);
+    const ayerTxt = ayer.split('-').reverse().join('/');
+    await setInput('[data-testid="daily-report-date"]', ayer);
+    const past = await page.waitForFunction((t) => (document.querySelector('[data-testid="daily-report-subtitle"]')?.innerText ?? '').includes(t) && !document.querySelector('.animate-spin'), { timeout: 15_000 }, ayerTxt).then(() => true, () => false);
+    await sleep(800);
+    const pastView = await page.evaluate(() => ({ list: document.querySelector('[data-testid="daily-report-list"]')?.innerText ?? '', body: document.body.innerText }));
+    const pastOk = past && (pastView.list ? !pastView.list.includes(`${dr.local} · Recaudo`) : pastView.body.includes('Sin movimientos el'));
+    await setInput('[data-testid="daily-report-date"]', '2099-01-01'); await sleep(800);
+    const clamped = await page.$eval('[data-testid="daily-report-date"]', (el) => el.value);
+    ok('A-15d', ['C-01'], 'Informe del día: al elegir ayer muestra ese día (sin los movimientos de hoy); una fecha futura vuelve a hoy',
+      pastOk && clamped === bizToday, JSON.stringify({ ayer, past, list: pastView.list.slice(0, 120), clamped }));
 
     // Venta directa del Administrador desde la Base de Centro 2 (ruta sin Cobrador): nuevo cliente y venta.
     await login('admin1.norte@example.test');
