@@ -4,6 +4,10 @@
 //   · en ambos modelos, un gasto general con aportes de rutas o con dinero propio (0035) se rotula por su fuente
 //     real, nunca como «Histórico sin bolsa».
 // Mismo orden de filtrado (rutas permitidas → ruta elegida → fechas) y mismas filas: solo cambian los textos.
+//
+// VENTAS (2026-11-04): en Online una venta nace al desembolsarse, y `createdAt` llega en hora UTC
+// (`toISOString`): una venta desembolsada después de las 21:00 en Brasil caía en el día siguiente.
+// El día de la venta es la fecha de negocio del desembolso (`fechaDesembolso`, del servidor).
 
 import * as Clean from '@clean/services/reportService';
 import type { ReportFilters, ReportRow, ReportSources, ReportType } from '@clean/services/reportService';
@@ -60,6 +64,15 @@ export function buildGastosReport(src: ReportSources, f: ReportFilters): ReportR
   return gastos(src, f);
 }
 
+/** Fecha de negocio de la venta: la del desembolso; sin ella (no debería ocurrir), la de registro. */
+export function saleBusinessDate(s: { fechaDesembolso?: string; createdAt: string }): string {
+  return s.fechaDesembolso || s.createdAt;
+}
+
+export function buildVentasReport(src: ReportSources, f: ReportFilters): ReportRow[] {
+  return Clean.buildVentasReport({ ...src, sales: src.sales.map((s) => ({ ...s, createdAt: saleBusinessDate(s) })) }, f);
+}
+
 export function buildReport(type: ReportType, src: ReportSources, f: ReportFilters): ReportRow[] {
-  return type === 'gastos' ? gastos(src, f) : Clean.buildReport(type, src, f);
+  return type === 'gastos' ? gastos(src, f) : type === 'ventas' ? buildVentasReport(src, f) : Clean.buildReport(type, src, f);
 }
