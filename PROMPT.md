@@ -23,7 +23,7 @@
 
 *Actualizado: 2026-11-03 (barrido de pendientes: grupo A y 3.20 publicados)*
 
-1. **Objetivo actual:** barrido de pendientes mientras el socio prueba con BlueLine (va bien: los reportes semanales cuadran igual que en Listos). Grupo B **punto por punto** (pedido de Helmer): 3.20 publicado; 3.5 publicado (solo web); 3.4 publicado (solo web); 3.10 publicado (solo web). **Grupo B terminado.** Grupo D revisado (2026-11-04, solo lectura): 7.4 resuelto; 7.3 y 7.5 obsoletos; decisiones de Helmer (2026-11-04): 7.1 los domingos cuentan (falta: panel y Consultas › Caja con semana lunes–domingo), 7.2 el Supervisor no descarga nada por ahora; 7.6 (D4) sigue esperando. Reporte de Ventas con la fecha del desembolso: **publicado** (`d2adea88`). 3.23 (Informe del día con fecha elegible) **publicado** (`39282b84`, solo web, verify:deploy OK), E2E 97/46/30; falta validación del socio. 3.24 venta olvidada (plan aprobado por Helmer 2026-11-04: los dos casos, máximo 3 días, días cerrados no se reabren): **implementado, commit local sin push**, migración 0042 SIN aplicar en staging; test:db 607/607, E2E 97/46/32. **Falta: autorización de Helmer para aplicar 0042 en staging**, luego push → deploy manual de Render → verify:deploy. Siguiente: limpieza 6.1…6.4 (con permiso). Respaldos nocturnos: DNS corregido (confirmar el de esta noche).
+1. **Objetivo actual:** barrido de pendientes mientras el socio prueba con BlueLine (va bien: los reportes semanales cuadran igual que en Listos). Grupo B **punto por punto** (pedido de Helmer): 3.20 publicado; 3.5 publicado (solo web); 3.4 publicado (solo web); 3.10 publicado (solo web). **Grupo B terminado.** Grupo D revisado (2026-11-04, solo lectura): 7.4 resuelto; 7.3 y 7.5 obsoletos; decisiones de Helmer (2026-11-04): 7.1 los domingos cuentan (falta: panel y Consultas › Caja con semana lunes–domingo), 7.2 el Supervisor no descarga nada por ahora; 7.6 (D4) sigue esperando. Reporte de Ventas con la fecha del desembolso: **publicado** (`d2adea88`). 3.23 (Informe del día con fecha elegible) **publicado** (`39282b84`, solo web, verify:deploy OK), E2E 97/46/30; falta validación del socio. 3.24 venta olvidada (plan aprobado por Helmer 2026-11-04: los dos casos, máximo 3 días, días cerrados no se reabren): **publicado** (`e173f732`; 0042 aplicada en staging con respaldo `adex-20261104T1659`; Render y Vercel); test:db 607/607, E2E 97/46/32. Falta: validación del socio. Siguiente: limpieza 6.1…6.4 (con permiso). Respaldos nocturnos: DNS corregido (confirmar el de esta noche).
 2. **Qué quedó hecho:**
    * 3.10 (**publicado 2026-11-04**, `68f7e654`): la web ya no publica el mensaje ni el autor del commit ni datos del repositorio (lee por nombre solo las 4 variables que usa); el commit sigue visible para `verify:deploy`. Probado: build simulado, tipos, E2E 95/46/30; en producción verify:deploy OK y 0 variables VITE_VERCEL_* en los 81 JS publicados. Falta: nada del socio (no cambia pantallas).
    * 3.4 (2026-11-03, **PUBLICADO** `d8f83211`, verify:deploy OK; falta validación del socio): en Base por Ruta, Detalle de la ruta → «Ver historial de responsables» (cambios con motivo y resultado del conteo). El modelo anterior ya lo tenía desde R26. Solo web. Probado: tipos, E2E 95/46/30 (D-06b). No probado con BlueLine.
@@ -108,6 +108,10 @@ Si cambia su estado, su propósito, su despliegue o su ubicación, o si se elimi
 ## Changelog
 
 El historial detallado por rondas está en `docs/REGISTRO_MAESTRO_EVOLUCION_ADEX.md`.
+
+### 2026-11-04 — 3.24 venta registrada tarde y fecha de entrega (publicado)
+
+* `e173f732` + migración 0042 (respaldo previo `adex-20261104T1659`). Solo Administrador; máximo 3 días; días cerrados no se reabren; el libro conserva sus fechas. test:db 607/607, E2E 97/46/32. Render `adex-online-api` desplegado; Vercel tras el commit de documentación (la puerta canceló el build del push anterior a Render).
 
 ### 2026-11-04 — 3.23 y reporte de Ventas (publicados)
 
