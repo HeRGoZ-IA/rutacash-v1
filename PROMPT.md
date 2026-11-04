@@ -23,8 +23,9 @@
 
 *Actualizado: 2026-11-03 (barrido de pendientes: grupo A y 3.20 publicados)*
 
-1. **Objetivo actual:** barrido de pendientes mientras el socio prueba con BlueLine (va bien: los reportes semanales cuadran igual que en Listos). Grupo B **punto por punto** (pedido de Helmer): 3.20 publicado; 3.5 publicado (solo web); 3.4 publicado (solo web); sigue 3.10. Respaldos nocturnos: DNS corregido (confirmar el de esta noche).
+1. **Objetivo actual:** barrido de pendientes mientras el socio prueba con BlueLine (va bien: los reportes semanales cuadran igual que en Listos). Grupo B **punto por punto** (pedido de Helmer): 3.20 publicado; 3.5 publicado (solo web); 3.4 publicado (solo web); 3.10 publicado (solo web). **Grupo B terminado.** Siguiente: grupo D (vigencia de 7.1…7.6) y limpieza 6.1…6.4 (con permiso). Respaldos nocturnos: DNS corregido (confirmar el de esta noche).
 2. **Qué quedó hecho:**
+   * 3.10 (**publicado 2026-11-04**, `68f7e654`): la web ya no publica el mensaje ni el autor del commit ni datos del repositorio (lee por nombre solo las 4 variables que usa); el commit sigue visible para `verify:deploy`. Probado: build simulado, tipos, E2E 95/46/30; en producción verify:deploy OK y 0 variables VITE_VERCEL_* en los 81 JS publicados. Falta: nada del socio (no cambia pantallas).
    * 3.4 (2026-11-03, **PUBLICADO** `d8f83211`, verify:deploy OK; falta validación del socio): en Base por Ruta, Detalle de la ruta → «Ver historial de responsables» (cambios con motivo y resultado del conteo). El modelo anterior ya lo tenía desde R26. Solo web. Probado: tipos, E2E 95/46/30 (D-06b). No probado con BlueLine.
    * 3.5 (2026-11-03, **PUBLICADO** `7e5b407f`, verify:deploy OK; falta validación del socio): el aviso de «no se puede eliminar» dice la causa (recaudos, ventas, rutas asignadas…); Rutas y Clientes muestran el aviso del servidor. Las «dos operaciones» de Oficinas ya no existían (pantalla retirada en R26). Solo web. Probado: tipos, CLEAN, E2E 94/46/30. No probado con BlueLine.
    * 3.20 (2026-11-03, **publicado**: `ed237fd1`, 0041 aplicada con respaldo previo `adex-20261103T1532`, Render ambos servicios desplegados a mano por Helmer, Vercel): enlace para cambiar la contraseña de un usuario activo (Usuarios → llave; panel Owner para el SuperAdmin). Al usarlo se reclama la sesión del enlace y se cierran todas las de la persona (ADEX y Supabase). Migración **0041** (evento del Owner). Probado: PostgreSQL 599/0/1, E2E 94/46/29, tipos (3), unitarias 31/31. **No probado:** pantalla Owner en navegador, reversión de 0041, BlueLine.
@@ -43,7 +44,7 @@
    * Actualizar la guía del socio con los nombres nuevos de Liquidaciones (3.19): Helmer dijo «Ahora no» (2026-10-28).
    * Que el socio valide 3.12, 3.14, 3.15, 3.16, 3.17, 3.18, 3.19, el cierre del mismo día y el buscador en su celular.
    * **Respaldos nocturnos:** fallaron del 31/10 al 3/11 por el DNS del proveedor (rechazaba la dirección del pooler). **Corregido 2026-11-03:** Helmer puso DNS 1.1.1.1 y 8.8.8.8 en Ethernet y Wi-Fi; 20/20 búsquedas bien y respaldo diario lanzado a mano OK (`adex-20261103T1703`). Confirmar mañana que el de las 9:30 pm salió bien.
-   * DS-06 (cargar la cartera de una empresa nueva): en espera de la opinión del socio; preferida la opción A (saldos de apertura), sin aprobar. El archivo completo de Listos sirve para esa opción.
+   * DS-06 (cargar la cartera de una empresa nueva): en espera de la opinión del socio; preferida la opción A (saldos de apertura), sin aprobar. El archivo completo de Listos sirve para esa opción. **2026-11-03:** Helmer pidió un sistema de migración de rutas con historial; el chat «ADEX · Migración de rutas con historial» propuso un plan por fases (diseño → plantilla → validación sin escribir → empresa sintética → empresa real) y espera sus respuestas y su «sí». Sin código ni migración todavía. Hallazgos: los abonos antiguos no pueden entrar como recaudos (moverían efectivo y bloquean la rectificación, AX526); la venta no admite `start_date` pasada (trigger de 0010); hace falta una operación de apertura nueva (cartera de la ruta contra financiación).
    * RS-4 aprobada: trasladar el proyecto a Supabase Pro de Starcli **solo cuando Helmer lo ordene** (no mientras se prueba la app).
    * Grupo de chats «ADEX - RutaCash» (2026-10-27): Central, Errores o bugs, Peticiones del socio, Ideas y producto, Respaldos y operación, Decisiones pendientes. Solo Central y Errores tocan código.
    * Barrido: grupo B (3.20 con 2 detalles por confirmar, 3.5, 3.4, 3.10), grupo D (vigencia de 7.1…7.6) y al final la limpieza 6.1…6.4, que necesita permiso. Decisiones abiertas: 2.1.4, 2.1.11, 2.1.12, 2.1.13 y 2.2.1.
@@ -76,9 +77,8 @@
      * Los riesgos no están aceptados salvo que Helmer lo diga.
    * 2026-10-25: cierre del mismo día con el día bloqueado después.
    * En BlueLine nunca se crean datos ficticios ni se hace una purga global.
-5. **Archivos tocados (3.4):**
-   * `online/src/runtime/routeBase/api.ts` (`fetchControllerEvents`), `online/src/runtime/routeBase/CajaPrincipalRB.tsx` (`ControllerHistory`)
-   * E2E `saas/scripts/local/e2e-routebase.mjs` (D-06b). Antes, 3.5 y 3.20: ver Changelog y Registro.
+5. **Archivos tocados (3.10):**
+   * `online/src/main.tsx`, `online/src/owner/main.tsx` (variables por nombre, `dataset.adexCommit`), `scripts/verify-deploy.mjs` (lee `adexCommit`). Antes, 3.4, 3.5 y 3.20: ver Changelog y Registro.
 
 ## Reglas del proyecto
 
@@ -105,6 +105,10 @@ Si cambia su estado, su propósito, su despliegue o su ubicación, o si se elimi
 ## Changelog
 
 El historial detallado por rondas está en `docs/REGISTRO_MAESTRO_EVOLUCION_ADEX.md`.
+
+### 2026-11-04 — 3.10: la web deja de publicar metadatos de Git (publicado)
+
+* Solo web (`68f7e654`), sin migración. E2E 95/46/30. Verify:deploy OK (68f7e65); el JS publicado no contiene ninguna variable VITE_VERCEL_*. Grupo B terminado.
 
 ### 2026-11-03 — 3.4: historial de responsables en Base por Ruta (publicado)
 
