@@ -19,14 +19,16 @@ const MESSAGES: Record<string, string> = {
   INVALID_INPUT: 'Revise los datos.',
 }
 
-export function RouteMigrationAction({ route, isSuperadmin }: { route: Route; isSuperadmin: boolean }) {
+// `inUse`: la ruta ya tiene Base, cartera, ventas o clientes activos. Solo se ofrece «Poner en migración» en rutas
+// nuevas y vacías (pedido de Helmer, 2026-11-04); el servidor lo rechaza igual (AX444) si queda algún dato.
+export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { route: Route; isSuperadmin: boolean; inUse?: boolean }) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
   const [saving, setSaving] = useState(false)
   const [operationId, setOperationId] = useState('')
   if (!isSuperadmin) return null
   const inMigration = route.migrationState === 'en_migracion'
-  if (!inMigration && route.status !== 'activa') return null
+  if (!inMigration && (route.status !== 'activa' || inUse)) return null
 
   const start = () => { setText(inMigration ? '' : route.nombre); setOperationId(crypto.randomUUID()); setOpen(true) }
   const submit = async () => {

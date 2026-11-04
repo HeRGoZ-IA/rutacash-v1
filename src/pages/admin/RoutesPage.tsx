@@ -589,7 +589,8 @@ export default function RoutesPage() {
                   className="text-red-400 hover:text-red-600 hover:bg-red-50"
                 />
               </div>
-              <RouteMigrationAction route={route} isSuperadmin={user?.rol === 'superadmin'} />
+              <RouteMigrationAction route={route} isSuperadmin={user?.rol === 'superadmin'}
+                inUse={(() => { const s = summaryByRoute[route.id]; return !s || s.totalControlado !== 0 || s.ventasActivas > 0 || s.clientesActivos > 0 || (s.baseTrabajador ?? 0) !== 0 })()} />
             </Card>
           ))}
         </div>

@@ -7,6 +7,6 @@ import type { Route } from '@/models/types'
  * módulo por su puente (`online/src/bridge/components/routes/RouteMigrationAction.tsx`), que habla
  * con la API. Solo el SuperAdmin la ve.
  */
-export function RouteMigrationAction(_props: { route: Route; isSuperadmin: boolean }) {
+export function RouteMigrationAction(_props: { route: Route; isSuperadmin: boolean; inUse?: boolean }) {
   return null
 }
