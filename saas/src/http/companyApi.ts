@@ -48,7 +48,7 @@ import {
   listHandovers, modelPrerequisites, routePanel, transferBase, transferDestinations, transitionModel, withdrawBase,
 } from '../capital/routeBase.ts';
 import {
-  MIGRATION_CANCEL_FIELDS, MIGRATION_OPEN_FIELDS, cancelMigration, listMigrations, openMigration,
+  MIGRATION_CANCEL_FIELDS, MIGRATION_LOAD_FIELDS, MIGRATION_LOAD_MAX_BYTES, MIGRATION_OPEN_FIELDS, finishMigrationLoad, previewMigrationLoad, cancelMigration, listMigrations, openMigration,
 } from '../capital/routeMigration.ts';
 import {
   REGISTER_FIELDS, adminDirectory, cancelAdminTransfer, decideAdminTransfer, getAdminTransfer, listAdminTransfers, registerAdminTransfer,
@@ -102,6 +102,8 @@ interface Endpoint {
   idempotent?: string;
   /** Comando de dinero: sin `X-Adex-Operation-Id` se rechaza (un reintento nunca duplica). */
   requiresOperation?: boolean;
+  /** Tamaño máximo del cuerpo en bytes (por defecto 16 KB). Solo la carga de una migración de ruta lo amplía. */
+  maxBody?: number;
   handler: (params: string[], provider: IdentityProvider) => Handler;
 }
 
@@ -245,6 +247,12 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: ([id]) => async (c, ctx, b, _q, op) => created(await openMigration(c, ctx, id!, b, op)) },
   { method: 'POST', pattern: new RegExp(`^/v1/routes/${ID}/migration/cancel$`), fields: MIGRATION_CANCEL_FIELDS, idempotent: 'route.migration_cancel', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => ok(await cancelMigration(c, ctx, id!, b, op)) },
+  // 0044 · carga final desde Listos: vista previa (se deshace, no guarda nada) y carga definitiva (todo o nada).
+  { method: 'POST', pattern: new RegExp(`^/v1/routes/${ID}/migration/preview$`), fields: MIGRATION_LOAD_FIELDS, maxBody: MIGRATION_LOAD_MAX_BYTES,
+    handler: ([id]) => async (c, ctx, b) => ok(await previewMigrationLoad(c, ctx, id!, b)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/routes/${ID}/migration/finish$`), fields: MIGRATION_LOAD_FIELDS, maxBody: MIGRATION_LOAD_MAX_BYTES,
+    idempotent: 'route.migration_finish', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => ok(await finishMigrationLoad(c, ctx, id!, b, op)) },
   // ---------- Gastos generales (R74, 0035): saldos a favor de Administradores (nunca efectivo) y reembolsos ----------
   { method: 'GET', pattern: /^\/v1\/capital\/admin-payables$/, fields: null, handler: () => async (c, ctx) => ok(await adminPayables(c, ctx)) },
   // R74 (0037, item 4): obligaciones pendientes por gasto (beneficiario, descripción, pendiente), para pagar la de otro Administrador.
@@ -557,7 +565,7 @@ export function createCompanyHandler(opts: CompanyApiOptions): (req: http.Incomi
       // Mismo orden de rechazos que antes del cuerpo: un id inválido no lee nada.
       if (operationId?.trim() && (!UUID_RE.test(operationId.trim()) || !found.e.idempotent)) throw new ApiError(400, 'INVALID_OPERATION_ID');
       if (found.e.requiresOperation && !operationId?.trim()) throw new ApiError(400, 'OPERATION_ID_REQUIRED');
-      const body = found.e.fields ? await readJsonObject(req) : undefined;
+      const body = found.e.fields ? await readJsonObject(req, found.e.maxBody) : undefined;
       const result = await execute(claims, { method, path: url.pathname, query: url.searchParams, membershipId: membershipHeader, operationId, body });
       send(res, result.status, result.body);
     } catch (err) {

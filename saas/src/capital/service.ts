@@ -597,10 +597,11 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
       where o.company_id = $1 and o.currency_code <> c.currency_code`);
   const conservation = await q(`select coalesce(sum(balance_minor), 0)::text n from adex.capital_accounts where company_id = $1`);
   // Crédito ↔ libro: cada desembolso con su crédito (mismo importe y ruta) y viceversa.
+  // 0044: la apertura de una ruta migrada (`MIGRATION_OPENING`) hace las veces de desembolso (capital pendiente).
   // Ronda 73: el capital vigente de un crédito rectificado = desembolso + Σ ajustes (pata de la cartera, con signo).
   const unmatched = await q(
     `select count(*)::text n from adex.capital_operations o
-      where o.company_id = $1 and o.kind = 'LOAN_DISBURSEMENT'
+      where o.company_id = $1 and o.kind in ('LOAN_DISBURSEMENT', 'MIGRATION_OPENING')
         and not exists (select 1 from adex.sales s where s.company_id = o.company_id and s.id = o.sale_id and s.ledger_operation_id = o.id
                           and s.sale_value_minor = o.amount_minor + coalesce((select sum(e.amount_minor) from adex.capital_operations j
                                 join adex.capital_entries e on e.company_id = j.company_id and e.operation_id = j.id
@@ -611,7 +612,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
     `select count(*)::text n from adex.sales s
       where s.company_id = $1 and s.ledger_operation_id is not null
         and not exists (select 1 from adex.capital_operations o where o.company_id = s.company_id and o.id = s.ledger_operation_id
-                          and o.kind = 'LOAN_DISBURSEMENT' and o.sale_id = s.id)`);
+                          and o.kind in ('LOAN_DISBURSEMENT', 'MIGRATION_OPENING') and o.sale_id = s.id)`);
   const duplicated = await q(
     `select count(*)::text n from (select sale_request_id from adex.sales where company_id = $1 and sale_request_id is not null
                                     group by sale_request_id having count(*) > 1) d`);

@@ -1,23 +1,35 @@
-// Puente de ADEX Online · migración de rutas con historial (SaaS 0043, parte 1).
+// Puente de ADEX Online · migración de rutas con historial (SaaS 0043 y 0044).
 //
-// Solo el SuperAdmin pone una ruta «en migración» (o cancela la migración). El servidor comprueba todo
-// (ruta activa, vacía, sin entrega pendiente, Base por Ruta) y bloquea en PostgreSQL cualquier escritura en
-// la ruta mientras está en migración. Aquí solo se pide el dato y se muestra el resultado.
+// Solo el SuperAdmin pone una ruta «en migración», la cancela o hace la CARGA FINAL desde Listos. El servidor comprueba
+// todo (ruta activa, vacía, sin entrega pendiente, Base por Ruta; en la carga, los controles del reporte y el calendario
+// de cada crédito) y bloquea en PostgreSQL cualquier escritura en la ruta mientras está en migración. Aquí solo se pide
+// el dato, se muestra la vista previa y el resultado.
+//
+// Carga final (0044): el archivo `.json` lo arma `saas/scripts/migracion/listos_a_adex.py` con los reportes de Listos.
+// Primero se ve la VISTA PREVIA (no guarda nada); «Confirmar carga» escribe todo o nada y deja la ruta en estado normal.
 
 import { useState } from 'react'
-import { ArrowRightLeft } from 'lucide-react'
+import { ArrowRightLeft, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { toast } from '@/components/ui/Toast'
+import { formatCurrency } from '@/lib/formatters'
 import type { Route } from '@/models/types'
-import { OnlineCommandError, money } from '../../../runtime/commands.ts'
+import { OnlineCommandError, money, plain } from '../../../runtime/commands.ts'
 
 const MESSAGES: Record<string, string> = {
   ROUTE_MIGRATION_NOT_ALLOWED: 'La ruta debe estar activa, sin clientes, ventas ni movimientos, y sin una entrega pendiente.',
+  ROUTE_MIGRATION_INVALID_DATA: 'Los datos del archivo no cuadran. Revise la vista previa.',
+  BODY_TOO_LARGE: 'El archivo es demasiado grande.',
   PERMISSION_DENIED: 'Solo el SuperAdmin puede hacerlo.',
   INVALID_INPUT: 'Revise los datos.',
 }
+
+type Preview = Record<string, unknown>
+
+const num = (v: unknown) => (typeof v === 'number' ? v : Number(v ?? 0))
+const brl = (minor: unknown) => formatCurrency(num(minor) / 100, 'BRL')
 
 // `inUse`: la ruta ya tiene Base, cartera, ventas o clientes activos. Solo se ofrece «Poner en migración» en rutas
 // nuevas y vacías (pedido de Helmer, 2026-11-04); el servidor lo rechaza igual (AX444) si queda algún dato.
@@ -26,9 +38,18 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
   const [text, setText] = useState('')
   const [saving, setSaving] = useState(false)
   const [operationId, setOperationId] = useState('')
+  const [loadOpen, setLoadOpen] = useState(false)
+  const [payload, setPayload] = useState<Record<string, unknown> | null>(null)
+  const [fileName, setFileName] = useState('')
+  const [preview, setPreview] = useState<Preview | null>(null)
   if (!isSuperadmin) return null
   const inMigration = route.migrationState === 'en_migracion'
   if (!inMigration && (route.status !== 'activa' || inUse)) return null
+
+  const fail = (e: unknown) => {
+    const code = e instanceof OnlineCommandError ? e.code : ''
+    toast.error(MESSAGES[code] ?? (e instanceof Error ? e.message : 'No se pudo completar.'))
+  }
 
   const start = () => { setText(inMigration ? '' : route.nombre); setOperationId(crypto.randomUUID()); setOpen(true) }
   const submit = async () => {
@@ -44,15 +65,55 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
       toast.success(inMigration ? `${route.nombre}: migración cancelada.` : `${route.nombre} quedó «En migración».`)
       setOpen(false)
     } catch (e) {
-      const code = e instanceof OnlineCommandError ? e.code : ''
-      toast.error(MESSAGES[code] ?? (e instanceof Error ? e.message : 'No se pudo completar.'))
+      fail(e)
     } finally {
       setSaving(false)
     }
   }
 
+  const startLoad = () => { setPayload(null); setPreview(null); setFileName(''); setOperationId(crypto.randomUUID()); setLoadOpen(true) }
+  const pickFile = async (file: File | undefined) => {
+    setPayload(null); setPreview(null)
+    if (!file) return
+    setFileName(file.name)
+    let data: unknown
+    try { data = JSON.parse(await file.text()) } catch { toast.error('El archivo no es un archivo de carga válido (.json).'); return }
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) { toast.error('El archivo no es un archivo de carga válido.'); return }
+    setSaving(true)
+    try {
+      const p = await plain<Preview>('POST', `/v1/routes/${route.id}/migration/preview`, { payload: data })
+      setPayload(data as Record<string, unknown>)
+      setPreview(p)
+    } catch (e) {
+      fail(e)
+    } finally {
+      setSaving(false)
+    }
+  }
+  const confirmLoad = async () => {
+    if (!payload || !preview || preview['valid'] !== true) return
+    setSaving(true)
+    try {
+      await money('POST', `/v1/routes/${route.id}/migration/finish`, { payload }, operationId)
+      toast.success(`${route.nombre} quedó cargada y en estado normal. Falta abrir la caja: inyecte la Base contada.`)
+      setLoadOpen(false)
+    } catch (e) {
+      fail(e)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const listos = (preview?.['listos'] ?? {}) as Record<string, unknown>
+  const dups = Array.isArray(preview?.['duplicateDocuments']) ? (preview['duplicateDocuments'] as unknown[]).length : 0
+
   return (
     <>
+      {inMigration && (
+        <Button variant="ghost" size="sm" onClick={startLoad} icon={<Upload className="w-3.5 h-3.5" />} data-testid={`route-migration-load-${route.id}`}>
+          Cargar datos de Listos
+        </Button>
+      )}
       <Button variant="ghost" size="sm" onClick={start} icon={<ArrowRightLeft className="w-3.5 h-3.5" />} data-testid={`route-migration-action-${route.id}`}>
         {inMigration ? 'Cancelar migración' : 'Poner en migración'}
       </Button>
@@ -71,6 +132,40 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
           )}
           <Input label={inMigration ? 'Motivo' : 'Nombre de la ruta en Listos'} value={text} onChange={(e) => setText(e.target.value)}
             maxLength={inMigration ? 500 : 120} autoFocus />
+        </div>
+      </Modal>
+      <Modal open={loadOpen} onClose={() => !saving && setLoadOpen(false)} title="Cargar datos de Listos"
+        footer={<><Button variant="secondary" onClick={() => setLoadOpen(false)} disabled={saving}>Volver</Button>
+          <Button onClick={() => void confirmLoad()} loading={saving} disabled={!preview || preview['valid'] !== true}
+            data-testid={`route-migration-confirm-${route.id}`}>Confirmar carga</Button></>}>
+        <div className="space-y-3 text-sm text-gray-700">
+          <p>Suba el archivo de carga (<strong>.json</strong>) preparado con los reportes de Listos del cierre. Primero verá una
+            vista previa; no se guarda nada hasta que pulse <strong>Confirmar carga</strong>.</p>
+          <input type="file" accept=".json,application/json" disabled={saving} onChange={(e) => void pickFile(e.target.files?.[0])}
+            className="block w-full text-sm" data-testid={`route-migration-file-${route.id}`} />
+          {fileName && !preview && saving && <p className="text-gray-500">Revisando {fileName}…</p>}
+          {preview && preview['valid'] !== true && (
+            <div className="rounded-xl bg-red-50 p-3 text-red-700">
+              <p className="font-semibold">El archivo no cuadra. No se puede cargar.</p>
+              <p className="mt-1 break-words">{String(preview['problem'] ?? '')}</p>
+            </div>
+          )}
+          {preview && preview['valid'] === true && (
+            <div className="rounded-xl bg-gray-50 p-3 space-y-1" data-testid={`route-migration-preview-${route.id}`}>
+              <p className="font-semibold text-gray-800">Vista previa · reporte del {String(preview['reportDate'])}</p>
+              <p>Clientes: <strong>{num(preview['clients'])}</strong> ({num(preview['activeClients'])} con crédito activo)</p>
+              <p>Créditos activos: <strong>{num(preview['activeCredits'])}</strong> · saldo <strong>{brl(preview['balanceMinor'])}</strong></p>
+              <p>Capital pendiente (Cartera activa): <strong>{brl(preview['principalMinor'])}</strong></p>
+              <p>Créditos con cuotas vencidas: {num(preview['creditsOverdue'])}</p>
+              <p>Créditos pagados (historial de Listos): {num(preview['paidCredits'])}</p>
+              {dups > 0 && <p className="text-amber-700">Documentos ya usados en la empresa: {dups} (se cargan marcados, sin fusionar).</p>}
+              {(listos['cajaMinor'] != null || listos['carteraMinor'] != null) && (
+                <p className="text-gray-500">Listos ese día: caja {listos['cajaMinor'] != null ? brl(listos['cajaMinor']) : '—'} · cartera {listos['carteraMinor'] != null ? brl(listos['carteraMinor']) : '—'}</p>
+              )}
+              <p className="pt-1 text-gray-600">Al confirmar, la ruta queda en <strong>estado normal</strong> y empieza a operar en ADEX.
+                Después, el Administrador abre la caja inyectando la <strong>Base contada</strong>.</p>
+            </div>
+          )}
         </div>
       </Modal>
     </>

@@ -17,13 +17,13 @@ export function checkFields(body: Record<string, unknown>, allowed: readonly str
 }
 
 /** JSON estricto: objeto y tamaño acotado. */
-export async function readJsonObject(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+export async function readJsonObject(req: http.IncomingMessage, maxBytes: number = MAX_BODY): Promise<Record<string, unknown>> {
   if (!(req.headers['content-type'] ?? '').startsWith('application/json')) throw new ApiError(415, 'JSON_REQUIRED');
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new ApiError(413, 'BODY_TOO_LARGE');
+    if (size > maxBytes) throw new ApiError(413, 'BODY_TOO_LARGE');
     chunks.push(chunk as Buffer);
   }
   let parsed: unknown;

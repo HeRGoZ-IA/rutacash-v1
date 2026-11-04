@@ -135,6 +135,100 @@ describe('0043 · ruta en migración', () => {
     assert.deepEqual((l.body['migrations'] as Body[]).map((m) => m['status']), ['cancelada']);
   });
 
+  test('RM-005 · carga final desde Listos: vista previa, todo o nada, ventas por lo que falta y ruta en estado normal', async () => {
+    // Ruta nueva, vacía, con Ana como Administradora responsable; se pone en migración.
+    const nr = await bruno('POST', '/v1/routes', { name: 'Ruta Migrada Final', interestRate: 20, freeRate: false, maxLoanMinor: 500_000, adminIds: [M.anaAdmin] });
+    assert.equal(nr.status, 201, JSON.stringify(nr.body));
+    const rf = nr.body['id'] as string;
+    assert.equal((await open($bruno, rf)).status, 201);
+    const today = (await db.admin.query<{ d: string }>(`select to_char((now() at time zone timezone)::date, 'YYYY-MM-DD') d from adex.companies where id = $1`, [c1])).rows[0]!.d;
+    const day = (n: number) => { const d = new Date(`${today}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    // Crédito K1 (diario, 20 cuotas de 60,00 = 1.200,00; capital 1.000,00): pagadas 8 → saldo 720,00 en 12 cuotas,
+    // las 4 primeras ya vencidas. Crédito K2 (semanal, 4 × 300,00): saldo 450,00 (una cuota y media pagadas).
+    const sched = (from: number, step: number, amounts: number[]) => amounts.map((a, k) => ({ number: k + 1, dueDate: day(from + k * step), amountMinor: a }));
+    const payload = () => ({
+      sourceRouteName: 'VALPARAISO SOC GAJ (sintética)', reportDate: day(-1),
+      control: { clients: 3, activeCredits: 2, balanceMinor: 72_000 + 45_000 },
+      listos: { cajaMinor: -158_000, carteraMinor: 117_000 },
+      clients: [
+        { code: 'C1', name: 'CLIENTE LISTOS UNO', document: cpf(), documentType: 'CPF', phone: '61999990001', address: 'Rua sintética 1', active: true },
+        { code: 'C2', name: 'CLIENTE LISTOS DOS', document: cpf(), documentType: 'CPF', phone: '61999990002', address: 'Rua sintética 2', active: true },
+        { code: 'C3', name: 'CLIENTE LISTOS TRES', document: 'X12345', documentType: null, phone: '', address: '', active: false },
+      ],
+      credits: [
+        { code: 'K1', clientCode: 'C1', grantedOn: day(-13), valueMinor: 100_000, totalMinor: 120_000, rate: 20, installmentsCount: 20, installmentValueMinor: 6_000,
+          frequency: 'diaria', paymentDays: [0, 1, 2, 3, 4, 5, 6], balanceMinor: 72_000, overdueListos: 4, lastPaymentOn: day(-3),
+          schedule: sched(-4, 1, Array<number>(12).fill(6_000)) },
+        { code: 'K2', clientCode: 'C2', grantedOn: day(-15), valueMinor: 100_000, totalMinor: 120_000, rate: 20, installmentsCount: 4, installmentValueMinor: 30_000,
+          frequency: 'semanal', paymentDays: [1], balanceMinor: 45_000, overdueListos: 0, lastPaymentOn: day(-2),
+          schedule: sched(-1, 7, [15_000, 30_000]) },
+      ],
+      history: [{ code: 'K0', clientCode: 'C3', grantedOn: day(-300), valueMinor: 50_000, totalMinor: 60_000, installmentsCount: 20, frequency: 'diaria', lastPaymentOn: day(-250) }],
+    });
+    const preview = (p: Body) => bruno('POST', `/v1/routes/${rf}/migration/preview`, { payload: p });
+    const finish = (p: Body, op?: string) => $bruno(`/v1/routes/${rf}/migration/finish`, { payload: p }, op);
+
+    // Solo el SuperAdmin; la Administradora no.
+    expectCode(await ana('POST', `/v1/routes/${rf}/migration/preview`, { payload: payload() }), 403, 'PERMISSION_DENIED', 'vista previa de la Administradora');
+    // Vista previa con un saldo que no cuadra: dice qué falla y no guarda nada.
+    const bad = payload(); bad.control.balanceMinor += 100;
+    const pb = await preview(bad);
+    assert.equal(pb.status, 200, JSON.stringify(pb.body) + ' ' + String((api.errors.at(-1) as Error | undefined)?.message));
+    assert.equal(pb.body['valid'], false);
+    assert.match(String(pb.body['problem']), /total balance/);
+    const bad2 = payload(); bad2.credits[0]!.schedule[11]!.amountMinor = 5_000;
+    assert.match(String((await preview(bad2)).body['problem']), /K1: the schedule/);
+    expectCode(await finish(bad), 422, 'ROUTE_MIGRATION_INVALID_DATA', 'carga que no cuadra');
+    assert.equal(await state(rf), 'en_migracion', 'nada se escribió');
+    assert.equal(Number((await db.admin.query('select count(*) n from adex.clients where route_id = $1', [rf])).rows[0].n), 0);
+    // Vista previa correcta: resumen y nada guardado.
+    const pv = await preview(payload());
+    assert.equal(pv.status, 200, JSON.stringify(pv.body));
+    assert.equal(pv.body['valid'], true, JSON.stringify(pv.body));
+    assert.equal(pv.body['activeCredits'], 2);
+    assert.equal(pv.body['balanceMinor'], 117_000);
+    assert.equal(pv.body['creditsOverdue'], 2, 'los dos tienen cuotas vencidas');
+    assert.equal(await state(rf), 'en_migracion');
+    assert.equal(Number((await db.admin.query('select count(*) n from adex.sales where route_id = $1', [rf])).rows[0].n), 0);
+
+    // Carga definitiva (idempotente).
+    const p = payload();
+    const op = randomUUID();
+    const done = await finish(p, op);
+    assert.equal(done.status, 200, JSON.stringify(done.body));
+    assert.equal(done.body['status'], 'finalizada');
+    assert.deepEqual((await finish(p, op)).body, done.body, 'reintento: misma respuesta');
+    assert.equal(await state(rf), 'normal');
+    const sales = (await db.admin.query(`select s.sale_value_minor v, s.total_value_minor t, s.balance_minor b, s.installments_count n, s.status,
+        (select count(*) from adex.installments i where i.sale_id = s.id and i.status = 'vencida')::int overdue,
+        (select max(days_overdue) from adex.installments i where i.sale_id = s.id)::int days
+      from adex.sales s where s.route_id = $1 order by s.balance_minor desc`, [rf])).rows;
+    // K1: capital pendiente = 100.000 − round(48.000 × 100.000 / 120.000) = 60.000; total = saldo.
+    assert.deepEqual(sales.map((x) => [Number(x.v), Number(x.t), Number(x.b), x.n, x.status]), [[60_000, 72_000, 72_000, 12, 'activa'], [37_500, 45_000, 45_000, 2, 'activa']]);
+    assert.equal(sales[0]!.overdue, 4, 'retraso visible');
+    assert.equal(sales[0]!.days, 4);
+    assert.equal(await balance(db.admin, c1, 'portfolio', null, rf), 97_500);
+    assert.equal(await balance(db.admin, c1, 'route_funding', null, rf), -97_500);
+    assert.equal(await balance(db.admin, c1, 'route_base', null, rf), 0, 'ninguna caja se movió');
+    const items = (await db.admin.query(`select kind, count(*)::int n from adex.route_migration_items where route_id = $1 group by kind order by kind`, [rf])).rows;
+    assert.deepEqual(items.map((x) => [x.kind, x.n]), [['client', 3], ['credit', 2], ['paid_credit', 1]]);
+    const cl = (await db.admin.query(`select status, count(*)::int n from adex.clients where route_id = $1 group by status order by status`, [rf])).rows;
+    assert.deepEqual(cl.map((x) => [x.status, x.n]), [['activo', 2], ['inactivo', 1]]);
+    // Ya no se puede volver a cargar ni cancelar.
+    expectCode(await finish(payload()), 409, 'ROUTE_MIGRATION_NOT_ALLOWED', 'segunda carga');
+    expectCode(await cancel($bruno, rf), 409, 'ROUTE_MIGRATION_NOT_ALLOWED', 'cancelar tras la carga');
+    const audit = (await db.admin.query(`select action from adex.audit_log where route_id = $1 and action like 'ROUTE_MIGRATION%' order by created_at`, [rf])).rows.map((x) => x.action);
+    assert.deepEqual(audit, ['ROUTE_MIGRATION_OPENED', 'ROUTE_MIGRATION_FINISHED']);
+
+    // La ruta opera normal: la Administradora abre la caja (Base contada) y se cobra un crédito migrado.
+    const inj = await $ana('/v1/capital/route-base/injections', { routeId: rf, amountMinor: 20_000, reason: 'Apertura de caja: conteo del cierre de Listos' });
+    assert.equal(inj.status, 201, JSON.stringify(inj.body));
+    const saleA = (await db.admin.query(`select id from adex.sales where route_id = $1 and balance_minor = 72000`, [rf])).rows[0].id as string;
+    const col = await $ana('/v1/collections', { saleId: saleA, amountMinor: 6_000 });
+    assert.equal(col.status, 201, JSON.stringify(col.body));
+    assert.equal(await balance(db.admin, c1, 'portfolio', null, rf), 97_500 - 5_000);
+  });
+
   test('RM-004 · conciliación limpia', async () => {
     const r = await bruno('GET', '/v1/capital/reconciliation');
     assert.equal(r.status, 200, JSON.stringify(r.body));

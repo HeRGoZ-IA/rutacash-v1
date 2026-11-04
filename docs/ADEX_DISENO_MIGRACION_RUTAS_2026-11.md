@@ -287,7 +287,47 @@ Para verlo en BlueLine: (1) Helmer aplica 0043 en staging con respaldo; (2) desp
 Render; (3) push → Vercel; (4) Helmer crea la ruta Valparaíso en la oficina Aguas Lindas con Andrew y pulsa
 «Poner en migración».
 
-**Parte 2 (0044):** carga inicial y reportes diarios (§5–§6) y paso a normal (§7).
+**Parte 1 publicada** (091d4e37, 0043 en staging, 2026-11-04). Valparaíso (RT-002, Oficina 20, Andrew) quedó «En migración».
+
+**Parte 2 (0044) — hecha en local, 2026-11-04.** Ver §14.
+
+## 14. Parte 2: carga final (0044) — cómo quedó
+
+**Cambio respecto de §5–§6 (decisión técnica, 2026-11-04):** la ruta se escribe **una sola vez, al final**, con el reporte
+del cierre del domingo 8. Los reportes diarios del jueves al sábado se **revisan** (vista previa, sin guardar).
+Motivo: un cobro hecho en Listos no debe convertirse en un abono de ADEX; si no, se mezclaría con el recaudo, los
+cuadres, las comisiones y los informes de ADEX. Así no hace falta `MIGRATION_COLLECTION` ni marcar abonos.
+
+- **Créditos activos** → ventas de ADEX por **lo que falta cobrar**: total = saldo de Listos; capital = capital
+  pendiente (`valor − round(pagado × valor / total)`, la misma proporción del cobro); cuotas = las que faltan, con
+  sus **fechas originales** (el retraso se ve tal cual). Las cifras originales (valor, total, cuotas pactadas, mora de
+  Listos, último abono) quedan en `adex.route_migration_items` (tipo `credit`).
+- **Asiento `MIGRATION_OPENING`** por venta: cartera de la ruta + capital pendiente / financiación de la ruta −. No toca
+  ninguna caja. La conciliación lo trata como el desembolso de esa venta.
+- **Créditos pagados** → solo historial (`route_migration_items`, tipo `paid_credit`). **Clientes**: los activos como
+  `activo`, el resto `inactivo`; documento repetido en la empresa → se carga marcado (`document_legacy_duplicate`).
+- `adex.route_migration_finish` (solo SuperAdmin, por la API): comprueba todo (controles del reporte, calendario de
+  cada crédito, Σ saldos), cierra la migración (`finalizada`) y deja la ruta en **estado normal** en la misma
+  transacción: **todo o nada**. Error nuevo AX445 `ROUTE_MIGRATION_INVALID_DATA`.
+- API: `POST /v1/routes/{id}/migration/preview` (vista previa: corre la carga y la deshace; dice qué falla) y
+  `POST /v1/routes/{id}/migration/finish` (idempotente). Cuerpo `{ payload }` hasta 2 MB.
+- **Lector**: `saas/scripts/migracion/listos_a_adex.py` (Python con openpyxl). Une los reportes de créditos (gana la
+  exportación más reciente), cruza con «Clientes activos» (Σ saldos y activos por cliente), arma el calendario y
+  escribe el `.json` (fuera del repositorio: datos personales). Imprime solo cifras.
+- **Online**: en Rutas, con la ruta en migración, el SuperAdmin ve «Cargar datos de Listos» → sube el `.json` → vista
+  previa → «Confirmar carga».
+- **Caja (paso a normal)**: después de la carga, Andrew inyecta la **Base contada** con la inyección de Base normal
+  («Inyectar Base»). No hace falta un asiento nuevo.
+
+**Probado (local, PostgreSQL real):** `route-migration.test.ts` 5/5 (RM-005: vista previa con errores, todo o nada,
+idempotencia, ventas por lo que falta, retraso visible, inyección de Base y cobro posterior, conciliación limpia).
+Con los reportes **reales** de Valparaíso del 3/11 en una base local desechable: 123 clientes, 41 activos, saldo
+R$ 63.773 (= cartera de Listos), 852 pagados, capital pendiente R$ 53.144,17; carga en < 1 s; conciliación limpia.
+Mora: con la regla de Listos (sin la cuota con abono parcial) coinciden 37 de 41 créditos.
+
+**Pendiente conocido:** las ventas migradas tienen como fecha de venta la de Listos; los informes de ventas por fecha
+de esos días antiguos las incluyen (con el valor pendiente, no el original). Ficha del cliente con el historial de
+Listos: después.
 
 ## 12. Calendario (meta: cobrar en ADEX el lunes 9)
 

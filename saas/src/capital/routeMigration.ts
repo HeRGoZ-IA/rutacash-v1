@@ -73,3 +73,52 @@ export async function cancelMigration(client: pg.PoolClient, ctx: ActiveContext,
   });
   return r;
 }
+
+// ---------- 0044 · Carga final desde Listos y paso a normal ----------
+// El cuerpo es `{ payload }`: lo arma `saas/scripts/migracion/listos_a_adex.py` a partir de los reportes de Listos
+// (importes en unidades menores). PostgreSQL lo valida todo (`adex.route_migration_finish`): controles del reporte,
+// calendario de cada crédito, suma de saldos. Todo o nada.
+export const MIGRATION_LOAD_FIELDS = ['payload'] as const;
+/** Una ruta grande: ~150 clientes, ~60 activos con su calendario y ~1.000 créditos pagados caben con holgura. */
+export const MIGRATION_LOAD_MAX_BYTES = 2 * 1024 * 1024;
+
+function loadPayload(body: Body): Record<string, unknown> {
+  const p = body['payload'];
+  if (typeof p !== 'object' || p === null || Array.isArray(p)) throw new ApiError(400, 'INVALID_INPUT', 'payload must be an object');
+  return p as Record<string, unknown>;
+}
+
+/** Vista previa: ejecuta la carga completa con las mismas comprobaciones y la DESHACE. No guarda nada. */
+export async function previewMigrationLoad(client: pg.PoolClient, ctx: ActiveContext, routeId: string, body: Body) {
+  requireSuperadmin(ctx);
+  const route = await routeOf(client, ctx, pathId(routeId));
+  const payload = loadPayload(body);
+  await client.query('savepoint route_migration_preview');
+  try {
+    const r = (await client.query<{ r: Record<string, unknown> }>('select adex.route_migration_finish($1, $2, $3::jsonb) r',
+      [crypto.randomUUID(), route.id, JSON.stringify(payload)])).rows[0]!.r;
+    return { ...r, preview: true, valid: true, status: 'en_migracion' };
+  } catch (e) {
+    // Datos que no cuadran (AX445): la vista previa dice QUÉ falla (crédito, control) en lugar de un error sin detalle.
+    if ((e as { code?: string }).code !== 'AX445') throw e;
+    return { preview: true, valid: false, problem: String((e as Error).message).replace(/^adex: /, '') };
+  } finally {
+    await client.query('rollback to savepoint route_migration_preview');
+  }
+}
+
+/** Carga definitiva: crea clientes, ventas (lo que falta cobrar) e historial, y deja la ruta en estado normal. */
+export async function finishMigrationLoad(client: pg.PoolClient, ctx: ActiveContext, routeId: string, body: Body, operationId: string | null) {
+  requireSuperadmin(ctx);
+  const route = await routeOf(client, ctx, pathId(routeId));
+  const payload = loadPayload(body);
+  const r = (await client.query<{ r: Record<string, unknown> }>('select adex.route_migration_finish($1, $2, $3::jsonb) r',
+    [requireOperationId(operationId), route.id, JSON.stringify(payload)])).rows[0]!.r;
+  await audit(client, ctx, {
+    action: 'ROUTE_MIGRATION_FINISHED', entityType: 'route_migration', entityId: String(r['migrationId']), routeId: route.id,
+    description: `Ruta ${route.name} cargada desde Listos (reporte del ${String(r['reportDate'])}): ${String(r['activeCredits'])} créditos activos, `
+      + `${String(r['clients'])} clientes. La ruta queda en estado normal.`,
+    after: r, metadata: { operationId },
+  });
+  return r;
+}
