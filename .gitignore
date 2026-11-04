@@ -2,6 +2,8 @@ node_modules/
 dist/
 node_modules
 tmp/
+# Migraciones de rutas: reportes de Listos y archivos de carga (datos personales de clientes). Nunca se suben.
+/Migraciones/
 
 # Bundles que generan los scripts test:* de package.json
 tests/_out*.mjs
