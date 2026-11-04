@@ -51,6 +51,7 @@
    * Barrido: grupo B (3.20 con 2 detalles por confirmar, 3.5, 3.4, 3.10), grupo D (vigencia de 7.1…7.6) y al final la limpieza 6.1…6.4, que necesita permiso. Decisiones abiertas: 2.1.4, 2.1.11, 2.1.12, 2.1.13 y 2.2.1.
    * Resto: `docs/ADEX_PENDIENTES_CONSOLIDADOS_2026-10-24.md`, que es el **listado canónico**.
 4. **Decisiones tomadas:**
+   * 2026-11-04: las ideas de producto se guardan en `docs/ADEX_IDEAS_DE_PRODUCTO.md`, **no** como pendientes. IDEA-01: venta a crédito con cobrador como segundo tipo de cliente, para retomar más adelante.
    * 2026-11-03: una sola aplicación web instalable para todos los roles; sin programa de escritorio; apps de tienda solo si hacen falta, construidas sobre la misma web (2.4.7, trabajo 3.22).
    * 2026-11-03 (3.20): al usar el enlace de restablecimiento se cierran todas las sesiones de la persona; el enlace de un Administrador solo lo emite el SuperAdmin, el de un SuperAdmin solo el Owner.
    * 2026-11-03: la normativa (SOC 2, ISO 27001/27701) se toma solo como guía de calidad, sin certificarse; el análisis de brechas queda para después de la prueba de BlueLine.
