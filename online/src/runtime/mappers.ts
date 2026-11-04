@@ -75,7 +75,8 @@ export function routeFrom(r: V): Route {
     // Sin caja de ruta en el SaaS (capital centralizado): no hay capital inicial ni actual.
     capitalInicial: 0, capitalActual: 0,
     cobradorId: r.collectorId ?? undefined, capitalControllerAdminId: r.capitalControllerId ?? undefined,
-    capitalControllerSince: r.capitalControllerSince ?? undefined, status: r.status, createdAt: r.createdAt ?? '', updatedAt: r.updatedAt ?? '',
+    capitalControllerSince: r.capitalControllerSince ?? undefined, status: r.status,
+    migrationState: r.migrationState === 'en_migracion' ? 'en_migracion' : 'normal', createdAt: r.createdAt ?? '', updatedAt: r.updatedAt ?? '',
   };
 }
 

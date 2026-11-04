@@ -115,8 +115,9 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       id('capitalControllerAdminId', 'capital_controller_membership_id'), instant('capitalControllerSince', 'capital_controller_since'),
       f('status', 'status'), created, updated,
     ],
-    omitted: [], added: [
+    omitted: [{ field: 'migrationState', reason: '0043: estado de migración de la ruta, solo del servidor (lo abre y lo cierra el SuperAdmin); una importación entra siempre normal' }], added: [
       { column: 'handover_state', reason: 'R74 Base por Ruta (0034): ruta «en entrega» al cambiar el responsable hasta que el nuevo confirma el conteo (acta en route_handover_records). Toda importación es normal' },
+      { column: 'migration_state', reason: '0043: ruta «en migración» desde el sistema anterior (Listos), de solo lectura hasta terminar (registro en route_migrations). Toda importación es normal' },
     ],
   },
   {

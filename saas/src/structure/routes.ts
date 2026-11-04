@@ -36,17 +36,17 @@ interface Row {
   id: string; name: string; code: string; city: string | null; email: string | null; phone: string | null;
   interest_rate: string; free_rate: boolean; max_loan_minor: string; office_id: string | null;
   collector_membership_id: string | null; capital_controller_membership_id: string | null; capital_controller_since: Date | null;
-  status: 'activa' | 'inactiva'; created_at: Date; updated_at: Date;
+  status: 'activa' | 'inactiva'; migration_state: 'normal' | 'en_migracion'; created_at: Date; updated_at: Date;
 }
 const COLS = `id, name, code, city, email, phone, interest_rate, free_rate, max_loan_minor, office_id, collector_membership_id,
-              capital_controller_membership_id, capital_controller_since, status, created_at, updated_at`;
+              capital_controller_membership_id, capital_controller_since, status, migration_state, created_at, updated_at`;
 
 function view(r: Row, members?: string[]) {
   return {
     id: r.id, name: r.name, code: r.code, city: r.city, email: r.email, phone: r.phone, interestRate: Number(r.interest_rate),
     freeRate: r.free_rate, maxLoanMinor: Number(r.max_loan_minor), officeId: r.office_id, collectorId: r.collector_membership_id,
     capitalControllerId: r.capital_controller_membership_id, capitalControllerSince: r.capital_controller_since?.toISOString() ?? null,
-    status: r.status, createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
+    status: r.status, migrationState: r.migration_state, createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
     ...(members ? { memberIds: members } : {}),
   };
 }

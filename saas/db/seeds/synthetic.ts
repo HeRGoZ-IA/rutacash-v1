@@ -124,7 +124,8 @@ function companyRecords(c: CompanySpec): DexieSnapshot {
   Object.assign(legacy, { routeId: legacy.authorizedRouteIds![0], canCreateDirectSales: false, maxDirectSaleAmount: v(100),
     grantedCapabilities: ['cashbox.viewOwnCollection'], revokedCapabilities: ['client.create'], mustChangePassword: false } satisfies Partial<User>);
 
-  const routes: Required<Route>[] = ([1, 2, 3] as const).map((n) => ({
+  // 0043: `migrationState` es un dato solo del servidor (no se importa).
+  const routes: Required<Omit<Route, 'migrationState'>>[] = ([1, 2, 3] as const).map((n) => ({
     id: r(n), tenantId, officeId: n === 3 ? (undefined as unknown as string) : offices[n === 1 ? 0 : 1]!.id, nombre: `Ruta ${n}`, codigo: `R${n}`,
     ciudad: 'Ciudad Sintética', email: `ruta${n}-${c.key}@example.test`, telefono: '+00 222 2222', tasaInteres: 20, tasaLibre: n === 2,
     montoMaximoPrestamo: v(2000), capitalInicial: v(5000), capitalActual: v(5000),
@@ -133,7 +134,7 @@ function companyRecords(c: CompanySpec): DexieSnapshot {
     capitalControllerSince: n === 3 ? (undefined as unknown as string) : at(-28),
     status: n === 3 ? 'inactiva' : 'activa', createdAt: at(-30), updatedAt: at(-28),
   }));
-  for (const route of routes) for (const k of Object.keys(route) as (keyof Route)[]) if (route[k] === undefined) delete route[k];
+  for (const route of routes) for (const k of Object.keys(route) as (keyof typeof route)[]) if (route[k] === undefined) delete route[k];
 
   // 3.14: `paraCobradores` y `eliminada` son datos solo del servidor (no se importan).
   const categories: Required<Omit<ExpenseCategory, 'paraCobradores' | 'eliminada'>>[] = [

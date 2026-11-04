@@ -12,6 +12,7 @@ import { DateRangeFilter } from '@/components/ui/DateRangeFilter'
 import { ConfirmDiscardModal } from '@/components/ui/ConfirmDiscardModal'
 import { RouteAssignedUsers } from '@/components/ui/RouteAssignedUsers'
 import { CapitalControllerBadge } from '@/components/ui/CapitalControllerBadge'
+import { RouteMigrationAction } from '@/components/routes/RouteMigrationAction'
 import { useDirtyForm } from '@/hooks/useDirtyForm'
 import { useDataRevision } from '@/hooks/useDataRevision'
 import { toast } from '@/components/ui/Toast'
@@ -499,6 +500,11 @@ export default function RoutesPage() {
                   <Badge variant={route.status === 'activa' ? 'success' : 'gray'}>
                     {route.status === 'activa' ? 'Activa' : 'Inactiva'}
                   </Badge>
+                  {route.migrationState === 'en_migracion' && (
+                    <span title="La ruta se está migrando desde el sistema anterior: sigue operando allá y aquí es solo de consulta hasta terminar la migración." data-testid={`route-migration-${route.id}`}>
+                      <Badge variant="warning">En migración</Badge>
+                    </span>
+                  )}
                   {/* Ruta válida pero PENDIENTE DE ASIGNACIÓN: existe, no opera cobros. */}
                   {officeInactivaDe(route) && (
                     <span title="Esta ruta pertenece a una Oficina inactiva. No se pueden registrar nuevas operaciones; la consulta histórica sigue disponible.">
@@ -583,6 +589,7 @@ export default function RoutesPage() {
                   className="text-red-400 hover:text-red-600 hover:bg-red-50"
                 />
               </div>
+              <RouteMigrationAction route={route} isSuperadmin={user?.rol === 'superadmin'} />
             </Card>
           ))}
         </div>

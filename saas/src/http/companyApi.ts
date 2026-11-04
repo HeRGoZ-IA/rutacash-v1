@@ -48,6 +48,9 @@ import {
   listHandovers, modelPrerequisites, routePanel, transferBase, transferDestinations, transitionModel, withdrawBase,
 } from '../capital/routeBase.ts';
 import {
+  MIGRATION_CANCEL_FIELDS, MIGRATION_OPEN_FIELDS, cancelMigration, listMigrations, openMigration,
+} from '../capital/routeMigration.ts';
+import {
   REGISTER_FIELDS, adminDirectory, cancelAdminTransfer, decideAdminTransfer, getAdminTransfer, listAdminTransfers, registerAdminTransfer,
 } from '../capital/adminTransfers.ts';
 import {
@@ -236,6 +239,12 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'GET', pattern: /^\/v1\/capital\/handovers$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ handovers: await listHandovers(c, ctx, q) }) },
   { method: 'POST', pattern: new RegExp(`^/v1/capital/handovers/${ID}/confirm$`), fields: HANDOVER_FIELDS, idempotent: 'capital.handover_confirm', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => ok(await confirmHandover(c, ctx, id!, b, op)) },
+  // ---------- Migración de rutas con historial (0043): estado «en migración» por ruta, solo el SuperAdmin ----------
+  { method: 'GET', pattern: /^\/v1\/route-migrations$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ migrations: await listMigrations(c, ctx, q) }) },
+  { method: 'POST', pattern: new RegExp(`^/v1/routes/${ID}/migration$`), fields: MIGRATION_OPEN_FIELDS, idempotent: 'route.migration_open', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => created(await openMigration(c, ctx, id!, b, op)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/routes/${ID}/migration/cancel$`), fields: MIGRATION_CANCEL_FIELDS, idempotent: 'route.migration_cancel', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => ok(await cancelMigration(c, ctx, id!, b, op)) },
   // ---------- Gastos generales (R74, 0035): saldos a favor de Administradores (nunca efectivo) y reembolsos ----------
   { method: 'GET', pattern: /^\/v1\/capital\/admin-payables$/, fields: null, handler: () => async (c, ctx) => ok(await adminPayables(c, ctx)) },
   // R74 (0037, item 4): obligaciones pendientes por gasto (beneficiario, descripción, pendiente), para pagar la de otro Administrador.

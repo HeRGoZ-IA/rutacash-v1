@@ -86,6 +86,9 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX440': return new ApiError(409, 'JOINT_REVERSAL_NOT_NEEDED');        // el actor controla todas las rutas: anulación directa
     case 'AX441': return new ApiError(409, 'JOINT_REVERSAL_PENDING_EXISTS');    // ya hay una propuesta pendiente para esa operación
     case 'AX442': return new ApiError(409, 'JOINT_REVERSAL_NOT_PENDING');       // asentada, cancelada o caducada
+    // 0043 · migración de rutas: la ruta está en migración (solo lectura) / la migración no se puede abrir o cerrar.
+    case 'AX443': return new ApiError(409, 'ROUTE_IN_MIGRATION');
+    case 'AX444': return new ApiError(409, 'ROUTE_MIGRATION_NOT_ALLOWED');
     // Fase 4 · solicitudes y desembolsos.
     case 'AX501': return new ApiError(409, 'REQUEST_STATE_INVALID');
     case 'AX502': return new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED');

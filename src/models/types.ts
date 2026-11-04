@@ -277,6 +277,11 @@ export interface Route {
   /** Instante desde el que responde el responsable actual. */
   capitalControllerSince?: string
   status: RouteStatus
+  /**
+   * SaaS 0043: `en_migracion` = la ruta sigue operando en el sistema anterior (Listos) y en ADEX es de solo
+   * lectura hasta que el SuperAdmin termina la migración. `undefined` = `normal` (local/CLEAN).
+   */
+  migrationState?: 'normal' | 'en_migracion'
   createdAt: string
   updatedAt: string
 }
