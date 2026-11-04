@@ -32,6 +32,9 @@ const ERRORS: Record<string, string> = {
   REQUEST_NOT_DISBURSABLE: 'La solicitud ya no se puede desembolsar.',
   // Ronda 73 · corrección de ventas desembolsadas (SOC-09).
   CREDIT_HAS_COLLECTIONS: 'La venta ya tiene cobros registrados: no se puede corregir.',
+  // 0042 · venta registrada tarde y fecha de entrega.
+  DELIVERY_DATE_OUT_OF_RANGE: 'La fecha de entrega debe estar entre 3 días antes y el día anterior.',
+  DELIVERY_DATE_ALREADY_SET: 'Esta venta ya tiene registrada su fecha real de entrega: solo se corrige una vez.',
   OVERPAYMENT: 'El total corregido quedaría por debajo de lo ya pagado (o el pago superaría el saldo). No hay política de sobrepagos aprobada.',
   LEGACY_PAYMENTS: 'La venta tiene pagos sin asiento en el libro: no se puede recalcular.',
   PAYMENT_ADJUSTMENT_PENDING: 'Hay una solicitud de ajuste de pago pendiente en esta venta.',

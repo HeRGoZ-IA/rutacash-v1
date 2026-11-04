@@ -401,6 +401,83 @@ export async function directSale(client: pg.PoolClient, ctx: ActiveContext, body
 }
 
 // ============================================================
+// Venta registrada tarde y fecha de entrega (decisión del propietario 2026-11-04 · 0042)
+// ============================================================
+
+function dateField(body: Record<string, unknown>, key: string): string {
+  const v = body[key];
+  if (typeof v !== 'string' || !DATE_RE.test(v) || Number.isNaN(Date.parse(`${v}T00:00:00Z`))) throw new ApiError(400, 'INVALID_INPUT', `${key} is invalid`, { field: key });
+  return v;
+}
+
+export const LATE_SALE_FIELDS = [...CREATE_REQUEST_FIELDS, 'deliveredOn', 'deliveredBy', 'reason'] as const;
+
+/**
+ * Caso 1: el ADMINISTRADOR (responsable de capital de la ruta) registra una venta que no se registró el día en que
+ * se entregó el dinero (hasta 3 días atrás). `deliveredBy` = trabajador que entregó (sale de su custodia) o vacío
+ * (el Administrador, desde la Base de la ruta). Si la semana de la fecha real está cerrada, la venta queda con la
+ * fecha de hoy y la real se guarda aparte (los días cerrados no se reabren). Todo en `adex.credit_disburse_late`.
+ */
+export async function lateSale(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
+  const opId = requireOperationId(operationId);
+  const route = await routeOf(client, ctx, reqId(body, 'routeId'));
+  need(ctx, 'sale.createDirect', { routeId: route.id });
+  if (ctx.role !== 'admin') throw new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED', 'only an administrator registers a late sale');
+  const c: Conditions = { amount: amountOf(body), rate: rateOf(body), count: countOf(body), frequency: frequencyOf(body), start: startOf(body), days: daysOf(body) };
+  const rateError = originationRateError(ctx.role, c.rate, await routeRatePolicy(client, ctx, route.id));
+  if (rateError) throw new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED', rateError);
+  const deliveredOn = dateField(body, 'deliveredOn');
+  const today = await companyToday(client, ctx);
+  const minDay = new Date(Date.parse(`${today}T00:00:00Z`) - 3 * 86_400_000).toISOString().slice(0, 10);
+  if (deliveredOn >= today || deliveredOn < minDay) throw new ApiError(400, 'DELIVERY_DATE_OUT_OF_RANGE', 'the delivery date must be between 3 days ago and yesterday');
+  if (c.start < deliveredOn) throw new ApiError(400, 'INVALID_CONDITIONS', 'start date before the delivery date');
+  const deliveredBy = has(body, 'deliveredBy') && body['deliveredBy'] !== null && body['deliveredBy'] !== '' ? reqId(body, 'deliveredBy') : null;
+  const reason = textOf(body, 'reason', 10, 300);
+  const cl = await activeClient(client, ctx, reqId(body, 'clientId'), route.id);
+  const active = await activeCredits(client, ctx, cl.id);
+  const decision = decideSaleOrigination({ actor: { rol: ctx.role }, canCreateDirect: true, canCreateRequest: allowed(ctx, 'sale.createRequest', { routeId: route.id }),
+    activeCredits: active.sales.length + active.approvedRequests.length });
+  if (decision.kind !== 'direct') throw new ApiError(409, 'AUTHORIZATION_REQUIRED');
+  const { schedule } = financials(c);
+  const out = (await client.query<{ credit_id: string; disbursement_id: string; business_date: string | Date; applied_to_books: boolean }>(
+    'select * from adex.credit_disburse_late($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)',
+    [opId, route.id, cl.id, c.amount, c.rate, c.count, c.frequency, c.start, c.days, JSON.stringify(schedule), deliveredOn, deliveredBy, reason])).rows[0]!;
+  await audit(client, ctx, { action: 'CREATE_LATE_SALE', entityType: 'sale', entityId: out.credit_id, routeId: route.id,
+    description: `Venta registrada tarde ${c.amount} a ${cl.name} (entregada el ${deliveredOn})`, reason,
+    after: { operationId: out.disbursement_id, deliveredOn, deliveredBy, businessDate: ymd(out.business_date), appliedToBooks: out.applied_to_books },
+    metadata: { operationId: opId } });
+  const credit = await getCredit(client, ctx, out.credit_id);
+  return { ...credit, lateSale: { deliveredOn, businessDate: ymd(out.business_date), appliedToBooks: out.applied_to_books } };
+}
+
+export const DELIVERY_DATE_FIELDS = ['deliveredOn', 'reason'] as const;
+
+/**
+ * Caso 2: el ADMINISTRADOR corrige la fecha de entrega de una venta registrada tarde (hasta 3 días antes de la
+ * fecha registrada; una sola vez). El libro es inmutable: el asiento conserva su fecha; la venta pasa a la fecha
+ * real solo si las semanas siguen abiertas (si no, la real queda informativa). `adex.credit_correct_delivery_date`.
+ */
+export async function correctDeliveryDate(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Record<string, unknown>, operationId: string | null) {
+  const opId = requireOperationId(operationId);
+  pathId(id);
+  const s = (await client.query<SaleRow>('select * from adex.sales where company_id = $1 and id = $2', [ctx.companyId, id])).rows[0];
+  if (!s) throw new ApiError(404, 'NOT_FOUND');
+  need(ctx, 'sale.cancel', { routeId: s.route_id });
+  if (ctx.role !== 'admin') throw new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED', 'only an administrator corrects the delivery date');
+  const deliveredOn = dateField(body, 'deliveredOn');
+  const reason = textOf(body, 'reason', 10, 300);
+  const out = (await client.query<{ business_date: string | Date; applied_to_books: boolean }>(
+    'select * from adex.credit_correct_delivery_date($1, $2, $3, $4)', [opId, s.id, deliveredOn, reason])).rows[0]!;
+  const before = s.disbursement_date ? ymd(s.disbursement_date) : null;
+  await audit(client, ctx, { action: 'CORRECT_DELIVERY_DATE', entityType: 'sale', entityId: s.id, routeId: s.route_id,
+    description: `Fecha de entrega corregida (${before} → ${deliveredOn})`, reason,
+    before: { disbursementDate: before }, after: { deliveredOn, disbursementDate: ymd(out.business_date), appliedToBooks: out.applied_to_books },
+    metadata: { operationId: opId } });
+  const credit = await getCredit(client, ctx, s.id);
+  return { ...credit, deliveryDate: { deliveredOn, businessDate: ymd(out.business_date), appliedToBooks: out.applied_to_books } };
+}
+
+// ============================================================
 // Rectificación de un crédito desembolsado (Ronda 73 · SOC-09 · 0030)
 // ============================================================
 
@@ -607,6 +684,7 @@ interface SaleRow {
   disbursement_status: string | null; disbursed_by_collector_id: string | null; disbursed_by_membership_id: string | null;
   disbursement_date: string | Date | null; disbursed_at: Date | null; sale_request_id: string | null; ledger_operation_id: string | null; created_at: Date;
   rectification_count?: number;   // Ronda 73 (0030)
+  delivered_on?: string | Date | null;   // 0042: fecha real de entrega (venta registrada tarde o corregida)
 }
 
 function creditView(s: SaleRow) {
@@ -619,6 +697,7 @@ function creditView(s: SaleRow) {
     disbursedBy: s.disbursed_by_membership_id, disbursementDate: s.disbursement_date ? ymd(s.disbursement_date) : null,
     disbursedAt: iso(s.disbursed_at), saleRequestId: s.sale_request_id, ledgerOperationId: s.ledger_operation_id, createdAt: s.created_at.toISOString(),
     rectificationCount: s.rectification_count ?? 0,
+    deliveredOn: s.delivered_on ? ymd(s.delivered_on) : null,
   };
 }
 

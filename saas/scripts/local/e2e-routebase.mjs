@@ -1605,6 +1605,90 @@ try {
     ok('K-05', ['C-05'], '3.5: eliminar un usuario con historia dice la causa («asignaciones de rutas a personas») y no lo borra',
       k35?.body?.membershipId && k35Msg && /asignaciones de rutas a personas/.test(k35Toast) && k35Still?.n === 1, JSON.stringify({ created: Boolean(k35?.body?.membershipId), k35Msg, toast: k35Toast.slice(0, 200), kept: k35Still?.n }));
 
+    // L · 0042 (propietario 2026-11-04): venta registrada tarde y corrección de la fecha de entrega, desde «Ventas activas»
+    // del Administrador (Centro 2: sin Cobrador, la entrega sale de la Base). Días cerrados no se reabren: se compara con
+    // lo que dice el servidor para esa fecha.
+    stage = 'L';
+    const lAd1 = await apiAs('admin1.norte@example.test', M.ad1);
+    const lToday = (await one('select adex.business_today($1)::text d', [N])).d;
+    const [ly, lm, ld] = lToday.split('-').map(Number);
+    const lYesterday = new Date(Date.UTC(ly, lm - 1, ld - 1)).toISOString().slice(0, 10);
+    const lClosed = (await one('select adex.capital_period_closed($1, $2, $3::date) c', [N, C2, lYesterday])).c;
+    const lExpected = lClosed ? lToday : lYesterday;
+    const lClient = async (name) => {
+      const r = await lAd1('POST', '/v1/clients', { routeId: C2, name, documentType: 'CPF', document: doc11(), phonePrimary: '11977776666',
+        addressPrimary: 'Rua Sintética E2E, 3', addressSecondary: 'Rua Sintética E2E, 4', business: 'Comércio E2E' });
+      return r.status === 201 ? r.body.id : null;
+    };
+    const lateName = 'Cliente E2E Venta Tarde', fixName = 'Cliente E2E Fecha Corregida';
+    const lateClient = await lClient(lateName), fixClient = await lClient(fixName);
+    // Venta registrada hoy para corregir su fecha (por la API, ANTES de entrar en el navegador: una sola sesión activa).
+    const lDirect = await lAd1('POST', '/v1/credits/direct', { routeId: C2, clientId: fixClient, amountMinor: 10_000, interestRate: 20, installmentsCount: 10,
+      frequency: 'diaria', startDate: lToday, paymentDays: [0, 1, 2, 3, 4, 5, 6] });
+    const fixSaleId = lDirect.body?.credit?.id;
+    await login('admin1.norte@example.test');
+    const lBase0 = await base(C2);
+    await go('/admin/active-sales'); await sleep(2000);
+    await clickText('button', /^Nueva venta$/);
+    await page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"]')].some((d) => d.innerText.includes('Valor de la venta')), { timeout: 20_000 });
+    await pick('Ruta', 'Ruta Centro 2'); await sleep(800);
+    await pickSearch('Cliente', 'VENTA TARDE').catch(() => false) || await pickSearch('Cliente', 'Venta Tarde');
+    await sleep(800);
+    await setField('Valor de la venta', '150'); await sleep(300);
+    await tap('late-sale-toggle'); await waitTestid('late-sale-date', 10_000);
+    await setInput('[data-testid="late-sale-date"]', lYesterday);
+    await page.evaluate(() => { const el = document.querySelector('[data-testid="late-sale-reason"]');
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, 'El cobrador olvidó registrar la venta (prueba E2E)');
+      el.dispatchEvent(new Event('input', { bubbles: true })); });
+    await sleep(300);
+    const lOptions = await page.$$eval('[data-testid="late-sale-by"] option', (os) => os.map((o) => o.textContent.trim()));
+    await both('LT-01-venta-tarde', () => waitTestid('late-sale-date'));
+    await clickText('button', /^Crear venta$/);
+    await sleep(800);
+    if (await page.evaluate(() => [...document.querySelectorAll('[role="dialog"]')].some((d) => /otra venta|ya tiene una venta/i.test(d.innerText)))) await clickText('button', /Sí, crear otra venta/);
+    const lToast = await waitToast(lClosed ? 'ya está cerrada' : 'Venta registrada con fecha del');
+    let lSale = null;
+    for (let i = 0; i < 15 && !lSale; i++) {
+      await sleep(700);
+      lSale = await one(`select s.id, s.sale_value_minor::int v, s.disbursement_date::text dd, s.delivered_on::text del, o.entry_date::text ed
+                           from adex.sales s join adex.capital_operations o on o.id = s.ledger_operation_id where s.client_id = $1`, [lateClient]);
+    }
+    const lHist = lSale ? await one('select kind, applied_to_books a, reason from adex.sale_delivery_dates where sale_id = $1', [lSale.id]) : null;
+    ok('LT-01', ['C-01'], `Venta entregada otro día (ayer, Centro 2, «Yo»): queda con fecha ${lClosed ? 'de hoy (semana de ayer cerrada) y la real aparte' : 'de ayer'}, sale de la Base y deja historial`,
+      lToast && lSale?.v === 15_000 && lSale.dd === lExpected && lSale.ed === lExpected && lSale.del === lYesterday && (await base(C2)) === lBase0 - 15_000
+        && lHist?.kind === 'LATE_REGISTRATION' && lHist.a === !lClosed && lOptions[0]?.startsWith('Yo'),
+      JSON.stringify({ lToast, lSale, lHist, lClosed, lOptions, base0: lBase0, base1: await base(C2) }));
+
+    // Corrección de la fecha de una venta registrada hoy (venta directa por la API, corrección por la pantalla).
+    await go('/admin/active-sales'); await sleep(2500);
+    await page.waitForFunction(() => [...document.querySelectorAll('tr, li button')].some((r) => /fecha corregida/i.test(r.innerText)), { timeout: 30_000 }).catch(() => undefined);
+    await page.evaluate(() => { const row = [...document.querySelectorAll('tr, li button')].find((r) => /fecha corregida/i.test(r.innerText) && r.offsetParent !== null); row?.click(); });
+    const lBtn = await waitTestid('delivery-date-open', 20_000);
+    if (!lBtn) await shot('LT-02-sin-boton-1280');
+    const lDiag = { direct: lDirect.status, error: lDirect.body?.error ?? null, rows: await page.evaluate(() => [...document.querySelectorAll('tr')].filter((r) => /fecha corregida/i.test(r.innerText)).length),
+      dialog: await page.evaluate(() => [...document.querySelectorAll('[role="dialog"]')].map((d) => d.innerText.slice(0, 80))) };
+    await tap('delivery-date-open'); await waitTestid('delivery-date-input', 10_000);
+    await setInput('[data-testid="delivery-date-input"]', lYesterday);
+    await page.evaluate(() => { const el = document.querySelector('[data-testid="delivery-date-reason"]'); if (!el) return;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, 'Se registró al día siguiente de la entrega (prueba E2E)');
+      el.dispatchEvent(new Event('input', { bubbles: true })); });
+    await both('LT-02-corregir-fecha', () => waitTestid('delivery-date-input'));
+    await tap('delivery-date-save');
+    const lFixToast = await waitToast(lClosed ? 'ya está cerrada' : 'Fecha de entrega corregida');
+    let lFix = null;
+    for (let i = 0; i < 15 && !(lFix?.del); i++) {
+      await sleep(700);
+      lFix = await one(`select s.disbursement_date::text dd, s.delivered_on::text del, o.entry_date::text ed
+                          from adex.sales s join adex.capital_operations o on o.id = s.ledger_operation_id where s.id = $1`, [fixSaleId ?? '']);
+    }
+    await sleep(1500);
+    const lDetail = await page.$eval('[data-testid="sale-delivery-dates"]', (el) => el.innerText).catch(() => '');
+    const lBtnGone = !(await page.$('[data-testid="delivery-date-open"]'));
+    const yTxt = lYesterday.split('-').reverse().join('/');
+    ok('LT-02', ['C-01'], `Corregir fecha de entrega (ayer): la venta ${lClosed ? 'conserva su fecha y guarda la real' : 'pasa a ayer'}; el asiento conserva la suya; el botón desaparece`,
+      Boolean(fixSaleId) && lBtn && lFixToast && lFix?.del === lYesterday && lFix.dd === lExpected && lFix.ed === lToday && lDetail.includes(yTxt) && lBtnGone,
+      JSON.stringify({ fixSaleId, lBtn, lFixToast, lFix, lDetail: lDetail.slice(0, 160), lBtnGone, lDiag }));
+
     stage = 'TZ';
     for (const [c, name] of [[N, 'Norte'], [T, 'Transición']]) {
       const l = await ledgerClean(c);

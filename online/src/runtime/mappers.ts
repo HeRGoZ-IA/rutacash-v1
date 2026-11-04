@@ -103,6 +103,7 @@ export function saleFrom(c: V): Sale {
     disbursedByUserId: c.disbursedBy ?? undefined, fechaDesembolso: c.disbursementDate ?? undefined, disbursedAt: c.disbursedAt ?? undefined,
     saleRequestId: c.saleRequestId ?? undefined, motivoPerdida: s(c.lossReason), createdAt: c.createdAt ?? '', updatedAt: c.updatedAt ?? c.createdAt ?? '',
     rectificationCount: Number(c.rectificationCount ?? 0),
+    deliveredOn: c.deliveredOn ?? undefined,
   };
 }
 

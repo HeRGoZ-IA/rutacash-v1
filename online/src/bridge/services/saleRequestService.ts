@@ -186,6 +186,32 @@ async function recordRectificationCaseOnline(saleId: string, input: { blocker: s
   }, input.operationId));
 }
 
+// ---------- 0042 · venta registrada tarde y fecha de entrega (solo Administrador, ADEX Online) ----------
+
+export interface LateSaleResult { deliveredOn: string; businessDate: string; appliedToBooks: boolean }
+
+/**
+ * Caso 1: venta que no se registró el día en que se entregó el dinero (hasta 3 días atrás). `deliveredBy` = trabajador
+ * que entregó (sale de su efectivo) o vacío (el Administrador, desde la Base de la ruta). Si la semana de esa fecha ya
+ * está cerrada, el servidor la deja con la fecha de hoy y guarda la real aparte (`appliedToBooks: false`).
+ */
+export async function createLateSaleOnline(input: Conditions & { deliveredOn: string; deliveredBy?: string; reason: string }): Promise<LateSaleResult> {
+  return asSaleError(async () => {
+    const r = await money<Record<string, unknown>>('POST', '/v1/credits/late', {
+      ...conditions(input, clientId(input.clientId)), deliveredOn: input.deliveredOn, deliveredBy: input.deliveredBy || null, reason: input.reason.trim(),
+    }, generateId());
+    return r['lateSale'] as LateSaleResult;
+  });
+}
+
+/** Caso 2: corrige la fecha de entrega de una venta registrada tarde (hasta 3 días antes; una sola vez). */
+export async function correctDeliveryDateOnline(saleId: string, deliveredOn: string, reason: string): Promise<LateSaleResult> {
+  return asSaleError(async () => {
+    const r = await money<Record<string, unknown>>('POST', `/v1/credits/${encodeURIComponent(saleId)}/delivery-date`, { deliveredOn, reason: reason.trim() }, generateId());
+    return r['deliveryDate'] as LateSaleResult;
+  });
+}
+
 // Firmas ORIGINALES de CLEAN (las pantallas y servicios originales las llaman así).
 export const approveSaleRequest = approveSaleRequestOnline as unknown as typeof Clean.approveSaleRequest;
 export const rejectSaleRequest = rejectSaleRequestOnline as unknown as typeof Clean.rejectSaleRequest;

@@ -201,6 +201,16 @@ export async function controllerAuthorityReady(pool: pg.Pool): Promise<boolean> 
   }
 }
 
+/** 0042: venta registrada tarde y corrección de la fecha de entrega. */
+export async function lateSaleReady(pool: pg.Pool): Promise<boolean> {
+  try {
+    const r = await pool.query<{ ok: boolean }>("select to_regprocedure('adex.credit_correct_delivery_date(uuid,text,date,text)') is not null as ok");
+    return r.rows[0]?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Bloque A post-R73 (0032): rectificación con pagos y reaplicación de pagos anulados. */
 export async function rectificationPaymentsReady(pool: pg.Pool): Promise<boolean> {
   for (let i = 1; i <= 3; i++) {

@@ -106,6 +106,9 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX527': return new ApiError(409, 'PAYMENT_ADJUSTMENT_PENDING');
     case 'AX528': return new ApiError(409, 'PAYMENT_NOT_REAPPLICABLE');
     case 'AX529': return new ApiError(409, 'REVERSAL_SETTLED');
+    // 0042: venta registrada tarde y corrección de la fecha de entrega (máximo 3 días; una sola vez por venta).
+    case 'AX530': return new ApiError(400, 'DELIVERY_DATE_OUT_OF_RANGE');
+    case 'AX531': return new ApiError(409, 'DELIVERY_DATE_ALREADY_SET');
     // Fase 5 · recaudos y gastos (0013). Sin cifras de saldos.
     case 'AX701': return new ApiError(409, 'CREDIT_NOT_ACTIVE');
     case 'AX702': return new ApiError(409, 'CREDIT_NOT_DISBURSED');

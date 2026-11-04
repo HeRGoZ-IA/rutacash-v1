@@ -1,0 +1,834 @@
+// PUENTE de `src/pages/admin/ActiveSalesPage.tsx` (CLEAN) · 0042 (propietario 2026-11-04): la misma pantalla con
+//   · «Venta entregada otro día» en Nueva venta (solo Administrador): una venta que no se registró el día en que se
+//     entregó el dinero, hasta 3 días atrás, con quién entregó (su efectivo) o el Administrador (Base de la ruta) y motivo;
+//   · «Corregir fecha de entrega» en el detalle (solo Administrador, una vez, hasta 3 días antes de la fecha registrada);
+//   · el detalle muestra la fecha del desembolso y, si se registró tarde, la de entrega y la de registro.
+// Días cerrados no se reabren: el servidor decide y la pantalla dice el resultado.
+import { useState, useEffect } from 'react'
+import { DEFAULT_INSTALLMENTS } from '@/lib/saleDefaults'
+import { Plus, CreditCard, Search, XCircle, DollarSign, AlertTriangle, RotateCcw, CalendarClock } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
+import { Input, Select, Textarea } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
+import { SearchSelect } from '@/components/ui/SearchSelect'
+import { SaleStatusBadge, InstallmentStatusBadge } from '@/components/ui/Badge'
+import { Modal } from '@/components/ui/Modal'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { PaymentDaysBadges } from '@/components/ui/PaymentDaysBadges'
+import { RectifySaleModal } from '@/components/ui/RectifySaleModal'
+import { toast } from '@/components/ui/Toast'
+import { db } from '@/lib/db'
+import { useTenant } from '@/hooks/useTenant'
+import { useAuth } from '@/hooks/useAuth'
+import { useDataRevision } from '@/hooks/useDataRevision'
+import { useRouteCapital } from '@/hooks/useRouteCapital'
+import { generateId } from '@/lib/utils'
+import { formatCurrency, formatDate, today } from '@/lib/formatters'
+import { formatClientName, formatPersonName } from '@/lib/displayName'
+import {
+  generateInstallments, calculateTotalWithInterest,
+  estimateFinalDate, calculateInstallmentValue,
+  getLastPaidInstallmentNumber, installmentsCoveredBy, installmentRangeLabel,
+} from '@/services/installmentEngine'
+import { annulPayment, canAnnulPayment, canReapplyPayment } from '@/services/paymentCorrectionService'
+import { ReapplyPaymentModal } from '@/components/ui/ReapplyPaymentModal'
+import { effectivePayments, paymentDisplayStateOf, paymentHistoryRows } from '@/lib/paymentState'
+import { compareByCreation } from '@/lib/eventOrder'
+import {
+  AnnulPaymentButton, AnnulPaymentModal, PaymentAnnulmentDetail, PaymentStateBadge, type AnnulPaymentTarget,
+} from '@/components/ui/PaymentAnnulment'
+import { registerPayment, quickAmounts, amountForInstallments, pendingInstallments } from '@/services/paymentService'
+import { CollectorPicker } from '@/components/ui/CollectorPicker'
+import { createDirectSale, findActiveSaleForClient, markSaleLost } from '@/services/saleRequestService'
+import { createLateSaleOnline, correctDeliveryDateOnline } from '../../services/saleRequestService'
+import { getAssignedRouteIds } from '@/lib/roles'
+import { calendar } from '../../../runtime/projection.ts'
+import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from '@/lib/permissions'
+import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
+import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
+import type { Sale, Client, Route, Installment, Payment, User } from '@/models/types'
+
+// Días de pago (1=lunes ... 6=sábado, 0=domingo)
+const WEEK_DAYS = [
+  { value: 1, label: 'Lun' }, { value: 2, label: 'Mar' }, { value: 3, label: 'Mié' },
+  { value: 4, label: 'Jue' }, { value: 5, label: 'Vie' }, { value: 6, label: 'Sáb' },
+  { value: 0, label: 'Dom' },
+]
+
+// Tasa de interés fija seleccionable (Paquete 1: solo 10% o 20%, sin tasa libre)
+const TASA_OPTIONS = [
+  { value: '10', label: '10%' },
+  { value: '20', label: '20%' },
+]
+
+/** yyyy-MM-dd ± n días (calendario puro, sin zona horaria). */
+function shiftDay(day: string, n: number): string {
+  const [y, m, d] = day.split('-').map(Number)
+  return new Date(Date.UTC(y!, m! - 1, d! + n)).toISOString().slice(0, 10)
+}
+
+const ISO_DAY = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/
+
+export default function ActiveSalesPage() {
+  const { tenantId, currency } = useTenant()
+  const officeFilter = useOfficeRouteFilter()
+  const { user } = useAuth()
+  const [sales, setSales] = useState<Sale[]>([])
+  const [clients, setClients] = useState<Client[]>([])
+  const [routes, setRoutes] = useState<Route[]>([])
+  // Última parcela pagada por venta (para la columna Parcelas).
+  const [paidBySale, setPaidBySale] = useState<Record<string, number>>({})
+  const [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [detailSale, setDetailSale] = useState<Sale | null>(null)
+  // Ronda 73 · SOC-09: corrección de la venta desembolsada (Administrador, sin cobros).
+  const [rectifyOpen, setRectifyOpen] = useState(false)
+  // Bloque A post-R73: pago anulado que se reaplica (mismo efectivo, misma cuenta).
+  const [reapplyTarget, setReapplyTarget] = useState<Payment | null>(null)
+  const [detailInstallments, setDetailInstallments] = useState<Installment[]>([])
+  // Pagos del crédito abierto (vigentes y anulados) y nombres para mostrarlos.
+  const [detailPayments, setDetailPayments] = useState<Payment[]>([])
+  const [users, setUsers] = useState<User[]>([])
+  const [annulTarget, setAnnulTarget] = useState<(AnnulPaymentTarget & { paymentId: string }) | null>(null)
+  const [lostOpen, setLostOpen] = useState(false)
+  const [lostSale, setLostSale] = useState<Sale | null>(null)
+  const [motivoPerdida, setMotivoPerdida] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [paymentSale, setPaymentSale] = useState<Sale | null>(null)
+  const [paymentValor, setPaymentValor] = useState(0)
+  // Petición del socio (3.15): «Cuotas a pagar» llena el valor; escribir el valor o usar un botón rápido lo vacía.
+  const [paymentCuotas, setPaymentCuotas] = useState('')
+  const setPaymentValorManual = (v: number) => { setPaymentCuotas(''); setPaymentValor(v) }
+  /** Cobrador RESPONSABLE del recaudo (quien recibió el dinero), no quien lo digita. */
+  const [paymentCollectorId, setPaymentCollectorId] = useState('')
+  const [payingQuick, setPayingQuick] = useState(false)
+  // Revisión socio 25-jun — alerta de segunda venta activa del mismo cliente.
+  const [activeSale, setActiveSale] = useState<Sale | null>(null)
+  const [confirmSecondOpen, setConfirmSecondOpen] = useState(false)
+  // 0042: «Venta entregada otro día» (Nueva venta) y «Corregir fecha de entrega» (detalle). Solo Administrador.
+  const esAdmin = user?.rol === 'admin'
+  const [hoy, setHoy] = useState(today())
+  const [late, setLate] = useState({ on: false, deliveredOn: '', deliveredBy: '', reason: '' })
+  const [dateFix, setDateFix] = useState<{ open: boolean; deliveredOn: string; reason: string; saving: boolean }>({ open: false, deliveredOn: '', reason: '', saving: false })
+  useEffect(() => {
+    let vivo = true
+    calendar().then(c => { if (vivo && ISO_DAY.test(c.businessDate)) setHoy(c.businessDate) }).catch(() => undefined)
+    return () => { vivo = false }
+  }, [])
+
+  const [form, setForm] = useState({
+    clientId: '', routeId: '', valorVenta: 0, tasaInteres: 20,
+    numeroCuotas: DEFAULT_INSTALLMENTS, frecuenciaPago: 'diaria' as const, fechaInicio: today(),
+    paymentDays: [1, 2, 3, 4, 5, 6] as number[], // Lun-Sáb por defecto
+  })
+
+  // Base de la ruta seleccionada (no se permite vender por encima).
+  const { available: capDisponible } = useRouteCapital(form.routeId)
+  // Entregada por un trabajador (venta tarde): sale de SU efectivo, no de la Base; el servidor lo valida.
+  const pagaBase = !(late.on && late.deliveredBy)
+  const capExcedido = pagaBase && capDisponible != null && form.valorVenta > capDisponible
+
+  function togglePaymentDay(day: number) {
+    setForm(f => ({
+      ...f,
+      paymentDays: f.paymentDays.includes(day)
+        ? f.paymentDays.filter(d => d !== day)
+        : [...f.paymentDays, day].sort((a, b) => a - b),
+    }))
+  }
+
+  useEffect(() => { load() }, [tenantId, user])
+
+  // Un abono registrado en otra pestaña (Cobrador/Supervisor, mismo navegador)
+  // cambia saldos y parcelas: se recarga la lista sin spinner ni F5.
+  const revision = useDataRevision()
+  useEffect(() => {
+    if (revision === 0) return
+    load(true)
+    // El detalle abierto también se relee: un pago anulado en otra pestaña cambia
+    // saldo, parcelas y estado del crédito.
+    if (detailSale) refreshDetail(detailSale.id)
+  }, [revision])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function load(silent = false) {
+    if (!silent) setLoading(true)
+    const [rawSales, rawClients, rawRoutes, rawUsers] = await Promise.all([
+      db.sales.where('tenantId').equals(tenantId).toArray(),
+      db.clients.where('tenantId').equals(tenantId).toArray(),
+      db.routes.where('tenantId').equals(tenantId).toArray(),
+      db.users.where('tenantId').equals(tenantId).toArray(),
+    ])
+    setUsers(rawUsers)
+    // RESTRICCIÓN POR RUTAS: ventas, clientes y rutas limitados a los autorizados.
+    const allSales = filterByAccessibleRoute(user, rawSales)
+    const allClients = filterByAccessibleRoute(user, rawClients)
+    const allRoutes = filterAccessibleRoutes(user, rawRoutes)
+    // Parcelas de estas ventas → última parcela pagada por venta.
+    const insts = await db.installments.where('saleId').anyOf(allSales.map(s => s.id)).toArray()
+    const bySale = new Map<string, typeof insts>()
+    for (const i of insts) {
+      const arr = bySale.get(i.saleId) ?? []
+      arr.push(i)
+      bySale.set(i.saleId, arr)
+    }
+    const paid: Record<string, number> = {}
+    for (const s of allSales) paid[s.id] = getLastPaidInstallmentNumber(bySale.get(s.id) ?? [])
+    setPaidBySale(paid)
+    setSales(allSales)
+    setClients(allClients)
+    setRoutes(allRoutes)
+    setLoading(false)
+  }
+
+  const clientMap = new Map(clients.map(c => [c.id, c]))
+  const routeMap = new Map(routes.map(r => [r.id, r]))
+
+  // Revisión socio 25-jun — clientes del formulario filtrados por la ruta seleccionada.
+  const clientsForRoute = form.routeId ? clients.filter(c => c.routeId === form.routeId) : []
+
+  // Al seleccionar un cliente, detectar si ya tiene una venta activa (para advertir).
+  useEffect(() => {
+    let alive = true
+    if (!form.clientId) { setActiveSale(null); return }
+    findActiveSaleForClient(form.clientId).then(s => { if (alive) setActiveSale(s) })
+    return () => { alive = false }
+  }, [form.clientId])
+
+  // Cambiar de ruta limpia el cliente si ya no pertenece a la nueva ruta.
+  function handleRouteChange(routeId: string) {
+    const route = routeMap.get(routeId)
+    setForm(f => {
+      const keepClient = f.clientId && clients.find(c => c.id === f.clientId)?.routeId === routeId
+      return {
+        ...f,
+        routeId,
+        clientId: keepClient ? f.clientId : '',
+        // La tasa solo puede ser 10% o 20%: si la ruta trae otra, se usa 20% por defecto
+        tasaInteres: route?.tasaInteres === 10 ? 10 : 20,
+      }
+    })
+  }
+
+  // Montos rápidos del modal de pago. Fuente única `quickAmounts`: se calculan
+  // sobre el SALDO REAL de la parcela actual, no sobre el nominal `valorCuota`
+  // (la última parcela absorbe el redondeo y puede valer menos que el nominal).
+  const paymentQuick = paymentSale ? quickAmounts(paymentSale, detailInstallments) : null
+
+  // Recorte por Oficina/Ruta ANTES de los filtros propios de la pantalla.
+  const salesEnAlcance = officeFilter.filterRows(sales)
+  const filtered = salesEnAlcance.filter(s => {
+    const client = clientMap.get(s.clientId)
+    const matchSearch = !search || client?.nombre.toLowerCase().includes(search.toLowerCase()) || client?.documento.includes(search)
+    // La ruta la aplica el filtro Oficina → Ruta compartido (arriba).
+    const matchRoute = true
+    return matchSearch && matchRoute
+  })
+
+  const calculated = (() => {
+    if (form.valorVenta <= 0) return null
+    const { valorInteres, valorTotal } = calculateTotalWithInterest({ valorVenta: form.valorVenta, tasaInteres: form.tasaInteres })
+    const valorCuota = calculateInstallmentValue({ valorTotal, numeroCuotas: form.numeroCuotas })
+    const fechaFinal = estimateFinalDate({ fechaInicio: form.fechaInicio, numeroCuotas: form.numeroCuotas, frecuencia: form.frecuenciaPago, paymentDays: form.paymentDays })
+    return { valorInteres, valorTotal, valorCuota, fechaFinal }
+  })()
+
+  // Valida el formulario. Si pasa y el cliente ya tiene una venta activa, abre la
+  // confirmación de "segunda venta"; si no, crea la venta directamente.
+  function handleCreateSale() {
+    if (!form.routeId) { toast.error('Debes seleccionar una ruta'); return }
+    if (!canAccessRoute(user, form.routeId)) { toast.error('No tienes permiso sobre esa ruta.'); return }
+    if (!form.clientId) { toast.error('Debes seleccionar un cliente'); return }
+    // El cliente debe pertenecer a la ruta seleccionada.
+    const client = clientMap.get(form.clientId)
+    if (!client || client.routeId !== form.routeId) { toast.error('El cliente seleccionado no pertenece a la ruta'); return }
+    if (form.valorVenta <= 0) { toast.error('El valor de la venta debe ser mayor a 0'); return }
+    if (capExcedido && capDisponible != null) { toast.error(`La venta supera el dinero disponible (${formatCurrency(capDisponible, currency)})`); return }
+    if (form.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return }
+    if (![10, 20].includes(form.tasaInteres)) { toast.error('La tasa de interés debe ser 10% o 20%'); return }
+    if (late.on) {
+      if (!late.deliveredOn || late.deliveredOn >= hoy || late.deliveredOn < shiftDay(hoy, -3)) { toast.error('La fecha de entrega debe estar entre 3 días antes y ayer'); return }
+      if (late.reason.trim().length < 10) { toast.error('Escribe el motivo (al menos 10 caracteres)'); return }
+      if (form.fechaInicio < late.deliveredOn) { toast.error('La fecha de inicio de cobro no puede ser anterior a la fecha de entrega'); return }
+    } else if (form.fechaInicio < today()) { toast.error('La fecha de inicio de cobro no puede ser anterior a hoy'); return }
+    if (form.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
+    // Si el cliente ya tiene una venta activa, pedir confirmación antes de crear otra.
+    if (activeSale) { setConfirmSecondOpen(true); return }
+    doCreateSale()
+  }
+
+  async function doCreateSale() {
+    setConfirmSecondOpen(false)
+    if (!user) return
+    setSaving(true)
+    try {
+      // Por el SERVICIO (incidente 2026-09): permiso, integridad, capital, regla de
+      // crédito activo y atribución del desembolso se validan en dominio, no aquí.
+      if (late.on) {
+        const r = await createLateSaleOnline({
+          routeId: form.routeId, clientId: form.clientId, valorVenta: form.valorVenta, tasaInteres: form.tasaInteres, numeroCuotas: form.numeroCuotas,
+          frecuenciaPago: form.frecuenciaPago, fechaInicio: form.fechaInicio, paymentDays: form.paymentDays,
+          deliveredOn: late.deliveredOn, deliveredBy: late.deliveredBy || undefined, reason: late.reason,
+        })
+        if (r.appliedToBooks) toast.success(`Venta registrada con fecha del ${formatDate(r.deliveredOn)}`)
+        else toast.warning(`La semana del ${formatDate(r.deliveredOn)} ya está cerrada: la venta quedó con la fecha de hoy y la fecha real se guardó aparte`)
+        setLate({ on: false, deliveredOn: '', deliveredBy: '', reason: '' })
+      } else {
+        await createDirectSale({
+          tenantId, routeId: form.routeId, clientId: form.clientId, createdByUserId: user.id,
+          valorVenta: form.valorVenta, tasaInteres: form.tasaInteres, numeroCuotas: form.numeroCuotas,
+          frecuenciaPago: form.frecuenciaPago, fechaInicio: form.fechaInicio, paymentDays: form.paymentDays,
+        }, user)
+        toast.success('Venta creada con sus parcelas')
+      }
+      setCreateOpen(false)
+      setForm({ clientId: '', routeId: '', valorVenta: 0, tasaInteres: 20, numeroCuotas: DEFAULT_INSTALLMENTS, frecuenciaPago: 'diaria', fechaInicio: today(), paymentDays: [1, 2, 3, 4, 5, 6] })
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al crear la venta')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function openDetail(sale: Sale) {
+    setDetailSale(sale)
+    setDetailPayments([])
+    await refreshDetail(sale.id)
+  }
+
+  /** Relee venta, parcelas y pagos del detalle desde la base (fuente de verdad). */
+  async function refreshDetail(saleId: string) {
+    const [fresh, insts, pays] = await Promise.all([
+      db.sales.get(saleId),
+      db.installments.where('saleId').equals(saleId).toArray(),
+      db.payments.where('saleId').equals(saleId).toArray(),
+    ])
+    if (fresh) setDetailSale(fresh)
+    setDetailInstallments(insts.sort((a, b) => a.numero - b.numero))
+    setDetailPayments(pays.sort(compareByCreation).reverse())
+  }
+
+  // Trabajadores con efectivo en la ruta elegida (Cobrador y Supervisor activos asignados): quién pudo entregar.
+  const routeWorkers = form.routeId
+    ? users.filter(u => (u.rol === 'cobrador' || u.rol === 'supervisor') && u.status === 'activo' && getAssignedRouteIds(u).includes(form.routeId))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre))
+    : []
+
+  async function saveDateFix() {
+    if (!detailSale) return
+    const registrada = detailSale.fechaDesembolso ?? ''
+    if (!dateFix.deliveredOn || dateFix.deliveredOn >= registrada || dateFix.deliveredOn < shiftDay(registrada, -3)) {
+      toast.error('La fecha de entrega debe estar entre 3 días antes de la fecha registrada y el día anterior'); return
+    }
+    if (dateFix.reason.trim().length < 10) { toast.error('Escribe el motivo (al menos 10 caracteres)'); return }
+    setDateFix(d => ({ ...d, saving: true }))
+    try {
+      const r = await correctDeliveryDateOnline(detailSale.id, dateFix.deliveredOn, dateFix.reason)
+      if (r.appliedToBooks) toast.success(`Fecha de entrega corregida: ${formatDate(r.deliveredOn)}`)
+      else toast.warning(`La semana ya está cerrada: la venta conserva su fecha y la entrega del ${formatDate(r.deliveredOn)} quedó guardada aparte`)
+      setDateFix({ open: false, deliveredOn: '', reason: '', saving: false })
+      await refreshDetail(detailSale.id)
+      await load(true)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo corregir la fecha')
+      setDateFix(d => ({ ...d, saving: false }))
+    }
+  }
+
+  const userName = (id?: string) => { const n = id ? users.find(u => u.id === id)?.nombre : undefined; return n ? formatPersonName(n) : undefined }
+
+  function openAnnul(p: Payment) {
+    if (!detailSale) return
+    const parcelas = installmentRangeLabel(installmentsCoveredBy(detailInstallments, effectivePayments(detailPayments), p.id))
+    setAnnulTarget({
+      paymentId: p.id,
+      cliente: formatClientName(clientMap.get(detailSale.clientId)?.nombre) || 'Cliente',
+      credito: `${formatCurrency(detailSale.valorVenta, currency)} · ${formatDate(detailSale.fechaInicio)}`,
+      valor: p.valor, fecha: p.fecha,
+      cobrador: userName(p.collectorId), ruta: routeMap.get(p.routeId)?.nombre,
+      parcelas: parcelas || undefined,
+    })
+  }
+
+  async function confirmAnnul(reason: string) {
+    if (!annulTarget || !detailSale) return
+    await annulPayment({ actor: user, tenantId, paymentId: annulTarget.paymentId, reason })
+    toast.success('Recaudo anulado. La venta se recalculó.')
+    setAnnulTarget(null)
+    await refreshDetail(detailSale.id)
+    await load(true)
+  }
+
+  // Registro de pago: TODA la lógica financiera vive en `paymentService`
+  // (lectura fresca, autorización, validaciones, tope al saldo y transacción).
+  // Aquí solo se recoge el importe, se muestra el resultado y se refresca.
+  async function handleQuickPayment() {
+    if (!paymentSale) return
+    setPayingQuick(true)
+    try {
+      const result = await registerPayment({
+        saleId: paymentSale.id,
+        requestedAmount: paymentValor,
+        actor: user,
+        // Quien recibió el dinero. Si va vacío, el servicio lo resuelve (y rechaza
+        // si la ruta tiene varios cobradores y no se indicó cuál).
+        collectorId: paymentCollectorId || undefined,
+      })
+      // Ronda 48.1 (Online): sin confirmación no es un error. Registrar otra vez con el MISMO
+      // valor comprueba ese abono; nunca crea otro.
+      if (!result.ok) {
+        const aviso = result.code === 'PAYMENT_UNCONFIRMED' || result.code === 'PREVIOUS_PAYMENT_CONFIRMED'
+        ;(aviso ? toast.warning : toast.error)(result.message)
+        if (result.code === 'PREVIOUS_PAYMENT_CONFIRMED') await load()
+        return
+      }
+      if (result.capped) {
+        toast.warning(`El pago se limitó al saldo pendiente: ${formatCurrency(result.appliedAmount, currency)}. La deuda queda en ${formatCurrency(0, currency)}.`)
+      } else {
+        toast.success('Pago registrado correctamente')
+      }
+      setPaymentSale(null)
+      setPaymentValor(0)
+      setPaymentCuotas('')
+      setPaymentCollectorId('')
+      setDetailSale(null)
+      await load()
+    } finally { setPayingQuick(false) }
+  }
+
+  async function markLost() {
+    if (!lostSale || !motivoPerdida) { toast.error('Ingresa el motivo'); return }
+    if (!user) return
+    // El servicio valida permiso, estado vigente y audita (Ronda 6/6B).
+    try {
+      await markSaleLost(lostSale.id, user, motivoPerdida)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo marcar la venta como perdida')
+      await load()
+      return
+    }
+    toast.success('Venta marcada como perdida')
+    setLostOpen(false)
+    setDetailSale(null)
+    await load()
+  }
+
+  const freqOptions = [
+    { value: 'diaria', label: 'Diaria' }, { value: 'semanal', label: 'Semanal' },
+    { value: 'quincenal', label: 'Quincenal' }, { value: 'mensual', label: 'Mensual' },
+  ]
+
+  return (
+    <div className="p-4 md:p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Ventas activas</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{filtered.length} registro(s)</p>
+        </div>
+        <Button onClick={() => setCreateOpen(true)} icon={<Plus className="w-4 h-4" />}>Nueva venta</Button>
+      </div>
+
+      {/* FILTROS (Ronda 48): buscador y Oficina → Ruta en una fila en escritorio. */}
+      <OfficeRouteFilterBar
+        offices={officeFilter.offices}
+        officeId={officeFilter.officeId}
+        onOfficeChange={officeFilter.setOfficeId}
+        routesInOffice={officeFilter.routesInOffice}
+        routeId={officeFilter.routeId}
+        onRouteChange={officeFilter.setRouteId}
+        hasUnassigned={officeFilter.hasUnassigned}
+        contextLabel={officeFilter.contextLabel}
+        showContext={officeFilter.hasOfficeFilter}
+        search={<Input aria-label="Buscar ventas por cliente" placeholder="Buscar cliente..." value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />}
+      />
+
+      {loading ? (
+        <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin" /></div>
+      ) : filtered.length === 0 ? (
+        <EmptyState icon={<CreditCard className="w-8 h-8" />} title="No hay ventas" action={<Button onClick={() => setCreateOpen(true)} icon={<Plus className="w-4 h-4" />}>Nueva venta</Button>} />
+      ) : (
+        <>
+        {/* Ronda 50 · móvil: una tarjeta por venta (sin desplazamiento horizontal ni importes cortados). */}
+        <ul className="sm:hidden space-y-2" data-testid="active-sales-cards">
+          {filtered.map(s => {
+            const client = clientMap.get(s.clientId)
+            const route = routeMap.get(s.routeId)
+            return (
+              <li key={s.id}>
+                <button type="button" onClick={() => openDetail(s)} className="w-full text-left bg-white rounded-2xl shadow-card border border-gray-100 p-4 active:bg-primary-50/40">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 [overflow-wrap:anywhere]">{formatClientName(client?.nombre) || 'N/A'}</p>
+                      <p className="text-xs text-gray-500">{client?.documento ?? ''}</p>
+                    </div>
+                    <SaleStatusBadge status={s.status} />
+                  </div>
+                  <div className="mt-3 flex items-end justify-between gap-3">
+                    <div>
+                      <p className="text-xs text-gray-500">Saldo</p>
+                      <p className={`text-lg font-bold tabular-nums leading-tight ${s.saldo > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{formatCurrency(s.saldo)}</p>
+                    </div>
+                    <div className="text-right text-xs text-gray-500 tabular-nums">
+                      <p>Venta <span className="font-medium text-gray-800">{formatCurrency(s.valorVenta)}</span> · {s.tasaInteres}%</p>
+                      <p>Parcela <span className="font-medium text-gray-800">{formatCurrency(s.valorCuota)}</span> · {paidBySale[s.id] ?? 0}/{s.numeroCuotas}</p>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs text-gray-500">{route?.nombre ?? '—'} · {formatDate(s.fechaInicio)}</p>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+        <div className="hidden sm:block bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Cliente</th>
+                  <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden sm:table-cell">Venta</th>
+                  <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Saldo</th>
+                  <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden md:table-cell">Parcela</th>
+                  <th className="text-center text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden sm:table-cell">Parcelas</th>
+                  <th className="text-center text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Estado</th>
+                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3 hidden lg:table-cell">Ruta</th>
+                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">Fecha</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filtered.map(s => {
+                  const client = clientMap.get(s.clientId)
+                  const route = routeMap.get(s.routeId)
+                  return (
+                    <tr key={s.id} onClick={() => openDetail(s)} className="hover:bg-primary-50/40 cursor-pointer transition-colors">
+                      <td className="px-4 py-3">
+                        <p className="text-sm font-medium text-gray-900">{formatClientName(client?.nombre) || 'N/A'}</p>
+                        <p className="text-xs text-gray-500">{client?.documento ?? ''}</p>
+                      </td>
+                      <td className="px-4 py-3 text-right hidden sm:table-cell">
+                        {/* Revisión 2 socio 30-jun: "Venta" muestra el valor prestado SIN interés. */}
+                        <p className="text-sm font-medium text-gray-900">{formatCurrency(s.valorVenta)}</p>
+                        <p className="text-xs text-gray-500">{s.tasaInteres}% interés</p>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={`text-sm font-bold ${s.saldo > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{formatCurrency(s.saldo)}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right hidden md:table-cell">
+                        <p className="text-sm text-gray-700">{formatCurrency(s.valorCuota)}</p>
+                      </td>
+                      <td className="px-4 py-3 text-center hidden sm:table-cell">
+                        {/* Parcelas: última pagada / total (no la próxima pendiente). */}
+                        <span className="text-sm font-medium text-gray-700">{paidBySale[s.id] ?? 0}/{s.numeroCuotas}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center"><SaleStatusBadge status={s.status} /></td>
+                      <td className="px-4 py-3 hidden lg:table-cell"><span className="text-sm text-gray-600">{route?.nombre}</span></td>
+                      <td className="px-4 py-3"><span className="text-sm text-gray-500">{formatDate(s.fechaInicio)}</span></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        </>
+      )}
+
+
+      {/* Create Sale Modal */}
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nueva venta" size="mdPlus"
+        footer={<><Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancelar</Button><Button onClick={handleCreateSale} loading={saving} disabled={capExcedido}>Crear venta</Button></>}>
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Select label="Ruta" value={form.routeId} onChange={e => handleRouteChange(e.target.value)}
+              options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
+            <SearchSelect label="Cliente" value={form.clientId} onChange={clientId => setForm(f => ({ ...f, clientId }))}
+              options={clientsForRoute.map(c => ({ value: c.id, label: `${formatClientName(c.nombre)} - ${c.documento}` }))}
+              placeholder={form.routeId ? 'Escribe el nombre o el documento' : 'Selecciona primero la ruta'} disabled={!form.routeId} required />
+          </div>
+          {form.routeId && clientsForRoute.length === 0 && (
+            <p className="text-xs text-amber-600">No hay clientes registrados en esta ruta.</p>
+          )}
+          {/* Alerta: el cliente seleccionado ya tiene una venta activa */}
+          {activeSale && (
+            <div className="flex items-start gap-2 p-3 bg-amber-50 rounded-xl border border-amber-200">
+              <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div className="text-xs text-amber-700">
+                <p className="font-semibold">Este cliente ya tiene una venta activa.</p>
+                <p className="mt-0.5">
+                  Venta {formatCurrency(activeSale.valorVenta, currency)} · Saldo {formatCurrency(activeSale.saldo, currency)} · Inicio {formatDate(activeSale.fechaInicio)} · Ruta {routeMap.get(activeSale.routeId)?.nombre ?? '—'}
+                </p>
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <MoneyInput label="Valor de la venta" currency={currency} value={form.valorVenta} onValueChange={v => setForm(f => ({ ...f, valorVenta: v }))} required />
+            <Select label="Tasa interés" value={String(form.tasaInteres)} onChange={e => setForm(f => ({ ...f, tasaInteres: Number(e.target.value) }))} options={TASA_OPTIONS} />
+            <Input label="N° de parcelas" type="number" min={1} required value={form.numeroCuotas || ''} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder={`Ej: ${DEFAULT_INSTALLMENTS}`} />
+          </div>
+          {form.routeId && capDisponible != null && (
+            <div className={`rounded-xl p-3 text-sm border ${capExcedido ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-100 text-gray-600'}`}>
+              Disponible para esta venta: <span className="font-bold">{formatCurrency(capDisponible, currency)}</span>
+              {capExcedido && <p className="text-xs mt-1 font-medium">El valor supera el dinero disponible para esta venta. Reduce el monto o solicita capital.</p>}
+            </div>
+          )}
+          {esAdmin && (
+            <div className="rounded-xl border border-gray-200 p-3 space-y-3">
+              <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                <input type="checkbox" data-testid="late-sale-toggle" className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  checked={late.on} onChange={e => {
+                    const on = e.target.checked
+                    setLate(l => ({ ...l, on, deliveredOn: on ? (l.deliveredOn || shiftDay(hoy, -1)) : l.deliveredOn }))
+                  }} />
+                <span>
+                  <span className="font-medium">Venta entregada otro día</span>
+                  <span className="block text-xs text-gray-500">El dinero se entregó hasta 3 días atrás y no se registró ese día.</span>
+                </span>
+              </label>
+              {late.on && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Input label="Fecha real de entrega" type="date" data-testid="late-sale-date" min={shiftDay(hoy, -3)} max={shiftDay(hoy, -1)}
+                    value={late.deliveredOn} onChange={e => setLate(l => ({ ...l, deliveredOn: e.target.value }))}
+                    hint="Si esa semana ya está cerrada, la venta queda con la fecha de hoy y la real se guarda aparte" />
+                  <Select label="¿Quién entregó el dinero?" data-testid="late-sale-by" value={late.deliveredBy}
+                    onChange={e => setLate(l => ({ ...l, deliveredBy: e.target.value }))}
+                    options={[{ value: '', label: 'Yo (sale de la Base de la ruta)' },
+                      ...routeWorkers.map(u => ({ value: u.id, label: `${formatPersonName(u.nombre)} (sale de su efectivo)` }))]} />
+                  <div className="sm:col-span-2">
+                    <Textarea label="Motivo" data-testid="late-sale-reason" rows={2} value={late.reason} required
+                      onChange={e => setLate(l => ({ ...l, reason: e.target.value }))} placeholder="Ej.: el cobrador olvidó registrar la venta" />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Select label="Frecuencia de pago" value={form.frecuenciaPago} onChange={e => setForm(f => ({ ...f, frecuenciaPago: e.target.value as any }))} options={freqOptions} />
+            <Input label="Fecha inicio de cobro" type="date" min={late.on && late.deliveredOn ? late.deliveredOn : today()} value={form.fechaInicio} onChange={e => setForm(f => ({ ...f, fechaInicio: e.target.value }))}
+              hint={late.on ? 'No puede ser anterior a la fecha de entrega' : 'No puede ser anterior a hoy'} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Días de pago</label>
+            <div className="flex flex-wrap gap-2">
+              {WEEK_DAYS.map(d => {
+                const active = form.paymentDays.includes(d.value)
+                return (
+                  <button
+                    key={d.value}
+                    type="button"
+                    onClick={() => togglePaymentDay(d.value)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                      active
+                        ? 'bg-primary-600 text-white border-primary-600'
+                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="mt-1 text-xs text-gray-500">Selecciona los días en que se cobrará. Para frecuencia semanal puedes dejar un solo día.</p>
+          </div>
+          {calculated && (
+            <div className="bg-primary-50 rounded-xl p-4 grid grid-cols-2 gap-3">
+              <div><p className="text-xs text-gray-500">Interés total</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorInteres, currency)}</p></div>
+              <div><p className="text-xs text-gray-500">Total a pagar</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorTotal, currency)}</p></div>
+              <div><p className="text-xs text-gray-500">Valor parcela</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorCuota, currency)}</p></div>
+              <div><p className="text-xs text-gray-500">Fecha estimada fin</p><p className="font-bold text-primary-700">{formatDate(calculated.fechaFinal)}</p></div>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Detail Modal */}
+      {detailSale && (
+        <Modal open={!!detailSale} onClose={() => setDetailSale(null)} title="Detalle de venta" size="lg"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setDetailSale(null)}>Cerrar</Button>
+              {detailSale.status === 'activa' && (
+                <Button onClick={() => { setPaymentSale(detailSale); setPaymentCuotas(''); setPaymentValor(quickAmounts(detailSale, detailInstallments).parcela) }} icon={<DollarSign className="w-4 h-4" />}>Registrar pago</Button>
+              )}
+              {detailSale.status === 'activa' && (
+                <Button variant="danger" onClick={() => { setLostSale(detailSale); setLostOpen(true) }} icon={<XCircle className="w-4 h-4" />}>Marcar perdida</Button>
+              )}
+              {/* Bloque A post-R73: el diálogo se abre aunque haya pagos; el servidor explica si se puede corregir. */}
+              {user?.rol === 'admin' && detailSale.status === 'activa' && detailSale.disbursementStatus === 'desembolsado' && (
+                <Button variant="secondary" onClick={() => setRectifyOpen(true)}>Corregir venta</Button>
+              )}
+              {esAdmin && detailSale.disbursementStatus === 'desembolsado' && detailSale.fechaDesembolso && !detailSale.deliveredOn && (
+                <Button variant="secondary" data-testid="delivery-date-open" icon={<CalendarClock className="w-4 h-4" />}
+                  onClick={() => setDateFix({ open: true, deliveredOn: shiftDay(detailSale.fechaDesembolso!, -1), reason: '', saving: false })}>Corregir fecha de entrega</Button>
+              )}
+            </>
+          }>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-500">Venta</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorVenta)}</p></div>
+              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-500">Total+interés</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorTotal)}</p></div>
+              <div className="bg-amber-50 rounded-xl p-3"><p className="text-xs text-gray-500">Saldo</p><p className="font-bold text-amber-600">{formatCurrency(detailSale.saldo)}</p></div>
+              <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-500">Parcela</p><p className="font-bold text-gray-900">{formatCurrency(detailSale.valorCuota)}</p></div>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-sm">
+              <p className="text-gray-500">Frecuencia: <span className="font-medium text-gray-800 capitalize">{detailSale.frecuenciaPago}</span></p>
+              {detailSale.fechaDesembolso && (
+                <p className="text-gray-500" data-testid="sale-delivery-dates">Desembolso: <span className="font-medium text-gray-800">{formatDate(detailSale.fechaDesembolso)}</span>
+                  {detailSale.deliveredOn && detailSale.deliveredOn !== detailSale.fechaDesembolso && <> · entregada el <span className="font-medium text-gray-800">{formatDate(detailSale.deliveredOn)}</span></>}
+                  {detailSale.deliveredOn && <span className="text-xs text-gray-400"> · registrada el {formatDate(detailSale.createdAt)}</span>}
+                </p>
+              )}
+              <div className="flex items-center gap-1.5 text-gray-500">Días de pago: <PaymentDaysBadges days={detailSale.paymentDays} size="sm" /></div>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-700 mb-2">Parcelas ({detailInstallments.length})</p>
+              <div className="max-h-64 overflow-y-auto space-y-1.5">
+                {detailInstallments.map(inst => (
+                  <div key={inst.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-mono text-gray-500 w-6">#{inst.numero}</span>
+                      <span className="text-xs text-gray-500">{formatDate(inst.fechaVencimiento)}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-medium text-gray-700">{formatCurrency(inst.valor)}</span>
+                      <span className="text-xs text-emerald-600">Pag: {formatCurrency(inst.pagado)}</span>
+                      <InstallmentStatusBadge status={inst.status} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-700 mb-2">Pagos ({effectivePayments(detailPayments).length} vigentes)</p>
+              {detailPayments.length === 0 ? (
+                <p className="text-xs text-gray-500">Sin pagos registrados.</p>
+              ) : (
+                <div className="max-h-64 overflow-y-auto space-y-1.5">
+                  {paymentHistoryRows(detailPayments).map(({ payment: p, reversal }) => {
+                    const estado = paymentDisplayStateOf(p)
+                    return (
+                      <div key={p.id} className="px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs text-gray-700">{formatDate(p.fecha)}{userName(p.collectorId) ? ` · ${userName(p.collectorId)}` : ''}</p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className={`text-sm font-bold ${estado === 'vigente' ? 'text-emerald-600' : 'text-gray-400 line-through'}`}>+{formatCurrency(p.valor, currency)}</span>
+                            <PaymentStateBadge state={estado} />
+                            {canAnnulPayment(user, p) && <AnnulPaymentButton onClick={() => openAnnul(p)} />}
+                            {canReapplyPayment(user, p) && !detailPayments.some(x => x.reappliesPaymentId === p.id) && (
+                              <Button size="sm" variant="secondary" onClick={() => setReapplyTarget(p)} icon={<RotateCcw className="w-3.5 h-3.5" />}>Reaplicar</Button>
+                            )}
+                          </div>
+                        </div>
+                        {estado === 'anulado' && <PaymentAnnulmentDetail original={p} reversal={reversal} currency={currency} userName={userName} />}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      <AnnulPaymentModal target={annulTarget} currency={currency}
+        onCancel={() => setAnnulTarget(null)} onConfirm={confirmAnnul} />
+      {detailSale && (
+        <ReapplyPaymentModal payment={reapplyTarget} currency={currency}
+          cliente={formatClientName(clientMap.get(detailSale.clientId)?.nombre) || 'Cliente'}
+          onCancel={() => setReapplyTarget(null)}
+          onDone={async () => { setReapplyTarget(null); await refreshDetail(detailSale.id); await load(true) }} />
+      )}
+
+      {/* Confirmación: segunda venta activa del mismo cliente */}
+      <Modal open={confirmSecondOpen} onClose={() => setConfirmSecondOpen(false)} title="Cliente con venta activa"
+        footer={<><Button variant="secondary" onClick={() => setConfirmSecondOpen(false)}>Cancelar</Button><Button onClick={doCreateSale} loading={saving}>Sí, crear otra venta</Button></>}>
+        <div className="space-y-3">
+          <div className="flex items-start gap-2 p-3 bg-amber-50 rounded-xl border border-amber-200">
+            <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+            <p className="text-sm text-amber-700">Este cliente ya tiene una venta activa. ¿Deseas crear otra venta para este cliente?</p>
+          </div>
+          {activeSale && (
+            <p className="text-sm text-gray-600">
+              Venta actual: <span className="font-semibold">{formatCurrency(activeSale.valorVenta, currency)}</span> · Saldo pendiente: <span className="font-semibold text-amber-600">{formatCurrency(activeSale.saldo, currency)}</span> · Inicio {formatDate(activeSale.fechaInicio)}
+            </p>
+          )}
+        </div>
+      </Modal>
+
+      {/* Lost modal */}
+      <Modal open={lostOpen} onClose={() => setLostOpen(false)} title="Marcar venta como perdida"
+        footer={<><Button variant="secondary" onClick={() => setLostOpen(false)}>Cancelar</Button><Button variant="danger" onClick={markLost}>Confirmar</Button></>}>
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">Esta acción marcará la venta como perdida. Por favor explica el motivo:</p>
+          <Textarea label="Motivo de pérdida" value={motivoPerdida} onChange={e => setMotivoPerdida(e.target.value)} rows={3} required />
+        </div>
+      </Modal>
+
+      {/* Quick payment modal */}
+      <Modal open={!!paymentSale} onClose={() => { setPaymentSale(null); setPaymentCollectorId('') }} title="Registrar recaudo"
+        footer={<><Button variant="secondary" onClick={() => { setPaymentSale(null); setPaymentCollectorId('') }}>Cancelar</Button><Button onClick={handleQuickPayment} loading={payingQuick} icon={<DollarSign className="w-4 h-4" />}>Confirmar pago</Button></>}>
+        {paymentSale && paymentQuick && (
+          <div className="space-y-4">
+            <div className="bg-primary-50 rounded-xl p-4 grid grid-cols-2 gap-3">
+              <div><p className="text-xs text-gray-500">Parcela pendiente</p><p className="font-bold text-primary-700">{formatCurrency(paymentQuick.parcela, currency)}</p></div>
+              <div><p className="text-xs text-gray-500">Saldo pendiente</p><p className="font-bold text-amber-600">{formatCurrency(paymentQuick.total, currency)}</p></div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <button type="button" onClick={() => setPaymentValorManual(paymentQuick.parcela)} className="py-2 bg-primary-50 text-primary-700 rounded-xl text-xs font-medium hover:bg-primary-100">Completar parcela<br />{formatCurrency(paymentQuick.parcela, currency)}</button>
+              <button type="button" onClick={() => setPaymentValorManual(paymentQuick.mitad)} className="py-2 bg-gray-50 text-gray-600 rounded-xl text-xs font-medium hover:bg-gray-100">Mitad<br />{formatCurrency(paymentQuick.mitad, currency)}</button>
+              <button type="button" onClick={() => setPaymentValorManual(paymentQuick.total)} className="py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-medium hover:bg-emerald-100">Total saldo<br />{formatCurrency(paymentQuick.total, currency)}</button>
+            </div>
+            {/* Petición del socio (3.15): pagar por número de cuotas. Solo propone el valor; el servicio lo aplica como siempre. */}
+            {(() => {
+              const pendientes = pendingInstallments(detailInstallments).length
+              return (
+                <Input label="Cuotas a pagar" inputMode="numeric" placeholder="0" data-testid="payment-installments" value={paymentCuotas}
+                  onChange={e => {
+                    const t = e.target.value.replace(/\D/g, '').slice(0, 3)
+                    setPaymentCuotas(t)
+                    const n = Number(t)
+                    if (n > 0) setPaymentValor(amountForInstallments(paymentSale, detailInstallments, n))
+                  }}
+                  hint={Number(paymentCuotas) > pendientes && pendientes > 0
+                    ? `Solo quedan ${pendientes} cuota${pendientes === 1 ? '' : 's'}: se propone el total de la deuda.`
+                    : `De ${pendientes} pendiente${pendientes === 1 ? '' : 's'}. Llena el valor con lo que falta de la cuota actual y las siguientes.`} />
+              )
+            })()}
+            <MoneyInput label="Valor del recaudo" currency={currency} value={paymentValor} onValueChange={setPaymentValorManual} required
+              hint={paymentValor > paymentQuick.total ? `Supera el saldo: se registrará ${formatCurrency(paymentQuick.total, currency)}` : undefined} />
+            {/* El efectivo se carga a la caja del cobrador que lo recibió, no del
+                usuario que registra la operación. */}
+            <CollectorPicker routeId={paymentSale.routeId} value={paymentCollectorId} onChange={setPaymentCollectorId} />
+          </div>
+        )}
+      </Modal>
+
+      {/* 0042: corregir la fecha de entrega (después del detalle, para quedar por encima de él) */}
+      {detailSale && dateFix.open && (
+        <Modal open={dateFix.open} onClose={() => setDateFix(d => ({ ...d, open: false }))} title="Corregir fecha de entrega"
+          footer={<><Button variant="secondary" onClick={() => setDateFix(d => ({ ...d, open: false }))}>Cancelar</Button>
+            <Button data-testid="delivery-date-save" onClick={saveDateFix} loading={dateFix.saving}>Guardar fecha</Button></>}>
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">
+              Registrada el <span className="font-medium">{formatDate(detailSale.fechaDesembolso ?? '')}</span>. Indica el día en que realmente se entregó el dinero
+              (hasta 3 días antes). Las parcelas no cambian; para moverlas usa «Corregir venta». Solo se puede hacer una vez.
+            </p>
+            <Input label="Fecha real de entrega" type="date" data-testid="delivery-date-input"
+              min={shiftDay(detailSale.fechaDesembolso ?? hoy, -3)} max={shiftDay(detailSale.fechaDesembolso ?? hoy, -1)}
+              value={dateFix.deliveredOn} onChange={e => setDateFix(d => ({ ...d, deliveredOn: e.target.value }))}
+              hint="Si esa semana ya está cerrada, la venta conserva su fecha y la real queda guardada aparte" />
+            <Textarea label="Motivo" data-testid="delivery-date-reason" rows={2} required value={dateFix.reason}
+              onChange={e => setDateFix(d => ({ ...d, reason: e.target.value }))} placeholder="Ej.: se registró al día siguiente de la entrega" />
+          </div>
+        </Modal>
+      )}
+
+      {/* Ronda 73 · SOC-09: después del detalle, para quedar por encima de él */}
+      {detailSale && user && rectifyOpen && (
+        <RectifySaleModal sale={detailSale} user={user} currency={currency} open={rectifyOpen} onClose={() => setRectifyOpen(false)}
+          onDone={async () => { setRectifyOpen(false); await refreshDetail(detailSale.id) }} />
+      )}
+    </div>
+  )
+}

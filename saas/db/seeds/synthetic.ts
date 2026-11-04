@@ -181,7 +181,7 @@ function companyRecords(c: CompanySpec): DexieSnapshot {
       id: saleApproved, tenantId, routeId: r(1), clientId: clients[0]!.id, createdByUserId: admin, valorVenta: v(1000), tasaInteres: 20,
       valorInteres: v(200), valorTotal: v(1200), saldo: v(1100), numeroCuotas: 24, valorCuota: v(50), frecuenciaPago: 'diaria',
       paymentDays: [1, 2, 3, 4, 5, 6], fechaInicio: day(1), fechaFinalEstimada: day(29), status: 'activa', disbursementStatus: 'desembolsado',
-      disbursedByCollectorId: worker, disbursedByUserId: worker, fechaDesembolso: day(0), disbursedAt: at(0, 4), saleRequestId: id('request:1'),
+      disbursedByCollectorId: worker, disbursedByUserId: worker, fechaDesembolso: day(0), deliveredOn: day(-1), disbursedAt: at(0, 4), saleRequestId: id('request:1'),
       createdAt: at(-1, 2), updatedAt: at(2),
     },
     {

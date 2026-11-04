@@ -28,7 +28,7 @@ import { createDemoHandler } from '../http/demoApi.ts';
 import { createDemoService } from '../demo/service.ts';
 import { API_FEATURES, createOnlineServer } from './app.ts';
 import { collectorCategoriesReady } from '../structure/categories.ts';
-import { adminTransfersReady, capitalRequestsReady, offlineCollectorReady, offlineDisbursementsReady, paymentLocationsReady, routeMapReady, creditRectificationReady, rectificationPaymentsReady, routeBaseReady, singleSessionReady, generalExpensesReady, adminAuthorityReady, controllerAuthorityReady } from '../collections/location.ts';
+import { adminTransfersReady, capitalRequestsReady, offlineCollectorReady, offlineDisbursementsReady, paymentLocationsReady, routeMapReady, creditRectificationReady, rectificationPaymentsReady, routeBaseReady, singleSessionReady, generalExpensesReady, adminAuthorityReady, controllerAuthorityReady, lateSaleReady } from '../collections/location.ts';
 
 /** Configuración común a los dos servicios (empresa y Owner): TLS, CORS, proveedor, límites. */
 export function readCommonConfig(env: NodeJS.ProcessEnv) {
@@ -120,6 +120,9 @@ export async function start(env: NodeJS.ProcessEnv = process.env) {
   if (!(await controllerAuthorityReady(apiPool))) missing.add('controller-authority-v1');
   // 3.14 (0040): casilla «Para Cobradores» y eliminación de tipos de gasto con historia.
   if (!(await collectorCategoriesReady(apiPool))) missing.add('collector-expense-categories-v1');
+  // 0042: venta registrada tarde y corrección de la fecha de entrega. Solo se comprueba si 0040 está (las migraciones van
+  // en orden): con la base inalcanzable no se suma otro intento de conexión al arranque.
+  if (missing.has('collector-expense-categories-v1') || !(await lateSaleReady(apiPool))) missing.add('late-sale-v1');
   const features = API_FEATURES.filter((f) => !missing.has(f));
   const server = createOnlineServer({
     company: createCompanyHandler(companyOpts), demo, readinessPool: apiPool, allowedOrigins: cfg.origins, trustProxy: cfg.trustProxy, rateLimit: cfg.rateLimit,

@@ -39,7 +39,10 @@ export const API_FEATURES: readonly string[] = ['collections-v1', 'settlements-v
   // SÍ está en la puerta de Vercel: sin él, el Cobrador no vería tipos marcados y el Administrador no podría marcarlos.
   'collector-expense-categories-v1',
   // 3.20: enlace de restablecimiento de contraseña para usuarios activos (sin migración). En la puerta de Vercel.
-  'reset-links-v1'];
+  'reset-links-v1',
+  // 0042 (propietario 2026-11-04): venta registrada tarde y corrección de la fecha de entrega. Solo si 0042 está aplicada (start.ts).
+  // En la puerta de Vercel: sin él, «Venta entregada otro día» y «Corregir fecha de entrega» fallarían.
+  'late-sale-v1'];
 
 /** Módulos del servicio Owner (servicio aparte, ver controlStart.ts). */
 // Ronda 54: `owner-email-v1` (cambio del correo del SuperAdmin) solo si 0024 está aplicada (controlStart.ts).

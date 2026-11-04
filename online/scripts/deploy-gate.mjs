@@ -30,7 +30,9 @@ const REQUIRED = ['settlements-v1', 'clean-online-v1', 'access-links-v1', 'payme
   // 3.14 (0040): tipos de gasto «Para Cobradores» y eliminación con historia.
   'collector-expense-categories-v1',
   // 3.20: enlace de restablecimiento de contraseña para usuarios activos (sin migración).
-  'reset-links-v1'];
+  'reset-links-v1',
+  // 0042: venta registrada tarde y corrección de la fecha de entrega (0042 → API → frontend).
+  'late-sale-v1'];
 // Ronda 40: si este despliegue activa la Plataforma Owner (VITE_ADEX_CONTROL_URL), el
 // servicio Owner publicado tiene que servir la versión que usan las pantallas originales.
 const CONTROL = (process.env.VITE_ADEX_CONTROL_URL ?? '').replace(/\/$/, '');

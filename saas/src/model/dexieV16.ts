@@ -161,7 +161,7 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       money('valorCuota', 'installment_value_minor'), f('frecuenciaPago', 'payment_frequency'), f('paymentDays', 'payment_days', 'days'),
       date('fechaInicio', 'start_date'), date('fechaFinalEstimada', 'estimated_end_date'), date('fechaFinalizacion', 'finished_on'),
       f('status', 'status'), f('disbursementStatus', 'disbursement_status'), id('disbursedByCollectorId', 'disbursed_by_collector_id'),
-      id('disbursedByUserId', 'disbursed_by_membership_id'), date('fechaDesembolso', 'disbursement_date'), instant('disbursedAt', 'disbursed_at'),
+      id('disbursedByUserId', 'disbursed_by_membership_id'), date('fechaDesembolso', 'disbursement_date'), date('deliveredOn', 'delivered_on'), instant('disbursedAt', 'disbursed_at'),
       id('saleRequestId', 'sale_request_id'), f('motivoPerdida', 'lost_reason'), instant('lostAt', 'lost_at'),
       id('lostByUserId', 'lost_by_membership_id'), created, updated,
     ],

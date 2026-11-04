@@ -52,6 +52,7 @@ import {
 } from '../capital/adminTransfers.ts';
 import {
   APPROVE_FIELDS, CREATE_REQUEST_FIELDS, DIRECT_FIELDS, DISBURSE_FIELDS, RECTIFY_FIELDS, approveRequest, cancelRequest, createRequest, directSale, disburseRequest,
+  LATE_SALE_FIELDS, DELIVERY_DATE_FIELDS, lateSale, correctDeliveryDate,
   getCredit, getRequest, listCredits, listInstallments, listRectifications, listRequests, rectifyCredit, rejectRequest,
   RECTIFICATION_CASE_FIELDS, listRectificationCases, recordRectificationCase, rectifyCheck,
 } from '../credits/service.ts';
@@ -296,6 +297,11 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: ([id]) => async (c, ctx, b, _q, op) => created(await disburseRequest(c, ctx, id!, op, b)) },
   { method: 'POST', pattern: new RegExp(`^/v1/credits/direct$`), fields: DIRECT_FIELDS, idempotent: 'credits.direct', requiresOperation: true,
     handler: () => async (c, ctx, b, _q, op) => created(await directSale(c, ctx, b, op)) },
+  // 0042 (propietario 2026-11-04): venta registrada tarde y corrección de la fecha de entrega (solo Administrador, máx. 3 días).
+  { method: 'POST', pattern: new RegExp(`^/v1/credits/late$`), fields: LATE_SALE_FIELDS, idempotent: 'credits.late', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await lateSale(c, ctx, b, op)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/credits/${ID}/delivery-date$`), fields: DELIVERY_DATE_FIELDS, idempotent: 'credits.delivery_date', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => ok(await correctDeliveryDate(c, ctx, id!, b, op)) },
   { method: 'GET', pattern: new RegExp(`^/v1/credits$`), fields: null, handler: () => async (c, ctx, _b, q) => ok({ credits: await listCredits(c, ctx, q) }) },
   { method: 'GET', pattern: new RegExp(`^/v1/credits/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getCredit(c, ctx, id!)) },
   // Ronda 73 · SOC-08: Consultas como tabla (una fila por operación lógica + eventos sin dinero), paginada en el servidor.

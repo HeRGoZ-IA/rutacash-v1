@@ -418,6 +418,11 @@ export interface Sale {
    */
   fechaDesembolso?: string
   /**
+   * ADEX Online (0042): fecha REAL de entrega cuando el Administrador registró la venta tarde o corrigió
+   * su fecha (yyyy-MM-dd). Informativa: la fecha de negocio sigue siendo `fechaDesembolso`.
+   */
+  deliveredOn?: string
+  /**
    * INSTANTE (ISO completo) en que se confirmó el desembolso. Lo necesita el cuadre
    * por trabajador (`CashSettlement`), que corta por instante y no por día: dos
    * cierres el mismo día deben saber a cuál pertenece cada entrega. Ventas
