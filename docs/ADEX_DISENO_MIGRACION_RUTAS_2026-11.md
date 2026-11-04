@@ -329,6 +329,30 @@ Mora: con la regla de Listos (sin la cuota con abono parcial) coinciden 37 de 41
 de esos días antiguos las incluyen (con el valor pendiente, no el original). Ficha del cliente con el historial de
 Listos: después.
 
+## 15. Corrección (0045): un cierre por día, la ruta se ve cada día
+
+Helmer (2026-11-04) rechazó la carga única del §14: quiere ver la ruta **cada día** con el cierre de Listos y que el
+domingo solo falte el último cierre y la caja. Se vuelve al diseño aprobado (§6), así:
+
+- `adex.route_migration_load` carga **un cierre** (un día). La ruta **sigue «en migración»** (solo lectura).
+  Primera carga: clientes, créditos activos (por lo que falta cobrar) e historial. Siguientes, por código de Listos:
+  cliente nuevo → alta; crédito nuevo → venta nueva; saldo menor → **«Abono en Listos»** por la diferencia (fecha =
+  día del cierre); crédito pagado → abono por el resto y venta finalizada; saldo mayor o activo que desaparece sin
+  estar pagado → **se detiene** (AX445). Control: Σ saldos de la ruta en ADEX = reporte.
+- **«Abono en Listos»** = pago de ADEX (saldo, cuotas y retraso reales) con asiento `MIGRATION_COLLECTION`: cartera −
+  capital, interés − interés, financiación de la ruta + importe. **No toca ninguna caja**. Cobrador del pago = el
+  Administrador responsable (Andrew); tipo `otro`; nota «Abono en Listos (migración, crédito N)». En los informes de
+  recaudo por fecha de esos días aparece como recaudo de la ruta (es un cobro real, hecho en Listos).
+- `adex.route_migration_close` termina la migración (estado normal). La caja: inyección de Base de Andrew.
+- Cancelar la migración solo antes del primer cierre. `route_migration_finish` (0044) se retira.
+- API: `POST /v1/routes/{id}/migration/preview`, `POST …/migration/loads` (idempotente), `POST …/migration/close`;
+  `GET /v1/route-migrations` trae los cierres cargados.
+- Online: «Cargar cierre de Listos» (vista previa → «Guardar cierre»), fecha del último cierre, «Terminar migración».
+
+**Probado:** `route-migration.test.ts` 5/5 (dos cierres: abono, crédito pagado, cliente que renueva, saldo que sube,
+cierre repetido, terminar, Base y cobro, conciliación limpia). Reales del 3/11 en base local: cierre 1 en < 1 s,
+cierre 2 sin cambios, terminar, conciliación limpia.
+
 ## 12. Calendario (meta: cobrar en ADEX el lunes 9)
 
 | Día | Qué |

@@ -48,7 +48,7 @@ import {
   listHandovers, modelPrerequisites, routePanel, transferBase, transferDestinations, transitionModel, withdrawBase,
 } from '../capital/routeBase.ts';
 import {
-  MIGRATION_CANCEL_FIELDS, MIGRATION_LOAD_FIELDS, MIGRATION_LOAD_MAX_BYTES, MIGRATION_OPEN_FIELDS, finishMigrationLoad, previewMigrationLoad, cancelMigration, listMigrations, openMigration,
+  MIGRATION_CANCEL_FIELDS, MIGRATION_CLOSE_FIELDS, MIGRATION_LOAD_FIELDS, MIGRATION_LOAD_MAX_BYTES, MIGRATION_OPEN_FIELDS, closeMigration, loadMigrationClose, previewMigrationLoad, cancelMigration, listMigrations, openMigration,
 } from '../capital/routeMigration.ts';
 import {
   REGISTER_FIELDS, adminDirectory, cancelAdminTransfer, decideAdminTransfer, getAdminTransfer, listAdminTransfers, registerAdminTransfer,
@@ -247,12 +247,14 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: ([id]) => async (c, ctx, b, _q, op) => created(await openMigration(c, ctx, id!, b, op)) },
   { method: 'POST', pattern: new RegExp(`^/v1/routes/${ID}/migration/cancel$`), fields: MIGRATION_CANCEL_FIELDS, idempotent: 'route.migration_cancel', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => ok(await cancelMigration(c, ctx, id!, b, op)) },
-  // 0044 · carga final desde Listos: vista previa (se deshace, no guarda nada) y carga definitiva (todo o nada).
+  // 0044/0045 · cierres de Listos: vista previa (se deshace), carga de un cierre (todo o nada) y finalización.
   { method: 'POST', pattern: new RegExp(`^/v1/routes/${ID}/migration/preview$`), fields: MIGRATION_LOAD_FIELDS, maxBody: MIGRATION_LOAD_MAX_BYTES,
     handler: ([id]) => async (c, ctx, b) => ok(await previewMigrationLoad(c, ctx, id!, b)) },
-  { method: 'POST', pattern: new RegExp(`^/v1/routes/${ID}/migration/finish$`), fields: MIGRATION_LOAD_FIELDS, maxBody: MIGRATION_LOAD_MAX_BYTES,
-    idempotent: 'route.migration_finish', requiresOperation: true,
-    handler: ([id]) => async (c, ctx, b, _q, op) => ok(await finishMigrationLoad(c, ctx, id!, b, op)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/routes/${ID}/migration/loads$`), fields: MIGRATION_LOAD_FIELDS, maxBody: MIGRATION_LOAD_MAX_BYTES,
+    idempotent: 'route.migration_load', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => created(await loadMigrationClose(c, ctx, id!, b, op)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/routes/${ID}/migration/close$`), fields: MIGRATION_CLOSE_FIELDS, idempotent: 'route.migration_close', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => ok(await closeMigration(c, ctx, id!, b, op)) },
   // ---------- Gastos generales (R74, 0035): saldos a favor de Administradores (nunca efectivo) y reembolsos ----------
   { method: 'GET', pattern: /^\/v1\/capital\/admin-payables$/, fields: null, handler: () => async (c, ctx) => ok(await adminPayables(c, ctx)) },
   // R74 (0037, item 4): obligaciones pendientes por gasto (beneficiario, descripción, pendiente), para pagar la de otro Administrador.

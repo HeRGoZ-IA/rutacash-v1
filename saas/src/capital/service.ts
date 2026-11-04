@@ -643,7 +643,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
        join adex.sales s on s.company_id = p.company_id and s.id = p.sale_id
       where p.company_id = $1 and s.ledger_operation_id is not null
         and not exists (select 1 from adex.capital_operations o where o.company_id = p.company_id and o.id = p.ledger_operation_id and o.payment_id = p.id
-                          and o.amount_minor = abs(p.amount_minor) and o.route_id = p.route_id and coalesce(o.reverses_kind, o.kind) = 'COLLECTION')`);
+                          and o.amount_minor = abs(p.amount_minor) and o.route_id = p.route_id and coalesce(o.reverses_kind, o.kind) in ('COLLECTION', 'MIGRATION_COLLECTION'))`);
   // Fase 5 · gastos: cada gasto con asiento coincide con él, y la cuenta de gastos de
   // cada ruta (o de empresa) es la suma de sus gastos netos.
   // R74 (0035): un gasto general con aportes de rutas tiene UNA operación por ruta (todas con su `expense_id`):

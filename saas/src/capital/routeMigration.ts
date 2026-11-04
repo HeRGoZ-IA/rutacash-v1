@@ -41,7 +41,13 @@ export async function listMigrations(client: pg.PoolClient, ctx: ActiveContext, 
   let where = 'company_id = $1';
   if (routeId !== null) { params.push(pathId(routeId)); where += ` and route_id = $${params.length}`; }
   const r = await client.query<MigrationRow>(`select * from adex.route_migrations where ${where} order by opened_at desc, id limit 200`, params);
-  return r.rows.map(view);
+  // 0045: cierres cargados (fecha y resumen), del más reciente al más antiguo.
+  const loads = r.rows.length === 0 ? [] : (await client.query<{ migration_id: string; report_date: string; result: Record<string, unknown>; created_at: Date }>(
+    `select migration_id, to_char(report_date, 'YYYY-MM-DD') report_date, result - 'duplicateDocuments' result, created_at
+       from adex.route_migration_loads where company_id = $1 and migration_id = any($2::text[]) order by report_date desc`,
+    [ctx.companyId, r.rows.map((m) => m.id)])).rows;
+  return r.rows.map((m) => ({ ...view(m), loads: loads.filter((l) => l.migration_id === m.id)
+    .map((l) => ({ reportDate: l.report_date, loadedAt: l.created_at.toISOString(), summary: l.result })) }));
 }
 
 /** El SuperAdmin pone una ruta vacía «en migración» (espejo de solo lectura del sistema anterior). */
@@ -74,11 +80,13 @@ export async function cancelMigration(client: pg.PoolClient, ctx: ActiveContext,
   return r;
 }
 
-// ---------- 0044 · Carga final desde Listos y paso a normal ----------
+// ---------- 0044/0045 · Carga de cada cierre de Listos y finalización ----------
 // El cuerpo es `{ payload }`: lo arma `saas/scripts/migracion/listos_a_adex.py` a partir de los reportes de Listos
-// (importes en unidades menores). PostgreSQL lo valida todo (`adex.route_migration_finish`): controles del reporte,
-// calendario de cada crédito, suma de saldos. Todo o nada.
+// (importes en unidades menores). PostgreSQL lo valida todo (`adex.route_migration_load`): controles del reporte,
+// calendario de cada crédito, saldos que solo bajan, Σ saldos de la ruta = reporte. Todo o nada. La ruta SIGUE en
+// migración; `closeMigration` la termina (estado normal) y la caja se abre con una inyección de Base.
 export const MIGRATION_LOAD_FIELDS = ['payload'] as const;
+export const MIGRATION_CLOSE_FIELDS = ['note'] as const;
 /** Una ruta grande: ~150 clientes, ~60 activos con su calendario y ~1.000 créditos pagados caben con holgura. */
 export const MIGRATION_LOAD_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -88,16 +96,16 @@ function loadPayload(body: Body): Record<string, unknown> {
   return p as Record<string, unknown>;
 }
 
-/** Vista previa: ejecuta la carga completa con las mismas comprobaciones y la DESHACE. No guarda nada. */
+/** Vista previa: ejecuta la carga del cierre con las mismas comprobaciones y la DESHACE. No guarda nada. */
 export async function previewMigrationLoad(client: pg.PoolClient, ctx: ActiveContext, routeId: string, body: Body) {
   requireSuperadmin(ctx);
   const route = await routeOf(client, ctx, pathId(routeId));
   const payload = loadPayload(body);
   await client.query('savepoint route_migration_preview');
   try {
-    const r = (await client.query<{ r: Record<string, unknown> }>('select adex.route_migration_finish($1, $2, $3::jsonb) r',
+    const r = (await client.query<{ r: Record<string, unknown> }>('select adex.route_migration_load($1, $2, $3::jsonb) r',
       [crypto.randomUUID(), route.id, JSON.stringify(payload)])).rows[0]!.r;
-    return { ...r, preview: true, valid: true, status: 'en_migracion' };
+    return { ...r, preview: true, valid: true };
   } catch (e) {
     // Datos que no cuadran (AX445): la vista previa dice QUÉ falla (crédito, control) en lugar de un error sin detalle.
     if ((e as { code?: string }).code !== 'AX445') throw e;
@@ -107,18 +115,34 @@ export async function previewMigrationLoad(client: pg.PoolClient, ctx: ActiveCon
   }
 }
 
-/** Carga definitiva: crea clientes, ventas (lo que falta cobrar) e historial, y deja la ruta en estado normal. */
-export async function finishMigrationLoad(client: pg.PoolClient, ctx: ActiveContext, routeId: string, body: Body, operationId: string | null) {
+/** Carga un cierre: la ruta en ADEX queda igual que en Listos ese día (sigue en migración, de solo lectura). */
+export async function loadMigrationClose(client: pg.PoolClient, ctx: ActiveContext, routeId: string, body: Body, operationId: string | null) {
   requireSuperadmin(ctx);
   const route = await routeOf(client, ctx, pathId(routeId));
   const payload = loadPayload(body);
-  const r = (await client.query<{ r: Record<string, unknown> }>('select adex.route_migration_finish($1, $2, $3::jsonb) r',
+  const r = (await client.query<{ r: Record<string, unknown> }>('select adex.route_migration_load($1, $2, $3::jsonb) r',
     [requireOperationId(operationId), route.id, JSON.stringify(payload)])).rows[0]!.r;
+  const { duplicateDocuments: _d, ...summary } = r;
+  await audit(client, ctx, {
+    action: 'ROUTE_MIGRATION_LOADED', entityType: 'route_migration', entityId: String(r['migrationId']), routeId: route.id,
+    description: `Ruta ${route.name}: cierre de Listos del ${String(r['reportDate'])} cargado (${String(r['activeCredits'])} créditos activos).`,
+    after: summary, metadata: { operationId },
+  });
+  return r;
+}
+
+/** Termina la migración: la ruta queda en estado normal y empieza a operar en ADEX. */
+export async function closeMigration(client: pg.PoolClient, ctx: ActiveContext, routeId: string, body: Body, operationId: string | null) {
+  requireSuperadmin(ctx);
+  const route = await routeOf(client, ctx, pathId(routeId));
+  const note = optText(body, 'note', 500);
+  const r = (await client.query<{ r: Record<string, unknown> }>('select adex.route_migration_close($1, $2, $3) r',
+    [requireOperationId(operationId), route.id, note])).rows[0]!.r;
+  const { duplicateDocuments: _d, ...summary } = r;
   await audit(client, ctx, {
     action: 'ROUTE_MIGRATION_FINISHED', entityType: 'route_migration', entityId: String(r['migrationId']), routeId: route.id,
-    description: `Ruta ${route.name} cargada desde Listos (reporte del ${String(r['reportDate'])}): ${String(r['activeCredits'])} créditos activos, `
-      + `${String(r['clients'])} clientes. La ruta queda en estado normal.`,
-    after: r, metadata: { operationId },
+    description: `Migración de ${route.name} terminada con el cierre del ${String(r['lastReportDate'])}: la ruta queda en estado normal.`,
+    reason: note, after: summary, metadata: { operationId },
   });
   return r;
 }
