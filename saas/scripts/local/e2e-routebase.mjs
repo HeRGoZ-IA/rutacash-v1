@@ -574,14 +574,14 @@ try {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ''); el.dispatchEvent(new Event('input', { bubbles: true })); });
     // Pendiente 3.14 (0040): casilla «Para Cobradores» en Categorías de gasto y lista filtrada del Cobrador.
     const catRow = (name) => one('select id, for_collectors from adex.expense_categories where company_id = $1 and name = $2 and deleted_at is null', [N, name]);
-    const papel = await catRow('Papelería'), transp = await catRow('Transporte');
+    const papel = await catRow('Honorarios contador'), transp = await catRow('Gasolina');
     await go('/admin/expense-categories'); await waitTestid(`cat-collectors-${papel.id}`);
     const shownMarks = await page.evaluate((a, b) => [a, b].map((id) => document.querySelector(`[data-testid="cat-collectors-${id}"]`)?.checked ?? null), papel.id, transp.id);
     await tap(`cat-collectors-${papel.id}`);
     let marked = false;
-    for (let i = 0; i < 20 && !marked; i++) { await sleep(700); marked = (await catRow('Papelería')).for_collectors === true; }
+    for (let i = 0; i < 20 && !marked; i++) { await sleep(700); marked = (await catRow('Honorarios contador')).for_collectors === true; }
     await both('A-16c-categorias', () => waitTestid(`cat-collectors-${papel.id}`));
-    ok('A-16c', ['C-01'], 'Categorías: Transporte nace marcada «Para Cobradores» y Papelería no; el Administrador marca Papelería', shownMarks[0] === false && shownMarks[1] === true && marked, JSON.stringify({ shownMarks, marked }));
+    ok('A-16c', ['C-01'], 'Categorías (lista del socio, 0047): Gasolina nace marcada «Para Cobradores» y Honorarios contador no; el Administrador marca Honorarios contador', shownMarks[0] === false && shownMarks[1] === true && marked, JSON.stringify({ shownMarks, marked }));
     await clickText('button', /Nueva categoría/); await waitTestid('cat-form-collectors');
     await setField('Nombre de la categoría', 'Peaje E2E'); await tap('cat-form-collectors'); await sleep(300); await tap('cat-save');
     let peaje = null;
@@ -600,8 +600,8 @@ try {
     await go('/collector/expenses'); await waitTestid('expense-new'); await tap('expense-new'); await waitTestid('expense-category');
     const offered = await page.$$eval('[data-testid="expense-category"] option', (os) => os.map((o) => o.textContent.trim()).filter((t) => t && !t.startsWith('Seleccionar')));
     await both('A-16f-cobrador-categorias', () => waitTestid('expense-category'));
-    ok('A-16f', ['C-01'], 'Gastos del Cobrador: solo ofrece las categorías marcadas (Alimentación, Combustible, Papelería, Transporte)',
-      JSON.stringify([...offered].sort()) === JSON.stringify(['Alimentación', 'Combustible', 'Papelería', 'Transporte']), JSON.stringify(offered));
+    ok('A-16f', ['C-01'], 'Gastos del Cobrador: solo ofrece las categorías marcadas (las 11 de la lista del socio y Honorarios contador)',
+      JSON.stringify([...offered].sort()) === JSON.stringify(['Aceite', 'Arriendo funcionario', 'Despinchada moto', 'Gasolina', 'Honorarios contador', 'Impuesto CNPJ', 'Mantenimiento moto', 'Medicamentos', 'Otros', 'Pago cadena', 'Recarga celular', 'Seguro de moto'].sort()), JSON.stringify(offered));
     await login('admin1.norte@example.test');
     const bC2 = await base(C2), bC1 = await base(C1);
     await go('/admin/active-sales'); await sleep(2000);
@@ -628,7 +628,7 @@ try {
     // Gasto general con un aporte mayor que la Base de su ruta: la pantalla lo impide.
     await toPanel();
     await tap('ge-new'); await waitTestid('ge-form'); await sleep(500);
-    await pick('Categoría', 'Papelería'); await setField('Valor total', String(Math.ceil((await base(C2)) / 100) + 100)); await setField('Descripción', 'Aporte mayor que la Base (no se registra)');
+    await pick('Categoría', 'Honorarios contador'); await setField('Valor total', String(Math.ceil((await base(C2)) / 100) + 100)); await setField('Descripción', 'Aporte mayor que la Base (no se registra)');
     await setField('Aporte de Ruta Centro 2', String(Math.ceil((await base(C2)) / 100) + 100)); await sleep(400);
     ok('B-03', ['C-06'], 'Gasto general: un aporte mayor que la Base de Centro 2 se impide («Supera la Base disponible», Registrar deshabilitado)', ((await testid('ge-contributions')) ?? '').includes('Supera la Base disponible') && (await disabled('ge-save')) === true);
     await shot('B-03-aporte-mayor-1280');
@@ -659,7 +659,7 @@ try {
     await toPanel();
     let [g1, g2] = [await base(C1), await base(C2)];
     await tap('ge-new'); await waitTestid('ge-form'); await sleep(500);
-    await pick('Categoría', 'Papelería'); await setField('Valor total', '90'); await setField('Descripción', 'Papelería conjunta E2E (A)');
+    await pick('Categoría', 'Honorarios contador'); await setField('Valor total', '90'); await setField('Descripción', 'Papelería conjunta E2E (A)');
     await setField('Aporte de Ruta Centro 1', '60'); await setField('Aporte de Ruta Centro 2', '30'); await sleep(400);
     await both('C-01-gasto-A', () => waitTestid('ge-form'));
     await tap('ge-save');

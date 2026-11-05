@@ -54,7 +54,7 @@ describe('3.14 · tipos de gasto «Para Cobradores» (0040)', () => {
   });
   after(async () => { await api.close(); await control.close(); await db.close(); });
 
-  test('CEC-001 · la casilla viaja en el catálogo: existentes por nombre (Combustible sí, Papelería no); empresas nuevas con Transporte, Alimentación y Combustible', async () => {
+  test('CEC-001 · la casilla viaja en el catálogo: existentes por nombre (Combustible sí, Papelería no); empresas nuevas con la lista del socio (3.29, 0047): 50 tipos, 11 marcados', async () => {
     const list = await cats(carlos);
     const by = Object.fromEntries(list.map((c) => [c.name, c]));
     assert.equal(by['Combustible']!.forCollectors, true);
@@ -66,8 +66,9 @@ describe('3.14 · tipos de gasto «Para Cobradores» (0040)', () => {
       timezone: 'America/Bogota', billingMode: 'per_route', billingRate: 10 } });
     assert.equal(created.status, 201, JSON.stringify(created.body));
     const marked = (await db.admin.query('select name from adex.expense_categories where company_id = $1 and for_collectors order by name', [created.body['companyId']])).rows.map((r) => r.name);
-    assert.deepEqual(marked, ['Alimentación', 'Combustible', 'Transporte']);
-    assert.equal(await count(db.admin, 'select 1 from adex.expense_categories where company_id = $1 and not for_collectors', [created.body['companyId']]), 4);
+    assert.deepEqual(marked, ['Aceite', 'Arriendo funcionario', 'Despinchada moto', 'Gasolina', 'Impuesto CNPJ', 'Mantenimiento moto',
+      'Medicamentos', 'Otros', 'Pago cadena', 'Recarga celular', 'Seguro de moto']);
+    assert.equal(await count(db.admin, 'select 1 from adex.expense_categories where company_id = $1 and not for_collectors', [created.body['companyId']]), 39);
   });
 
   test('CEC-002 · Cobrador y Supervisor solo registran con tipos marcados; el Administrador usa todos; marcar lo habilita al momento', async () => {

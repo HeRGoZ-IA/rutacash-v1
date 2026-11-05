@@ -99,7 +99,8 @@ export async function seed({ API, CONTROL, issuer, provider, ownerId, log, logOn
   async function categories(by) {
     const list = expect(await as(by).get('/v1/expense-categories'), 'categorías').categories ?? [];
     const find = (n) => (list.find((c) => c.name === n) ?? list[0])?.id;
-    return { fuel: find('Combustible'), food: find('Alimentación'), paper: find('Papelería'), other: find('Otros'), transport: find('Transporte') };
+    // 3.29 (0047): lista del socio. fuel/food son «Para Cobradores»; paper/transport, solo Administrador.
+    return { fuel: find('Gasolina'), food: find('Recarga celular'), paper: find('Honorarios contador'), other: find('Otros'), transport: find('Viáticos') };
   }
   async function settle(admin, cob, routeId, delta, reason) {
     const p = expect(await as(admin).get(`/v1/settlements/preview?routeId=${routeId}&workerId=${cob.m}`), 'vista previa del cuadre');

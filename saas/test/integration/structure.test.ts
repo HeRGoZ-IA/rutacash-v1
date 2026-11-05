@@ -176,18 +176,20 @@ describe('Fase 2 · estructura de empresa, Oficinas, rutas y categorías', () =>
     assert.deepEqual((await bruno('POST', `/v1/expense-categories/${peajes['id']}/delete`, {})).body, { deleted: peajes['id'], kept: false });
   });
 
-  test('CAT-001 · las categorías predeterminadas nacen con la empresa (mismos nombres que CLEAN)', async () => {
+  test('CAT-001 · las categorías predeterminadas nacen con la empresa (lista del socio, 3.29/0047; misma referencia que el plano Owner)', async () => {
     const owner = await issuer.issue('owner');
     const created = await control.call('POST', '/control/v1/companies', { token: owner, body: {
       name: 'Épsilon Cobros', email: 'epsilon@example.test', countryCode: 'CO', countryLabel: 'Colombia', currencyCode: 'COP',
       timezone: 'America/Bogota', billingMode: 'per_route', billingRate: 10 } });
     assert.equal(created.status, 201, JSON.stringify(created.body));
     const names = (await db.admin.query('select name from adex.expense_categories where company_id = $1 order by name', [created.body['companyId']])).rows.map((r) => r.name);
-    // El módulo de CLEAN arrastra Dexie: se lee la constante del fuente, sin copiarla.
-    const src = readFileSync(new URL('../../../src/lib/expenseCategoryDefaults.ts', import.meta.url), 'utf8');
-    const clean = [...(/DEFAULT_EXPENSE_CATEGORY_NAMES = \[([^\]]*)\]/.exec(src)![1]!.matchAll(/'([^']+)'/g))].map((m) => m[1]!);
-    assert.equal(clean.length, 7);
-    assert.deepEqual([...names].sort(), [...clean].sort());
+    // Referencia del plano Owner (sin importar el módulo): se lee la constante del fuente.
+    const src = readFileSync(new URL('../../../online/src/owner/plane/expenseCategoryDefaults.ts', import.meta.url), 'utf8');
+    const ref = [...(/DEFAULT_EXPENSE_CATEGORY_NAMES = \[([^\]]*)\]/.exec(src)![1]!.matchAll(/'([^']+)'/g))].map((m) => m[1]!);
+    const partner = (await db.admin.query('select name from adex.partner_expense_categories()')).rows.map((r) => r.name as string);
+    assert.equal(ref.length, 50);
+    assert.deepEqual([...names].sort(), [...partner].sort());
+    assert.deepEqual([...ref].sort(), [...partner].sort());
   });
 
   test('STR-040 · idempotencia: mismo X-Adex-Operation-Id → un solo efecto y la misma respuesta; otro cuerpo → 409', async () => {
