@@ -40,7 +40,7 @@
    * **Probado:** pruebas financieras (CUOTAS-001…003), las de CLEAN, los tipos y E2E 89/89, 41/41 y 25/25. **No probado:** con datos reales ni por el socio.
 3. **Qué falta:**
    * **Para el chat Central:** 3.29 (Alta, petición del socio 2026-11-05): nueva base de 50 tipos de gasto, 11 «Para Cobradores», para empresas nuevas y BlueLine (sin borrar nada; BlueLine requiere el permiso de Helmer). Lista: `docs/GASTOS_BASE_INICIAL_SOCIO_2026-11-05.md`.
-   * 3.26 (Alta, manuales interactivos): **manual del Cobrador entregado** el 2026-11-05 (`docs/manuales/Manual_Cobrador_ADEX.html`, ES/PT, para enviar por WhatsApp). Falta: que el socio lo revise y probarlo en un celular real; después, el manual del Administrador.
+   * 3.26 (Alta, manuales interactivos): entregados el 2026-11-05 el **manual del Cobrador** y el **del Administrador** (`docs/manuales/`, ES/PT, para enviar por WhatsApp). Falta: que el socio los revise (ya revisa el del Cobrador) y probarlos en un celular real.
    * **Para el chat Central:** 3.23 (Alta, petición del socio 2026-11-04): fecha elegible en «Informe del día» (Cobrador y Supervisor, cualquier fecha pasada, sigue siendo personal).
    * **Para el chat Central:** 3.22, hacer ADEX Online instalable como app (manifiesto web). Esperando la respuesta del socio: Android o iPhone, impresión de recibos y recorrido en mapa.
    * Que el socio compruebe 3.21 (4.9): dejar la app abierta hasta el día siguiente.

@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Manual del Administrador · ADEX</title>
+<style>
+:root{
+  --blue:#2563eb;--blue2:#1d4ed8;--ink:#0f172a;--mut:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--card:#fff;
+  --green:#059669;--red:#dc2626;--amber:#d97706;--soft:#eff6ff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);-webkit-text-size-adjust:100%}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;padding:10px 16px;background:linear-gradient(135deg,var(--blue),var(--blue2));color:#fff}
+.top .logo{font-weight:900;font-size:20px;letter-spacing:1px}
+.top .ttl{font-size:14px;opacity:.9;flex:1;line-height:1.2}
+.lang{display:flex;background:rgba(255,255,255,.18);border-radius:999px;padding:3px}
+.lang button{padding:5px 11px;border-radius:999px;font-weight:700;font-size:13px;color:#fff}
+.lang button.on{background:#fff;color:var(--blue)}
+/* ---------- MENÚ ---------- */
+#menu{max-width:720px;margin:0 auto;padding:16px 16px 40px}
+.hero{background:#fff;border-radius:20px;padding:18px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:16px}
+.hero h1{font-size:22px;margin-bottom:6px}
+.hero p{color:var(--mut);font-size:15px;line-height:1.45}
+.sec{margin:22px 0 10px;font-size:18px;font-weight:800;display:flex;align-items:center;gap:8px}
+.sec small{font-weight:500;color:var(--mut);font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.task{background:#fff;border-radius:16px;padding:14px;text-align:left;box-shadow:0 1px 3px rgba(0,0,0,.06);border:2px solid transparent;display:flex;flex-direction:column;gap:6px;min-height:104px}
+.task:active,.task:hover{border-color:var(--blue)}
+.task .ic{font-size:28px}
+.task b{font-size:15px;line-height:1.25}
+.task span{font-size:12.5px;color:var(--mut);line-height:1.3}
+.tip{background:#fffbeb;border:1px solid #fde68a;border-radius:14px;padding:12px 14px;font-size:14px;line-height:1.45;margin-top:14px}
+/* ---------- REPRODUCTOR ---------- */
+#player{display:none;flex-direction:column;height:calc(100dvh - 52px);max-width:720px;margin:0 auto}
+#player.on{display:flex}
+.pbar{display:flex;align-items:center;gap:8px;padding:8px 12px}
+.pbar .back{background:#fff;border-radius:999px;padding:7px 12px;font-weight:700;font-size:14px;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.pbar .name{font-weight:800;font-size:15px;flex:1;line-height:1.2}
+.stagewrap{flex:1;min-height:0;display:flex;justify-content:center;align-items:flex-start;padding:0 8px}
+.stage{position:relative;border-radius:18px;overflow:hidden;box-shadow:0 8px 30px rgba(15,23,42,.18);background:#000}
+.cap{background:#fff;border-radius:18px 18px 0 0;padding:12px 16px calc(10px + env(safe-area-inset-bottom));box-shadow:0 -4px 16px rgba(0,0,0,.06)}
+.prog{display:flex;gap:4px;margin-bottom:8px}
+.prog i{flex:1;height:5px;border-radius:9px;background:var(--line)}
+.prog i.pd{background:#93c5fd}.prog i.pc{background:var(--blue)}
+.stepn{font-size:12px;color:var(--mut);font-weight:700;margin-bottom:3px}
+.txt{font-size:16.5px;line-height:1.42;min-height:3.2em}
+.txt b{color:var(--blue2)}
+.ctrls{display:flex;gap:8px;margin-top:10px}
+.ctrls button{flex:1;padding:11px 6px;border-radius:12px;background:var(--soft);color:var(--blue2);font-weight:800;font-size:15px}
+.ctrls button.main{background:var(--blue);color:#fff;flex:1.4}
+.done{position:absolute;inset:0;z-index:40;background:rgba(15,23,42,.72);display:flex;align-items:center;justify-content:center;padding:24px}
+.done div{background:#fff;border-radius:20px;padding:22px;text-align:center;max-width:300px}
+.done .big{font-size:46px}
+.done h3{margin:6px 0 8px;font-size:20px}
+.done p{color:var(--mut);font-size:15px;line-height:1.4;margin-bottom:14px}
+.done button{display:block;width:100%;padding:12px;border-radius:12px;font-weight:800;margin-top:8px;background:var(--soft);color:var(--blue2)}
+.done button.main{background:var(--blue);color:#fff}
+/* explorar */
+.chips{display:flex;gap:6px;overflow-x:auto;padding:0 12px 8px}
+.chips button{white-space:nowrap;padding:7px 12px;border-radius:999px;background:#fff;font-weight:700;font-size:13.5px;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.chips button.on{background:var(--blue);color:#fff}
+.badge{position:absolute;z-index:30;width:22px;height:22px;border-radius:50%;background:#f59e0b;color:#fff;font-size:12px;font-weight:900;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px #fff;pointer-events:none;animation:bob 1.6s ease-in-out infinite}
+@keyframes bob{50%{transform:scale(1.15)}}
+.explore [data-h]{cursor:pointer}
+.picked{outline:3px solid #f59e0b!important;outline-offset:2px;border-radius:10px}
+
+/* ================= APP SIMULADA (360 x 640) ================= */
+.app{position:absolute;left:0;top:0;width:360px;height:640px;transform-origin:0 0;background:#f8fafc;overflow:hidden;font-size:13px;color:#111827}
+.app *{transition:none}
+.hdr{position:absolute;left:0;right:0;top:0;height:54px;background:var(--blue);color:#fff;display:flex;align-items:center;gap:8px;padding:0 10px}
+.hdr .lg{font-weight:900;font-size:17px;font-style:italic;letter-spacing:.5px;line-height:.9}
+.hdr .lg small{display:block;font-size:6px;letter-spacing:2px;font-style:normal;font-weight:600}
+.hdr .who{flex:1;line-height:1.15}.hdr .who b{font-size:13px;display:block}.hdr .who span{font-size:11px;opacity:.9}
+.net{font-size:10.5px;font-weight:700;padding:4px 8px;border-radius:999px;background:rgba(255,255,255,.2)}
+.net.off{background:#f59e0b}
+.hico{width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:15px}
+.scr{position:absolute;left:0;right:0;top:54px;bottom:58px;overflow-y:auto;padding:12px;scroll-behavior:smooth}
+.scr.full{top:0;bottom:0}
+.scr.nonav{bottom:0}
+.nav{position:absolute;left:0;right:0;bottom:0;height:58px;background:#fff;border-top:1px solid var(--line);display:flex}
+.nav div{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9.5px;color:#9ca3af;gap:2px}
+.nav div i{font-style:normal;font-size:16px;filter:grayscale(1);opacity:.7}
+.nav div.on{color:var(--blue)}.nav div.on i{filter:none;opacity:1}
+.c{background:#fff;border-radius:16px;border:1px solid #eef2f7;box-shadow:0 1px 2px rgba(0,0,0,.04);padding:12px;margin-bottom:10px}
+.greet{background:linear-gradient(135deg,#2563eb,#1e40af);color:#fff;border-radius:18px;padding:14px;margin-bottom:10px}
+.greet small{opacity:.85;font-size:12px}.greet b{display:block;font-size:19px;margin:2px 0 8px}
+.greet .row{display:flex;justify-content:space-between;align-items:center;font-size:11.5px}
+.pill{display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,.18);padding:4px 9px;border-radius:999px;font-weight:600}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:10px}
+.stats div{border-radius:13px;padding:9px 4px;text-align:center;border:1px solid}
+.stats b{display:block;font-size:15px}.stats span{font-size:10.5px;color:#374151}
+.s1{background:#fffbeb;border-color:#fde68a!important}.s1 b{color:#d97706}
+.s2{background:#ecfdf5;border-color:#a7f3d0!important}.s2 b{color:#059669}
+.s3{background:#eff6ff;border-color:#bfdbfe!important}.s3 b{color:#2563eb}
+.mod{display:flex;gap:10px;align-items:flex-start}
+.mod .mi{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:18px;flex:none}
+.mod b{font-size:14px;display:block}.mod span{font-size:11.5px;color:#6b7280}
+.btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.b{display:inline-flex;align-items:center;justify-content:center;padding:7px 11px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;font-size:11.5px}
+.b.pri{background:var(--blue);color:#fff;border-color:var(--blue)}
+.b.grn{background:#059669;color:#fff;border-color:#059669}
+.b.full{display:flex;width:100%;padding:11px;font-size:13px;margin-top:8px}
+.b.out{background:#fff}
+.h1{font-weight:800;font-size:16px}.sub{font-size:11.5px;color:#6b7280;margin-bottom:10px}
+.back{font-size:12px;color:var(--blue);font-weight:700;margin-bottom:6px}
+.f{margin-bottom:9px}
+.f label{display:block;font-size:11px;font-weight:700;color:#374151;margin-bottom:3px}
+.inp{border:1.5px solid #d1d5db;border-radius:10px;padding:8px 10px;background:#fff;min-height:35px;font-size:13px;display:flex;align-items:center;gap:6px}
+.inp .v{flex:1;white-space:nowrap;overflow:hidden}
+.inp .ph{color:#9ca3af}
+.inp .v:empty{flex:0}
+.inp.dis{background:#f3f4f6;color:#6b7280}
+.sel::after{content:"▾";color:#9ca3af}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tabs{display:flex;gap:5px;margin-bottom:8px;overflow:hidden}
+.tabs div{padding:6px 8px;border-radius:999px;background:#fff;border:1px solid #e5e7eb;font-size:10.5px;font-weight:700;white-space:nowrap}
+.tabs div.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.cl .top2{display:flex;justify-content:space-between;align-items:flex-start;gap:6px}
+.cl b{font-size:13.5px}.cl .ad{font-size:11px;color:#6b7280}
+.tag{font-size:10px;font-weight:700;padding:3px 7px;border-radius:999px;white-space:nowrap}
+.t-ok{background:#d1fae5;color:#047857}.t-w{background:#fef3c7;color:#b45309}.t-r{background:#fee2e2;color:#b91c1c}.t-g{background:#f3f4f6;color:#4b5563}.t-b{background:#dbeafe;color:#1d4ed8}
+.kv{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0;text-align:center}
+.kv div{background:#f9fafb;border-radius:9px;padding:6px 2px}
+.kv span{display:block;font-size:10px;color:#6b7280}.kv b{font-size:12px}
+.days{font-size:10.5px;color:#6b7280}
+.quick{display:flex;gap:5px;margin:6px 0 9px}
+.quick div{flex:1;text-align:center;padding:7px 2px;border-radius:9px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;font-size:11px;font-weight:700}
+.sum{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:9px 11px;margin-bottom:8px;font-size:12px}
+.sum div{display:flex;justify-content:space-between;padding:2px 0}
+.note{font-size:10.5px;color:#6b7280;background:#f9fafb;border-radius:9px;padding:7px 9px;margin-bottom:6px}
+.ok{text-align:center;padding:40px 16px}
+.ok .circ{width:70px;height:70px;border-radius:50%;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;font-size:34px;color:#fff}
+.ok h2{font-size:18px;margin-bottom:6px}.ok p{font-size:12.5px;color:#4b5563;line-height:1.4}
+.chiprow{display:flex;flex-wrap:wrap;gap:6px}
+.chiprow div{padding:7px 10px;border-radius:999px;border:1px solid #e5e7eb;background:#fff;font-size:11.5px;font-weight:600}
+.chiprow div.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.ph-box{border:1.5px dashed #cbd5e1;border-radius:12px;padding:12px;text-align:center;font-size:11px;color:#6b7280;background:#fff}
+.tog{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sw{width:38px;height:22px;border-radius:99px;background:#d1d5db;position:relative;flex:none}
+.sw::after{content:"";position:absolute;width:18px;height:18px;border-radius:50%;background:#fff;top:2px;left:2px}
+.sw.on{background:var(--blue)}.sw.on::after{left:18px}
+.toast{position:absolute;left:12px;right:12px;bottom:70px;background:#065f46;color:#fff;border-radius:12px;padding:10px 12px;font-size:12px;font-weight:600;z-index:15;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.mv{display:flex;justify-content:space-between;align-items:center;padding:9px 2px;border-bottom:1px solid #f3f4f6}
+.mv:last-child{border:0}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:8px}
+.row2{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f3f4f6;font-size:12px}
+.row2:last-child{border:0}
+.drop{border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-top:3px;box-shadow:0 4px 12px rgba(0,0,0,.08)}
+.drop div{padding:8px 10px;font-size:12px;border-bottom:1px solid #f3f4f6}
+.login{position:absolute;inset:0;background:linear-gradient(160deg,#1e3a8a,#2563eb);padding:40px 18px}
+.login .brand{color:#fff;text-align:center;margin-bottom:22px}
+.login .brand b{font-size:34px;font-style:italic;font-weight:900;letter-spacing:1px}
+.login .brand span{display:block;font-size:12px;opacity:.85}
+/* mano y resaltado */
+.hand{position:absolute;z-index:50;font-size:34px;left:300px;top:700px;transition:left .75s cubic-bezier(.4,.1,.2,1),top .75s cubic-bezier(.4,.1,.2,1);pointer-events:none;filter:drop-shadow(0 3px 4px rgba(0,0,0,.35));transform:translate(-30%,-8%)}
+.hand.tap{animation:tap .45s ease}
+@keyframes tap{50%{transform:translate(-30%,-8%) scale(.82)}}
+.rip{position:absolute;z-index:49;width:16px;height:16px;border-radius:50%;background:rgba(37,99,235,.45);pointer-events:none;animation:rip .6s ease-out forwards}
+@keyframes rip{to{transform:scale(4.5);opacity:0}}
+.hl{outline:3px solid #f59e0b;outline-offset:2px;border-radius:10px;animation:glow 1.2s ease-in-out infinite}
+@keyframes glow{50%{outline-color:#fcd34d}}
+.caret::after{content:"|";animation:blink .8s steps(1) infinite;color:var(--blue)}
+@keyframes blink{50%{opacity:0}}
+@media (min-width:900px){
+  #player{flex-direction:row;flex-wrap:wrap;align-content:flex-start;max-width:900px}
+  .pbar,.chips{width:100%}
+  .stagewrap{flex:0 0 auto;padding:0 16px}
+  .cap{flex:1;border-radius:18px;margin-right:16px;align-self:flex-start}
+}
+
+/* ---- Admin ---- */
+.ahdr{position:absolute;left:0;right:0;top:0;height:54px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;padding:0 10px}
+.ahdr .aco{flex:1;font-size:13px;font-weight:600;color:#4b5563}
+.wifi{font-size:11px;padding:4px 8px;border-radius:999px;background:#ecfdf5}
+.avat{width:30px;height:30px;border-radius:50%;background:#dbeafe;color:#1d4ed8;font-weight:800;font-size:11px;display:flex;align-items:center;justify-content:center}
+.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.dk{background:#fff;border:1px solid #eef2f7;border-radius:14px;padding:9px 10px}
+.dk span{display:block;font-size:10.5px;color:#6b7280}.dk b{display:block;font-size:14.5px;margin-top:2px}.dk small{display:block;font-size:9.5px;color:#9ca3af;margin-top:2px;line-height:1.2}
+.bars{display:flex;align-items:flex-end;gap:6px;height:70px;margin-top:8px}.bars i{flex:1;background:#93c5fd;border-radius:5px 5px 0 0}
+.shade{position:absolute;inset:0;background:rgba(0,0,0,.5);z-index:20}
+.drw{position:absolute;left:0;top:0;bottom:0;width:250px;background:#1e3a8a;color:#fff;z-index:21;padding:12px 10px;overflow-y:auto}
+.dlogo{font-weight:900;font-style:italic;font-size:20px;padding:4px 8px 10px}.dlogo small{display:block;font-size:10px;font-style:normal;font-weight:600;opacity:.7}
+.dg p{font-size:9.5px;letter-spacing:1.2px;color:#93c5fd;font-weight:700;padding:8px 8px 3px}
+.di{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:9px;font-size:12.5px;color:#dbeafe}
+.di i{font-style:normal;font-size:13px;width:18px;text-align:center}.di.on{background:rgba(255,255,255,.15);color:#fff;font-weight:700}
+.tb{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
+.ul{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}.ul b{font-size:13px}.ad{font-size:11px;color:#6b7280}
+.modal{position:absolute;inset:0;background:rgba(15,23,42,.55);z-index:20;display:flex;align-items:flex-end}
+.mbox{background:#fff;width:100%;max-height:88%;overflow-y:auto;border-radius:18px 18px 0 0;padding:14px}
+.chk{display:flex;flex-wrap:wrap;gap:6px}.chk div{padding:7px 10px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;font-size:11.5px}
+.chk div.on{border-color:var(--blue);background:#eff6ff;color:#1d4ed8;font-weight:700}.chk.col{flex-direction:column}
+.mt{display:flex;background:#e5e7eb;border-radius:11px;padding:3px;margin-bottom:10px}
+.mt div{flex:1;text-align:center;padding:7px 4px;border-radius:9px;font-size:11.5px;font-weight:700;color:#4b5563}.mt div.on{background:#fff;color:#1d4ed8;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.pc{font-size:10.5px;padding:4px 7px;border-radius:8px;border:1px solid #e5e7eb;color:#6b7280}.pc.on{background:#ecfdf5;border-color:#a7f3d0;color:#047857;font-weight:700}
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="logo">ADEX</div>
+  <div class="ttl" id="topTtl">Manual del Administrador</div>
+  <div class="lang"><button data-l="es" class="on">ES</button><button data-l="pt">PT</button></div>
+</div>
+
+<main id="menu"></main>
+
+<section id="player">
+  <div class="pbar"><button class="back" id="bBack">‹ <span id="bBackT">Menú</span></button><div class="name" id="pName"></div></div>
+  <div class="chips" id="chips" style="display:none"></div>
+  <div class="stagewrap"><div class="stage" id="stage"><div class="app" id="app"></div></div></div>
+  <div class="cap" id="cap">
+    <div class="prog" id="prog"></div>
+    <div class="stepn" id="stepn"></div>
+    <div class="txt" id="txt"></div>
+    <div class="ctrls" id="ctrls">
+      <button id="bPrev">◀</button>
+      <button id="bPlay" class="main">⏸</button>
+      <button id="bNext">▶</button>
+      <button id="bAgain">⟲</button>
+    </div>
+  </div>
+</section>
+
+<script>
+(function(){
+"use strict";
+/* ===================== TEXTOS DE LA GUÍA ===================== */
+var LANG='es';
+try{var sl=localStorage.getItem('adexManualLang');if(sl==='pt'||sl==='es')LANG=sl;}catch(e){}
+var UI={
+ es:{title:'Manual del Administrador',heroH:'¡Hola! Aprende a manejar ADEX 👋',
+  heroP:'Elige lo que quieres aprender. Verás la pantalla funcionando sola, paso a paso. Puedes pausar, volver atrás o repetir cuando quieras.',
+  how:'¿Cómo hago…?',howS:'toca una tarea',what:'¿Qué es esto?',whatS:'toca una pantalla y luego cualquier parte',
+  tip:'💡 <b>Los nombres y el dinero de este manual son de mentira.</b> Sirven solo para practicar.<br>💻 Aquí ves ADEX como se ve en el <b>celular</b>. En el computador el menú está siempre abierto a la izquierda, pero los botones son los mismos.',
+  menu:'Menú',step:'Paso {a} de {b}',play:'▶',pause:'⏸',
+  doneH:'¡Muy bien!',doneP:'Ya sabes hacerlo. ¿Quieres verlo otra vez o aprender otra cosa?',again:'⟲ Ver otra vez',toMenu:'Volver al menú',
+  expHint:'👆 Toca cualquier parte de la pantalla que tenga un <b style="color:#d97706">número naranja</b> y aquí te digo para qué sirve.'},
+ pt:{title:'Manual do Administrador',heroH:'Olá! Aprenda a usar o ADEX 👋',
+  heroP:'Escolha o que você quer aprender. Você verá a tela funcionando sozinha, passo a passo. Pode pausar, voltar ou repetir quando quiser.',
+  how:'Como eu faço…?',howS:'toque numa tarefa',what:'O que é isto?',whatS:'toque numa tela e depois em qualquer parte',
+  tip:'💡 <b>Os nomes e valores deste manual são de mentira.</b> Servem só para praticar.<br>💻 Aqui você vê o ADEX como aparece no <b>celular</b>. No computador o menu fica sempre aberto à esquerda, mas os botões são os mesmos.<br>📱 O aplicativo está em espanhol: os botões aparecem aqui com o mesmo nome que você verá.',
+  menu:'Menu',step:'Passo {a} de {b}',play:'▶',pause:'⏸',
+  doneH:'Muito bem!',doneP:'Agora você sabe fazer. Quer ver de novo ou aprender outra coisa?',again:'⟲ Ver de novo',toMenu:'Voltar ao menu',
+  expHint:'👆 Toque em qualquer parte da tela que tenha um <b style="color:#d97706">número laranja</b> e aqui eu explico para que serve.'}
+};
+function T(k){return UI[LANG][k];}
+
+/* ===================== PANTALLAS SIMULADAS ===================== */
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function H(k){return ' data-h="'+k+'"';}
+function money(n){return 'R$ '+n.toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.');}
+function inp(t,label,v,ph,cls){return '<div class="f"><label>'+label+'</label><div class="inp '+(cls||'')+'" data-t="'+t+'"><span class="v">'+(v?esc(v):'')+'</span>'+(v?'':'<span class="ph">'+esc(ph||'')+'</span>')+'</div></div>';}
+function ahdr(){
+  return '<div class="ahdr"'+H('ahdr')+'><div class="hico" data-t="burger"'+H('burger')+' style="color:#4b5563;font-size:20px">☰</div>'+
+   '<div class="aco"'+H('aco')+'>Empresa Demo</div><div class="wifi"'+H('wifi')+'>📶</div><div class="avat"'+H('avat')+'>HC</div></div>';
+}
+function ashell(body,o){o=o||{};return ahdr()+'<div class="scr nonav">'+body+'</div>'+(o.modal?'<div class="modal"><div class="mbox">'+o.modal+'</div></div>':'')+(o.toast?'<div class="toast" style="bottom:16px">'+o.toast+'</div>':'');}
+function card(lbl,val,sub,col,h){return '<div class="dk"'+(h?H(h):'')+'><span>'+lbl+'</span><b style="color:'+(col||'#111827')+'">'+val+'</b>'+(sub?'<small>'+sub+'</small>':'')+'</div>';}
+function mtabs(a,b,on,ta,tb){return '<div class="mt"><div class="'+(on===0?'on':'')+'"'+(ta?' data-t="'+ta+'"':'')+'>'+a+'</div><div class="'+(on===1?'on':'')+'"'+(tb?' data-t="'+tb+'"':'')+'>'+b+'</div></div>';}
+
+var S={};
+S.login=function(st){
+  return '<div class="login"><div class="brand"><b>ADEX</b><span>Sistema de rutas y cobros</span></div>'+
+   '<div class="c" style="padding:16px"><div class="h1">Iniciar sesión</div><div class="sub">Ingresa a tu cuenta para continuar</div>'+
+   inp('email','Correo electrónico',st.email,'correo@ejemplo.com')+
+   inp('pass','Contraseña',st.pass?'••••••••':'','••••••')+
+   '<div class="b pri full" data-t="login">Ingresar</div></div></div>';
+};
+S.dash=function(st){
+  st=st||{};
+  return ashell('<div class="h1">Dashboard</div><div class="sub">Resumen de tus rutas</div>'+
+   '<div class="dgrid">'+
+    card('Base disponible',money(3250),'De tus rutas','#059669','d-base')+
+    card('Base del trabajador',money(1840),'En manos de trabajadores','#2563eb','d-bt')+
+    card('Efectivo de las rutas',money(5090),'Base disponible + Base del trabajador','#111827','d-ef')+
+    card('Capital colocado',money(21400),'Sin interés · no es efectivo','#6b7280','d-cap')+
+    card('Recaudo hoy',money(1260),'','#059669','d-rh')+
+    card('Cartera activa',money(25680),'La cartera (con interés) no es efectivo','#6b7280','d-car')+
+    card('Recaudo semanal',money(7430),'','#059669','d-rs')+
+    card('Gastos semana',money(310),'','#dc2626','d-gs')+
+    card('Clientes activos','64','','#111827','d-cl')+
+    card('Rutas con mora','1','','#d97706','d-mora')+
+   '</div>'+
+   '<div class="c"'+H('d-graf')+'><b style="font-size:12.5px">Recaudo últimos 7 días</b><div class="bars">'+[50,70,62,85,40,92,58].map(function(h){return '<i style="height:'+h+'%"></i>';}).join('')+'</div></div>'+
+   '<div class="c"'+H('d-top')+'><b style="font-size:12.5px">Top rutas por recaudo semanal</b><div class="row2"><span>Ruta Centro</span><b>'+money(4210)+'</b></div><div class="row2"><span>Ruta Norte</span><b>'+money(3220)+'</b></div></div>',st);
+};
+var NAV=[[null,[['dash','📊','Dashboard']]],['Estructura',[['offices','🏢','Oficinas'],['routes','📍','Rutas'],['users','👥','Usuarios']]],
+ ['Cartera',[['clients','🧑','Clientes'],['sales','💳','Ventas Activas'],['auth','✅','Autorizaciones'],['adj','🧾','Ajustes de pago'],['map','🗺️','Mapa']]],
+ ['Dinero',[['caja','💲','Caja principal'],['exp','📉','Gastos'],['transf','🔁','Transferencias'],['ntc','🔔','Notificaciones'],['cons','🔎','Consultas']]],
+ ['Control',[['reports','📈','Reportes'],['liq','📅','Liquidación'],['dif','⚖️','Diferencias']]],[null,[['settings','⚙️','Configuración']]]];
+S.drawer=function(st){
+  st=st||{};
+  var h='<div class="drw"'+H('drw')+'><div class="dlogo">ADEX<small>Administrador</small></div>';
+  NAV.forEach(function(g){
+    h+='<div class="dg"'+(g[0]?H('g-'+g[0]):'')+'>'+(g[0]?'<p>'+g[0].toUpperCase()+'</p>':'')+
+      g[1].map(function(it){return '<div class="di'+(st.on===it[0]?' on':'')+'" data-t="nav-'+it[0]+'"><i>'+it[1]+'</i>'+it[2]+'</div>';}).join('')+'</div>';
+  });
+  h+='<div class="di" style="margin-top:8px;opacity:.8"'+H('salir')+'><i>⎋</i>Cerrar sesión</div></div>';
+  return S.dash({})+'<div class="shade"></div>'+h;
+};
+S.users=function(st){
+  st=st||{};
+  var list='<div class="c ul"><div><b>Carlos Souza</b><div class="ad">carlos@empresa.com</div></div><span class="tag t-b">Cobrador</span></div>'+
+   '<div class="c ul"><div><b>Andrea Melo</b><div class="ad">andrea@empresa.com</div></div><span class="tag t-g">Supervisor</span></div>'+
+   (st.created?'<div class="c ul" style="border:2px solid #a7f3d0"><div><b>Marcos Lima</b><div class="ad">marcos@empresa.com · Ruta Norte</div><div class="b out" data-t="acceso" style="margin-top:6px">🔗 Acceso del usuario</div></div><span class="tag t-b">Cobrador</span></div>':'');
+  var modal=st.form?'<div class="h1" style="margin-bottom:8px">Crear usuario</div>'+
+   inp('unom','Nombre completo',st.unom,'')+inp('umail','Email',st.umail,'')+
+   inp('urol','Rol',st.urol||'','Seleccionar','sel')+
+   '<div class="f" data-t="urutas"><label>Rutas autorizadas</label><div class="chk"><div class="'+(st.ruta?'on':'')+'">☑ Ruta Norte</div><div>☐ Ruta Centro</div></div></div>'+
+   '<div class="note">El acceso lo gestiona el proveedor de identidad: ADEX Online no crea ni conoce contraseñas.</div>'+
+   '<div class="two"><div class="b out full">Cancelar</div><div class="b pri full" data-t="ucrear">Crear</div></div>':null;
+  if(st.link) modal='<div class="h1" style="margin-bottom:6px">Acceso del usuario</div><div class="sub">Marcos Lima · Cobrador</div>'+
+   '<div class="note" data-t="ulink" style="font-size:11.5px;color:#1d4ed8;background:#eff6ff">https://…/activar#…<br><b>Copiar enlace</b></div>'+
+   '<div class="note">Envíale este enlace a la persona: con él elige su contraseña. Sirve una sola vez.</div><div class="b out full">Cerrar</div>';
+  return ashell('<div class="tb"><div><div class="h1">Usuarios</div></div><div class="b pri" data-t="unew"'+H('unew')+'>＋ Nuevo usuario</div></div>'+
+   '<div class="inp" style="margin-bottom:10px"'+H('usearch')+'>🔍 <span class="ph">Buscar por nombre, email o rol...</span></div>'+list,{modal:modal,toast:st.toast});
+};
+S.routes=function(st){
+  st=st||{};
+  var r=function(n,b,bt,car,h){return '<div class="c"'+(h?H(h):'')+'><div class="top2" style="display:flex;justify-content:space-between"><b>'+n+'</b><span class="tag t-ok">Activa</span></div>'+
+   '<div class="kv"><div><span>Base disponible</span><b>'+b+'</b></div><div><span>Base del trabajador</span><b>'+bt+'</b></div><div><span>Cartera activa</span><b>'+car+'</b></div></div>'+
+   '<div class="days">Tasa 20 % · Ventas 30 · Clientes 42</div></div>';};
+  var modal=st.form?'<div class="h1" style="margin-bottom:8px">Crear ruta</div>'+
+   inp('rnom','Nombre de la ruta',st.rnom,'')+inp('rciu','Ciudad',st.rciu,'Ej: Barranquilla')+
+   inp('rofi','Oficina',st.rofi||'','Sin Oficina','sel')+
+   inp('radm','Administrador responsable (opcional)',st.radm||'','Seleccionar','sel')+
+   inp('rtasa','Tasa de interés (%)',st.rtasa,'0')+
+   '<div class="f" data-t="rusers"><label>Usuarios asignados a esta ruta</label><div class="chk"><div class="'+(st.ru?'on':'')+'">☑ Marcos Lima</div><div>☐ Andrea Melo</div></div></div>'+
+   '<div class="two"><div class="b out full">Cancelar</div><div class="b pri full" data-t="rcrear">Crear</div></div>':null;
+  return ashell('<div class="tb"><div class="h1">Rutas</div><div class="b pri" data-t="rnew">＋ Nueva ruta</div></div>'+
+   r('Ruta Centro',money(1900),money(1100),money(14900),'rcard')+r('Ruta Norte',money(1350),money(740),money(10780))+
+   (st.created?'<div style="border:2px solid #a7f3d0;border-radius:16px">'+r('Ruta Sul','R$ 0,00','R$ 0,00','R$ 0,00')+'</div>':''),{modal:modal,toast:st.toast});
+};
+S.auth=function(st){
+  st=st||{};
+  var row=st.done?'<div class="c" style="text-align:center;color:#6b7280;padding:22px">No hay solicitudes</div>':
+   '<div class="c cl"'+H('arow')+'><div style="display:flex;justify-content:space-between"><div><b>Ana Lima</b><div class="ad">Ruta Centro · Cobrador: Carlos Souza</div></div><span class="tag t-w">Pendiente</span></div>'+
+   '<div class="kv"><div><span>Valor</span><b>'+money(500)+'</b></div><div><span>Parcelas</span><b>20</b></div><div><span>Fecha</span><b>05/11</b></div></div>'+
+   '<div class="b pri full" data-t="arev">Revisar</div></div>';
+  var modal=st.open?'<div class="h1">Solicitud de venta</div><div class="sub">Ana Lima · Salão de beleza</div>'+
+   '<div class="sum" data-t="aind" style="background:#fffbeb;border-color:#fde68a"><div><b>Indicadores comparativos</b></div><div><span>Solicitud actual</span><b>'+money(500)+'</b></div><div><span>Promedio histórico</span><b>'+money(400)+'</b></div><div><span>Mayor venta anterior</span><b>'+money(450)+'</b></div><div style="color:#b45309">Esta solicitud supera la mayor venta anterior del cliente.</div></div>'+
+   '<div data-t="acond"><div style="font-size:11px;font-weight:800;margin:4px 0 6px">Condiciones a aprobar (modificables)</div>'+
+   '<div class="two">'+inp('aval','Valor solicitado',money(st.val||500),'')+inp('apar','Nº parcelas','20','')+'</div>'+
+   '<div class="kv"><div><span>Total a pagar</span><b>'+money((st.val||500)*1.2)+'</b></div><div><span>Valor parcela</span><b>'+money((st.val||500)*1.2/20)+'</b></div><div><span>Tasa</span><b>20 %</b></div></div></div>'+
+   '<div class="two"><div class="b out full" data-t="arech" style="color:#dc2626">Rechazar</div><div class="b grn full" data-t="aok">Aprobar</div></div>':null;
+  return ashell('<div class="h1">Autorizaciones de ventas</div><div class="sub">Solicitudes de venta enviadas por los cobradores</div>'+
+   '<div class="tabs"'+H('atabs')+'><div class="on">Pendientes</div><div>Aprobadas</div><div>Desembolsadas</div><div>Rechazadas</div></div>'+row,{modal:modal,toast:st.toast});
+};
+S.liq=function(st){
+  st=st||{};
+  var top='<div class="h1">Liquidaciones</div><div class="sub">Cierre de ruta y cuadre por trabajador</div>'+
+   '<div'+H('ltabs')+'>'+mtabs('Cierre de ruta','Cuadre por trabajador',st.tab||0,'tcierre','tcuadre')+'</div>'+
+   inp('lruta','Ruta','Ruta Centro','','sel');
+  var body='';
+  if(!st.tab){
+    body='<div class="note" data-t="lult"'+H('lult')+' style="background:#eff6ff;color:#1d4ed8">Último cierre: 26/10 – 01/11</div>'+
+     '<div class="two">'+inp('ldesde','Desde','02/11/2026','','dis')+inp('lhasta','Hasta','05/11/2026','','sel')+'</div>'+
+     '<div class="two" style="margin-bottom:8px"><div class="b out full" data-t="lgen"'+H('lgen')+'>Generar</div><div class="b pri full" data-t="lcerrar"'+H('lcerrar')+' style="'+(st.gen?'':'opacity:.5')+'">Hacer cierre</div></div>';
+    if(st.gen) body+='<div class="c" data-t="lres"'+H('lres')+'>'+
+      '<div class="row2"><span>Base del trabajador al inicio</span><b>'+money(900)+'</b></div><div class="row2"><span>(+) Entregas de Base</span><b>'+money(1500)+'</b></div>'+
+      '<div class="row2"><span>(+) Recaudo</span><b style="color:#059669">'+money(4210)+'</b></div><div class="row2"><span>(−) Desembolsos</span><b style="color:#dc2626">'+money(3000)+'</b></div>'+
+      '<div class="row2"><span>(−) Gastos</span><b style="color:#dc2626">'+money(190)+'</b></div><div class="row2"><span>(−) Devoluciones de Base</span><b style="color:#dc2626">'+money(2320)+'</b></div>'+
+      '<div class="row2"><span><b>Base del trabajador al cierre</b></span><b>'+money(1100)+'</b></div></div>';
+    body+='<div class="c"'+H('lhist')+' data-t="lhist"><b style="font-size:12.5px">Cierres realizados</b>'+(st.closed?'<div class="row2"><span>02/11 – 05/11</span><span class="tag t-ok">Cerrado</span></div>':'')+'<div class="row2"><span>26/10 – 01/11</span><span class="tag t-ok">Cerrado</span></div><div class="row2"><span>19/10 – 25/10</span><span class="tag t-ok">Cerrado</span></div></div>';
+  } else {
+    body=inp('ltrab','Trabajador',st.trab?'Carlos Souza · Cobrador':'','Selecciona a quién cuadrar','sel');
+    if(st.trab){
+      body+='<div class="c" data-t="lesp"'+H('lesp')+'><div class="row2"><span>Arrastre pendiente (faltante anterior)</span><b>'+money(0)+'</b></div><div class="row2"><span>Base entregada</span><b>'+money(500)+'</b></div>'+
+       '<div class="row2"><span>(+) Recaudo</span><b style="color:#059669">'+money(450)+'</b></div><div class="row2"><span>(−) Desembolsado</span><b style="color:#dc2626">'+money(0)+'</b></div><div class="row2"><span>(−) Gastos</span><b style="color:#dc2626">'+money(30)+'</b></div>'+
+       '<div class="row2"><span><b>Esperado a entregar</b></span><b style="color:#1d4ed8">'+money(920)+'</b></div></div>'+
+       '<div class="two" style="margin-bottom:8px"><div class="b grn full" data-t="lbase"'+H('lbase')+'>Entregar Base</div><div class="b out full"'+H('ldev')+'>Recibir devolución</div></div>'+
+       inp('lentr','Entregado',st.entr?money(st.entr):'','0')+
+       '<div class="b pri full" data-t="lccuad"'+H('lccuad')+'>Cerrar cuadre</div>';
+    }
+  }
+  var modal=null;
+  if(st.mclose) modal='<div class="h1">Hacer cierre</div><div class="sub">Ruta Centro · 02/11/2026 – 05/11/2026</div><div class="note">Estás cerrando el día de hoy: sus cifras quedan congeladas.</div><div class="two"><div class="b out full">Cancelar</div><div class="b pri full" data-t="lconf">Hacer cierre y congelar cifras</div></div>';
+  if(st.mbase) modal='<div class="h1">Entregar Base</div><div class="sub">A Carlos Souza</div>'+inp('bval','Valor',st.bval?money(st.bval):'','0')+'<div class="note">Base disponible de esta ruta: <b>'+money(1900)+'</b></div><div class="two"><div class="b out full">Cancelar</div><div class="b pri full" data-t="bok">Registrar</div></div>';
+  if(st.mcuad) modal='<div class="h1">Confirmar cierre</div><div class="sum"><div><span>Trabajador:</span><b>Carlos Souza</b></div><div><span>Esperado:</span><b>'+money(920)+'</b></div><div><span>Entregado:</span><b>'+money(920)+'</b></div><div style="color:#047857"><b>Cuadre exacto.</b></div></div><div class="note">El efectivo entregado vuelve a la Base disponible de esta ruta.</div><div class="two"><div class="b out full">Cancelar</div><div class="b pri full" data-t="lcok">Confirmar cuadre</div></div>';
+  return ashell(top+body,{modal:modal,toast:st.toast});
+};
+S.exp=function(st){
+  st=st||{};
+  var modal=st.form?'<div class="h1" style="margin-bottom:8px">Registrar gasto</div>'+
+   '<div class="f" data-t="equien"><label>¿A quién corresponde este gasto?</label><div class="chk col">'+
+    ['General de empresa','De ruta (lo paga su Base disponible)','De un trabajador (lo paga su Base del trabajador)'].map(function(x,i){return '<div class="'+(st.quien===i?'on':'')+'">'+(st.quien===i?'◉ ':'○ ')+x+'</div>';}).join('')+'</div></div>'+
+   (st.quien===1?inp('eruta','Ruta','Ruta Centro','','sel'):'')+
+   inp('ecat','Categoría',st.cat||'','Seleccionar','sel')+inp('eval','Valor',st.val?money(st.val):'','0')+
+   '<div class="two"><div class="b out full">Cancelar</div><div class="b pri full" data-t="ereg">Registrar</div></div>':null;
+  return ashell(mtabs('Gastos','Categorías',0,null,'tcats')+
+   '<div class="tb"><div class="h1">Gastos</div><div class="b pri" data-t="enew"'+H('enew')+'>＋ Nuevo gasto</div></div>'+
+   '<div class="two" style="margin-bottom:8px"'+H('efil')+'>'+inp('x1','Tipo','Todos los tipos','','sel')+inp('x2','Desde','01/11/2026','','sel')+'</div>'+
+   '<div class="c"'+H('elist')+'>'+(st.saved?'<div class="mv"><div><b>Pago abogado</b><div class="ad">05/11 · General</div></div><b style="color:#dc2626">-'+money(250)+'</b></div>':'')+
+   '<div class="mv"><div><b>Gasolina</b><div class="ad">05/11 · De trabajador · Carlos Souza</div></div><b style="color:#dc2626">-'+money(30)+'</b></div>'+
+   '<div class="mv"><div><b>Mantenimiento moto</b><div class="ad">04/11 · De ruta · Ruta Centro</div></div><div style="text-align:right"><b style="color:#dc2626">-'+money(120)+'</b><div class="ad"'+H('eanular')+' style="color:#dc2626;font-weight:700">Anular</div></div></div></div>',{modal:modal,toast:st.toast});
+};
+S.cats=function(st){
+  st=st||{};
+  function c(n,on,h,t){return '<div class="c" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px"'+(h?H(h):'')+'><b style="font-size:12.5px">'+n+'</b><div style="display:flex;gap:8px;align-items:center"><span class="pc'+(on?' on':'')+'"'+(t?' data-t="'+t+'"':'')+'>'+(on?'☑':'☐')+' Para Cobradores</span><span class="tag t-ok">Activa</span></div></div>';}
+  return ashell(mtabs('Gastos','Categorías',1)+
+   '<div class="tb"><div class="h1">Categorías de gastos</div><div class="b pri">＋ Nueva categoría</div></div>'+
+   '<div class="note"'+H('cnote')+'>Marca «Para Cobradores» en los tipos que pueden usar los Cobradores y Supervisores. Tú ves y usas todos los tipos activos.</div>'+
+   c('Gasolina',true,'cpc')+c('Recarga celular',true)+c('Lavada de moto',!!st.lav,null,'clav')+c('Pago abogado',false)+c('Honorarios contador',false),{toast:st.toast});
+};
+
+/* ===================== TAREAS ===================== */
+var D_USERS={unom:'Marcos Lima',umail:'marcos@empresa.com',urol:'Cobrador',ruta:1};
+function U(o){var r={form:1};for(var k in o)r[k]=o[k];return r;}
+var TASKS=[
+{id:'entrar',ic:'🔑',es:['Entrar y moverme por el menú','Dónde está cada cosa'],pt:['Entrar e usar o menu','Onde fica cada coisa'],steps:[
+ {s:'login',st:{email:'admin@empresa.com'},t:'email',a:'type',v:'admin@empresa.com',es:'Escribe tu <b>correo</b> en «Correo electrónico».',pt:'Escreva o seu <b>e-mail</b> em «Correo electrónico».'},
+ {s:'login',st:{email:'admin@empresa.com',pass:1},t:'pass',a:'type',v:'••••••••',es:'Escribe tu <b>contraseña</b>. Es secreta: no se la des a nadie.',pt:'Escreva a sua <b>senha</b>. Ela é secreta: não passe para ninguém.'},
+ {s:'login',st:{email:'admin@empresa.com',pass:1},t:'login',a:'tap',es:'Toca <b>«Ingresar»</b>.',pt:'Toque em <b>«Ingresar»</b>.'},
+ {s:'dash',st:{},a:'look',es:'Entras al <b>Dashboard</b>: el resumen de tus rutas, con el dinero de hoy y de la semana.',pt:'Você entra no <b>Dashboard</b>: o resumo das suas rotas, com o dinheiro de hoje e da semana.'},
+ {s:'dash',st:{},t:'burger',a:'tap',es:'Para ir a otra parte, toca el botón <b>☰</b> de arriba a la izquierda.',pt:'Para ir a outra parte, toque no botão <b>☰</b> em cima à esquerda.'},
+ {s:'drawer',st:{on:'dash'},t:'nav-routes',a:'look',es:'Se abre el <b>menú</b>. <b>Estructura</b>: oficinas, rutas y usuarios.',pt:'Abre o <b>menu</b>. <b>Estructura</b>: escritórios, rotas e usuários.'},
+ {s:'drawer',st:{on:'dash'},t:'nav-auth',a:'look',es:'<b>Cartera</b>: clientes, ventas, <b>autorizaciones</b> de ventas, ajustes de pago y mapa.',pt:'<b>Cartera</b>: clientes, vendas, <b>autorizações</b> de vendas, ajustes de pagamento e mapa.'},
+ {s:'drawer',st:{on:'dash'},t:'nav-exp',a:'look',es:'<b>Dinero</b>: caja principal, <b>gastos</b>, transferencias, notificaciones y consultas.',pt:'<b>Dinero</b>: caixa principal, <b>despesas</b>, transferências, notificações e consultas.'},
+ {s:'drawer',st:{on:'dash'},t:'nav-liq',a:'tap',es:'<b>Control</b>: reportes, <b>Liquidación</b> (cierres y cuadres) y diferencias. Toca una opción para entrar.',pt:'<b>Control</b>: relatórios, <b>Liquidación</b> (fechamentos e acertos) e diferenças. Toque numa opção para entrar.'}
+]},
+{id:'usuario',ic:'👤',es:['Crear un usuario','Un cobrador nuevo, por ejemplo'],pt:['Criar um usuário','Um cobrador novo, por exemplo'],steps:[
+ {s:'drawer',st:{},t:'nav-users',a:'tap',es:'En el menú ☰, toca <b>«Usuarios»</b>.',pt:'No menu ☰, toque em <b>«Usuarios»</b>.'},
+ {s:'users',st:{},t:'unew',a:'tap',es:'Toca <b>«Nuevo usuario»</b>.',pt:'Toque em <b>«Nuevo usuario»</b>.'},
+ {s:'users',st:U({unom:'Marcos Lima'}),t:'unom',a:'type',v:'Marcos Lima',es:'Escribe el <b>nombre completo</b> de la persona.',pt:'Escreva o <b>nome completo</b> da pessoa.'},
+ {s:'users',st:U({unom:'Marcos Lima',umail:'marcos@empresa.com'}),t:'umail',a:'type',v:'marcos@empresa.com',es:'Escribe su <b>correo</b>. Con él va a entrar a ADEX.',pt:'Escreva o <b>e-mail</b> dela. Com ele vai entrar no ADEX.'},
+ {s:'users',st:U({unom:'Marcos Lima',umail:'marcos@empresa.com',urol:'Cobrador'}),t:'urol',a:'type',v:'Cobrador',es:'Elige el <b>Rol</b>, por ejemplo <b>Cobrador</b> o <b>Supervisor</b>.',pt:'Escolha o <b>papel</b> (Rol), por exemplo <b>Cobrador</b> ou <b>Supervisor</b>.'},
+ {s:'users',st:U(D_USERS),t:'urutas',a:'look',es:'Marca las <b>rutas</b> en las que va a trabajar.',pt:'Marque as <b>rotas</b> em que ela vai trabalhar.'},
+ {s:'users',st:U(D_USERS),t:'ucrear',a:'tap',es:'Toca <b>«Crear»</b>.',pt:'Toque em <b>«Crear»</b>.'},
+ {s:'users',st:{created:1,toast:'✓ Usuario creado'},t:'acceso',a:'tap',es:'Ahora toca <b>«Acceso del usuario»</b> para sacar su <b>enlace de entrada</b>.',pt:'Agora toque em <b>«Acceso del usuario»</b> para gerar o <b>link de entrada</b>.'},
+ {s:'users',st:{created:1,link:1},t:'ulink',a:'look',es:'Copia el enlace y envíaselo (por WhatsApp, por ejemplo). Con él la persona <b>elige su contraseña</b>. Tú nunca la conoces.',pt:'Copie o link e envie para a pessoa (pelo WhatsApp, por exemplo). Com ele ela <b>escolhe a senha</b>. Você nunca fica sabendo.'}
+]},
+{id:'ruta',ic:'📍',es:['Crear una ruta','Y asignarle trabajadores'],pt:['Criar uma rota','E colocar trabalhadores'],steps:[
+ {s:'drawer',st:{},t:'nav-routes',a:'tap',es:'En el menú ☰, toca <b>«Rutas»</b>.',pt:'No menu ☰, toque em <b>«Rutas»</b>.'},
+ {s:'routes',st:{},t:'rnew',a:'tap',es:'Toca <b>«Nueva ruta»</b>.',pt:'Toque em <b>«Nueva ruta»</b>.'},
+ {s:'routes',st:{form:1,rnom:'Ruta Sul'},t:'rnom',a:'type',v:'Ruta Sul',es:'Escribe el <b>nombre de la ruta</b>.',pt:'Escreva o <b>nome da rota</b>.'},
+ {s:'routes',st:{form:1,rnom:'Ruta Sul',rciu:'Águas Lindas'},t:'rciu',a:'type',v:'Águas Lindas',es:'Escribe la <b>ciudad</b>.',pt:'Escreva a <b>cidade</b>.'},
+ {s:'routes',st:{form:1,rnom:'Ruta Sul',rciu:'Águas Lindas',radm:'Helena Costa'},t:'radm',a:'type',v:'Helena Costa',es:'Elige el <b>Administrador responsable</b>: el que maneja la Base y hace los cierres de esa ruta.',pt:'Escolha o <b>Administrador responsável</b>: quem cuida da Base e faz os fechamentos dessa rota.'},
+ {s:'routes',st:{form:1,rnom:'Ruta Sul',rciu:'Águas Lindas',radm:'Helena Costa',rtasa:'20'},t:'rtasa',a:'type',v:'20',es:'Escribe la <b>tasa de interés</b> de la ruta. Las ventas nuevas la usan sola.',pt:'Escreva a <b>taxa de juros</b> da rota. As vendas novas usam ela sozinhas.'},
+ {s:'routes',st:{form:1,rnom:'Ruta Sul',rciu:'Águas Lindas',radm:'Helena Costa',rtasa:'20',ru:1},t:'rusers',a:'look',es:'Marca los <b>trabajadores</b> de esta ruta.',pt:'Marque os <b>trabalhadores</b> desta rota.'},
+ {s:'routes',st:{form:1,rnom:'Ruta Sul',rciu:'Águas Lindas',radm:'Helena Costa',rtasa:'20',ru:1},t:'rcrear',a:'tap',es:'Toca <b>«Crear»</b>.',pt:'Toque em <b>«Crear»</b>.'},
+ {s:'routes',st:{created:1,toast:'✓ Ruta creada'},a:'look',es:'¡Listo! La ruta nueva aparece en la lista, todavía sin dinero. Después le entregas Base.',pt:'Pronto! A rota nova aparece na lista, ainda sem dinheiro. Depois você entrega a Base.'}
+]},
+{id:'aprobar',ic:'✅',es:['Aprobar o rechazar una venta','Lo que pide el cobrador'],pt:['Aprovar ou recusar uma venda','O que o cobrador pede'],steps:[
+ {s:'drawer',st:{},t:'nav-auth',a:'tap',es:'Cuando un cobrador pide permiso para una venta, te llega un aviso. En el menú ☰ toca <b>«Autorizaciones»</b>.',pt:'Quando um cobrador pede permissão para uma venda, chega um aviso. No menu ☰ toque em <b>«Autorizaciones»</b>.'},
+ {s:'auth',st:{},t:'arev',a:'tap',es:'En <b>«Pendientes»</b> están las solicitudes. Toca <b>«Revisar»</b>.',pt:'Em <b>«Pendientes»</b> estão os pedidos. Toque em <b>«Revisar»</b>.'},
+ {s:'auth',st:{open:1},t:'aind',a:'look',es:'Mira los <b>indicadores</b>: cuánto pide ahora comparado con sus ventas anteriores.',pt:'Veja os <b>indicadores</b>: quanto pede agora comparado com as vendas anteriores.'},
+ {s:'auth',st:{open:1},t:'acond',a:'look',es:'Puedes <b>cambiar las condiciones</b> (valor, parcelas) antes de aprobar.',pt:'Você pode <b>mudar as condições</b> (valor, parcelas) antes de aprovar.'},
+ {s:'auth',st:{open:1},t:'aok',a:'tap',es:'Si está bien, toca <b>«Aprobar»</b>. Si no, toca <b>«Rechazar»</b> y escribe el motivo.',pt:'Se estiver tudo certo, toque em <b>«Aprobar»</b>. Se não, toque em <b>«Rechazar»</b> e escreva o motivo.'},
+ {s:'auth',st:{done:1,toast:'✓ Solicitud aprobada. Venta creada, pendiente de desembolso por el cobrador.'},a:'look',es:'¡Listo! Ahora el cobrador la ve en <b>«Desembolsos»</b> y entrega el dinero al cliente.',pt:'Pronto! Agora o cobrador vê em <b>«Desembolsos»</b> e entrega o dinheiro ao cliente.'}
+]},
+{id:'base',ic:'💵',es:['Entregar Base a un cobrador','El dinero para trabajar'],pt:['Entregar Base a um cobrador','O dinheiro para trabalhar'],steps:[
+ {s:'drawer',st:{},t:'nav-liq',a:'tap',es:'En el menú ☰, toca <b>«Liquidación»</b>.',pt:'No menu ☰, toque em <b>«Liquidación»</b>.'},
+ {s:'liq',st:{},t:'tcuadre',a:'tap',es:'Toca la pestaña <b>«Cuadre por trabajador»</b>.',pt:'Toque na aba <b>«Cuadre por trabajador»</b>.'},
+ {s:'liq',st:{tab:1,trab:1},t:'ltrab',a:'type',v:'Carlos Souza · Cobrador',es:'Elige la <b>ruta</b> y el <b>trabajador</b>.',pt:'Escolha a <b>rota</b> e o <b>trabalhador</b>.'},
+ {s:'liq',st:{tab:1,trab:1},t:'lbase',a:'tap',es:'Toca <b>«Entregar Base»</b>. Solo lo puede hacer el <b>Administrador responsable</b> de la ruta.',pt:'Toque em <b>«Entregar Base»</b>. Só o <b>Administrador responsável</b> da rota pode fazer isso.'},
+ {s:'liq',st:{tab:1,trab:1,mbase:1,bval:500},t:'bval',a:'type',v:'R$ 500,00',es:'Escribe el <b>valor</b> que le entregas en la mano.',pt:'Escreva o <b>valor</b> que você entrega na mão dele.'},
+ {s:'liq',st:{tab:1,trab:1,mbase:1,bval:500},t:'bok',a:'tap',es:'Toca <b>«Registrar»</b>. El cobrador lo ve en su celular como <b>«Base recibida»</b>.',pt:'Toque em <b>«Registrar»</b>. O cobrador vê no celular como <b>«Base recibida»</b>.'}
+]},
+{id:'cuadre',ic:'🤝',es:['Cuadrar a un cobrador','Recibir su efectivo'],pt:['Fazer o acerto do cobrador','Receber o dinheiro dele'],steps:[
+ {s:'liq',st:{tab:1},t:'ltrab',a:'tap',es:'En <b>Liquidación → «Cuadre por trabajador»</b>, elige al trabajador que te entrega el dinero.',pt:'Em <b>Liquidación → «Cuadre por trabajador»</b>, escolha o trabalhador que te entrega o dinheiro.'},
+ {s:'liq',st:{tab:1,trab:1},t:'lesp',a:'look',es:'ADEX calcula cuánto <b>debe entregarte</b>: Base + lo que cobró − lo que prestó − sus gastos. Eso es <b>«Esperado a entregar»</b>.',pt:'O ADEX calcula quanto ele <b>deve te entregar</b>: Base + o que cobrou − o que emprestou − as despesas. Isso é <b>«Esperado a entregar»</b>.'},
+ {s:'liq',st:{tab:1,trab:1,entr:920},t:'lentr',a:'type',v:'R$ 920,00',es:'Cuenta el dinero y escribe en <b>«Entregado»</b> lo que de verdad recibiste.',pt:'Conte o dinheiro e escreva em <b>«Entregado»</b> o que você realmente recebeu.'},
+ {s:'liq',st:{tab:1,trab:1,entr:920},t:'lccuad',a:'tap',es:'Toca <b>«Cerrar cuadre»</b>. Si falta o sobra dinero, ADEX te pide el <b>motivo</b>.',pt:'Toque em <b>«Cerrar cuadre»</b>. Se faltar ou sobrar dinheiro, o ADEX pede o <b>motivo</b>.'},
+ {s:'liq',st:{tab:1,trab:1,entr:920,mcuad:1},t:'lcok',a:'tap',es:'Revisa y toca <b>«Confirmar cuadre»</b>. El dinero vuelve a la <b>Base disponible</b> de la ruta.',pt:'Confira e toque em <b>«Confirmar cuadre»</b>. O dinheiro volta para a <b>Base disponível</b> da rota.'}
+]},
+{id:'cierre',ic:'📅',es:['Hacer el cierre de una ruta','Congelar las cifras'],pt:['Fazer o fechamento de uma rota','Congelar os números'],steps:[
+ {s:'drawer',st:{},t:'nav-liq',a:'tap',es:'En el menú ☰, toca <b>«Liquidación»</b>.',pt:'No menu ☰, toque em <b>«Liquidación»</b>.'},
+ {s:'liq',st:{},t:'lruta',a:'look',es:'Estás en <b>«Cierre de ruta»</b>. Elige la <b>ruta</b>: cada ruta se cierra por separado.',pt:'Você está em <b>«Cierre de ruta»</b>. Escolha a <b>rota</b>: cada rota é fechada separadamente.'},
+ {s:'liq',st:{},t:'lult',a:'look',es:'Aquí ves el <b>último cierre</b>. «Desde» empieza solo al día siguiente, así no queda ningún día sin cerrar.',pt:'Aqui você vê o <b>último fechamento</b>. «Desde» começa sozinho no dia seguinte, assim nenhum dia fica sem fechar.'},
+ {s:'liq',st:{},t:'lhasta',a:'look',es:'En <b>«Hasta»</b> pon el último día que quieres cerrar. Puede ser hoy.',pt:'Em <b>«Hasta»</b> coloque o último dia que você quer fechar. Pode ser hoje.'},
+ {s:'liq',st:{},t:'lgen',a:'tap',es:'Toca <b>«Generar»</b>. Es solo una <b>vista previa</b>: todavía no guarda nada.',pt:'Toque em <b>«Generar»</b>. É só uma <b>prévia</b>: ainda não salva nada.'},
+ {s:'liq',st:{gen:1},t:'lres',a:'look',es:'Revisa las cifras: Base al inicio, lo que entró, lo que salió y la <b>Base al cierre</b>.',pt:'Confira os números: Base no início, o que entrou, o que saiu e a <b>Base no fechamento</b>.'},
+ {s:'liq',st:{gen:1},t:'lcerrar',a:'tap',es:'Si todo está bien, toca <b>«Hacer cierre»</b>. Antes, pide a los cobradores que <b>sincronicen</b> sus celulares.',pt:'Se tudo estiver certo, toque em <b>«Hacer cierre»</b>. Antes, peça aos cobradores para <b>sincronizar</b> os celulares.'},
+ {s:'liq',st:{gen:1,mclose:1},t:'lconf',a:'tap',es:'Confirma con <b>«Hacer cierre y congelar cifras»</b>. Esos días ya no se pueden cambiar sin reabrir.',pt:'Confirme com <b>«Hacer cierre y congelar cifras»</b>. Esses dias não podem mais ser mudados sem reabrir.'},
+ {s:'liq',st:{closed:1},t:'lhist',a:'look',es:'El cierre queda en <b>«Cierres realizados»</b>. Cualquier Administrador de la ruta lo puede ver.',pt:'O fechamento fica em <b>«Cierres realizados»</b>. Qualquer Administrador da rota pode ver.'}
+]},
+{id:'gasto',ic:'📉',es:['Registrar un gasto','De la empresa, de una ruta o de un trabajador'],pt:['Registrar uma despesa','Da empresa, de uma rota ou de um trabalhador'],steps:[
+ {s:'drawer',st:{},t:'nav-exp',a:'tap',es:'En el menú ☰, toca <b>«Gastos»</b>.',pt:'No menu ☰, toque em <b>«Gastos»</b>.'},
+ {s:'exp',st:{},t:'enew',a:'tap',es:'Toca <b>«Nuevo gasto»</b>.',pt:'Toque em <b>«Nuevo gasto»</b>.'},
+ {s:'exp',st:{form:1,quien:0},t:'equien',a:'look',es:'Elige <b>de qué dinero sale</b>: de la <b>empresa</b>, de la <b>Base de una ruta</b> o del efectivo de un <b>trabajador</b>.',pt:'Escolha <b>de qual dinheiro sai</b>: da <b>empresa</b>, da <b>Base de uma rota</b> ou do dinheiro de um <b>trabalhador</b>.'},
+ {s:'exp',st:{form:1,quien:0,cat:'Pago abogado'},t:'ecat',a:'type',v:'Pago abogado',es:'Elige la <b>categoría</b>. Tú ves todas; el cobrador solo las marcadas para él.',pt:'Escolha a <b>categoria</b>. Você vê todas; o cobrador só as marcadas para ele.'},
+ {s:'exp',st:{form:1,quien:0,cat:'Pago abogado',val:250},t:'eval',a:'type',v:'R$ 250,00',es:'Escribe el <b>valor</b>.',pt:'Escreva o <b>valor</b>.'},
+ {s:'exp',st:{form:1,quien:0,cat:'Pago abogado',val:250},t:'ereg',a:'tap',es:'Toca <b>«Registrar»</b>.',pt:'Toque em <b>«Registrar»</b>.'},
+ {s:'exp',st:{saved:1,toast:'✓ Gasto registrado'},a:'look',es:'¡Listo! Si te equivocas, puedes <b>«Anular»</b> un gasto: el valor vuelve a donde salió.',pt:'Pronto! Se errar, você pode <b>«Anular»</b> a despesa: o valor volta para onde saiu.'}
+]},
+{id:'categorias',ic:'🏷️',es:['Elegir los gastos del cobrador','Casilla «Para Cobradores»'],pt:['Escolher as despesas do cobrador','Caixa «Para Cobradores»'],steps:[
+ {s:'exp',st:{},t:'tcats',a:'tap',es:'En <b>Gastos</b>, toca la pestaña <b>«Categorías»</b>.',pt:'Em <b>Gastos</b>, toque na aba <b>«Categorías»</b>.'},
+ {s:'cats',st:{},t:'cpc',a:'look',es:'Los tipos con <b>«Para Cobradores»</b> marcado son los únicos que el cobrador y el supervisor pueden usar.',pt:'Os tipos com <b>«Para Cobradores»</b> marcado são os únicos que o cobrador e o supervisor podem usar.'},
+ {s:'cats',st:{},t:'clav',a:'tap',es:'Para dejar que usen otro tipo, toca su casilla <b>«Para Cobradores»</b>.',pt:'Para deixar que usem outro tipo, toque na caixa <b>«Para Cobradores»</b> dele.'},
+ {s:'cats',st:{lav:1,toast:'✓ Categoría actualizada'},t:'clav',a:'look',es:'¡Listo! Desde ahora lo ven en su celular. También puedes crear, editar o desactivar categorías.',pt:'Pronto! A partir de agora eles veem no celular. Você também pode criar, editar ou desativar categorias.'}
+]}
+];
+
+/* ===================== ¿QUÉ ES ESTO? ===================== */
+var EXPLIST=[['dash','📊','Dashboard','Dashboard'],['drawer','☰','Menú','Menu'],['liq','📅','Liquidaciones','Liquidações'],['exp','📉','Gastos','Despesas']];
+var EXP={
+ dash:{s:'dash',st:{},keys:['burger','aco','wifi','avat','d-base','d-bt','d-ef','d-cap','d-rh','d-car','d-rs','d-gs','d-cl','d-mora','d-graf','d-top']},
+ drawer:{s:'drawer',st:{on:'dash'},keys:['g-Estructura','g-Cartera','g-Dinero','g-Control','salir']},
+ liq:{s:'liq',st:{gen:1},keys:['ltabs','lult','lgen','lcerrar','lres','lhist']},
+ exp:{s:'exp',st:{},keys:['enew','efil','elist','eanular']}
+};
+var HELP={
+ burger:['<b>☰ Menú</b>: abre la lista de todas las pantallas.','<b>☰ Menu</b>: abre a lista de todas as telas.'],
+ aco:['El nombre de tu <b>empresa</b>.','O nome da sua <b>empresa</b>.'],
+ wifi:['Dice si tienes <b>internet</b>. Verde: en línea. Rojo: sin conexión; entonces <b>no se guarda nada</b>, espera a que vuelva.','Diz se você tem <b>internet</b>. Verde: online. Vermelho: sem conexão; então <b>nada é salvo</b>, espere voltar.'],
+ avat:['Tus <b>iniciales</b>: eres tú, el usuario que entró.','As suas <b>iniciais</b>: é você, o usuário que entrou.'],
+ 'd-base':['<b>Base disponible</b>: dinero de tus rutas que está en la oficina, listo para entregar.','<b>Base disponible</b>: dinheiro das suas rotas que está no escritório, pronto para entregar.'],
+ 'd-bt':['<b>Base del trabajador</b>: dinero que tienen en la mano tus cobradores y supervisores.','<b>Base del trabajador</b>: dinheiro que os seus cobradores e supervisores têm na mão.'],
+ 'd-ef':['<b>Efectivo de las rutas</b>: la suma de los dos anteriores. Es todo el dinero en efectivo.','<b>Efectivo de las rutas</b>: a soma dos dois anteriores. É todo o dinheiro em espécie.'],
+ 'd-cap':['<b>Capital colocado</b>: lo que está prestado, sin contar el interés. No es efectivo.','<b>Capital colocado</b>: o que está emprestado, sem contar os juros. Não é dinheiro em mão.'],
+ 'd-rh':['<b>Recaudo hoy</b>: lo que cobraron hoy todos tus trabajadores.','<b>Recaudo hoy</b>: o que todos os seus trabalhadores cobraram hoje.'],
+ 'd-car':['<b>Cartera activa</b>: todo lo que los clientes deben, con interés.','<b>Cartera activa</b>: tudo o que os clientes devem, com juros.'],
+ 'd-rs':['<b>Recaudo semanal</b>: lo cobrado en la semana.','<b>Recaudo semanal</b>: o que foi cobrado na semana.'],
+ 'd-gs':['<b>Gastos semana</b>: lo gastado en la semana.','<b>Gastos semana</b>: o que foi gasto na semana.'],
+ 'd-cl':['<b>Clientes activos</b>: clientes con un préstamo que se está pagando.','<b>Clientes activos</b>: clientes com um empréstimo sendo pago.'],
+ 'd-mora':['<b>Rutas con mora</b>: rutas con clientes atrasados. Revísalas.','<b>Rutas con mora</b>: rotas com clientes atrasados. Confira.'],
+ 'd-graf':['Gráfico de lo cobrado en los <b>últimos 7 días</b>.','Gráfico do que foi cobrado nos <b>últimos 7 dias</b>.'],
+ 'd-top':['Las rutas que <b>más cobraron</b> esta semana.','As rotas que <b>mais cobraram</b> nesta semana.'],
+ 'g-Estructura':['<b>Estructura</b>: Oficinas, Rutas y Usuarios. Para organizar la empresa.','<b>Estructura</b>: Escritórios, Rotas e Usuários. Para organizar a empresa.'],
+ 'g-Cartera':['<b>Cartera</b>: Clientes, Ventas Activas, Autorizaciones (aprobar ventas), Ajustes de pago y Mapa de la ruta.','<b>Cartera</b>: Clientes, Vendas Ativas, Autorizações (aprovar vendas), Ajustes de pagamento e Mapa da rota.'],
+ 'g-Dinero':['<b>Dinero</b>: Caja principal, Gastos, Transferencias entre administradores, Notificaciones y Consultas.','<b>Dinero</b>: Caixa principal, Despesas, Transferências entre administradores, Notificações e Consultas.'],
+ 'g-Control':['<b>Control</b>: Reportes, Liquidación (cierres y cuadres) y Diferencias.','<b>Control</b>: Relatórios, Liquidación (fechamentos e acertos) e Diferenças.'],
+ salir:['<b>Cerrar sesión</b>: salir de ADEX. Hazlo siempre en un computador que no es tuyo.','<b>Sair</b> do ADEX. Faça sempre num computador que não é seu.'],
+ ltabs:['Dos pestañas: <b>Cierre de ruta</b> (congelar las cifras de la ruta) y <b>Cuadre por trabajador</b> (entregar Base y recibir el efectivo).','Duas abas: <b>Cierre de ruta</b> (congelar os números da rota) e <b>Cuadre por trabajador</b> (entregar Base e receber o dinheiro).'],
+ lult:['Fechas del <b>último cierre</b> de esta ruta.','Datas do <b>último fechamento</b> desta rota.'],
+ lgen:['<b>Generar</b>: muestra las cifras sin guardar nada.','<b>Generar</b>: mostra os números sem salvar nada.'],
+ lcerrar:['<b>Hacer cierre</b>: guarda y congela las cifras. Solo el Administrador responsable.','<b>Hacer cierre</b>: salva e congela os números. Só o Administrador responsável.'],
+ lres:['Resumen: Base al inicio, entradas, salidas y <b>Base al cierre</b>.','Resumo: Base no início, entradas, saídas e <b>Base no fechamento</b>.'],
+ lhist:['<b>Cierres realizados</b>: todos los cierres de la ruta, con su estado.','<b>Cierres realizados</b>: todos os fechamentos da rota, com o estado.'],
+ enew:['<b>Nuevo gasto</b>: registrar un gasto.','<b>Nuevo gasto</b>: registrar uma despesa.'],
+ efil:['<b>Filtros</b>: ver solo un tipo de gasto o unas fechas.','<b>Filtros</b>: ver só um tipo de despesa ou algumas datas.'],
+ elist:['Lista de gastos: tipo, fecha, <b>de dónde salió</b> el dinero y valor.','Lista de despesas: tipo, data, <b>de onde saiu</b> o dinheiro e valor.'],
+ eanular:['<b>Anular</b>: deshacer un gasto mal registrado. El valor vuelve a donde salió.','<b>Anular</b>: desfazer uma despesa registrada errada. O valor volta para onde saiu.']
+};
+
+/* ===================== MOTOR ===================== */
+var $=function(id){return document.getElementById(id);};
+var app=$('app'),stage=$('stage'),menu=$('menu'),player=$('player');
+var mode=null,task=null,idx=0,playing=true,timer=null,typer=null,scale=1,expKey='home';
+
+function fit(){
+  var wrapW=Math.min(player.clientWidth-16,420);
+  var used=$('cap').offsetHeight+player.querySelector('.pbar').offsetHeight+($('chips').style.display==='none'?0:$('chips').offsetHeight)+14;
+  var availH=window.innerHeight-52-used;
+  if(window.innerWidth>=900) availH=window.innerHeight-52-player.querySelector('.pbar').offsetHeight-30;
+  scale=Math.max(0.5,Math.min(wrapW/360,availH/640,1.25));
+  app.style.transform='scale('+scale+')';
+  stage.style.width=(360*scale)+'px';stage.style.height=(640*scale)+'px';
+}
+function renderMenu(){
+  document.documentElement.lang=LANG==='pt'?'pt-BR':'es';
+  $('topTtl').textContent=T('title');document.title=T('title')+' · ADEX';
+  var h='<div class="hero"><h1>'+T('heroH')+'</h1><p>'+T('heroP')+'</p></div>';
+  h+='<div class="sec">📘 '+T('how')+' <small>'+T('howS')+'</small></div><div class="grid">';
+  TASKS.forEach(function(t,i){h+='<button class="task" data-task="'+i+'"><span class="ic">'+t.ic+'</span><b>'+t[LANG][0]+'</b><span>'+t[LANG][1]+'</span></button>';});
+  h+='</div><div class="sec">🔎 '+T('what')+' <small>'+T('whatS')+'</small></div><div class="grid">';
+  EXPLIST.map(function(x){return [x[0],x[1],LANG==='pt'?x[3]:x[2]];}).forEach(function(x){
+    h+='<button class="task" data-exp="'+x[0]+'"><span class="ic">'+x[1]+'</span><b>'+x[2]+'</b></button>';});
+  h+='</div><div class="tip">'+T('tip')+'</div>';
+  menu.innerHTML=h;
+  $('bBackT').textContent=T('menu');
+}
+menu.addEventListener('click',function(e){
+  var b=e.target.closest('[data-task]');if(b){openTask(+b.dataset.task);return;}
+  b=e.target.closest('[data-exp]');if(b){openExplore(b.dataset.exp);}
+});
+function showPlayer(){menu.style.display='none';player.classList.add('on');window.scrollTo(0,0);}
+function toMenu(){stop();mode=null;player.classList.remove('on');menu.style.display='';app.innerHTML='';}
+$('bBack').onclick=toMenu;
+
+function stop(){clearTimeout(timer);clearInterval(typer);timer=null;typer=null;}
+function openTask(i){
+  mode='task';task=TASKS[i];idx=0;playing=true;
+  $('pName').textContent=task.ic+' '+task[LANG][0];
+  $('chips').style.display='none';$('ctrls').style.display='';$('prog').style.display='';
+  showPlayer();fit();runStep();
+}
+function drawScreen(s,st){
+  app.innerHTML=S[s](JSON.parse(JSON.stringify(st||{})))+'<div class="hand" id="hand">👆</div>';
+}
+function el(t){return app.querySelector('[data-t="'+t+'"]')||app.querySelector('[data-h="'+t+'"]');}
+function bringIntoView(node){
+  var scr=node.closest('.scr');if(!scr)return;
+  var r=node.getBoundingClientRect(),sr=scr.getBoundingClientRect();
+  var y=(r.top-sr.top)/scale+scr.scrollTop;
+  var want=y-(scr.clientHeight/2)+(r.height/scale/2);
+  scr.style.scrollBehavior='auto';
+  scr.scrollTop=Math.max(0,want);
+}
+function pos(node){
+  var r=node.getBoundingClientRect(),a=app.getBoundingClientRect();
+  return {x:(r.left-a.left+r.width/2)/scale,y:(r.top-a.top+r.height/2)/scale};
+}
+function runStep(){
+  stop();
+  var st=task.steps[idx];
+  drawScreen(st.s,st.st);
+  var n=task.steps.length;
+  $('prog').innerHTML=task.steps.map(function(_,k){return '<i class="'+(k<idx?'pd':k===idx?'pc':'')+'"></i>';}).join('');
+  $('stepn').textContent=T('step').replace('{a}',idx+1).replace('{b}',n);
+  $('txt').innerHTML=st[LANG];
+  $('bPlay').textContent=playing?T('pause'):T('play');
+  fit();
+  var hand=$('hand');
+  var target=st.t?el(st.t):null;
+  var extra=0;
+  if(target){
+    bringIntoView(target);
+    var p=pos(target);
+    requestAnimationFrame(function(){hand.style.left=p.x+'px';hand.style.top=p.y+'px';});
+    setTimeout(function(){
+      if(mode!=='task')return;
+      target.classList.add('hl');
+      if(st.a==='tap'){
+        hand.classList.add('tap');
+        var rp=document.createElement('div');rp.className='rip';rp.style.left=(p.x-8)+'px';rp.style.top=(p.y-8)+'px';app.appendChild(rp);
+      }
+      if(st.a==='type'){
+        var v=target.querySelector('.v');var ph=target.querySelector('.ph');if(ph)ph.remove();
+        if(v){var full=st.v,k=0;v.textContent='';v.classList.add('caret');
+          typer=setInterval(function(){k++;v.textContent=full.slice(0,k);if(k>=full.length){clearInterval(typer);typer=null;v.classList.remove('caret');}},85);}
+      }
+    },800);
+    if(st.a==='type')extra=st.v.length*85;
+  } else {hand.style.display='none';}
+  var dur=Math.max(4200,st[LANG].replace(/<[^>]+>/g,'').length*62)+extra+(target?800:0);
+  if(playing)timer=setTimeout(next,dur);
+}
+function next(){
+  if(idx<task.steps.length-1){idx++;runStep();}
+  else finish();
+}
+function prev(){if(idx>0){idx--;runStep();}else runStep();}
+function finish(){
+  stop();
+  var d=document.createElement('div');d.className='done';
+  d.innerHTML='<div><div class="big">🎉</div><h3>'+T('doneH')+'</h3><p>'+T('doneP')+'</p><button class="main" id="dAgain">'+T('again')+'</button><button id="dMenu">'+T('toMenu')+'</button></div>';
+  stage.appendChild(d);
+  $('dAgain').onclick=function(){d.remove();idx=0;playing=true;runStep();};
+  $('dMenu').onclick=function(){d.remove();toMenu();};
+}
+function clearDone(){var d=stage.querySelector('.done');if(d)d.remove();}
+$('bNext').onclick=function(){clearDone();next();};
+$('bPrev').onclick=function(){clearDone();prev();};
+$('bAgain').onclick=function(){clearDone();idx=0;playing=true;runStep();};
+$('bPlay').onclick=function(){clearDone();playing=!playing;if(playing){runStep();}else{stop();$('bPlay').textContent=T('play');}};
+
+/* ---- explorar ---- */
+function openExplore(k){
+  mode='exp';expKey=k;
+  $('pName').textContent='🔎 '+T('what');
+  var ch=$('chips');ch.style.display='flex';
+  ch.innerHTML=EXPLIST.map(function(x){return [x[0],LANG==='pt'?x[3]:x[2]];}).map(function(x){return '<button data-k="'+x[0]+'" class="'+(x[0]===k?'on':'')+'">'+x[1]+'</button>';}).join('');
+  $('ctrls').style.display='none';$('prog').style.display='none';$('stepn').textContent='';
+  $('txt').innerHTML=T('expHint');
+  showPlayer();
+  var e=EXP[k];
+  drawScreen(e.s,e.st);$('hand').style.display='none';
+  app.classList.add('explore');
+  fit();
+  setTimeout(placeBadges,30);
+}
+$('chips').addEventListener('click',function(e){var b=e.target.closest('[data-k]');if(b)openExplore(b.dataset.k);});
+function placeBadges(){
+  app.querySelectorAll('.badge').forEach(function(b){b.remove();});
+  var e=EXP[expKey];
+  e.keys.forEach(function(key,i){
+    var node=app.querySelector('[data-h="'+key+'"]');if(!node)return;
+    var r=node.getBoundingClientRect(),a=app.getBoundingClientRect();
+    var b=document.createElement('div');b.className='badge';b.textContent=i+1;
+    var x=(r.right-a.left)/scale-16, y=(r.top-a.top)/scale-8;
+    b.style.left=Math.max(2,Math.min(334,x))+'px';b.style.top=Math.max(2,Math.min(614,y))+'px';
+    app.appendChild(b);
+  });
+}
+app.addEventListener('click',function(e){
+  if(mode!=='exp')return;
+  var e2=EXP[expKey];
+  var node=e.target.closest('[data-h]');
+  while(node&&e2.keys.indexOf(node.dataset.h)<0){node=node.parentElement&&node.parentElement.closest('[data-h]');}
+  if(!node)return;
+  app.querySelectorAll('.picked').forEach(function(x){x.classList.remove('picked');});
+  node.classList.add('picked');
+  var n=e2.keys.indexOf(node.dataset.h)+1;
+  $('txt').innerHTML='<span style="display:inline-flex;width:22px;height:22px;border-radius:50%;background:#f59e0b;color:#fff;font-weight:900;font-size:12px;align-items:center;justify-content:center;margin-right:6px">'+n+'</span>'+HELP[node.dataset.h][LANG==='pt'?1:0];
+});
+app.addEventListener('scroll',function(){if(mode==='exp')placeBadges();},true);
+
+/* ---- idioma ---- */
+document.querySelectorAll('.lang button').forEach(function(b){
+  b.onclick=function(){
+    LANG=b.dataset.l;try{localStorage.setItem('adexManualLang',LANG);}catch(e){}
+    document.querySelectorAll('.lang button').forEach(function(x){x.classList.toggle('on',x.dataset.l===LANG);});
+    renderMenu();
+    if(mode==='task'){$('pName').textContent=task.ic+' '+task[LANG][0];runStep();}
+    else if(mode==='exp'){openExplore(expKey);}
+  };
+  b.classList.toggle('on',b.dataset.l===LANG);
+});
+window.addEventListener('resize',function(){if(mode){fit();if(mode==='exp')placeBadges();}});
+renderMenu();
+window.__manual={TASKS:TASKS,S:S,EXP:EXP,HELP:HELP};
+})();
+</script>
+</body>
+</html>
