@@ -39,6 +39,7 @@
    * Ronda 76: mora al día (`865844a`, Render) y respaldos con la alternativa A activa (copias diarias cifradas en OneDrive, clave de recuperación comprobada, tareas registradas; primera copia automática `adex-20261027T1947`).
    * **Probado:** pruebas financieras (CUOTAS-001…003), las de CLEAN, los tipos y E2E 89/89, 41/41 y 25/25. **No probado:** con datos reales ni por el socio.
 3. **Qué falta:**
+   * 3.26 (Alta, petición del socio 2026-11-05): manuales interactivos en HTML (Cobrador primero, después Admin), con botón ES/PT, que se vean bien en el celular y se envíen por WhatsApp. Las listas de tareas están por confirmar con el socio.
    * **Para el chat Central:** 3.23 (Alta, petición del socio 2026-11-04): fecha elegible en «Informe del día» (Cobrador y Supervisor, cualquier fecha pasada, sigue siendo personal).
    * **Para el chat Central:** 3.22, hacer ADEX Online instalable como app (manifiesto web). Esperando la respuesta del socio: Android o iPhone, impresión de recibos y recorrido en mapa.
    * Que el socio compruebe 3.21 (4.9): dejar la app abierta hasta el día siguiente.
