@@ -1,0 +1,739 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Manual del Cobrador · ADEX</title>
+<style>
+:root{
+  --blue:#2563eb;--blue2:#1d4ed8;--ink:#0f172a;--mut:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--card:#fff;
+  --green:#059669;--red:#dc2626;--amber:#d97706;--soft:#eff6ff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);-webkit-text-size-adjust:100%}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;padding:10px 16px;background:linear-gradient(135deg,var(--blue),var(--blue2));color:#fff}
+.top .logo{font-weight:900;font-size:20px;letter-spacing:1px}
+.top .ttl{font-size:14px;opacity:.9;flex:1;line-height:1.2}
+.lang{display:flex;background:rgba(255,255,255,.18);border-radius:999px;padding:3px}
+.lang button{padding:5px 11px;border-radius:999px;font-weight:700;font-size:13px;color:#fff}
+.lang button.on{background:#fff;color:var(--blue)}
+/* ---------- MENÚ ---------- */
+#menu{max-width:720px;margin:0 auto;padding:16px 16px 40px}
+.hero{background:#fff;border-radius:20px;padding:18px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:16px}
+.hero h1{font-size:22px;margin-bottom:6px}
+.hero p{color:var(--mut);font-size:15px;line-height:1.45}
+.sec{margin:22px 0 10px;font-size:18px;font-weight:800;display:flex;align-items:center;gap:8px}
+.sec small{font-weight:500;color:var(--mut);font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.task{background:#fff;border-radius:16px;padding:14px;text-align:left;box-shadow:0 1px 3px rgba(0,0,0,.06);border:2px solid transparent;display:flex;flex-direction:column;gap:6px;min-height:104px}
+.task:active,.task:hover{border-color:var(--blue)}
+.task .ic{font-size:28px}
+.task b{font-size:15px;line-height:1.25}
+.task span{font-size:12.5px;color:var(--mut);line-height:1.3}
+.tip{background:#fffbeb;border:1px solid #fde68a;border-radius:14px;padding:12px 14px;font-size:14px;line-height:1.45;margin-top:14px}
+/* ---------- REPRODUCTOR ---------- */
+#player{display:none;flex-direction:column;height:calc(100dvh - 52px);max-width:720px;margin:0 auto}
+#player.on{display:flex}
+.pbar{display:flex;align-items:center;gap:8px;padding:8px 12px}
+.pbar .back{background:#fff;border-radius:999px;padding:7px 12px;font-weight:700;font-size:14px;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.pbar .name{font-weight:800;font-size:15px;flex:1;line-height:1.2}
+.stagewrap{flex:1;min-height:0;display:flex;justify-content:center;align-items:flex-start;padding:0 8px}
+.stage{position:relative;border-radius:18px;overflow:hidden;box-shadow:0 8px 30px rgba(15,23,42,.18);background:#000}
+.cap{background:#fff;border-radius:18px 18px 0 0;padding:12px 16px calc(10px + env(safe-area-inset-bottom));box-shadow:0 -4px 16px rgba(0,0,0,.06)}
+.prog{display:flex;gap:4px;margin-bottom:8px}
+.prog i{flex:1;height:5px;border-radius:9px;background:var(--line)}
+.prog i.pd{background:#93c5fd}.prog i.pc{background:var(--blue)}
+.stepn{font-size:12px;color:var(--mut);font-weight:700;margin-bottom:3px}
+.txt{font-size:16.5px;line-height:1.42;min-height:3.2em}
+.txt b{color:var(--blue2)}
+.ctrls{display:flex;gap:8px;margin-top:10px}
+.ctrls button{flex:1;padding:11px 6px;border-radius:12px;background:var(--soft);color:var(--blue2);font-weight:800;font-size:15px}
+.ctrls button.main{background:var(--blue);color:#fff;flex:1.4}
+.done{position:absolute;inset:0;z-index:40;background:rgba(15,23,42,.72);display:flex;align-items:center;justify-content:center;padding:24px}
+.done div{background:#fff;border-radius:20px;padding:22px;text-align:center;max-width:300px}
+.done .big{font-size:46px}
+.done h3{margin:6px 0 8px;font-size:20px}
+.done p{color:var(--mut);font-size:15px;line-height:1.4;margin-bottom:14px}
+.done button{display:block;width:100%;padding:12px;border-radius:12px;font-weight:800;margin-top:8px;background:var(--soft);color:var(--blue2)}
+.done button.main{background:var(--blue);color:#fff}
+/* explorar */
+.chips{display:flex;gap:6px;overflow-x:auto;padding:0 12px 8px}
+.chips button{white-space:nowrap;padding:7px 12px;border-radius:999px;background:#fff;font-weight:700;font-size:13.5px;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.chips button.on{background:var(--blue);color:#fff}
+.badge{position:absolute;z-index:30;width:22px;height:22px;border-radius:50%;background:#f59e0b;color:#fff;font-size:12px;font-weight:900;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px #fff;pointer-events:none;animation:bob 1.6s ease-in-out infinite}
+@keyframes bob{50%{transform:scale(1.15)}}
+.explore [data-h]{cursor:pointer}
+.picked{outline:3px solid #f59e0b!important;outline-offset:2px;border-radius:10px}
+
+/* ================= APP SIMULADA (360 x 640) ================= */
+.app{position:absolute;left:0;top:0;width:360px;height:640px;transform-origin:0 0;background:#f8fafc;overflow:hidden;font-size:13px;color:#111827}
+.app *{transition:none}
+.hdr{position:absolute;left:0;right:0;top:0;height:54px;background:var(--blue);color:#fff;display:flex;align-items:center;gap:8px;padding:0 10px}
+.hdr .lg{font-weight:900;font-size:17px;font-style:italic;letter-spacing:.5px;line-height:.9}
+.hdr .lg small{display:block;font-size:6px;letter-spacing:2px;font-style:normal;font-weight:600}
+.hdr .who{flex:1;line-height:1.15}.hdr .who b{font-size:13px;display:block}.hdr .who span{font-size:11px;opacity:.9}
+.net{font-size:10.5px;font-weight:700;padding:4px 8px;border-radius:999px;background:rgba(255,255,255,.2)}
+.net.off{background:#f59e0b}
+.hico{width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:15px}
+.scr{position:absolute;left:0;right:0;top:54px;bottom:58px;overflow-y:auto;padding:12px;scroll-behavior:smooth}
+.scr.full{top:0;bottom:0}
+.scr.nonav{bottom:0}
+.nav{position:absolute;left:0;right:0;bottom:0;height:58px;background:#fff;border-top:1px solid var(--line);display:flex}
+.nav div{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9.5px;color:#9ca3af;gap:2px}
+.nav div i{font-style:normal;font-size:16px;filter:grayscale(1);opacity:.7}
+.nav div.on{color:var(--blue)}.nav div.on i{filter:none;opacity:1}
+.c{background:#fff;border-radius:16px;border:1px solid #eef2f7;box-shadow:0 1px 2px rgba(0,0,0,.04);padding:12px;margin-bottom:10px}
+.greet{background:linear-gradient(135deg,#2563eb,#1e40af);color:#fff;border-radius:18px;padding:14px;margin-bottom:10px}
+.greet small{opacity:.85;font-size:12px}.greet b{display:block;font-size:19px;margin:2px 0 8px}
+.greet .row{display:flex;justify-content:space-between;align-items:center;font-size:11.5px}
+.pill{display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,.18);padding:4px 9px;border-radius:999px;font-weight:600}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:10px}
+.stats div{border-radius:13px;padding:9px 4px;text-align:center;border:1px solid}
+.stats b{display:block;font-size:15px}.stats span{font-size:10.5px;color:#374151}
+.s1{background:#fffbeb;border-color:#fde68a!important}.s1 b{color:#d97706}
+.s2{background:#ecfdf5;border-color:#a7f3d0!important}.s2 b{color:#059669}
+.s3{background:#eff6ff;border-color:#bfdbfe!important}.s3 b{color:#2563eb}
+.mod{display:flex;gap:10px;align-items:flex-start}
+.mod .mi{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:18px;flex:none}
+.mod b{font-size:14px;display:block}.mod span{font-size:11.5px;color:#6b7280}
+.btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.b{display:inline-flex;align-items:center;justify-content:center;padding:7px 11px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;font-size:11.5px}
+.b.pri{background:var(--blue);color:#fff;border-color:var(--blue)}
+.b.grn{background:#059669;color:#fff;border-color:#059669}
+.b.full{display:flex;width:100%;padding:11px;font-size:13px;margin-top:8px}
+.b.out{background:#fff}
+.h1{font-weight:800;font-size:16px}.sub{font-size:11.5px;color:#6b7280;margin-bottom:10px}
+.back{font-size:12px;color:var(--blue);font-weight:700;margin-bottom:6px}
+.f{margin-bottom:9px}
+.f label{display:block;font-size:11px;font-weight:700;color:#374151;margin-bottom:3px}
+.inp{border:1.5px solid #d1d5db;border-radius:10px;padding:8px 10px;background:#fff;min-height:35px;font-size:13px;display:flex;align-items:center;gap:6px}
+.inp .v{flex:1;white-space:nowrap;overflow:hidden}
+.inp .ph{color:#9ca3af}
+.inp .v:empty{flex:0}
+.inp.dis{background:#f3f4f6;color:#6b7280}
+.sel::after{content:"▾";color:#9ca3af}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tabs{display:flex;gap:5px;margin-bottom:8px;overflow:hidden}
+.tabs div{padding:6px 8px;border-radius:999px;background:#fff;border:1px solid #e5e7eb;font-size:10.5px;font-weight:700;white-space:nowrap}
+.tabs div.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.cl .top2{display:flex;justify-content:space-between;align-items:flex-start;gap:6px}
+.cl b{font-size:13.5px}.cl .ad{font-size:11px;color:#6b7280}
+.tag{font-size:10px;font-weight:700;padding:3px 7px;border-radius:999px;white-space:nowrap}
+.t-ok{background:#d1fae5;color:#047857}.t-w{background:#fef3c7;color:#b45309}.t-r{background:#fee2e2;color:#b91c1c}.t-g{background:#f3f4f6;color:#4b5563}.t-b{background:#dbeafe;color:#1d4ed8}
+.kv{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0;text-align:center}
+.kv div{background:#f9fafb;border-radius:9px;padding:6px 2px}
+.kv span{display:block;font-size:10px;color:#6b7280}.kv b{font-size:12px}
+.days{font-size:10.5px;color:#6b7280}
+.quick{display:flex;gap:5px;margin:6px 0 9px}
+.quick div{flex:1;text-align:center;padding:7px 2px;border-radius:9px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;font-size:11px;font-weight:700}
+.sum{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:9px 11px;margin-bottom:8px;font-size:12px}
+.sum div{display:flex;justify-content:space-between;padding:2px 0}
+.note{font-size:10.5px;color:#6b7280;background:#f9fafb;border-radius:9px;padding:7px 9px;margin-bottom:6px}
+.ok{text-align:center;padding:40px 16px}
+.ok .circ{width:70px;height:70px;border-radius:50%;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;font-size:34px;color:#fff}
+.ok h2{font-size:18px;margin-bottom:6px}.ok p{font-size:12.5px;color:#4b5563;line-height:1.4}
+.chiprow{display:flex;flex-wrap:wrap;gap:6px}
+.chiprow div{padding:7px 10px;border-radius:999px;border:1px solid #e5e7eb;background:#fff;font-size:11.5px;font-weight:600}
+.chiprow div.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.ph-box{border:1.5px dashed #cbd5e1;border-radius:12px;padding:12px;text-align:center;font-size:11px;color:#6b7280;background:#fff}
+.tog{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sw{width:38px;height:22px;border-radius:99px;background:#d1d5db;position:relative;flex:none}
+.sw::after{content:"";position:absolute;width:18px;height:18px;border-radius:50%;background:#fff;top:2px;left:2px}
+.sw.on{background:var(--blue)}.sw.on::after{left:18px}
+.toast{position:absolute;left:12px;right:12px;bottom:70px;background:#065f46;color:#fff;border-radius:12px;padding:10px 12px;font-size:12px;font-weight:600;z-index:15;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.mv{display:flex;justify-content:space-between;align-items:center;padding:9px 2px;border-bottom:1px solid #f3f4f6}
+.mv:last-child{border:0}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:8px}
+.row2{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f3f4f6;font-size:12px}
+.row2:last-child{border:0}
+.drop{border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-top:3px;box-shadow:0 4px 12px rgba(0,0,0,.08)}
+.drop div{padding:8px 10px;font-size:12px;border-bottom:1px solid #f3f4f6}
+.login{position:absolute;inset:0;background:linear-gradient(160deg,#1e3a8a,#2563eb);padding:40px 18px}
+.login .brand{color:#fff;text-align:center;margin-bottom:22px}
+.login .brand b{font-size:34px;font-style:italic;font-weight:900;letter-spacing:1px}
+.login .brand span{display:block;font-size:12px;opacity:.85}
+/* mano y resaltado */
+.hand{position:absolute;z-index:50;font-size:34px;left:300px;top:700px;transition:left .75s cubic-bezier(.4,.1,.2,1),top .75s cubic-bezier(.4,.1,.2,1);pointer-events:none;filter:drop-shadow(0 3px 4px rgba(0,0,0,.35));transform:translate(-30%,-8%)}
+.hand.tap{animation:tap .45s ease}
+@keyframes tap{50%{transform:translate(-30%,-8%) scale(.82)}}
+.rip{position:absolute;z-index:49;width:16px;height:16px;border-radius:50%;background:rgba(37,99,235,.45);pointer-events:none;animation:rip .6s ease-out forwards}
+@keyframes rip{to{transform:scale(4.5);opacity:0}}
+.hl{outline:3px solid #f59e0b;outline-offset:2px;border-radius:10px;animation:glow 1.2s ease-in-out infinite}
+@keyframes glow{50%{outline-color:#fcd34d}}
+.caret::after{content:"|";animation:blink .8s steps(1) infinite;color:var(--blue)}
+@keyframes blink{50%{opacity:0}}
+@media (min-width:900px){
+  #player{flex-direction:row;flex-wrap:wrap;align-content:flex-start;max-width:900px}
+  .pbar,.chips{width:100%}
+  .stagewrap{flex:0 0 auto;padding:0 16px}
+  .cap{flex:1;border-radius:18px;margin-right:16px;align-self:flex-start}
+}
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="logo">ADEX</div>
+  <div class="ttl" id="topTtl">Manual del Cobrador</div>
+  <div class="lang"><button data-l="es" class="on">ES</button><button data-l="pt">PT</button></div>
+</div>
+
+<main id="menu"></main>
+
+<section id="player">
+  <div class="pbar"><button class="back" id="bBack">‹ <span id="bBackT">Menú</span></button><div class="name" id="pName"></div></div>
+  <div class="chips" id="chips" style="display:none"></div>
+  <div class="stagewrap"><div class="stage" id="stage"><div class="app" id="app"></div></div></div>
+  <div class="cap" id="cap">
+    <div class="prog" id="prog"></div>
+    <div class="stepn" id="stepn"></div>
+    <div class="txt" id="txt"></div>
+    <div class="ctrls" id="ctrls">
+      <button id="bPrev">◀</button>
+      <button id="bPlay" class="main">⏸</button>
+      <button id="bNext">▶</button>
+      <button id="bAgain">⟲</button>
+    </div>
+  </div>
+</section>
+
+<script>
+(function(){
+"use strict";
+/* ===================== TEXTOS DE LA GUÍA ===================== */
+var LANG='es';
+try{var sl=localStorage.getItem('adexManualLang');if(sl==='pt'||sl==='es')LANG=sl;}catch(e){}
+var UI={
+ es:{title:'Manual del Cobrador',heroH:'¡Hola! Aprende a usar ADEX 👋',
+  heroP:'Elige lo que quieres aprender. Verás el celular funcionando solo, paso a paso. Puedes pausar, volver atrás o repetir cuando quieras.',
+  how:'¿Cómo hago…?',howS:'toca una tarea',what:'¿Qué es esto?',whatS:'toca una pantalla y luego cualquier parte',
+  tip:'💡 <b>Los nombres y el dinero de este manual son de mentira.</b> Sirven solo para practicar. Tu app mostrará tus clientes reales.',
+  menu:'Menú',step:'Paso {a} de {b}',play:'▶',pause:'⏸',
+  doneH:'¡Muy bien!',doneP:'Ya sabes hacerlo. ¿Quieres verlo otra vez o aprender otra cosa?',again:'⟲ Ver otra vez',toMenu:'Volver al menú',
+  expHint:'👆 Toca cualquier parte del celular que tenga un <b style="color:#d97706">número naranja</b> y aquí te digo para qué sirve.',
+  scrHome:'Inicio',scrRoute:'Recaudo',scrPay:'Cobrar',scrExp:'Gastos'},
+ pt:{title:'Manual do Cobrador',heroH:'Olá! Aprenda a usar o ADEX 👋',
+  heroP:'Escolha o que você quer aprender. Você verá o celular funcionando sozinho, passo a passo. Pode pausar, voltar ou repetir quando quiser.',
+  how:'Como eu faço…?',howS:'toque numa tarefa',what:'O que é isto?',whatS:'toque numa tela e depois em qualquer parte',
+  tip:'💡 <b>Os nomes e valores deste manual são de mentira.</b> Servem só para praticar. O seu app mostrará os seus clientes reais. <br>📱 O aplicativo está em espanhol: os botões aparecem aqui com o mesmo nome que você verá.',
+  menu:'Menu',step:'Passo {a} de {b}',play:'▶',pause:'⏸',
+  doneH:'Muito bem!',doneP:'Agora você sabe fazer. Quer ver de novo ou aprender outra coisa?',again:'⟲ Ver de novo',toMenu:'Voltar ao menu',
+  expHint:'👆 Toque em qualquer parte do celular que tenha um <b style="color:#d97706">número laranja</b> e aqui eu explico para que serve.',
+  scrHome:'Início',scrRoute:'Cobrança',scrPay:'Cobrar',scrExp:'Despesas'}
+};
+function T(k){return UI[LANG][k];}
+
+/* ===================== PANTALLAS SIMULADAS ===================== */
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function H(k){return ' data-h="'+k+'"';}
+function hdr(o){
+  return '<div class="hdr"'+H('hdr')+'><div class="lg">ADEX<small>SOLUCIONES</small></div>'+
+   '<div class="who"'+H('who')+'><b>Cobrador</b><span>📍 Ruta Centro</span></div>'+
+   '<div class="net'+(o.off?' off':'')+'"'+H('net')+' data-t="net">'+(o.off?'⚠ Sin conexión':'📶 En línea')+'</div>'+
+   '<div class="hico"'+H('acct')+'>👤</div><div class="hico"'+H('logout')+'>⎋</div></div>';
+}
+function nav(on){
+  var it=[['home','🏠','Inicio'],['route','📍','Recaudo'],['disb','💵','Desembolsos'],['exp','💲','Gastos'],['cash','🧮','Mi efectivo'],['ntc','🔔','Avisos']];
+  return '<div class="nav"'+H('nav')+'>'+it.map(function(x){return '<div class="'+(x[0]===on?'on':'')+'" data-t="nav-'+x[0]+'"'+H('nav-'+x[0])+'><i>'+x[1]+'</i>'+x[2]+'</div>';}).join('')+'</div>';
+}
+function shell(body,o){o=o||{};return hdr(o)+'<div class="scr'+(o.nonav?' nonav':'')+'">'+body+'</div>'+(o.nonav?'':nav(o.tab||''))+(o.toast?'<div class="toast">'+o.toast+'</div>':'');}
+function inp(t,label,v,ph,cls){return '<div class="f"><label>'+label+'</label><div class="inp '+(cls||'')+'" data-t="'+t+'"><span class="v">'+(v?esc(v):'')+'</span>'+(v?'':'<span class="ph">'+esc(ph||'')+'</span>')+'</div></div>';}
+function money(n){return 'R$ '+n.toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.');}
+
+var S={};
+S.login=function(st){
+  return '<div class="login"><div class="brand"><b>ADEX</b><span>Sistema de rutas y cobros</span></div>'+
+   '<div class="c" style="padding:16px"><div class="h1">Iniciar sesión</div><div class="sub">Ingresa a tu cuenta para continuar</div>'+
+   inp('email','Correo electrónico',st.email,'correo@ejemplo.com')+
+   inp('pass','Contraseña',st.pass?'••••••••':'','••••••')+
+   '<div class="b pri full" data-t="login">Ingresar</div></div></div>';
+};
+S.selroute=function(){
+  function r(n,id,cl,ve,ca){return '<div class="c"><div class="cl"><div class="top2"><b>'+n+'</b><span class="tag t-ok">Activa</span></div></div>'+
+   '<div class="kv"><div><span>Clientes</span><b>'+cl+'</b></div><div><span>Ventas</span><b>'+ve+'</b></div><div><span>Cartera activa</span><b>'+ca+'</b></div></div>'+
+   '<div class="b pri full" data-t="'+id+'">Trabajar esta ruta</div></div>';}
+  return '<div class="scr full" style="padding:18px 12px"><div class="h1">Selecciona tu ruta</div><div class="sub">Elige la ruta que vas a trabajar hoy</div>'+
+   r('Ruta Centro','r1',42,30,'R$ 18.450')+r('Ruta Norte','r2',35,26,'R$ 15.200')+'</div>';
+};
+S.home=function(st){
+  st=st||{};
+  return shell(
+   '<div class="greet"'+H('greet')+'><small>Buenos días,</small><b>Carlos</b><div class="row"><span class="pill">📍 Ruta Centro</span><span>05/11/2026</span></div></div>'+
+   '<div class="stats"><div class="s1"'+H('st-pend')+'><b>30</b><span>Pendientes</span></div><div class="s2"'+H('st-rec')+'><b>'+(st.rec?money(st.rec):'R$ 0')+'</b><span>Mi recaudo hoy</span></div><div class="s3"'+H('st-ven')+'><b>30</b><span>Ventas activas</span></div></div>'+
+   '<div class="c" style="border:2px solid #bfdbfe"><div class="mod"><div class="mi" style="background:#d1fae5">🤝</div><div><b>Recaudo</b><span>Cobrar parcelas y revisar abonos</span></div></div>'+
+    '<div class="btns"><div class="b pri" data-t="goRoute"'+H('goRoute')+'>Ir a recaudo</div><div class="b"'+H('hist')+'>Histórico de abonos</div></div></div>'+
+   '<div class="c"><div class="mod"><div class="mi" style="background:#dbeafe">👥</div><div><b>Clientes y ventas</b><span>Registrar clientes, ventas y desembolsos</span></div></div>'+
+    '<div class="btns"><div class="b" data-t="goNewClient"'+H('newClient')+'>Nuevo cliente</div><div class="b" data-t="goNewSale"'+H('newSale')+'>Nueva venta</div><div class="b" data-t="goDisb"'+H('disb')+'>Desembolsos</div></div></div>'+
+   '<div class="c"><div class="mod"><div class="mi" style="background:#fee2e2">👛</div><div><b>Gastos y cuadre</b><span>Registrar gastos y revisar tu efectivo del día</span></div></div>'+
+    '<div class="btns"><div class="b" data-t="goExp"'+H('exp')+'>Gastos</div><div class="b" data-t="goReport"'+H('report')+'>Informe del día</div><div class="b" data-t="goCash"'+H('cash')+'>Mi efectivo</div></div></div>'+
+   '<div class="c" data-t="goSync"'+H('sync')+'><div class="mod"><div class="mi" style="background:#eff6ff">🔄</div><div style="flex:1"><b>Sincronización</b><span>Revisar pendientes y estado de datos</span></div><span class="tag '+(st.off?'t-w':'t-ok')+'">'+(st.off?'Offline':'Online')+'</span></div></div>'
+  ,{tab:'home',off:st.off,toast:st.toast});
+};
+var CL=[
+ {n:'Maria Souza',a:'Rua das Flores 120 · Mercadinho',tag:['Al día','t-ok'],saldo:600,par:50,np:'8/20'},
+ {n:'Pedro Alves',a:'Av. Brasil 455 · Barbearia',tag:['Atraso leve','t-w'],saldo:420,par:30,np:'6/20'},
+ {n:'João Pereira',a:'Rua 7 de Setembro 33 · Lanchonete',tag:['Al día','t-ok'],saldo:900,par:60,np:'5/20'},
+ {n:'Lucia Ramos',a:'Rua do Comércio 9 · Ateliê',tag:['Atraso fuerte','t-r'],saldo:310,par:40,np:'12/20'}
+];
+S.route=function(st){
+  st=st||{};
+  var list=CL.filter(function(c){return !st.search||c.n.toLowerCase().indexOf(st.search.toLowerCase())===0;});
+  var cards=list.map(function(c,i){
+   var k=c.n.split(' ')[0].toLowerCase();
+   var visited=st.visited===k, paid=st.paid===k;
+   var tag=paid?['Abonado','t-b']:visited?['Visitado hoy · no pagó','t-g']:c.tag;
+   return '<div class="c cl"'+(i===0?H('card'):'')+'><div class="top2"><div><b'+(i===0?H('cname'):'')+'>'+c.n+'</b><div class="ad">'+c.a+'</div></div><span class="tag '+tag[1]+'"'+(i===0?H('ctag'):'')+'>'+tag[0]+'</span></div>'+
+    '<div class="days">Días de cobro: Lun a Sáb</div>'+
+    '<div class="kv"'+(i===0?H('ckv'):'')+'><div><span>Saldo</span><b>'+money(c.saldo)+'</b></div><div><span>Parcela</span><b>'+money(c.par)+'</b></div><div><span>Parcelas</span><b>'+c.np+'</b></div></div>'+
+    '<div class="btns" style="margin-top:4px"><div class="b grn" data-t="pay-'+k+'"'+(i===0?H('abonar'):'')+'>Abonar</div><div class="b out" data-t="np-'+k+'"'+(i===0?H('nopago'):'')+'>No pagó</div><div class="b out"'+(i===0?H('detalle'):'')+'>Ver detalle</div></div></div>';
+  }).join('');
+  return shell(
+   '<div class="tabs"'+H('tabs')+'><div class="on">Pendientes 30</div><div>Abonados '+(st.paid?1:0)+'</div><div>Sin sincronizar 0</div><div>No hoy 4</div></div>'+
+   '<div class="f">'+'<div class="inp" data-t="search"'+H('search')+'>🔍 <span class="v">'+(st.search?esc(st.search):'')+'</span>'+(st.search?'':'<span class="ph">Buscar cliente...</span>')+'</div></div>'+
+   cards,{tab:'route',off:st.off,toast:st.toast});
+};
+S.pay=function(st){
+  st=st||{};
+  var v=st.valor||0, saldo=600;
+  return shell(
+   '<div class="back" data-t="pback">‹ Volver</div>'+
+   '<div class="c"'+H('pclient')+'><b style="font-size:15px">Maria Souza</b><div class="ad" style="font-size:11px;color:#6b7280">Desembolsada el 20/10/2026</div>'+
+    '<div class="kv"'+H('pkv')+'><div><span>Saldo</span><b>'+money(saldo)+'</b></div><div><span>Parcela</span><b>'+money(50)+'</b></div><div><span>Nº parcela</span><b>9 de 20</b></div></div></div>'+
+   '<div class="c"><div style="font-weight:700;margin-bottom:8px">Pagando parcela 9</div>'+
+    '<div class="f"><label>Valor del recaudo</label><div class="inp" data-t="valor"'+H('pvalor')+' style="font-size:17px;font-weight:800"><span class="v">'+(v?money(v):'')+'</span>'+(v?'':'<span class="ph">0</span>')+'</div></div>'+
+    '<div class="quick"'+H('pquick')+'><div data-t="qpar">Completar parcela</div><div>Mitad</div><div>Total deuda</div></div>'+
+    inp('cuotas','Cuotas a pagar',st.cuotas||'','1')+
+    inp('obs','Observación (opcional)',st.obs||'','')+
+    (v?'<div class="sum"'+H('psum')+' data-t="sum"><div><span>Cliente</span><b>Maria Souza</b></div><div><span>A registrar</span><b>'+money(v)+'</b></div><div><span>Saldo previsto</span><b>'+money(saldo-v)+'</b></div></div>':'')+
+    '<div class="note"'+H('pgps')+'>📍 Al registrar se pedirá tu ubicación como evidencia complementaria del cobro. Si no está disponible, el abono se registra igual.</div>'+
+    '<div class="b grn full" data-t="reg"'+H('preg')+'>'+(st.off?'Guardar abono sin conexión':'Registrar abono')+'</div><div class="b out full">Cancelar</div></div>'
+  ,{tab:'route',off:st.off});
+};
+S.payok=function(st){
+  st=st||{};
+  if(st.off) return shell('<div class="ok"><div class="circ" style="background:#f59e0b">⏳</div><h2>Recaudo guardado en este dispositivo</h2><p>Todavía <b>no está confirmado por el servidor</b>: se enviará solo cuando haya internet. No lo vuelva a registrar.</p><div class="b out full" data-t="vpend">Ver pendientes</div><div class="b pri full">Volver a la ruta</div></div>',{tab:'route',off:true});
+  return shell('<div class="ok"><div class="circ" style="background:#059669">✓</div><h2>¡Recaudo registrado!</h2><p>Recaudo confirmado por el servidor<br><b>Maria Souza · '+money(50)+'</b></p><div class="b pri full" data-t="volver">Volver a la ruta</div></div>',{tab:'route'});
+};
+S.nopay=function(st){
+  st=st||{};
+  var m=['No estaba','Sin dinero','Negocio cerrado','Promesa de pago','Otro'];
+  return shell('<div class="back">‹ Volver</div><div class="h1">Registrar visita sin pago</div><div class="sub">Pedro Alves · Saldo '+money(420)+'</div>'+
+   '<div class="c"><div class="f"><label>Motivo</label><div class="chiprow" data-t="motivos">'+m.map(function(x,i){return '<div data-t="m'+i+'" class="'+(st.motivo===i?'on':'')+'">'+x+'</div>';}).join('')+'</div></div>'+
+   (st.motivo===3?inp('fprom','Fecha de promesa',st.fprom||'','dd/mm/aaaa'):'')+
+   inp('nobs','Observación',st.nobs||'','Opcional')+
+   '<div class="b pri full" data-t="regnp">Registrar no pago</div><div class="b out full">Cancelar</div></div>',{tab:'route'});
+};
+S.newclient=function(st){
+  st=st||{};
+  return shell('<div class="back">‹ Volver</div><div class="h1">Nuevo cliente</div><div class="sub">Datos del cliente</div><div class="c">'+
+   inp('doc','Número de documento',st.doc,'')+inp('nom','Nombre completo',st.nom,'')+
+   inp('dres','Dirección de residencia',st.dres,'Ej: Cll 45 #23-12')+inp('dcob','Dirección de cobro / negocio',st.dcob,'Ej: Cra 8 #12-30, Local 2')+
+   inp('neg','Negocio',st.neg,'Ej: Tienda, panadería, venta ambulante')+
+   '<div class="two">'+inp('tel','Teléfono',st.tel,'')+inp('tel2','Teléfono adicional','','')+'</div>'+
+   inp('ruta','Ruta','Ruta Centro','','sel')+
+   '<div class="two" data-t="fotos" style="margin-bottom:9px"><div class="ph-box">📷<br>Foto del documento</div><div class="ph-box">🏪<br>Foto del negocio / lugar de cobro</div></div>'+
+   inp('cobs','Observación',st.cobs,'Opcional')+
+   '<div class="c tog" data-t="crearventa" style="background:#f9fafb"><div><b style="font-size:12.5px">Crear venta ahora</b><div style="font-size:11px;color:#6b7280">Registra la venta junto al cliente</div></div><div class="sw"></div></div>'+
+   '<div class="b pri full" data-t="savecl">Guardar cliente</div></div>',{tab:'home',toast:st.toast});
+};
+S.newsale=function(st){
+  st=st||{};
+  var d=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+  return shell('<div class="back">‹ Volver</div><div class="h1">Nueva venta</div><div class="sub">Préstamo para un cliente</div><div class="c">'+
+   '<div class="f"><label>Cliente</label><div class="inp" data-t="cli">🔍 <span class="v">'+(st.cli?esc(st.cli):'')+'</span>'+(st.cli?'':'<span class="ph">Escribe el nombre o el documento</span>')+'</div>'+
+    (st.drop?'<div class="drop"><div data-t="opt" style="background:#eff6ff"><b>Ana Lima</b> · 123.456.789-00</div><div>Ana Paula Costa · 987.654.321-00</div></div>':'')+'</div>'+
+   (st.drop?'':
+   '<div class="two">'+inp('val','Valor de la venta',st.val?money(st.val):'','0')+inp('tasa','Tasa de interés','20 %','','dis')+'</div>'+
+   '<div class="two">'+inp('forma','Forma de pago','Diaria','','sel')+inp('npar','Nº de parcelas',st.npar||'','')+'</div>'+
+   inp('fini','Fecha de inicio','06/11/2026','','sel')+
+   '<div class="f"><label>Días de pago</label><div class="chiprow" data-t="dias">'+d.map(function(x,i){return '<div class="'+(i<6?'on':'')+'">'+x+'</div>';}).join('')+'</div></div>'+
+   (st.val&&st.npar?'<div class="sum" data-t="vsum" style="background:#eff6ff;border-color:#bfdbfe"><div><span>Total a pagar</span><b>'+money(600)+'</b></div><div><span>Valor parcela</span><b>'+money(30)+'</b></div><div><span>Interés</span><b>'+money(100)+'</b></div><div><span>Fecha estimada fin</span><b>28/11/2026</b></div></div>':'')+
+   '<div class="note" data-t="disp">Disponible para esta venta: <b>'+money(2000)+'</b></div>'+
+   '<div class="b pri full" data-t="crear">Crear venta</div>')+'</div>',{tab:'home',toast:st.toast});
+};
+S.disb=function(st){
+  st=st||{};
+  var body='<div class="h1">Desembolsos</div><div class="sub">Ventas aprobadas pendientes por desembolsar</div>'+
+   '<div class="c" data-t="efdisp" style="background:#ecfdf5;border-color:#a7f3d0"><div style="font-size:11px;color:#047857">Efectivo disponible para entregar</div><b style="font-size:18px;color:#047857">'+money(st.done?750:1250)+'</b></div>';
+  body+= st.done?'<div class="c" style="text-align:center;color:#6b7280;padding:24px">No hay desembolsos pendientes</div>':
+   '<div class="c cl"><div class="top2"><div><b>Ana Lima</b><div class="ad">Cliente</div></div><span class="tag t-w">Por desembolsar</span></div>'+
+   '<div class="kv"><div><span>Valor</span><b>'+money(500)+'</b></div><div><span>Parcela</span><b>'+money(30)+'</b></div><div><span>Parcelas</span><b>20</b></div></div>'+
+   '<div class="b grn full" data-t="confd">Confirmar desembolso</div></div>';
+  return shell(body,{tab:'disb',toast:st.toast});
+};
+S.exp=function(st){
+  st=st||{};
+  var form=st.form?
+   '<div class="c" style="border:2px solid #bfdbfe"><div style="font-weight:800;margin-bottom:8px">Registrar gasto</div>'+
+   inp('cat','Categoría',st.cat||'','Seleccionar categoría','sel')+
+   '<div class="f" data-t="conque"'+H('conque')+'><label>¿Con qué efectivo se pagó?</label><div class="chiprow"><div class="on">Mi efectivo</div><div>Base disponible de la ruta</div></div></div>'+
+   inp('eval','Valor',st.eval?money(st.eval):'','0')+
+   inp('edesc','Descripción (opcional)',st.edesc||'','')+
+   '<div class="ph-box" data-t="efoto" style="margin-bottom:9px">📷 Foto de factura / soporte (opcional)</div>'+
+   '<div class="two"><div class="b out full">Cancelar</div><div class="b pri full" data-t="esave">Guardar</div></div></div>'
+   :'<div class="b pri full" data-t="newexp"'+H('newexp')+' style="margin:0 0 10px">＋ Registrar gasto</div>';
+  var items=(st.saved?'<div class="mv"><div><span class="dot" style="background:#ef4444"></span><b>Gasolina</b><div style="font-size:10.5px;color:#6b7280;margin-left:16px">Hoy · Mi efectivo</div></div><b style="color:#dc2626">-'+money(30)+'</b></div>':'')+
+   '<div class="mv"><div><span class="dot" style="background:#ef4444"></span><b>Recarga celular</b><div style="font-size:10.5px;color:#6b7280;margin-left:16px">04/11 · Mi efectivo</div></div><b style="color:#dc2626">-'+money(20)+'</b></div>';
+  return shell('<div class="h1">Gastos</div>'+
+   '<div class="kv" style="margin-top:6px"'+H('ekv')+'><div><span>Mi efectivo</span><b>'+money(st.saved?790:820)+'</b></div><div><span>Base disponible</span><b>'+money(1250)+'</b></div><div><span>Trabajador</span><b>Carlos</b></div></div>'+
+   form+'<div class="c"'+H('elist')+'><div style="font-size:11px;font-weight:800;color:#6b7280;margin-bottom:4px">CON MI EFECTIVO · DESPUÉS DEL ÚLTIMO CIERRE</div>'+items+'</div>'+
+   '<div class="c" data-t="cerrados"'+H('ecerr')+' style="color:#6b7280;font-size:12px">▸ Ya incluidos en cierres (6)</div>',{tab:'exp',toast:st.toast});
+};
+S.report=function(st){
+  st=st||{};
+  var past=!!st.past;
+  var mv=past?
+   [['08:15','João Pereira','Recaudo',60,'#10b981','+'],['09:40','Lucia Ramos','Recaudo',40,'#10b981','+'],['11:05','Gasolina','Gasto',25,'#ef4444','-']]:
+   [['08:02','Maria Souza','Recaudo',50,'#10b981','+'],['08:31','Pedro Alves','Recaudo',30,'#10b981','+'],['10:12','Ana Lima','Desembolso',500,'#2563eb','-'],['11:20','Gasolina','Gasto',30,'#ef4444','-']];
+  var rec=past?100:80,des=past?0:500,gas=past?25:30;
+  return shell('<div class="h1">Informe del día</div><div class="sub">'+(past?'Tus movimientos del 04/11/2026':'Tus movimientos de hoy')+'</div>'+
+   '<div class="two" style="align-items:end">'+inp('fecha','Fecha',past?'04/11/2026':'05/11/2026','','sel')+(past?'<div class="b out full" data-t="hoy" style="margin:0 0 9px">Volver a hoy</div>':'<div></div>')+'</div>'+
+   '<div class="stats" data-t="rtot"><div class="s2"><b style="font-size:12.5px">'+money(rec)+'</b><span>Recaudo</span></div><div class="s3"><b style="font-size:12.5px">'+money(des)+'</b><span>Desembolsos</span></div><div style="background:#fef2f2;border-color:#fecaca"><b style="font-size:12.5px;color:#dc2626">'+money(gas)+'</b><span>Gastos</span></div></div>'+
+   '<div class="c" data-t="rlist">'+mv.map(function(m){return '<div class="mv"><div><span class="dot" style="background:'+m[4]+'"></span><b>'+m[1]+'</b><div style="font-size:10.5px;color:#6b7280;margin-left:16px">'+m[0]+' · '+m[2]+'</div></div><b style="color:'+m[4]+'">'+m[5]+money(m[3])+'</b></div>';}).join('')+'</div>',{tab:'home'});
+};
+S.cash=function(){
+  function r(a,b,c){return '<div class="row2"><span>'+a+'</span><b style="color:'+(c||'#111827')+'">'+b+'</b></div>';}
+  return shell('<div class="h1">Mi efectivo</div><div class="sub">Entradas y salidas de este periodo. No son saldos separados: el único saldo es tu efectivo.</div>'+
+   '<div class="c" data-t="cin">'+r('Base recibida','+'+money(500),'#059669')+r('Mi recaudo en efectivo','+'+money(450),'#059669')+r('Mis desembolsos','-'+money(0),'#dc2626')+r('Mis gastos','-'+money(30),'#dc2626')+'</div>'+
+   '<div class="c" data-t="cnow" style="background:#eff6ff;border-color:#bfdbfe"><div style="font-size:11px;color:#1d4ed8">Mi efectivo actual</div><b style="font-size:22px;color:#1d4ed8">'+money(920)+'</b></div>'+
+   '<div class="c" data-t="ccuad"><div style="font-weight:800;margin-bottom:4px">Mis últimos cuadres</div>'+r('31/10/2026 · Efectivo entregado',money(1310))+r('Resultado','<span class="tag t-ok">Exacto</span>')+'</div>',{tab:'cash'});
+};
+S.sync=function(st){
+  st=st||{};
+  var pend=st.pend||0;
+  return shell('<div class="h1">Sincronización</div><div class="sub">Revisar pendientes y estado de datos</div>'+
+   '<div class="c" data-t="sstate" style="'+(st.off?'background:#fffbeb;border-color:#fde68a':'background:#ecfdf5;border-color:#a7f3d0')+'"><b>'+(st.off?'⚠ Sin conexión':'📶 En línea')+'</b><div style="font-size:11.5px;margin-top:3px">'+
+    (st.off?'Sin conexión: se enviará solo cuando vuelva internet.':pend?'Hay operaciones por enviar.':'Todo está confirmado por el servidor.')+'</div></div>'+
+   '<div class="c" data-t="spend"><div style="font-weight:800;margin-bottom:4px">Por sincronizar</div>'+(pend?'<div class="mv"><div><span class="dot" style="background:#f59e0b"></span><b>Recaudo · Maria Souza</b></div><b>'+money(50)+'</b></div>':'<div style="color:#6b7280;font-size:12px">Nada pendiente.</div>')+'</div>'+
+   '<div class="b pri full'+(st.off?'" style="opacity:.45':'')+'" data-t="syncnow">'+(st.off?'Sin conexión, no se puede sincronizar':'Sincronizar ahora')+'</div>',{tab:'home',off:st.off,toast:st.toast});
+};
+S.ntc=function(){
+  function n(i,t,d,h){return '<div class="c" style="display:flex;gap:10px"><div style="font-size:20px">'+i+'</div><div><b style="font-size:12.5px">'+t+'</b><div style="font-size:11.5px;color:#4b5563;margin-top:2px">'+d+'</div><div style="font-size:10px;color:#9ca3af;margin-top:3px">'+h+'</div></div></div>';}
+  return shell('<div class="h1">Notificaciones</div><div class="sub">Mensajes de la oficina</div><div data-t="nlist">'+
+   n('✅','Venta aprobada','La venta de Ana Lima por '+money(500)+' fue aprobada. Ya puedes desembolsarla.','Hoy 09:58')+
+   n('💵','Base recibida','Recibiste '+money(500)+' de Base de la ruta.','Hoy 07:30')+
+   n('📋','Cuadre registrado','Tu cuadre del 31/10 quedó Exacto.','31/10 18:10')+'</div>',{tab:'ntc'});
+};
+
+/* ===================== TAREAS (paso a paso) ===================== */
+/* a: 'look' | 'tap' | 'type' ;  t: elemento que se señala ; v: texto que se escribe */
+var TASKS=[
+{id:'login',ic:'🔑',es:['Entrar y elegir mi ruta','Lo primero de cada día'],pt:['Entrar e escolher a rota','A primeira coisa do dia'],steps:[
+ {s:'login',st:{},a:'look',es:'Abre <b>ADEX</b> en tu celular. Verás esta pantalla para entrar.',pt:'Abra o <b>ADEX</b> no seu celular. Você verá esta tela para entrar.'},
+ {s:'login',st:{email:'carlos@empresa.com'},t:'email',a:'type',v:'carlos@empresa.com',es:'Toca <b>«Correo electrónico»</b> y escribe tu correo. Es el que te dio tu administrador.',pt:'Toque em <b>«Correo electrónico»</b> e escreva o seu e-mail. É o que o seu administrador te deu.'},
+ {s:'login',st:{email:'carlos@empresa.com',pass:1},t:'pass',a:'type',v:'••••••••',es:'Ahora escribe tu <b>contraseña</b>. Es secreta: no se la digas a nadie.',pt:'Agora escreva a sua <b>senha</b>. Ela é secreta: não conte para ninguém.'},
+ {s:'login',st:{email:'carlos@empresa.com',pass:1},t:'login',a:'tap',es:'Toca el botón azul <b>«Ingresar»</b>.',pt:'Toque no botão azul <b>«Ingresar»</b>.'},
+ {s:'selroute',st:{},a:'look',es:'Si trabajas en <b>más de una ruta</b>, ADEX te pregunta cuál vas a trabajar hoy. Si tienes una sola, entra directo.',pt:'Se você trabalha em <b>mais de uma rota</b>, o ADEX pergunta qual você vai trabalhar hoje. Se tem só uma, entra direto.'},
+ {s:'selroute',st:{},t:'r1',a:'tap',es:'Toca <b>«Trabajar esta ruta»</b> en la ruta de hoy.',pt:'Toque em <b>«Trabajar esta ruta»</b> na rota de hoje.'},
+ {s:'home',st:{},a:'look',es:'¡Listo! Esta es tu pantalla de <b>Inicio</b>. Desde aquí llegas a todo. Arriba ves tu ruta y si tienes internet (<b>«En línea»</b>).',pt:'Pronto! Esta é a sua tela de <b>Início</b>. Daqui você chega a tudo. Em cima você vê a sua rota e se tem internet (<b>«En línea»</b>).'}
+]},
+{id:'cobrar',ic:'💰',es:['Cobrar a un cliente','Registrar el recaudo'],pt:['Cobrar um cliente','Registrar o pagamento'],steps:[
+ {s:'home',st:{},t:'goRoute',a:'tap',es:'En Inicio toca <b>«Ir a recaudo»</b>. También puedes tocar <b>«Recaudo»</b> abajo.',pt:'No Início toque em <b>«Ir a recaudo»</b>. Também pode tocar em <b>«Recaudo»</b> embaixo.'},
+ {s:'route',st:{},t:'tabs',a:'look',es:'Aquí está tu lista de clientes. En <b>«Pendientes»</b> están los que debes cobrar hoy.',pt:'Aqui está a sua lista de clientes. Em <b>«Pendientes»</b> estão os que você deve cobrar hoje.'},
+ {s:'route',st:{search:'Maria'},t:'search',a:'type',v:'Maria',es:'¿Muchos clientes? Escribe el nombre en <b>«Buscar cliente...»</b> y aparece rápido.',pt:'Muitos clientes? Escreva o nome em <b>«Buscar cliente...»</b> e ele aparece rápido.'},
+ {s:'route',st:{search:'Maria'},t:'pay-maria',a:'tap',es:'Cuando el cliente te paga, toca el botón verde <b>«Abonar»</b>.',pt:'Quando o cliente te paga, toque no botão verde <b>«Abonar»</b>.'},
+ {s:'pay',st:{},t:'pkv',a:'look',es:'Arriba ves el <b>Saldo</b> (lo que el cliente todavía debe) y el valor de la <b>Parcela</b>.',pt:'Em cima você vê o <b>Saldo</b> (o que o cliente ainda deve) e o valor da <b>Parcela</b>.'},
+ {s:'pay',st:{},t:'qpar',a:'tap',es:'Si paga la parcela completa, toca <b>«Completar parcela»</b> y el valor se escribe solo.',pt:'Se ele paga a parcela inteira, toque em <b>«Completar parcela»</b> e o valor se escreve sozinho.'},
+ {s:'pay',st:{valor:50},t:'valor',a:'look',es:'Si paga <b>otro valor</b>, escríbelo aquí en <b>«Valor del recaudo»</b>.',pt:'Se ele paga <b>outro valor</b>, escreva aqui em <b>«Valor del recaudo»</b>.'},
+ {s:'pay',st:{valor:50},t:'cuotas',a:'look',es:'Si paga <b>varias cuotas</b> de una vez, escribe cuántas en <b>«Cuotas a pagar»</b> y ADEX calcula el valor.',pt:'Se ele paga <b>várias parcelas</b> de uma vez, escreva quantas em <b>«Cuotas a pagar»</b> e o ADEX calcula o valor.'},
+ {s:'pay',st:{valor:50},t:'sum',a:'look',es:'Revisa el resumen: <b>cliente</b>, valor <b>«A registrar»</b> y cómo queda el <b>saldo</b>.',pt:'Confira o resumo: <b>cliente</b>, valor <b>«A registrar»</b> e como fica o <b>saldo</b>.'},
+ {s:'pay',st:{valor:50},t:'reg',a:'tap',es:'Toca <b>«Registrar abono»</b>. ADEX pide tu ubicación; si no la tiene, guarda el abono igual.',pt:'Toque em <b>«Registrar abono»</b>. O ADEX pede a sua localização; se não tiver, salva o pagamento mesmo assim.'},
+ {s:'payok',st:{},a:'look',es:'¡Listo! <b>«Recaudo confirmado por el servidor»</b> quiere decir que la oficina ya lo tiene. <b>No lo registres otra vez.</b>',pt:'Pronto! <b>«Recaudo confirmado por el servidor»</b> quer dizer que o escritório já recebeu. <b>Não registre de novo.</b>'}
+]},
+{id:'nopago',ic:'🚪',es:['El cliente no pagó','Dejar la visita anotada'],pt:['O cliente não pagou','Deixar a visita anotada'],steps:[
+ {s:'route',st:{},t:'np-pedro',a:'tap',es:'Si fuiste y el cliente <b>no pagó</b>, toca <b>«No pagó»</b> en su tarjeta.',pt:'Se você foi e o cliente <b>não pagou</b>, toque em <b>«No pagó»</b> no cartão dele.'},
+ {s:'nopay',st:{},t:'motivos',a:'look',es:'Elige el <b>motivo</b>: no estaba, sin dinero, negocio cerrado, promesa de pago u otro.',pt:'Escolha o <b>motivo</b>: não estava, sem dinheiro, loja fechada, promessa de pagamento ou outro.'},
+ {s:'nopay',st:{},t:'m3',a:'tap',es:'Por ejemplo, si te dijo que paga otro día, toca <b>«Promesa de pago»</b>.',pt:'Por exemplo, se ele disse que paga outro dia, toque em <b>«Promesa de pago»</b>.'},
+ {s:'nopay',st:{motivo:3,fprom:'07/11/2026'},t:'fprom',a:'type',v:'07/11/2026',es:'Escribe la <b>fecha</b> en que prometió pagar.',pt:'Escreva a <b>data</b> em que ele prometeu pagar.'},
+ {s:'nopay',st:{motivo:3,fprom:'07/11/2026'},t:'regnp',a:'tap',es:'Toca <b>«Registrar no pago»</b>.',pt:'Toque em <b>«Registrar no pago»</b>.'},
+ {s:'route',st:{visited:'pedro',toast:'Visita sin pago registrada'},t:'np-pedro',a:'look',es:'Ahora la tarjeta dice <b>«Visitado hoy · no pagó»</b>. Así tu administrador sabe que sí pasaste.',pt:'Agora o cartão diz <b>«Visitado hoy · no pagó»</b>. Assim o seu administrador sabe que você passou lá.'}
+]},
+{id:'cliente',ic:'🧑',es:['Registrar un cliente nuevo','Con sus datos y fotos'],pt:['Cadastrar um cliente novo','Com os dados e fotos'],steps:[
+ {s:'home',st:{},t:'goNewClient',a:'tap',es:'En Inicio, en <b>«Clientes y ventas»</b>, toca <b>«Nuevo cliente»</b>. Necesitas <b>internet</b>.',pt:'No Início, em <b>«Clientes y ventas»</b>, toque em <b>«Nuevo cliente»</b>. Você precisa de <b>internet</b>.'},
+ {s:'newclient',st:{doc:'123.456.789-00'},t:'doc',a:'type',v:'123.456.789-00',es:'Escribe el <b>número de documento</b> (CPF). ADEX avisa si ese cliente ya existe.',pt:'Escreva o <b>número do documento</b> (CPF). O ADEX avisa se esse cliente já existe.'},
+ {s:'newclient',st:{doc:'123.456.789-00',nom:'Ana Lima'},t:'nom',a:'type',v:'Ana Lima',es:'Escribe el <b>nombre completo</b>.',pt:'Escreva o <b>nome completo</b>.'},
+ {s:'newclient',st:{doc:'123.456.789-00',nom:'Ana Lima',dres:'Rua das Palmeiras 50'},t:'dres',a:'type',v:'Rua das Palmeiras 50',es:'Escribe dónde <b>vive</b> el cliente.',pt:'Escreva onde o cliente <b>mora</b>.'},
+ {s:'newclient',st:{doc:'123.456.789-00',nom:'Ana Lima',dres:'Rua das Palmeiras 50',dcob:'Rua do Comércio 18'},t:'dcob',a:'type',v:'Rua do Comércio 18',es:'Escribe dónde le vas a <b>cobrar</b> (su negocio).',pt:'Escreva onde você vai <b>cobrar</b> (o negócio dele).'},
+ {s:'newclient',st:{doc:'123.456.789-00',nom:'Ana Lima',dres:'Rua das Palmeiras 50',dcob:'Rua do Comércio 18',neg:'Salão de beleza'},t:'neg',a:'type',v:'Salão de beleza',es:'¿A qué se dedica? Escríbelo en <b>«Negocio»</b>.',pt:'O que ele faz? Escreva em <b>«Negocio»</b>.'},
+ {s:'newclient',st:{doc:'123.456.789-00',nom:'Ana Lima',dres:'Rua das Palmeiras 50',dcob:'Rua do Comércio 18',neg:'Salão de beleza',tel:'(61) 99876-5432'},t:'tel',a:'type',v:'(61) 99876-5432',es:'Escribe su <b>teléfono</b>.',pt:'Escreva o <b>telefone</b> dele.'},
+ {s:'newclient',st:{doc:'123.456.789-00',nom:'Ana Lima',dres:'Rua das Palmeiras 50',dcob:'Rua do Comércio 18',neg:'Salão de beleza',tel:'(61) 99876-5432'},t:'fotos',a:'look',es:'Toma una <b>foto del documento</b> y otra <b>del negocio</b>. Así todos reconocen al cliente.',pt:'Tire uma <b>foto do documento</b> e outra <b>do negócio</b>. Assim todos reconhecem o cliente.'},
+ {s:'newclient',st:{doc:'123.456.789-00',nom:'Ana Lima',dres:'Rua das Palmeiras 50',dcob:'Rua do Comércio 18',neg:'Salão de beleza',tel:'(61) 99876-5432'},t:'crearventa',a:'look',es:'Si hoy también le vas a prestar, activa <b>«Crear venta ahora»</b>. Mira la tarea <b>«Hacer una venta nueva»</b>.',pt:'Se hoje você também vai emprestar, ative <b>«Crear venta ahora»</b>. Veja a tarefa <b>«Fazer uma venda nova»</b>.'},
+ {s:'newclient',st:{doc:'123.456.789-00',nom:'Ana Lima',dres:'Rua das Palmeiras 50',dcob:'Rua do Comércio 18',neg:'Salão de beleza',tel:'(61) 99876-5432'},t:'savecl',a:'tap',es:'Toca <b>«Guardar cliente»</b>.',pt:'Toque em <b>«Guardar cliente»</b>.'},
+ {s:'newclient',st:{doc:'123.456.789-00',nom:'Ana Lima',dres:'Rua das Palmeiras 50',dcob:'Rua do Comércio 18',neg:'Salão de beleza',tel:'(61) 99876-5432',toast:'✓ Cliente registrado'},t:'savecl',a:'look',es:'¡Listo! Aparece <b>«Cliente registrado»</b>.',pt:'Pronto! Aparece <b>«Cliente registrado»</b>.'}
+]},
+{id:'venta',ic:'📝',es:['Hacer una venta nueva','Prestar a un cliente'],pt:['Fazer uma venda nova','Emprestar a um cliente'],steps:[
+ {s:'home',st:{},t:'goNewSale',a:'tap',es:'En Inicio toca <b>«Nueva venta»</b>. Necesitas <b>internet</b>.',pt:'No Início toque em <b>«Nueva venta»</b>. Você precisa de <b>internet</b>.'},
+ {s:'newsale',st:{cli:'Ana',drop:1},t:'cli',a:'type',v:'Ana',es:'Escribe el <b>nombre o documento</b> del cliente.',pt:'Escreva o <b>nome ou documento</b> do cliente.'},
+ {s:'newsale',st:{cli:'Ana',drop:1},t:'opt',a:'tap',es:'Toca el cliente correcto en la lista.',pt:'Toque no cliente certo da lista.'},
+ {s:'newsale',st:{cli:'Ana Lima',val:500},t:'val',a:'type',v:'R$ 500,00',es:'Escribe el <b>valor del préstamo</b> en <b>«Valor de la venta»</b>. La tasa de interés ya viene puesta por la ruta.',pt:'Escreva o <b>valor do empréstimo</b> em <b>«Valor de la venta»</b>. A taxa de juros já vem definida pela rota.'},
+ {s:'newsale',st:{cli:'Ana Lima',val:500,npar:'20'},t:'npar',a:'type',v:'20',es:'Elige la <b>forma de pago</b> (diaria, semanal…) y escribe <b>cuántas parcelas</b>.',pt:'Escolha a <b>forma de pagamento</b> (diária, semanal…) e escreva <b>quantas parcelas</b>.'},
+ {s:'newsale',st:{cli:'Ana Lima',val:500,npar:'20'},t:'dias',a:'look',es:'Marca los <b>días de pago</b>. Vienen de lunes a sábado; tócalos para cambiarlos.',pt:'Marque os <b>dias de pagamento</b>. Vêm de segunda a sábado; toque para mudar.'},
+ {s:'newsale',st:{cli:'Ana Lima',val:500,npar:'20'},t:'vsum',a:'look',es:'ADEX calcula solo el <b>total a pagar</b>, el <b>valor de cada parcela</b> y cuándo termina.',pt:'O ADEX calcula sozinho o <b>total a pagar</b>, o <b>valor de cada parcela</b> e quando termina.'},
+ {s:'newsale',st:{cli:'Ana Lima',val:500,npar:'20'},t:'disp',a:'look',es:'Mira <b>«Disponible para esta venta»</b>. Si el préstamo es mayor, baja el valor o pide capital.',pt:'Veja <b>«Disponible para esta venta»</b>. Se o empréstimo for maior, diminua o valor ou peça capital.'},
+ {s:'newsale',st:{cli:'Ana Lima',val:500,npar:'20'},t:'crear',a:'tap',es:'Toca <b>«Crear venta»</b>. Si necesita permiso, dirá <b>«Enviar solicitud de venta»</b> y la oficina la aprueba.',pt:'Toque em <b>«Crear venta»</b>. Se precisar de permissão, dirá <b>«Enviar solicitud de venta»</b> e o escritório aprova.'},
+ {s:'newsale',st:{cli:'Ana Lima',val:500,npar:'20',toast:'✓ Solicitud de venta enviada al administrador'},t:'crear',a:'look',es:'Cuando la venta esté aprobada, la verás en <b>«Desembolsos»</b> para entregar el dinero.',pt:'Quando a venda for aprovada, você verá em <b>«Desembolsos»</b> para entregar o dinheiro.'}
+]},
+{id:'desembolso',ic:'💵',es:['Entregar el dinero del préstamo','Confirmar el desembolso'],pt:['Entregar o dinheiro do empréstimo','Confirmar o desembolso'],steps:[
+ {s:'home',st:{},t:'goDisb',a:'tap',es:'Toca <b>«Desembolsos»</b>.',pt:'Toque em <b>«Desembolsos»</b>.'},
+ {s:'disb',st:{},t:'efdisp',a:'look',es:'Arriba ves cuánto <b>efectivo tienes para entregar</b>.',pt:'Em cima você vê quanto <b>dinheiro tem para entregar</b>.'},
+ {s:'disb',st:{},t:'confd',a:'tap',es:'Entrega el dinero al cliente y <b>después</b> toca <b>«Confirmar desembolso»</b>.',pt:'Entregue o dinheiro ao cliente e <b>depois</b> toque em <b>«Confirmar desembolso»</b>.'},
+ {s:'disb',st:{done:1,toast:'✓ Desembolso confirmado. La venta ya está activa para recaudo.'},a:'look',es:'¡Listo! Desde ahora el cliente aparece en tu lista de <b>Recaudo</b>.',pt:'Pronto! A partir de agora o cliente aparece na sua lista de <b>Recaudo</b>.'}
+]},
+{id:'gasto',ic:'⛽',es:['Registrar un gasto','Gasolina, recarga…'],pt:['Registrar uma despesa','Gasolina, recarga…'],steps:[
+ {s:'home',st:{},t:'goExp',a:'tap',es:'Toca <b>«Gastos»</b>.',pt:'Toque em <b>«Gastos»</b>.'},
+ {s:'exp',st:{},t:'newexp',a:'tap',es:'Toca <b>«Registrar gasto»</b>.',pt:'Toque em <b>«Registrar gasto»</b>.'},
+ {s:'exp',st:{form:1,cat:'Gasolina'},t:'cat',a:'type',v:'Gasolina',es:'En <b>«Categoría»</b> elige qué compraste, por ejemplo <b>Gasolina</b>.',pt:'Em <b>«Categoría»</b> escolha o que você comprou, por exemplo <b>Gasolina</b>.'},
+ {s:'exp',st:{form:1,cat:'Gasolina'},t:'conque',a:'look',es:'Elige <b>con qué dinero pagaste</b>: normalmente <b>«Mi efectivo»</b>.',pt:'Escolha <b>com que dinheiro você pagou</b>: normalmente <b>«Mi efectivo»</b>.'},
+ {s:'exp',st:{form:1,cat:'Gasolina',eval:30},t:'eval',a:'type',v:'R$ 30,00',es:'Escribe cuánto costó en <b>«Valor»</b>.',pt:'Escreva quanto custou em <b>«Valor»</b>.'},
+ {s:'exp',st:{form:1,cat:'Gasolina',eval:30},t:'efoto',a:'look',es:'Si tienes la factura, tómale una <b>foto</b>. Es opcional.',pt:'Se tiver a nota, tire uma <b>foto</b>. É opcional.'},
+ {s:'exp',st:{form:1,cat:'Gasolina',eval:30},t:'esave',a:'tap',es:'Toca <b>«Guardar»</b>.',pt:'Toque em <b>«Guardar»</b>.'},
+ {s:'exp',st:{saved:1,toast:'✓ Gasto registrado'},t:'cerrados',a:'look',es:'Tu gasto queda en la lista. Los gastos que ya entraron en un cierre están abajo, en <b>«Ya incluidos en cierres»</b>.',pt:'A despesa fica na lista. As que já entraram num fechamento ficam embaixo, em <b>«Ya incluidos en cierres»</b>.'}
+]},
+{id:'informe',ic:'📊',es:['Ver mi informe del día','Hoy o días anteriores'],pt:['Ver o meu relatório do dia','Hoje ou dias anteriores'],steps:[
+ {s:'home',st:{},t:'goReport',a:'tap',es:'Toca <b>«Informe del día»</b>.',pt:'Toque em <b>«Informe del día»</b>.'},
+ {s:'report',st:{},t:'rtot',a:'look',es:'Arriba ves el total que <b>cobraste</b>, lo que <b>prestaste</b> y lo que <b>gastaste</b> hoy.',pt:'Em cima você vê o total que <b>cobrou</b>, o que <b>emprestou</b> e o que <b>gastou</b> hoje.'},
+ {s:'report',st:{},t:'rlist',a:'look',es:'Abajo está cada movimiento con su <b>hora</b>. Solo ves lo tuyo.',pt:'Embaixo está cada movimento com a <b>hora</b>. Você vê só o seu.'},
+ {s:'report',st:{},t:'fecha',a:'tap',es:'¿Quieres ver <b>otro día</b>? Toca <b>«Fecha»</b> y elige el día en el calendario.',pt:'Quer ver <b>outro dia</b>? Toque em <b>«Fecha»</b> e escolha o dia no calendário.'},
+ {s:'report',st:{past:1},t:'rtot',a:'look',es:'Ahora ves el informe del <b>04/11</b>.',pt:'Agora você vê o relatório do dia <b>04/11</b>.'},
+ {s:'report',st:{past:1},t:'hoy',a:'tap',es:'Para volver, toca <b>«Volver a hoy»</b>.',pt:'Para voltar, toque em <b>«Volver a hoy»</b>.'}
+]},
+{id:'efectivo',ic:'🧮',es:['Revisar mi efectivo','Cuánto dinero debo tener'],pt:['Conferir o meu dinheiro','Quanto dinheiro devo ter'],steps:[
+ {s:'home',st:{},t:'goCash',a:'tap',es:'Toca <b>«Mi efectivo»</b>.',pt:'Toque em <b>«Mi efectivo»</b>.'},
+ {s:'cash',st:{},t:'cin',a:'look',es:'Aquí ves lo que <b>entró</b> (Base recibida, lo que cobraste) y lo que <b>salió</b> (préstamos y gastos).',pt:'Aqui você vê o que <b>entrou</b> (Base recebida, o que você cobrou) e o que <b>saiu</b> (empréstimos e despesas).'},
+ {s:'cash',st:{},t:'cnow',a:'look',es:'<b>«Mi efectivo actual»</b> es el dinero que debes tener en la mano ahora.',pt:'<b>«Mi efectivo actual»</b> é o dinheiro que você deve ter na mão agora.'},
+ {s:'cash',st:{},t:'ccuad',a:'look',es:'Cuando entregas el dinero a la oficina se hace un <b>cuadre</b>. Aquí ves si salió <b>«Exacto»</b>.',pt:'Quando você entrega o dinheiro ao escritório é feito um <b>acerto</b>. Aqui você vê se ficou <b>«Exacto»</b>.'}
+]},
+{id:'offline',ic:'📵',es:['Trabajar sin internet','Y enviar todo después'],pt:['Trabalhar sem internet','E enviar tudo depois'],steps:[
+ {s:'home',st:{off:1},t:'net',a:'look',es:'Si se va la señal, arriba dice <b>«Sin conexión»</b>. ¡Tranquilo! Puedes <b>seguir cobrando</b>.',pt:'Se o sinal cair, em cima aparece <b>«Sin conexión»</b>. Calma! Você pode <b>continuar cobrando</b>.'},
+ {s:'pay',st:{off:1,valor:50},t:'reg',a:'tap',es:'Cobra igual que siempre. El botón ahora dice <b>«Guardar abono sin conexión»</b>.',pt:'Cobre como sempre. O botão agora diz <b>«Guardar abono sin conexión»</b>.'},
+ {s:'payok',st:{off:1},a:'look',es:'El abono queda <b>guardado en tu celular</b>. <b>No lo vuelvas a registrar</b>: se envía solo cuando vuelva el internet.',pt:'O pagamento fica <b>salvo no seu celular</b>. <b>Não registre de novo</b>: ele é enviado sozinho quando a internet voltar.'},
+ {s:'home',st:{off:1},a:'look',es:'Sin internet <b>no puedes</b> registrar clientes nuevos ni ventas nuevas. Para eso, busca señal o llama a la oficina.',pt:'Sem internet você <b>não pode</b> cadastrar clientes novos nem vendas novas. Para isso, procure sinal ou ligue para o escritório.'},
+ {s:'home',st:{},t:'goSync',a:'tap',es:'Cuando vuelva el internet, toca <b>«Sincronización»</b> para revisar.',pt:'Quando a internet voltar, toque em <b>«Sincronización»</b> para conferir.'},
+ {s:'sync',st:{pend:1},t:'syncnow',a:'tap',es:'Si hay algo en <b>«Por sincronizar»</b>, toca <b>«Sincronizar ahora»</b>.',pt:'Se tiver algo em <b>«Por sincronizar»</b>, toque em <b>«Sincronizar ahora»</b>.'},
+ {s:'sync',st:{},t:'sstate',a:'look',es:'Cuando dice <b>«Todo está confirmado por el servidor»</b>, la oficina ya tiene todo. 👍',pt:'Quando diz <b>«Todo está confirmado por el servidor»</b>, o escritório já tem tudo. 👍'}
+]},
+{id:'avisos',ic:'🔔',es:['Leer mis avisos','Mensajes de la oficina'],pt:['Ler os meus avisos','Mensagens do escritório'],steps:[
+ {s:'home',st:{},t:'nav-ntc',a:'tap',es:'Abajo a la derecha toca <b>«Avisos»</b> 🔔.',pt:'Embaixo à direita toque em <b>«Avisos»</b> 🔔.'},
+ {s:'ntc',st:{},t:'nlist',a:'look',es:'Aquí llegan los mensajes de la oficina: <b>ventas aprobadas</b>, <b>Base recibida</b>, <b>cuadres</b>… Revísalos cada día.',pt:'Aqui chegam as mensagens do escritório: <b>vendas aprovadas</b>, <b>Base recebida</b>, <b>acertos</b>… Confira todo dia.'}
+]}
+];
+
+/* ===================== ¿QUÉ ES ESTO? ===================== */
+var EXP={
+ home:{s:'home',st:{},keys:['who','net','acct','logout','greet','st-pend','st-rec','st-ven','goRoute','hist','newClient','newSale','disb','exp','report','cash','sync','nav']},
+ route:{s:'route',st:{},keys:['tabs','search','cname','ctag','ckv','abonar','nopago','detalle']},
+ pay:{s:'pay',st:{valor:50},keys:['pclient','pkv','pvalor','pquick','psum','pgps','preg']},
+ exp:{s:'exp',st:{},keys:['ekv','newexp','elist','ecerr']}
+};
+var HELP={
+ who:['Tu rol (Cobrador) y la <b>ruta</b> que estás trabajando hoy.','O seu papel (Cobrador) e a <b>rota</b> que você está trabalhando hoje.'],
+ net:['Dice si tienes internet. <b>«En línea»</b>: todo se envía al momento. <b>«Sin conexión»</b>: se guarda en el celular y se envía después.','Diz se você tem internet. <b>«En línea»</b>: tudo é enviado na hora. <b>«Sin conexión»</b>: fica salvo no celular e é enviado depois.'],
+ acct:['<b>Mi cuenta</b>: tus datos de usuario.','<b>Minha conta</b>: os seus dados de usuário.'],
+ logout:['<b>Cerrar sesión</b>: salir de ADEX. Úsalo si el celular no es tuyo.','<b>Sair</b> do ADEX. Use se o celular não for seu.'],
+ greet:['Saludo, tu ruta y la <b>fecha de hoy</b>.','Saudação, a sua rota e a <b>data de hoje</b>.'],
+ 'st-pend':['<b>Pendientes</b>: cuántos clientes te faltan por cobrar hoy.','<b>Pendientes</b>: quantos clientes faltam cobrar hoje.'],
+ 'st-rec':['<b>Mi recaudo hoy</b>: cuánto has cobrado hoy.','<b>Mi recaudo hoy</b>: quanto você já cobrou hoje.'],
+ 'st-ven':['<b>Ventas activas</b>: préstamos que se están pagando en tu ruta.','<b>Ventas activas</b>: empréstimos que estão sendo pagos na sua rota.'],
+ goRoute:['<b>Ir a recaudo</b>: tu lista de clientes para cobrar.','<b>Ir a recaudo</b>: a sua lista de clientes para cobrar.'],
+ hist:['<b>Histórico de abonos</b>: todos los pagos que ya registraste.','<b>Histórico de abonos</b>: todos os pagamentos que você já registrou.'],
+ newClient:['<b>Nuevo cliente</b>: registrar a una persona nueva (necesita internet).','<b>Nuevo cliente</b>: cadastrar uma pessoa nova (precisa de internet).'],
+ newSale:['<b>Nueva venta</b>: hacer un préstamo nuevo (necesita internet).','<b>Nueva venta</b>: fazer um empréstimo novo (precisa de internet).'],
+ disb:['<b>Desembolsos</b>: préstamos aprobados que debes entregar en dinero.','<b>Desembolsos</b>: empréstimos aprovados que você deve entregar em dinheiro.'],
+ exp:['<b>Gastos</b>: anotar lo que gastaste (gasolina, recarga…).','<b>Gastos</b>: anotar o que você gastou (gasolina, recarga…).'],
+ report:['<b>Informe del día</b>: lo que cobraste, prestaste y gastaste. Puedes ver días anteriores.','<b>Informe del día</b>: o que você cobrou, emprestou e gastou. Pode ver dias anteriores.'],
+ cash:['<b>Mi efectivo</b>: cuánto dinero debes tener en la mano.','<b>Mi efectivo</b>: quanto dinheiro você deve ter na mão.'],
+ sync:['<b>Sincronización</b>: ver si quedó algo sin enviar y enviarlo.','<b>Sincronización</b>: ver se ficou algo sem enviar e enviar.'],
+ nav:['La <b>barra de abajo</b> te lleva rápido a: Inicio, Recaudo, Desembolsos, Gastos, Mi efectivo y Avisos.','A <b>barra de baixo</b> leva rápido a: Início, Cobrança, Desembolsos, Despesas, Meu dinheiro e Avisos.'],
+ tabs:['Pestañas: <b>Pendientes</b> (por cobrar hoy), <b>Abonados</b> (ya pagaron), <b>Sin sincronizar</b> (guardados sin internet) y <b>No hoy</b> (hoy no les toca).','Abas: <b>Pendientes</b> (cobrar hoje), <b>Abonados</b> (já pagaram), <b>Sin sincronizar</b> (salvos sem internet) e <b>No hoy</b> (hoje não é dia deles).'],
+ search:['<b>Buscar cliente</b>: escribe el nombre para encontrarlo rápido.','<b>Buscar cliente</b>: escreva o nome para achar rápido.'],
+ cname:['Nombre del cliente y dónde se le cobra.','Nome do cliente e onde você cobra.'],
+ ctag:['Cómo va el cliente: <b>Al día</b> (verde), <b>Atraso leve</b> (amarillo), <b>Atraso fuerte</b> (rojo).','Como o cliente está: <b>Al día</b> (verde), <b>Atraso leve</b> (amarelo), <b>Atraso fuerte</b> (vermelho).'],
+ ckv:['<b>Saldo</b>: lo que todavía debe. <b>Parcela</b>: lo que paga cada vez. <b>Parcelas</b>: cuántas pagó de cuántas.','<b>Saldo</b>: o que ainda deve. <b>Parcela</b>: o que paga cada vez. <b>Parcelas</b>: quantas pagou de quantas.'],
+ abonar:['<b>Abonar</b>: registrar un pago del cliente.','<b>Abonar</b>: registrar um pagamento do cliente.'],
+ nopago:['<b>No pagó</b>: anotar que fuiste y no te pagó, y por qué.','<b>No pagó</b>: anotar que você foi e ele não pagou, e por quê.'],
+ detalle:['<b>Ver detalle</b>: datos del cliente, sus préstamos y sus pagos.','<b>Ver detalle</b>: dados do cliente, os empréstimos e os pagamentos.'],
+ pclient:['El cliente que estás cobrando y la <b>fecha en que recibió el préstamo</b>.','O cliente que você está cobrando e a <b>data em que recebeu o empréstimo</b>.'],
+ pkv:['Saldo, valor de la parcela y <b>qué número de parcela</b> está pagando.','Saldo, valor da parcela e <b>qual número de parcela</b> está pagando.'],
+ pvalor:['<b>Valor del recaudo</b>: el dinero que te dio el cliente.','<b>Valor del recaudo</b>: o dinheiro que o cliente te deu.'],
+ pquick:['Botones rápidos: <b>Completar parcela</b>, <b>Mitad</b> o <b>Total deuda</b> (pagar todo).','Botões rápidos: <b>Completar parcela</b>, <b>Mitad</b> (metade) ou <b>Total deuda</b> (pagar tudo).'],
+ psum:['Resumen antes de guardar: cuánto registras y cómo queda el saldo.','Resumo antes de salvar: quanto você registra e como fica o saldo.'],
+ pgps:['ADEX guarda tu <b>ubicación</b> como prueba del cobro. Si no hay, el pago se guarda igual.','O ADEX salva a sua <b>localização</b> como prova da cobrança. Se não tiver, o pagamento é salvo mesmo assim.'],
+ preg:['<b>Registrar abono</b>: guardar el pago. Tócalo <b>una sola vez</b>.','<b>Registrar abono</b>: salvar o pagamento. Toque <b>uma vez só</b>.'],
+ ekv:['Tu <b>efectivo</b> y la <b>Base disponible</b> de la ruta.','O seu <b>dinheiro</b> e a <b>Base disponível</b> da rota.'],
+ newexp:['<b>Registrar gasto</b>: anotar algo que pagaste para trabajar.','<b>Registrar gasto</b>: anotar algo que você pagou para trabalhar.'],
+ elist:['Tus gastos desde el <b>último cierre</b>.','As suas despesas desde o <b>último fechamento</b>.'],
+ ecerr:['Gastos viejos que <b>ya entraron en un cierre</b>. Tócalo para verlos.','Despesas antigas que <b>já entraram num fechamento</b>. Toque para ver.']
+};
+
+/* ===================== MOTOR ===================== */
+var $=function(id){return document.getElementById(id);};
+var app=$('app'),stage=$('stage'),menu=$('menu'),player=$('player');
+var mode=null,task=null,idx=0,playing=true,timer=null,typer=null,scale=1,expKey='home';
+
+function fit(){
+  var wrapW=Math.min(player.clientWidth-16,420);
+  var used=$('cap').offsetHeight+player.querySelector('.pbar').offsetHeight+($('chips').style.display==='none'?0:$('chips').offsetHeight)+14;
+  var availH=window.innerHeight-52-used;
+  if(window.innerWidth>=900) availH=window.innerHeight-52-player.querySelector('.pbar').offsetHeight-30;
+  scale=Math.max(0.5,Math.min(wrapW/360,availH/640,1.25));
+  app.style.transform='scale('+scale+')';
+  stage.style.width=(360*scale)+'px';stage.style.height=(640*scale)+'px';
+}
+function renderMenu(){
+  document.documentElement.lang=LANG==='pt'?'pt-BR':'es';
+  $('topTtl').textContent=T('title');document.title=T('title')+' · ADEX';
+  var h='<div class="hero"><h1>'+T('heroH')+'</h1><p>'+T('heroP')+'</p></div>';
+  h+='<div class="sec">📘 '+T('how')+' <small>'+T('howS')+'</small></div><div class="grid">';
+  TASKS.forEach(function(t,i){h+='<button class="task" data-task="'+i+'"><span class="ic">'+t.ic+'</span><b>'+t[LANG][0]+'</b><span>'+t[LANG][1]+'</span></button>';});
+  h+='</div><div class="sec">🔎 '+T('what')+' <small>'+T('whatS')+'</small></div><div class="grid">';
+  [['home','🏠',T('scrHome')],['route','📍',T('scrRoute')],['pay','💰',T('scrPay')],['exp','💲',T('scrExp')]].forEach(function(x){
+    h+='<button class="task" data-exp="'+x[0]+'"><span class="ic">'+x[1]+'</span><b>'+x[2]+'</b></button>';});
+  h+='</div><div class="tip">'+T('tip')+'</div>';
+  menu.innerHTML=h;
+  $('bBackT').textContent=T('menu');
+}
+menu.addEventListener('click',function(e){
+  var b=e.target.closest('[data-task]');if(b){openTask(+b.dataset.task);return;}
+  b=e.target.closest('[data-exp]');if(b){openExplore(b.dataset.exp);}
+});
+function showPlayer(){menu.style.display='none';player.classList.add('on');window.scrollTo(0,0);}
+function toMenu(){stop();mode=null;player.classList.remove('on');menu.style.display='';app.innerHTML='';}
+$('bBack').onclick=toMenu;
+
+function stop(){clearTimeout(timer);clearInterval(typer);timer=null;typer=null;}
+function openTask(i){
+  mode='task';task=TASKS[i];idx=0;playing=true;
+  $('pName').textContent=task.ic+' '+task[LANG][0];
+  $('chips').style.display='none';$('ctrls').style.display='';$('prog').style.display='';
+  showPlayer();fit();runStep();
+}
+function drawScreen(s,st){
+  app.innerHTML=S[s](JSON.parse(JSON.stringify(st||{})))+'<div class="hand" id="hand">👆</div>';
+}
+function el(t){return app.querySelector('[data-t="'+t+'"]')||app.querySelector('[data-h="'+t+'"]');}
+function bringIntoView(node){
+  var scr=node.closest('.scr');if(!scr)return;
+  var r=node.getBoundingClientRect(),sr=scr.getBoundingClientRect();
+  var y=(r.top-sr.top)/scale+scr.scrollTop;
+  var want=y-(scr.clientHeight/2)+(r.height/scale/2);
+  scr.style.scrollBehavior='auto';
+  scr.scrollTop=Math.max(0,want);
+}
+function pos(node){
+  var r=node.getBoundingClientRect(),a=app.getBoundingClientRect();
+  return {x:(r.left-a.left+r.width/2)/scale,y:(r.top-a.top+r.height/2)/scale};
+}
+function runStep(){
+  stop();
+  var st=task.steps[idx];
+  drawScreen(st.s,st.st);
+  var n=task.steps.length;
+  $('prog').innerHTML=task.steps.map(function(_,k){return '<i class="'+(k<idx?'pd':k===idx?'pc':'')+'"></i>';}).join('');
+  $('stepn').textContent=T('step').replace('{a}',idx+1).replace('{b}',n);
+  $('txt').innerHTML=st[LANG];
+  $('bPlay').textContent=playing?T('pause'):T('play');
+  fit();
+  var hand=$('hand');
+  var target=st.t?el(st.t):null;
+  var extra=0;
+  if(target){
+    bringIntoView(target);
+    var p=pos(target);
+    requestAnimationFrame(function(){hand.style.left=p.x+'px';hand.style.top=p.y+'px';});
+    setTimeout(function(){
+      if(mode!=='task')return;
+      target.classList.add('hl');
+      if(st.a==='tap'){
+        hand.classList.add('tap');
+        var rp=document.createElement('div');rp.className='rip';rp.style.left=(p.x-8)+'px';rp.style.top=(p.y-8)+'px';app.appendChild(rp);
+      }
+      if(st.a==='type'){
+        var v=target.querySelector('.v');var ph=target.querySelector('.ph');if(ph)ph.remove();
+        if(v){var full=st.v,k=0;v.textContent='';v.classList.add('caret');
+          typer=setInterval(function(){k++;v.textContent=full.slice(0,k);if(k>=full.length){clearInterval(typer);typer=null;v.classList.remove('caret');}},85);}
+      }
+    },800);
+    if(st.a==='type')extra=st.v.length*85;
+  } else {hand.style.display='none';}
+  var dur=Math.max(4200,st[LANG].replace(/<[^>]+>/g,'').length*62)+extra+(target?800:0);
+  if(playing)timer=setTimeout(next,dur);
+}
+function next(){
+  if(idx<task.steps.length-1){idx++;runStep();}
+  else finish();
+}
+function prev(){if(idx>0){idx--;runStep();}else runStep();}
+function finish(){
+  stop();
+  var d=document.createElement('div');d.className='done';
+  d.innerHTML='<div><div class="big">🎉</div><h3>'+T('doneH')+'</h3><p>'+T('doneP')+'</p><button class="main" id="dAgain">'+T('again')+'</button><button id="dMenu">'+T('toMenu')+'</button></div>';
+  stage.appendChild(d);
+  $('dAgain').onclick=function(){d.remove();idx=0;playing=true;runStep();};
+  $('dMenu').onclick=function(){d.remove();toMenu();};
+}
+function clearDone(){var d=stage.querySelector('.done');if(d)d.remove();}
+$('bNext').onclick=function(){clearDone();next();};
+$('bPrev').onclick=function(){clearDone();prev();};
+$('bAgain').onclick=function(){clearDone();idx=0;playing=true;runStep();};
+$('bPlay').onclick=function(){clearDone();playing=!playing;if(playing){runStep();}else{stop();$('bPlay').textContent=T('play');}};
+
+/* ---- explorar ---- */
+function openExplore(k){
+  mode='exp';expKey=k;
+  $('pName').textContent='🔎 '+T('what');
+  var ch=$('chips');ch.style.display='flex';
+  ch.innerHTML=[['home',T('scrHome')],['route',T('scrRoute')],['pay',T('scrPay')],['exp',T('scrExp')]].map(function(x){return '<button data-k="'+x[0]+'" class="'+(x[0]===k?'on':'')+'">'+x[1]+'</button>';}).join('');
+  $('ctrls').style.display='none';$('prog').style.display='none';$('stepn').textContent='';
+  $('txt').innerHTML=T('expHint');
+  showPlayer();
+  var e=EXP[k];
+  drawScreen(e.s,e.st);$('hand').style.display='none';
+  app.classList.add('explore');
+  fit();
+  setTimeout(placeBadges,30);
+}
+$('chips').addEventListener('click',function(e){var b=e.target.closest('[data-k]');if(b)openExplore(b.dataset.k);});
+function placeBadges(){
+  app.querySelectorAll('.badge').forEach(function(b){b.remove();});
+  var e=EXP[expKey];
+  e.keys.forEach(function(key,i){
+    var node=app.querySelector('[data-h="'+key+'"]');if(!node)return;
+    var r=node.getBoundingClientRect(),a=app.getBoundingClientRect();
+    var b=document.createElement('div');b.className='badge';b.textContent=i+1;
+    var x=(r.right-a.left)/scale-16, y=(r.top-a.top)/scale-8;
+    b.style.left=Math.max(2,Math.min(334,x))+'px';b.style.top=Math.max(2,Math.min(614,y))+'px';
+    app.appendChild(b);
+  });
+}
+app.addEventListener('click',function(e){
+  if(mode!=='exp')return;
+  var e2=EXP[expKey];
+  var node=e.target.closest('[data-h]');
+  while(node&&e2.keys.indexOf(node.dataset.h)<0){node=node.parentElement&&node.parentElement.closest('[data-h]');}
+  if(!node)return;
+  app.querySelectorAll('.picked').forEach(function(x){x.classList.remove('picked');});
+  node.classList.add('picked');
+  var n=e2.keys.indexOf(node.dataset.h)+1;
+  $('txt').innerHTML='<span style="display:inline-flex;width:22px;height:22px;border-radius:50%;background:#f59e0b;color:#fff;font-weight:900;font-size:12px;align-items:center;justify-content:center;margin-right:6px">'+n+'</span>'+HELP[node.dataset.h][LANG==='pt'?1:0];
+});
+app.addEventListener('scroll',function(){if(mode==='exp')placeBadges();},true);
+
+/* ---- idioma ---- */
+document.querySelectorAll('.lang button').forEach(function(b){
+  b.onclick=function(){
+    LANG=b.dataset.l;try{localStorage.setItem('adexManualLang',LANG);}catch(e){}
+    document.querySelectorAll('.lang button').forEach(function(x){x.classList.toggle('on',x.dataset.l===LANG);});
+    renderMenu();
+    if(mode==='task'){$('pName').textContent=task.ic+' '+task[LANG][0];runStep();}
+    else if(mode==='exp'){openExplore(expKey);}
+  };
+  b.classList.toggle('on',b.dataset.l===LANG);
+});
+window.addEventListener('resize',function(){if(mode){fit();if(mode==='exp')placeBadges();}});
+renderMenu();
+window.__manual={TASKS:TASKS,S:S,EXP:EXP,HELP:HELP};
+})();
+</script>
+</body>
+</html>
