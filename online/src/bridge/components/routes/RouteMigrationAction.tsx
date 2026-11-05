@@ -69,7 +69,7 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
   const submit = async () => {
     const value = text.trim()
     if (inMigration ? value.length < 10 : value.length < 2) {
-      toast.error(inMigration ? 'Escriba el motivo (mínimo 10 caracteres).' : 'Escriba el nombre de la ruta en Listos.')
+      toast.error(inMigration ? 'Escriba el motivo (mínimo 10 caracteres).' : 'Escriba el nombre de la ruta en el sistema anterior.')
       return
     }
     setSaving(true)
@@ -140,12 +140,12 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
     <>
       {inMigration && last && (
         <p className="w-full text-xs text-gray-500" data-testid={`route-migration-last-${route.id}`}>
-          Último cierre de Listos cargado: {last.reportDate} · {num(last.summary['activeCredits'])} créditos activos · saldo {brl(last.summary['balanceMinor'])}
+          Último cierre cargado: {last.reportDate} · {num(last.summary['activeCredits'])} créditos activos · saldo {brl(last.summary['balanceMinor'])}
         </p>
       )}
       {inMigration && (
         <Button variant="ghost" size="sm" onClick={startLoad} icon={<Upload className="w-3.5 h-3.5" />} data-testid={`route-migration-load-${route.id}`}>
-          Cargar cierre de Listos
+          Cargar cierre
         </Button>
       )}
       {inMigration && last && (
@@ -166,21 +166,21 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
             <p>La ruta <strong>{route.nombre}</strong> vuelve a su estado normal. Solo es posible mientras no se hayan cargado datos.</p>
           ) : (
             <>
-              <p>La ruta <strong>{route.nombre}</strong> seguirá operando en Listos. En ADEX quedará <strong>solo de consulta</strong>:
+              <p>La ruta <strong>{route.nombre}</strong> seguirá operando en el sistema anterior. En ADEX quedará <strong>solo de consulta</strong>:
                 nadie podrá crear clientes, ventas, abonos, gastos ni mover la Base hasta terminar la migración.</p>
               <p>Debe ser una ruta nueva y vacía.</p>
             </>
           )}
-          <Input label={inMigration ? 'Motivo' : 'Nombre de la ruta en Listos'} value={text} onChange={(e) => setText(e.target.value)}
+          <Input label={inMigration ? 'Motivo' : 'Nombre de la ruta en el sistema anterior'} value={text} onChange={(e) => setText(e.target.value)}
             maxLength={inMigration ? 500 : 120} autoFocus />
         </div>
       </Modal>
-      <Modal open={loadOpen} onClose={() => !saving && setLoadOpen(false)} title="Cargar cierre de Listos"
+      <Modal open={loadOpen} onClose={() => !saving && setLoadOpen(false)} title="Cargar cierre"
         footer={<><Button variant="secondary" onClick={() => setLoadOpen(false)} disabled={saving}>Volver</Button>
           <Button onClick={() => void confirmLoad()} loading={saving} disabled={!preview || preview['valid'] !== true}
             data-testid={`route-migration-confirm-${route.id}`}>Guardar cierre</Button></>}>
         <div className="space-y-3 text-sm text-gray-700">
-          <p>Suba el archivo (<strong>.json</strong>) preparado con los reportes de Listos del cierre de un día. Primero verá una
+          <p>Suba el archivo (<strong>.json</strong>) preparado con los reportes del sistema anterior del cierre de un día. Primero verá una
             vista previa; no se guarda nada hasta que pulse <strong>Guardar cierre</strong>.</p>
           {last && <p className="text-gray-500">Último cierre cargado: {last.reportDate}. El nuevo debe ser de una fecha posterior.</p>}
           <input type="file" accept=".json,application/json" disabled={saving} onChange={(e) => void pickFile(e.target.files?.[0])}
@@ -197,19 +197,19 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
               <p className="font-semibold text-gray-800">Vista previa · cierre del {String(preview['reportDate'])}</p>
               {preview['firstLoad'] !== true && (
                 <p>Desde el cierre anterior: {num(preview['newCredits'])} créditos nuevos · {num(preview['creditsWithPayments'])} con abonos ·
-                  {' '}{num(preview['creditsPaidOff'])} pagados · cobrado en Listos <strong>{brl(preview['collectedInListosMinor'])}</strong></p>
+                  {' '}{num(preview['creditsPaidOff'])} pagados · abonos previos a la migración <strong>{brl(preview['collectedInListosMinor'])}</strong></p>
               )}
               <p>Clientes: <strong>{num(preview['clients'])}</strong> ({num(preview['activeClients'])} con crédito activo)</p>
               <p>Créditos activos: <strong>{num(preview['activeCredits'])}</strong> · saldo <strong>{brl(preview['balanceMinor'])}</strong></p>
               <p>Capital pendiente (Cartera activa): <strong>{brl(preview['principalMinor'])}</strong></p>
               <p>Créditos con cuotas vencidas: {num(preview['creditsOverdue'])}</p>
-              <p>Créditos pagados (historial de Listos): {num(preview['paidCredits'])}</p>
+              <p>Créditos pagados (historial): {num(preview['paidCredits'])}</p>
               {dups > 0 && <p className="text-amber-700">Documentos ya usados en la empresa: {dups} (se cargan marcados, sin fusionar).</p>}
               {(listos['cajaMinor'] != null || listos['carteraMinor'] != null) && (
-                <p className="text-gray-500">Listos ese día: caja {listos['cajaMinor'] != null ? brl(listos['cajaMinor']) : '—'} · cartera {listos['carteraMinor'] != null ? brl(listos['carteraMinor']) : '—'}</p>
+                <p className="text-gray-500">Sistema anterior ese día: caja {listos['cajaMinor'] != null ? brl(listos['cajaMinor']) : '—'} · cartera {listos['carteraMinor'] != null ? brl(listos['carteraMinor']) : '—'}</p>
               )}
-              <p className="pt-1 text-gray-600">Al guardar, la ruta queda igual que en Listos ese día y <strong>sigue en migración</strong>
-                (solo lectura). Los abonos de esos días quedan como «Abono en Listos»: no entran en ninguna caja.</p>
+              <p className="pt-1 text-gray-600">Al guardar, la ruta queda igual que en el sistema anterior ese día y <strong>sigue en migración</strong>
+                (solo lectura). Los abonos de esos días quedan como «Abono previo a la migración»: no entran en ninguna caja.</p>
             </div>
           )}
         </div>
@@ -219,7 +219,7 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
           <Button onClick={() => void confirmClose()} loading={saving} data-testid={`route-migration-close-confirm-${route.id}`}>Terminar migración</Button></>}>
         <div className="space-y-3 text-sm text-gray-700">
           <p>La ruta <strong>{route.nombre}</strong> queda en <strong>estado normal</strong> con el último cierre cargado
-            ({last?.reportDate ?? '—'}) y empieza a operar en ADEX. Después de esto ya no se cargan más cierres de Listos.</p>
+            ({last?.reportDate ?? '—'}) y empieza a operar en ADEX. Después de esto ya no se cargan más cierres.</p>
           <p>Luego, el Administrador abre la caja con <strong>Inyectar Base</strong> por el dinero contado al cierre.</p>
         </div>
       </Modal>

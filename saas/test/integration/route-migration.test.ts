@@ -222,8 +222,16 @@ describe('0043 · ruta en migración', () => {
     assert.deepEqual(pays.map((x) => [Number(x.a), x.d, x.c, x.kind]), [[12_000, day(-1), M.anaAdmin, 'MIGRATION_COLLECTION'], [45_000, day(-1), M.anaAdmin, 'MIGRATION_COLLECTION']]);
     assert.equal(await balance(db.admin, c1, 'route_base', null, rf), 0, 'ninguna caja se movió');
     assert.equal(await balance(db.admin, c1, 'portfolio', null, rf), 60_000 - 10_000 + 50_000);
-    const c3 = (await db.admin.query(`select status from adex.clients where route_id = $1 and notes like '%cliente C3%'`, [rf])).rows[0].status;
+    const c3 = (await db.admin.query(`select status from adex.clients where route_id = $1 and notes = 'Cliente migrado (código C3)'`, [rf])).rows[0].status;
     assert.equal(c3, 'activo', 'el cliente que renovó queda activo');
+    // 0046: ningún texto visible lleva el nombre del sistema anterior.
+    const texts = (await db.admin.query(`select note t from adex.payments where route_id = $1
+        union all select reason from adex.capital_operations where route_id = $1 and kind like 'MIGRATION%'
+        union all select notes from adex.clients where route_id = $1
+        union all select description from adex.audit_log where route_id = $1 and action like 'ROUTE_MIGRATION%'`, [rf])).rows.map((x) => String(x.t));
+    assert.deepEqual(texts.filter((t) => /listos/i.test(t)), []);
+    assert.ok(texts.includes('Abono previo a la migración (crédito K2 pagado)'), texts.join(' | '));
+    assert.ok(texts.includes('Cartera migrada (crédito K3)'), texts.join(' | '));
     const list = await bruno('GET', `/v1/route-migrations?routeId=${rf}`);
     assert.deepEqual(((list.body['migrations'] as Body[])[0]!['loads'] as Body[]).map((x) => x['reportDate']), [day(-1), day(-2)]);
 

@@ -60,7 +60,7 @@ export async function openMigration(client: pg.PoolClient, ctx: ActiveContext, r
     [requireOperationId(operationId), route.id, sourceRouteName, note])).rows[0]!.r;
   await audit(client, ctx, {
     action: 'ROUTE_MIGRATION_OPENED', entityType: 'route_migration', entityId: String(r['migrationId']), routeId: route.id,
-    description: `Ruta ${route.name} en migración desde Listos («${sourceRouteName}»): solo lectura hasta terminar.`,
+    description: `Ruta ${route.name} en migración desde el sistema anterior («${sourceRouteName}»): solo lectura hasta terminar.`,
     reason: note, after: r, metadata: { operationId },
   });
   return r;
@@ -125,7 +125,7 @@ export async function loadMigrationClose(client: pg.PoolClient, ctx: ActiveConte
   const { duplicateDocuments: _d, ...summary } = r;
   await audit(client, ctx, {
     action: 'ROUTE_MIGRATION_LOADED', entityType: 'route_migration', entityId: String(r['migrationId']), routeId: route.id,
-    description: `Ruta ${route.name}: cierre de Listos del ${String(r['reportDate'])} cargado (${String(r['activeCredits'])} créditos activos).`,
+    description: `Ruta ${route.name}: cierre del sistema anterior del ${String(r['reportDate'])} cargado (${String(r['activeCredits'])} créditos activos).`,
     after: summary, metadata: { operationId },
   });
   return r;

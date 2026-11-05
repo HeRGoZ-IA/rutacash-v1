@@ -371,3 +371,16 @@ Si un paso falla, la ruta sigue en Listos el lunes y se corre todo una semana: n
 - BlueLine nunca recibe datos ficticios; las pruebas van en una empresa sintética.
 - Las migraciones de base de datos las aplica Helmer; nada en Render sin su autorización.
 - Ninguna otra ruta de BlueLine se ve afectada: el estado es por ruta.
+
+## 16. Sin el nombre del sistema anterior (0046, pedido de Helmer 2026-11-05)
+
+Helmer no quiere ver el nombre del sistema de origen en ADEX. Lo que ven las personas dice «sistema anterior»:
+
+- Cliente cargado: «Cliente migrado (código X)». Abono de esos días: «Abono previo a la migración (crédito X)» (la nota
+  del abono y la descripción del asiento MIGRATION_COLLECTION). Asiento de apertura: «Cartera migrada (crédito X)».
+- Pantallas de Rutas: «Cargar cierre», «Último cierre cargado», «abonos previos a la migración»; Consultas: «Cartera migrada».
+- Auditoría: «en migración desde el sistema anterior», «cierre del sistema anterior del …».
+- 0046 reescribe los textos ya guardados (solo el texto: importes, fechas, asientos y estados no cambian). Apaga el libro
+  inmutable, la auditoría de solo añadir y el bloqueo de la ruta en migración solo durante su transacción, comprueba los
+  controles diferidos (`set constraints all immediate`) y los vuelve a encender; al final verifica que no quede ningún texto.
+- Las claves internas (`source_system = 'listos'`, `overdueListos`, `collectedInListosMinor`) no se muestran y no cambian.
