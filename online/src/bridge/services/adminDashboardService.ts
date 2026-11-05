@@ -3,7 +3,8 @@
 // contexto ANTES de sumar), con las cifras del SERVIDOR:
 //
 //   · «Hoy» y «esta semana» son los de la EMPRESA (fecha de negocio y zona horaria del
-//     servidor, GET /v1/periods/calendar), con la semana de CLEAN (lunes a sábado).
+//     servidor, GET /v1/periods/calendar), con la semana de LUNES A DOMINGO (3.25; CLEAN usaba
+//     lunes a sábado y un domingo dejaba fuera los cobros de ese día).
 //   · Base total: Σ Base de las rutas (custodia del servidor, ver puente de cashboxEngine).
 //   · Cartera activa: Σ saldo (capital + interés) de ventas activas desembolsadas, misma
 //     fórmula de CLEAN sobre los saldos del servidor.
@@ -22,7 +23,8 @@ import { format, parseISO, subDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { db } from '@/lib/db';
 import { filterAccessibleRoutes } from '@/lib/permissions';
-import { getWeekEnd, getWeekStart } from '@/lib/formatters';
+import { getWeekStart } from '@/lib/formatters';
+import { getWeekEndSunday } from '../lib/formatters.ts';
 import { carteraEnCalleOf } from '@clean/services/cashboxEngine';
 import type { Expense, Payment, User } from '@clean/models/types';
 import { calendar, custodyPositions, liquidation, mapLimit, since, table, truncated, type Liquidation } from '../../runtime/projection.ts';
@@ -69,7 +71,7 @@ export async function getAdminDashboardData(params: { user: User | null | undefi
   const todayStr = cal.businessDate;
   const now = parseISO(`${todayStr}T12:00:00`);
   const weekStart = getWeekStart(now);
-  const weekEnd = getWeekEnd(now);
+  const weekEnd = getWeekEndSunday(now);
   const weekTo = weekEnd < todayStr ? weekEnd : todayStr;
 
   const routes = filterAccessibleRoutes(user, await db.routes.where('tenantId').equals(tenantId).toArray());

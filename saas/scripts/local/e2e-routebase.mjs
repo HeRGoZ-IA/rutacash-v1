@@ -883,6 +883,18 @@ try {
     ok('D-11', ['C-08', 'C-04'], 'Consultas (Centro 1) muestra la anulación; PostgreSQL: los dos aportes se anularon juntos (R$ 90, dos rutas), sin anulación parcial',
       consA && rev.n === 2 && rev.routes === 2 && rev.a === 9_000, JSON.stringify(rev));
 
+    // 3.25: Consultas › Caja propone la semana de LUNES A DOMINGO (antes terminaba el sábado).
+    await go('/admin/consultas?vista=caja'); await sleep(2500);
+    const wk = await page.evaluate(() => {
+      const v = ['cashbox-from', 'cashbox-to'].map((t) => document.querySelector(`[data-testid="${t}"]`)?.value ?? '');
+      const day = (s) => new Date(`${s}T12:00:00`).getDay();
+      const span = v[0] && v[1] ? Math.round((new Date(`${v[1]}T12:00:00`) - new Date(`${v[0]}T12:00:00`)) / 86_400_000) : -1;
+      return { v, from: v[0] ? day(v[0]) : -1, to: v[1] ? day(v[1]) : -1, span };
+    });
+    await shot('D-11b-consultas-caja-semana');
+    ok('D-11b', ['C-04'], 'Consultas › Caja propone la semana de lunes a domingo (3.25)',
+      wk.from === 1 && wk.to === 0 && wk.span === 6, JSON.stringify(wk));
+
     // ======================================================================================================
     // E · Diferencias (RB-D3) desde la pantalla «Diferencias»: el Administrador concilia sin aprobación superior
     // ======================================================================================================

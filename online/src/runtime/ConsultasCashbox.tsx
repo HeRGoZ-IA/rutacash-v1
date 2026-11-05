@@ -16,7 +16,9 @@ import { CapitalFlowDetail } from '@/components/capital/CapitalFlowDetail'
 import { filterAccessibleRoutes, canAccessRoute } from '@/lib/permissions'
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeSelector } from '@/components/ui/OfficeSelector'
-import { formatCurrency, getWeekStart, getWeekEnd, formatDate } from '@/lib/formatters'
+import { formatCurrency, getWeekStart, formatDate } from '@/lib/formatters'
+// 3.25: la semana propuesta va de lunes a domingo (CLEAN: lunes a sábado).
+import { getWeekEndSunday } from '../bridge/lib/formatters.ts'
 import type { Route, CashboxSummary } from '@/models/types'
 
 /** ADEX Online (Ronda 59): panel «Caja por ruta» de Consultas. */
@@ -32,7 +34,7 @@ export function CashboxPanel() {
   const [flujo, setFlujo] = useState<CapitalFlowBreakdown | null>(null)
   const [loading, setLoading] = useState(false)
   const [fechaDesde, setFechaDesde] = useState(getWeekStart())
-  const [fechaHasta, setFechaHasta] = useState(getWeekEnd())
+  const [fechaHasta, setFechaHasta] = useState(getWeekEndSunday())
   // Un movimiento confirmado en esta u otra pestaña (mismo navegador) recalcula la
   // caja visible sin F5. El botón "Actualizar" se conserva.
   const revision = useDataRevision()
@@ -88,12 +90,12 @@ export function CashboxPanel() {
           placeholder="Seleccionar ruta" containerClassName="w-full sm:w-48" />
         <div>
           <label className="block text-xs text-gray-500 mb-1">Desde</label>
-          <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)}
+          <input type="date" data-testid="cashbox-from" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)}
             className="h-9 rounded-lg border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
         </div>
         <div>
           <label className="block text-xs text-gray-500 mb-1">Hasta</label>
-          <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)}
+          <input type="date" data-testid="cashbox-to" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)}
             className="h-9 rounded-lg border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
         </div>
         <Button variant="secondary" onClick={loadSummary} icon={<RefreshCw className="w-4 h-4" />} className="sm:ml-auto">Actualizar</Button>

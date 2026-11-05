@@ -7,6 +7,17 @@
 import { useRuntime } from '../../runtime/session.ts';
 
 export * from '@clean/lib/formatters';
+import { getWeekStart } from '@clean/lib/formatters';
+import { addDays, format, parseISO } from 'date-fns';
+
+/**
+ * 3.25 (decisión del propietario 2026-11-04, «los domingos no se pueden ignorar»): fin de la
+ * semana de LUNES A DOMINGO para el panel del Administrador y Consultas › Caja. `getWeekEnd` de
+ * CLEAN (lunes a sábado) se conserva para el resto (Liquidaciones, aviso de cierres pendientes).
+ */
+export function getWeekEndSunday(date = new Date()): string {
+  return format(addDays(parseISO(getWeekStart(date)), 6), 'yyyy-MM-dd');
+}
 
 export function formatCurrency(value: number, currency?: string): string {
   // Cifra que CLEAN calculaba con su libro local y el servidor no tiene (NaN): «—», nunca
