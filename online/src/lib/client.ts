@@ -91,6 +91,13 @@ export function isNotAboutOperation(err: unknown): boolean {
 const WAKING_AFTER_MS = 4_000;
 /** Espera máxima de la sonda `/healthz` para decidir si el servicio está arrancando. */
 const HEALTH_PROBE_MS = 4_000;
+/**
+ * Espera máxima de una petición (Errores, 2026-11-05). Sin límite, una respuesta perdida en la red
+ * del celular dejaba la pantalla esperando para siempre («Confirmar desembolso» girando) aunque el
+ * servidor ya lo hubiera registrado. Pasado este tiempo cuenta como fallo de red: un comando se
+ * resuelve con su id (`resolveUncertain`), sin repetirse. Cubre el arranque de Render Free.
+ */
+export const REQUEST_TIMEOUT_MS = 45_000;
 
 /** Errores que significan «el contexto elegido ya no vale»: volver al selector. */
 export const CONTEXT_LOST = new Set(['COMPANY_BLOCKED', 'MEMBERSHIP_INACTIVE', 'MEMBERSHIP_NOT_FOUND', 'CONTEXT_INVALID']);
@@ -229,10 +236,14 @@ export class OnlineClient {
   private async authFetch(path: string, o: { method: string; body?: string; token?: string }): Promise<Response> {
     const headers: Record<string, string> = { apikey: this.cfg.publishableKey, 'content-type': 'application/json' };
     if (o.token) headers['authorization'] = `Bearer ${o.token}`;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), REQUEST_TIMEOUT_MS);
     try {
-      return await fetch(`${this.cfg.supabaseUrl}${path}`, { method: o.method, headers, body: o.body, cache: 'no-store' });
+      return await fetch(`${this.cfg.supabaseUrl}${path}`, { method: o.method, headers, body: o.body, cache: 'no-store', signal: ctl.signal });
     } catch {
       throw new ApiFailure(0, 'NETWORK');
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -414,18 +425,26 @@ export class OnlineClient {
     let res: Response;
     let slowNow = false;
     const slow = setTimeout(() => { slowNow = true; this.slowStarted(); }, WAKING_AFTER_MS);
-    try {
-      res = await fetch(`${this.cfg.apiBase}${path}`, { method, headers, body: o.body === undefined ? undefined : JSON.stringify(o.body), cache: 'no-store' });
-    } catch {
-      this.emit('network', false);
-      throw new NetworkFailure('NETWORK');
-    } finally {
-      clearTimeout(slow);
-      if (slowNow) this.slowEnded();
-    }
-    this.emit('network', true);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), REQUEST_TIMEOUT_MS);
     let body: Record<string, unknown> = {};
-    try { body = (await res.json()) as Record<string, unknown>; } catch { /* sin cuerpo */ }
+    try {
+      try {
+        res = await fetch(`${this.cfg.apiBase}${path}`, { method, headers, body: o.body === undefined ? undefined : JSON.stringify(o.body), cache: 'no-store', signal: ctl.signal });
+      } catch {
+        this.emit('network', false);
+        throw new NetworkFailure(ctl.signal.aborted ? 'TIMEOUT' : 'NETWORK');
+      } finally {
+        clearTimeout(slow);
+        if (slowNow) this.slowEnded();
+      }
+      this.emit('network', true);
+      try { body = (await res.json()) as Record<string, unknown>; } catch { /* sin cuerpo */ }
+      // Respuesta cortada a mitad del cuerpo: el resultado no se conoce (no se toma como «sin cuerpo»).
+      if (ctl.signal.aborted) throw new NetworkFailure('TIMEOUT');
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) {
       const code = String(body['error'] ?? `HTTP_${res.status}`);
       if (SESSION_LOST.has(code) || code === 'INVALID_TOKEN') {

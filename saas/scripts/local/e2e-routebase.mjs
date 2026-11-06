@@ -56,6 +56,9 @@ const ok = (id, crit, what, pass, detail = '') => {
   return Boolean(pass);
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Respuesta perdida en la red (error 2026-11-05): la petición que cumpla esto LLEGA al servidor, pero su respuesta no vuelve al navegador. */
+let loseReply = null;
+const lost = [];
 const doc11 = () => String(randomInt(10_000_000_000, 99_999_999_999));
 const puppeteer = createRequire(path.join(ROOT, 'package.json'))('puppeteer-core');
 const pg = createRequire(path.join(ROOT, 'saas', 'package.json'))('pg');
@@ -164,7 +167,8 @@ try {
     page.setDefaultTimeout(45_000); page.setDefaultNavigationTimeout(90_000);
     page.on('pageerror', (e) => errors.push({ stage, e: String(e).slice(0, 300) }));
     await page.setRequestInterception(true);
-    page.on('request', (r) => { const u = r.url(); if (!u.startsWith(WEB) && !u.startsWith(API) && !u.startsWith('data:') && !u.startsWith('blob:')) return void r.abort(); r.continue(); });
+    page.on('request', (r) => { const u = r.url(); if (!u.startsWith(WEB) && !u.startsWith(API) && !u.startsWith('data:') && !u.startsWith('blob:')) return void r.abort();
+      if (loseReply?.(r)) return; r.continue(); });
     await page.setViewport({ width, height });
     await page.emulateTimezone('America/Sao_Paulo');
   };
@@ -477,13 +481,28 @@ try {
     await page.waitForFunction(() => !document.querySelector('.animate-spin'), { timeout: 20_000 }).catch(() => undefined);
     await sleep(1000);
     await both('A-12-cobrador-desembolsos');
+    // Error 2026-11-05: el desembolso llega al servidor y la respuesta se pierde. Antes el botón giraba para siempre;
+    // ahora, pasado el tiempo máximo de espera, la app consulta la operación por su id y la da por confirmada (sin repetirla).
+    loseReply = (r) => {
+      if (r.method() !== 'POST' || !/\/v1\/credit-requests\/[^/]+\/disburse$/.test(r.url())) return false;
+      const h = { ...r.headers() }; delete h['content-length'];
+      lost.push(fetch(r.url(), { method: 'POST', headers: h, body: r.postData() }).then((x) => x.status, (e) => String(e)));
+      return true;
+    };
+    const t0 = Date.now();
     await page.evaluate(() => { const card = [...document.querySelectorAll('div.rounded-2xl')].find((d) => d.innerText.includes('Centro E') && d.innerText.includes('Confirmar desembolso')); [...(card?.querySelectorAll('button') ?? [])].find((x) => x.innerText.includes('Confirmar desembolso'))?.click(); });
     await sleep(800);
     await clickText('button', /^(Confirmar|Sí, desembolsar|Desembolsar)$/).catch(() => undefined);
-    await page.waitForFunction(() => /Desembolso confirmado|desembolsad/i.test(document.querySelector('[aria-label="Notificaciones"]')?.innerText ?? ''), { timeout: 30_000 }).catch(() => undefined);
+    const toastOk = await page.waitForFunction(() => /Desembolso confirmado/i.test(document.querySelector('[aria-label="Notificaciones"]')?.innerText ?? ''), { timeout: 100_000 }).then(() => true, () => false);
+    const waitedS = Math.round((Date.now() - t0) / 1000);
+    loseReply = null;
+    const spinning = await page.evaluate(() => [...document.querySelectorAll('button')].some((b) => b.innerText.includes('Confirmar desembolso') && b.querySelector('.animate-spin')));
     await sleep(1000);
     const saleE = await saleOf('Cliente Sintético Centro E (aprobada, sin desembolsar)');
     ok('A-13', ['C-01'], 'El Cobrador desembolsa la venta aprobada «Centro E» (R$ 300): crédito activo y custodia −300', !!saleE && saleE.v === 30_000 && (await custody(M.cob1, C1)) === k0 - 30_000, JSON.stringify({ saleE, k0, k1: await custody(M.cob1, C1) }));
+    const disb = await one(`select count(*)::int n from adex.sales where company_id = $1 and client_id = (select client_id from adex.sales where id = $2) and disbursement_status = 'desembolsado'`, [N, saleE?.id ?? null]);
+    ok('A-13b', ['C-01'], 'Respuesta del desembolso perdida en la red: la app no queda girando, confirma por el id y no hay doble desembolso',
+      lost.length === 1 && toastOk && !spinning && disb?.n === 1, JSON.stringify({ lost: await Promise.all(lost), toastOk, spinning, waitedS, disb }));
     const saleA = await saleOf('Cliente Sintético Centro A');
     k0 = await custody(M.cob1, C1);
     const pay0 = Number((await one('select count(*)::int n from adex.payments where sale_id = $1', [saleA.id])).n);
