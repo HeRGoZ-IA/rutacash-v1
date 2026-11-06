@@ -46,9 +46,38 @@ export async function listMigrations(client: pg.PoolClient, ctx: ActiveContext, 
     `select migration_id, to_char(report_date, 'YYYY-MM-DD') report_date, result - 'duplicateDocuments' result, created_at
        from adex.route_migration_loads where company_id = $1 and migration_id = any($2::text[]) order by report_date desc`,
     [ctx.companyId, r.rows.map((m) => m.id)])).rows;
-  return r.rows.map((m) => ({ ...view(m), loads: loads.filter((l) => l.migration_id === m.id)
-    .map((l) => ({ reportDate: l.report_date, loadedAt: l.created_at.toISOString(), summary: l.result })) }));
+  // 0048: diferencias de cada migración (abiertas primero), con el valor de ADEX y el del sistema anterior.
+  const diffs = r.rows.length === 0 ? [] : (await client.query<DifferenceRow>(
+    `select d.*, to_char(d.detected_report_date, 'YYYY-MM-DD') detected_on, to_char(d.source_report_date, 'YYYY-MM-DD') source_on,
+            c.name client_name, v.status current_status, v.balance_minor current_balance
+       from adex.route_migration_differences d
+       join adex.clients c on c.company_id = d.company_id and c.id = d.client_id
+       join adex.sales v on v.company_id = d.company_id and v.id = d.sale_id
+      where d.company_id = $1 and d.migration_id = any($2::text[])
+      order by (d.status = 'abierta') desc, d.detected_report_date, d.source_code`,
+    [ctx.companyId, r.rows.map((m) => m.id)])).rows;
+  return r.rows.map((m) => {
+    const mine = diffs.filter((d) => d.migration_id === m.id).map(differenceView);
+    return { ...view(m), loads: loads.filter((l) => l.migration_id === m.id)
+      .map((l) => ({ reportDate: l.report_date, loadedAt: l.created_at.toISOString(), summary: l.result })),
+      differences: mine, openDifferences: mine.filter((d) => d.status === 'abierta').length };
+  });
 }
+
+interface DifferenceRow {
+  id: string; migration_id: string; sale_id: string; client_id: string; client_name: string; source_code: string; kind: string; status: string;
+  adex_status: string; adex_balance_minor: string; current_status: string; current_balance: string; source_status: string;
+  source_balance_minor: string | null; detected_on: string; source_on: string; action: string | null; reason: string | null;
+  resolved_at: Date | null; resolved_by_membership_id: string | null; result: Record<string, unknown>;
+}
+
+const differenceView = (d: DifferenceRow) => ({
+  id: d.id, saleId: d.sale_id, clientId: d.client_id, clientName: d.client_name, code: d.source_code, kind: d.kind, status: d.status,
+  adexStatus: d.adex_status, adexBalanceMinor: Number(d.adex_balance_minor), currentStatus: d.current_status, currentBalanceMinor: Number(d.current_balance),
+  sourceStatus: d.source_status, sourceBalanceMinor: d.source_balance_minor === null ? null : Number(d.source_balance_minor),
+  detectedReportDate: d.detected_on, sourceReportDate: d.source_on, action: d.action, reason: d.reason,
+  resolvedAt: d.resolved_at?.toISOString() ?? null, resolvedById: d.resolved_by_membership_id, result: d.result,
+});
 
 /** El SuperAdmin pone una ruta vacía «en migración» (espejo de solo lectura del sistema anterior). */
 export async function openMigration(client: pg.PoolClient, ctx: ActiveContext, routeId: string, body: Body, operationId: string | null) {
@@ -125,7 +154,8 @@ export async function loadMigrationClose(client: pg.PoolClient, ctx: ActiveConte
   const { duplicateDocuments: _d, ...summary } = r;
   await audit(client, ctx, {
     action: 'ROUTE_MIGRATION_LOADED', entityType: 'route_migration', entityId: String(r['migrationId']), routeId: route.id,
-    description: `Ruta ${route.name}: cierre del sistema anterior del ${String(r['reportDate'])} cargado (${String(r['activeCredits'])} créditos activos).`,
+    description: `Ruta ${route.name}: cierre del sistema anterior del ${String(r['reportDate'])} cargado (${String(r['activeCredits'])} créditos activos`
+      + (Number(r['openDifferences'] ?? 0) > 0 ? `; ${String(r['openDifferences'])} diferencias por revisar).` : ').'),
     after: summary, metadata: { operationId },
   });
   return r;
@@ -143,6 +173,39 @@ export async function closeMigration(client: pg.PoolClient, ctx: ActiveContext, 
     action: 'ROUTE_MIGRATION_FINISHED', entityType: 'route_migration', entityId: String(r['migrationId']), routeId: route.id,
     description: `Migración de ${route.name} terminada con el cierre del ${String(r['lastReportDate'])}: la ruta queda en estado normal.`,
     reason: note, after: summary, metadata: { operationId },
+  });
+  return r;
+}
+
+// ---------- 0048 · Diferencias de un cierre (3.27, decisión 2.2.2 de Helmer) ----------
+// Un cierre que no cuadra en un crédito se carga igual: el crédito queda con una diferencia ABIERTA (sin mover dinero).
+// La corrigen el SuperAdmin o el Administrador responsable de la ruta, con motivo; PostgreSQL lo valida todo
+// (`adex.route_migration_resolve_difference`) y ningún ajuste toca una caja. «Terminar migración» exige cero abiertas.
+export const MIGRATION_RESOLVE_FIELDS = ['action', 'reason'] as const;
+export const DIFFERENCE_ACTIONS = ['accept_source', 'keep_adex', 'paid', 'void', 'still_active', 'reopen', 'keep_paid'] as const;
+const ACTION_LABEL: Record<string, string> = {
+  accept_source: 'aceptar el saldo del sistema anterior', keep_adex: 'mantener el saldo de ADEX', paid: 'fue pagado',
+  void: 'nunca debió existir (anulada)', still_active: 'sigue activo', reopen: 'reabrir con el saldo del sistema anterior', keep_paid: 'mantener pagado',
+};
+
+/** Corrige una diferencia de migración: SuperAdmin o Administrador responsable de la ruta, con motivo. */
+export async function resolveMigrationDifference(client: pg.PoolClient, ctx: ActiveContext, routeId: string, differenceId: string, body: Body,
+                                                 operationId: string | null) {
+  if (ctx.role !== 'superadmin' && ctx.role !== 'admin') {
+    throw new ApiError(403, 'PERMISSION_DENIED', 'only the SuperAdmin or the responsible administrator resolves a migration difference');
+  }
+  const route = await routeOf(client, ctx, pathId(routeId));
+  const id = pathId(differenceId);
+  const action = reqText(body, 'action', 40);
+  if (!(DIFFERENCE_ACTIONS as readonly string[]).includes(action)) throw new ApiError(400, 'INVALID_INPUT', 'action is invalid', { field: 'action' });
+  const reason = reqText(body, 'reason', 500);
+  if (reason.length < 10) throw new ApiError(400, 'INVALID_INPUT', 'reason needs at least 10 characters', { field: 'reason' });
+  const r = (await client.query<{ r: Record<string, unknown> }>('select adex.route_migration_resolve_difference($1, $2, $3, $4, $5) r',
+    [requireOperationId(operationId), route.id, id, action, reason])).rows[0]!.r;
+  await audit(client, ctx, {
+    action: 'ROUTE_MIGRATION_DIFFERENCE_RESOLVED', entityType: 'route_migration_difference', entityId: id, routeId: route.id,
+    description: `Ruta ${route.name}: diferencia del crédito ${String(r['code'])} corregida (${ACTION_LABEL[action] ?? action}).`,
+    reason, before: r['before'], after: r, metadata: { operationId },
   });
   return r;
 }

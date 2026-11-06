@@ -57,7 +57,7 @@ export const KIND_LABEL: Record<string, string> = {
   ADMIN_RETURN: 'Devolución a la empresa', PARTNER_CONTRIBUTION: 'Aporte de socio (histórico)', WORKER_DELIVERY: 'Entrega de Base a trabajador',
   WORKER_RETURN: 'Devolución de Base', WORKER_TRANSFER: 'Traspaso entre trabajadores', ROUTE_REASSIGNMENT: 'Traspaso de trabajador entre rutas',
   LOAN_DISBURSEMENT: 'Desembolso', COLLECTION: 'Recaudo', WORKER_EXPENSE: 'Gasto del trabajador', ROUTE_EXPENSE: 'Gasto de ruta',
-  MIGRATION_OPENING: 'Cartera migrada',
+  MIGRATION_OPENING: 'Cartera migrada', MIGRATION_COLLECTION: 'Abono previo a la migración', MIGRATION_ADJUSTMENT: 'Venta migrada anulada',
   COMPANY_EXPENSE: 'Gasto de empresa', EXPENSE_REFUND: 'Reintegro de gasto', SETTLEMENT_RETURN: 'Entrega por cuadre',
   SETTLEMENT_SURPLUS: 'Sobrante de cuadre', ADMIN_TRANSFER_HOLD: 'Traspaso entre Administradores · salida',
   ADMIN_TRANSFER_APPLY: 'Traspaso entre Administradores · llegada', ADMIN_TRANSFER_RELEASE: 'Traspaso entre Administradores · devuelto',

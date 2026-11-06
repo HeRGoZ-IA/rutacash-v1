@@ -172,6 +172,7 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       { column: 'ledger_operation_id', reason: 'Fase 4: asiento de desembolso del libro de capital del servidor (capital_operations); CLEAN no tiene libro de doble entrada' },
       { column: 'rectification_count', reason: 'Ronda 73 (0030): rectificaciones del crédito desembolsado (historial en credit_rectifications; concurrencia optimista)' },
       { column: 'principal_reclassified_minor', reason: 'Ronda 74 (0032): capital reclasificado por rectificaciones con pagos; capital reconocido = Σ pagos.principal_minor + este valor' },
+      { column: 'migration_voided_at', reason: '0048: venta migrada anulada al corregir una diferencia de migración («nunca debió existir»); solo del servidor' },
     ],
   },
   {

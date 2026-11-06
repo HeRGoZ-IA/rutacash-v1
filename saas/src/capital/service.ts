@@ -599,6 +599,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
   // Crédito ↔ libro: cada desembolso con su crédito (mismo importe y ruta) y viceversa.
   // 0044: la apertura de una ruta migrada (`MIGRATION_OPENING`) hace las veces de desembolso (capital pendiente).
   // Ronda 73: el capital vigente de un crédito rectificado = desembolso + Σ ajustes (pata de la cartera, con signo).
+  // 0048: una venta migrada anulada al corregir una diferencia (`MIGRATION_ADJUSTMENT`) cuenta igual.
   const unmatched = await q(
     `select count(*)::text n from adex.capital_operations o
       where o.company_id = $1 and o.kind in ('LOAN_DISBURSEMENT', 'MIGRATION_OPENING')
@@ -606,7 +607,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
                           and s.sale_value_minor = o.amount_minor + coalesce((select sum(e.amount_minor) from adex.capital_operations j
                                 join adex.capital_entries e on e.company_id = j.company_id and e.operation_id = j.id
                                 join adex.capital_accounts a on a.company_id = e.company_id and a.id = e.account_id and a.kind = 'portfolio'
-                               where j.company_id = s.company_id and j.sale_id = s.id and j.kind = 'DISBURSEMENT_ADJUSTMENT'), 0)
+                               where j.company_id = s.company_id and j.sale_id = s.id and j.kind in ('DISBURSEMENT_ADJUSTMENT', 'MIGRATION_ADJUSTMENT')), 0)
                           and s.route_id = o.route_id and s.disbursement_status = 'desembolsado')`);
   const orphanCredits = await q(
     `select count(*)::text n from adex.sales s

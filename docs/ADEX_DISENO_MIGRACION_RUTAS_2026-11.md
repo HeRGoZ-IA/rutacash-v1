@@ -384,3 +384,113 @@ Helmer no quiere ver el nombre del sistema de origen en ADEX. Lo que ven las per
   inmutable, la auditoría de solo añadir y el bloqueo de la ruta en migración solo durante su transacción, comprueba los
   controles diferidos (`set constraints all immediate`) y los vuelve a encender; al final verifica que no quede ningún texto.
 - Las claves internas (`source_system = 'listos'`, `overdueListos`, `collectedInListosMinor`) no se muestran y no cambian.
+
+## 17. Diferencias en un cierre (3.27, decisión 2.2.2 de Helmer, 2026-11-05) — construido en local (0048, ver §17.7), sin publicar
+
+Decisión: si un cierre del sistema anterior no cuadra, **se carga igual** y el Administrador corrige la diferencia en
+ADEX con un movimiento **con motivo**, que queda en la auditoría. Este apartado es la propuesta; no se construye sin el
+«sí» de Helmer.
+
+### 17.1 Qué hoy detiene la carga (AX445) y pasa a ser «diferencia»
+
+| Caso | Ejemplo probable | Hoy |
+|---|---|---|
+| **A. El saldo de un crédito sube** | En el sistema anterior borraron un abono mal digitado | Se detiene todo el cierre |
+| **B. Un crédito activo desaparece sin estar pagado** | Lo anularon o lo borraron allá | Se detiene todo el cierre |
+| **C. Un crédito que ADEX dio por pagado vuelve a estar activo** | Reabrieron el pago allá | Se detiene todo el cierre |
+
+Lo demás sigue deteniendo la carga, porque son errores del archivo y no de la cartera: fecha inválida, cierre repetido,
+códigos repetidos, cliente sin documento, cifras imposibles en un crédito nuevo. El lector tampoco cambia: si un cliente
+con varios créditos cambió y no se puede saber cuál, o falta una renovación, lo resolvemos con un reporte más, como hoy.
+
+### 17.2 Cómo se carga un cierre con diferencias
+
+- El cierre se guarda con todo lo que **sí** cuadra (altas, créditos nuevos, abonos y pagados), igual que hoy.
+- Cada caso A, B o C queda como **diferencia abierta** del crédito, con los dos valores: ADEX (lo que había) y sistema
+  anterior (lo que dice el reporte). **No mueve dinero.** El crédito se queda en ADEX como estaba.
+- Mientras la diferencia esté abierta, los cierres siguientes **no tocan ese crédito**: solo actualizan el valor del
+  sistema anterior en la diferencia (así se ve si allá lo corrigieron solos). Si el reporte vuelve a coincidir con
+  ADEX, la diferencia se cierra sola, con la nota «se corrigió en el sistema anterior».
+- El control final del cierre cuenta con las diferencias abiertas: saldo ADEX = reporte ± diferencias abiertas.
+- La vista previa lo avisa antes de guardar: «Este cierre tiene 2 diferencias. Se cargará igual y quedarán para
+  revisar». El resumen del cierre muestra cuántas quedaron abiertas.
+
+### 17.3 Cómo las corrige el Administrador
+
+En Rutas → Valparaíso → **«Diferencias por revisar (N)»**: una fila por crédito, con cliente, código, valor en ADEX,
+valor en el sistema anterior y fecha del cierre. Cada fila tiene una acción, siempre con **motivo obligatorio**:
+
+| Caso | Opción | Qué hace en ADEX |
+|---|---|---|
+| A. Saldo sube | **Aceptar el saldo del sistema anterior** | Si la diferencia sale de abonos previos a la migración, anula esos abonos (por el importe exacto) y el saldo sube. Si es mayor (allá agregaron intereses o recargos), sube el saldo con un ajuste de interés. |
+| A. Saldo sube | **Mantener el saldo de ADEX** | No cambia nada; ADEX estaba bien. |
+| B. Desaparece | **Fue pagado** | Abono previo a la migración por el resto y el crédito queda pagado (como un pagado normal). |
+| B. Desaparece | **Nunca debió existir (anular)** | Se anula la venta migrada: sale de la cartera y el capital vuelve a la financiación de la ruta. |
+| B. Desaparece | **Sigue activo** | No cambia nada; se cobra en ADEX. |
+| C. Reaparece | **Reabrir con el saldo del sistema anterior** | Anula el abono final y el crédito vuelve a activo con ese saldo. |
+| C. Reaparece | **Mantener pagado** | No cambia nada. |
+
+- Ningún ajuste toca la caja: igual que los abonos previos a la migración, se mueve solo la cartera de la ruta.
+- Cada corrección es un asiento del libro con su motivo y una línea en la auditoría (quién, cuándo, valores antes y
+  después). Se puede ver en Consultas.
+- «Dar por perdido» (castigo) no está entre las opciones: llega con 3.28 y se usará también aquí.
+
+### 17.4 Terminar la migración
+
+**«Terminar migración» no se permite con diferencias abiertas.** El domingo 8 todas tienen que estar resueltas. Así la
+ruta empieza el lunes 9 con una cartera que el Administrador revisó.
+
+### 17.5 Lo que Helmer debe decidir
+
+**DECIDIDO por Helmer (2026-11-05):** (1) corrigen el SuperAdmin o el Administrador encargado de la ruta; (2) sí se
+bloquea «Terminar migración» con diferencias abiertas; (3) saldo mayor que los abonos previos: ajuste de interés con
+motivo. Preguntas originales:
+
+1. **Quién corrige:** propuesta, solo el Administrador responsable de la ruta (Andrew) y el SuperAdmin. ¿O cualquier
+   Administrador de la empresa?
+2. **Bloqueo al terminar** (17.4): propuesta, sí se bloquea. ¿De acuerdo?
+3. **Caso A con saldo mayor que los abonos previos:** propuesta, ajuste de interés con motivo. ¿O se prefiere que esos
+   casos los revise Helmer antes?
+
+### 17.6 Cómo se construye (al recibir el «sí»)
+
+- Migración 0047: tabla de diferencias; `route_migration_load` las registra en lugar de detenerse; nueva función
+  `route_migration_resolve_difference` (motivo obligatorio, auditoría); `route_migration_close` exige cero abiertas.
+- API: las diferencias en el resultado del cierre y en `GET /v1/route-migrations`; `POST …/migration/differences/{id}/resolve`.
+- Online: aviso en la vista previa, lista «Diferencias por revisar» y el diálogo de corrección.
+- Pruebas en Postgres local con un caso de cada tipo y cada opción, y control de que la ruta cuadra después. Luego,
+  orden habitual: respaldo, 0047 la aplica Helmer, Render con su autorización, `verify:deploy`.
+- Tiempo estimado: un día de trabajo. Mientras no esté publicado, si un cierre del 5 al 7/11 trae una diferencia, se
+  espera: los cierres pueden cargarse después, en orden, sin perder nada.
+
+### 17.7 Cómo quedó (construido en local el 2026-11-05, sin publicar)
+
+La migración es la **0048** (`saas/db/migrations/0048_route_migration_differences.sql`): la 0047 ya la usaba 3.29.
+
+- Tabla `adex.route_migration_differences`: una fila por crédito con diferencia (tipo A `balance_up`, B `missing`,
+  C `reappeared`), valor de ADEX y del sistema anterior, fecha del cierre, estado abierta/resuelta, acción, motivo y quién.
+- `route_migration_load`: los casos A, B y C dejan la diferencia abierta sin tocar el crédito. Los cierres siguientes
+  solo actualizan el valor del sistema anterior; si vuelve a coincidir, se cierra sola («Se corrigió en el sistema
+  anterior»). El control final aparta los créditos con diferencia en los dos lados.
+- `route_migration_resolve_difference` (SuperAdmin o Administrador responsable; motivo de 10 a 500 caracteres):
+  - A «Aceptar»: anula abonos previos a la migración del más reciente al más antiguo; si el último sobra, vuelve a
+    registrar el sobrante con su fecha (importe exacto). Si no alcanzan, el resto es un **ajuste de interés** (sube el total
+    y la última cuota). Ese ajuste no es un asiento del libro: no mueve dinero (el interés se reconoce al cobrar) y queda
+    en la diferencia y en la auditoría.
+  - A «Mantener»: no cambia nada; los cierres siguientes descuentan esa diferencia aceptada (y siguen cargando abonos).
+  - B «Fue pagado»: abono previo a la migración por el resto. B «Anular»: la venta queda con lo ya cobrado (saldo 0,
+    marcada `migration_voided_at`) y el capital pendiente vuelve a la financiación con el asiento nuevo
+    `MIGRATION_ADJUSTMENT`. B «Sigue activo»: no cambia nada; los cierres siguientes ya no lo marcan.
+  - C «Reabrir»: anula el abono final (y los que hagan falta) hasta el saldo del sistema anterior. C «Mantener pagado».
+  - Las anulaciones son `REVERSAL` de `MIGRATION_COLLECTION`; también las puede registrar el SuperAdmin, solo dentro de una
+    corrección de diferencia (excepción a RB-D11, decisión 1 de §17.5). Ninguna toca una caja.
+- `route_migration_close` exige cero diferencias abiertas.
+- API: diferencias en la vista previa, en el resultado del cierre y en `GET /v1/route-migrations` (`differences`,
+  `openDifferences`); `POST /v1/routes/{id}/migration/differences/{diffId}/resolve` (`action`, `reason`), idempotente.
+  La conciliación cuenta `MIGRATION_ADJUSTMENT` como ajuste del desembolso.
+- Online: aviso en la vista previa, botón «Diferencias por revisar (N)» con el diálogo de corrección (opciones y motivo)
+  para el SuperAdmin y el Administrador responsable, y «Terminar migración» desactivado con el motivo a la vista.
+
+**Probado (local, PostgreSQL real):** `route-migration.test.ts` 6/6. RM-006 cubre los 3 casos y las 7 opciones, el cierre
+automático, el bloqueo de «Terminar», quién puede corregir, la idempotencia, que ninguna caja se mueve y la conciliación
+completa de la empresa. **No probado:** la pantalla en un navegador ni con los cierres reales de Valparaíso.

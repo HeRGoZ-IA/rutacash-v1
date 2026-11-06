@@ -48,7 +48,7 @@ import {
   listHandovers, modelPrerequisites, routePanel, transferBase, transferDestinations, transitionModel, withdrawBase,
 } from '../capital/routeBase.ts';
 import {
-  MIGRATION_CANCEL_FIELDS, MIGRATION_CLOSE_FIELDS, MIGRATION_LOAD_FIELDS, MIGRATION_LOAD_MAX_BYTES, MIGRATION_OPEN_FIELDS, closeMigration, loadMigrationClose, previewMigrationLoad, cancelMigration, listMigrations, openMigration,
+  MIGRATION_CANCEL_FIELDS, MIGRATION_CLOSE_FIELDS, MIGRATION_LOAD_FIELDS, MIGRATION_LOAD_MAX_BYTES, MIGRATION_OPEN_FIELDS, MIGRATION_RESOLVE_FIELDS, closeMigration, resolveMigrationDifference, loadMigrationClose, previewMigrationLoad, cancelMigration, listMigrations, openMigration,
 } from '../capital/routeMigration.ts';
 import {
   REGISTER_FIELDS, adminDirectory, cancelAdminTransfer, decideAdminTransfer, getAdminTransfer, listAdminTransfers, registerAdminTransfer,
@@ -255,6 +255,10 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: ([id]) => async (c, ctx, b, _q, op) => created(await loadMigrationClose(c, ctx, id!, b, op)) },
   { method: 'POST', pattern: new RegExp(`^/v1/routes/${ID}/migration/close$`), fields: MIGRATION_CLOSE_FIELDS, idempotent: 'route.migration_close', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => ok(await closeMigration(c, ctx, id!, b, op)) },
+  // 0048 · diferencias de un cierre: las corrige el SuperAdmin o el Administrador responsable, con motivo.
+  { method: 'POST', pattern: new RegExp(`^/v1/routes/${ID}/migration/differences/${ID}/resolve$`), fields: MIGRATION_RESOLVE_FIELDS,
+    idempotent: 'route.migration_resolve_difference', requiresOperation: true,
+    handler: ([id, diffId]) => async (c, ctx, b, _q, op) => ok(await resolveMigrationDifference(c, ctx, id!, diffId!, b, op)) },
   // ---------- Gastos generales (R74, 0035): saldos a favor de Administradores (nunca efectivo) y reembolsos ----------
   { method: 'GET', pattern: /^\/v1\/capital\/admin-payables$/, fields: null, handler: () => async (c, ctx) => ok(await adminPayables(c, ctx)) },
   // R74 (0037, item 4): obligaciones pendientes por gasto (beneficiario, descripción, pendiente), para pagar la de otro Administrador.

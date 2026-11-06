@@ -205,9 +205,11 @@ describe('0043 · ruta en migración', () => {
     expectCode(await cancel($bruno, rf), 409, 'ROUTE_MIGRATION_NOT_ALLOWED', 'cancelar con cierres cargados');
     expectCode(await load(day1()), 422, 'ROUTE_MIGRATION_INVALID_DATA', 'el mismo cierre otra vez');
 
-    // Un saldo que SUBE se detiene.
+    // 0048: un saldo que SUBE ya no detiene el cierre: queda como diferencia abierta (la vista previa lo avisa).
     const up = day2(); up.credits[0] = k1(73_000, -2, 10); up.credits[0].schedule[9]!.amountMinor = 19_000; up.control.balanceMinor = 73_000 + 60_000;
-    assert.match(String((await preview(up)).body['problem']), /K1: the balance went up/);
+    const pu = await preview(up);
+    assert.equal(pu.body['valid'], true, JSON.stringify(pu.body));
+    assert.deepEqual((pu.body['differences'] as Body[]).map((d) => [d['code'], d['kind'], d['adexBalanceMinor'], d['sourceBalanceMinor']]), [['K1', 'balance_up', 72_000, 73_000]]);
 
     // Cierre 2: abono en Listos en K1, K2 pagado (finalizada), cliente C3 renueva con K3.
     const l2 = await load(day2());
@@ -248,6 +250,143 @@ describe('0043 · ruta en migración', () => {
     const saleK1 = (await db.admin.query(`select id from adex.sales where route_id = $1 and balance_minor = 60000 and installments_count = 12`, [rf])).rows[0].id as string;
     const col = await $ana('/v1/collections', { saleId: saleK1, amountMinor: 6_000 });
     assert.equal(col.status, 201, JSON.stringify(col.body));
+  });
+
+  test('RM-006 · 0048: un cierre con diferencias se carga igual; cada caso y cada corrección, sin caja; terminar exige cero abiertas', async () => {
+    // Ruta nueva con dos Administradores: Ana (responsable) y Edu (no responsable).
+    const nr = await bruno('POST', '/v1/routes', { name: 'Ruta Migrada Diferencias', interestRate: 20, freeRate: false, maxLoanMinor: 500_000,
+      adminIds: [M.anaAdmin, edu.membershipId] });
+    assert.equal(nr.status, 201, JSON.stringify(nr.body));
+    const rg = nr.body['id'] as string;
+    const ctrl = (await db.admin.query('select capital_controller_membership_id c from adex.routes where id = $1', [rg])).rows[0].c;
+    if (ctrl !== M.anaAdmin) {
+      assert.equal((await bruno('PUT', `/v1/routes/${rg}/capital-controller`, { membershipId: M.anaAdmin, reason: 'Responsable de la ruta migrada' })).status, 200);
+    }
+    assert.equal((await open($bruno, rg)).status, 201);
+    const today = (await db.admin.query<{ d: string }>(`select to_char((now() at time zone timezone)::date, 'YYYY-MM-DD') d from adex.companies where id = $1`, [c1])).rows[0]!.d;
+    const day = (n: number) => { const d = new Date(`${today}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    const codes = ['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3', 'C1', 'C2'];
+    const docs = codes.map(() => cpf());
+    const clients = codes.map((k, i) => ({ code: `P${k}`, name: `CLIENTE DIFERENCIA ${k}`, document: docs[i], documentType: 'CPF', phone: '61999990009', address: 'Rua sintética', active: true }));
+    // Diario, 20 × 60,00 = 1.200,00 (capital 1.000,00); el saldo son cuotas de 60,00 desde hace 3 días.
+    const credit = (k: string, balance: number) => ({ code: k, clientCode: `P${k}`, grantedOn: day(-30), valueMinor: 100_000, totalMinor: 120_000, rate: 20,
+      installmentsCount: 20, installmentValueMinor: 6_000, frequency: 'diaria', paymentDays: [0, 1, 2, 3, 4, 5, 6], balanceMinor: balance, overdueListos: 0,
+      lastPaymentOn: day(-6), schedule: Array.from({ length: balance / 6_000 }, (_, j) => ({ number: j + 1, dueDate: day(-3 + j), amountMinor: 6_000 })) });
+    const paid = (k: string) => ({ code: k, clientCode: `P${k}`, grantedOn: day(-30), valueMinor: 100_000, totalMinor: 120_000, installmentsCount: 20, frequency: 'diaria', lastPaymentOn: day(-3) });
+    const close = (reportDate: string, credits: [string, number][], history: string[]) => ({ sourceRouteName: 'RUTA CON DIFERENCIAS (sintética)', reportDate,
+      control: { clients: codes.length, activeCredits: credits.length, balanceMinor: credits.reduce((t, [, b]) => t + b, 0) },
+      clients, credits: credits.map(([k, b]) => credit(k, b)), history: history.map(paid) });
+    const load = (p: Body, op?: string) => $bruno(`/v1/routes/${rg}/migration/loads`, { payload: p }, op);
+    const sales = async () => Object.fromEntries((await db.admin.query(`select t.source_code k, s.status, s.balance_minor b, s.total_value_minor t, s.sale_value_minor v,
+        s.migration_voided_at is not null voided from adex.route_migration_items t join adex.sales s on s.id = t.sale_id
+       where t.route_id = $1 and t.kind = 'credit'`, [rg])).rows.map((x) => [x.k, [x.status, Number(x.b), Number(x.t), Number(x.v), x.voided]]));
+
+    // Cierre 1: los nueve activos. Cierre 2: abonos en A1 y A2; C1 y C2 pagados.
+    const day1 = close(day(-4), [['A1', 72_000], ['A2', 30_000], ['A3', 24_000], ['A4', 36_000], ['B1', 18_000], ['B2', 12_000], ['B3', 24_000], ['C1', 30_000], ['C2', 12_000]], []);
+    assert.equal((await load(day1)).status, 201);
+    const l2 = await load(close(day(-3), [['A1', 60_000], ['A2', 18_000], ['A3', 24_000], ['A4', 36_000], ['B1', 18_000], ['B2', 12_000], ['B3', 24_000]], ['C1', 'C2']));
+    assert.equal(l2.status, 201, JSON.stringify(l2.body));
+    assert.equal(l2.body['openDifferences'], 0);
+    const portfolioBefore = await balance(db.admin, c1, 'portfolio', null, rg);
+
+    // Cierre 3: A (saldo sube) en A1…A4; B (desaparece sin estar pagado) en B1…B3; C (vuelve activo) en C1 y C2.
+    const day3 = close(day(-2), [['A1', 66_000], ['A2', 36_000], ['A3', 30_000], ['A4', 42_000], ['C1', 30_000], ['C2', 12_000]], []);
+    const pv = await bruno('POST', `/v1/routes/${rg}/migration/preview`, { payload: day3 });
+    assert.equal(pv.status, 200, JSON.stringify(pv.body));
+    assert.equal(pv.body['valid'], true, JSON.stringify(pv.body));
+    assert.equal(pv.body['newDifferences'], 9);
+    assert.equal(Number((await db.admin.query('select count(*) n from adex.route_migration_differences where route_id = $1', [rg])).rows[0].n), 0, 'la vista previa no guarda nada');
+    const before3 = await sales();
+    const l3 = await load(day3);
+    assert.equal(l3.status, 201, JSON.stringify(l3.body));
+    assert.equal(l3.body['newDifferences'], 9);
+    assert.equal(l3.body['openDifferences'], 9);
+    assert.equal(l3.body['collectedInListosMinor'], 0);
+    assert.deepEqual(await sales(), before3, 'ningún crédito con diferencia cambió');
+    assert.equal(await balance(db.admin, c1, 'portfolio', null, rg), portfolioBefore, 'la cartera no se movió');
+    const diffs: Record<string, Body> = Object.fromEntries((l3.body['differences'] as Body[]).map((d) => [d['code'], d]));
+    assert.deepEqual(Object.entries(diffs).map(([k, d]) => [k, d['kind'], d['adexBalanceMinor'], d['sourceStatus'], d['sourceBalanceMinor']]).sort(), [
+      ['A1', 'balance_up', 60_000, 'active', 66_000], ['A2', 'balance_up', 18_000, 'active', 36_000], ['A3', 'balance_up', 24_000, 'active', 30_000],
+      ['A4', 'balance_up', 36_000, 'active', 42_000], ['B1', 'missing', 18_000, 'missing', null], ['B2', 'missing', 12_000, 'missing', null],
+      ['B3', 'missing', 24_000, 'missing', null], ['C1', 'reappeared', 0, 'active', 30_000], ['C2', 'reappeared', 0, 'active', 12_000]]);
+    assert.equal(diffs['A1']!['clientName'], 'CLIENTE DIFERENCIA A1');
+    // La lista la ven el SuperAdmin y la Administradora; «Terminar» se bloquea con diferencias abiertas.
+    const listed = await ana('GET', `/v1/route-migrations?routeId=${rg}`);
+    assert.equal((listed.body['migrations'] as Body[])[0]!['openDifferences'], 9, JSON.stringify(listed.body));
+    const blocked = await $bruno(`/v1/routes/${rg}/migration/close`, {});
+    expectCode(blocked, 409, 'ROUTE_MIGRATION_NOT_ALLOWED', 'terminar con diferencias');
+
+    const resolve = (who: Money, code: string, action: string, reason = 'Revisado con el reporte y el cuaderno del cobrador', op?: string) =>
+      who(`/v1/routes/${rg}/migration/differences/${String(diffs[code]!['id'])}/resolve`, { action, reason }, op);
+    // Quién corrige: SuperAdmin o la Administradora responsable; nadie más. Motivo obligatorio y opción del caso.
+    expectCode(await resolve(edu.money, 'A1', 'accept_source'), 403, 'CAPITAL_AUTHORITY_REQUIRED', 'Administrador no responsable');
+    expectCode(await resolve(money(caller(api, issuer, 'ana', M.anaCob)), 'A1', 'accept_source'), 403, 'PERMISSION_DENIED', 'cobradora');
+    expectCode(await resolve($ana, 'A1', 'accept_source', 'corto'), 400, 'INVALID_INPUT', 'motivo corto');
+    expectCode(await resolve($ana, 'A1', 'void'), 400, 'INVALID_INPUT', 'opción de otro caso');
+    expectCode(await ana('POST', `/v1/routes/${rg}/migration/differences/${String(diffs['A1']!['id'])}/resolve`, { action: 'keep_adex', reason: 'Sin operación' }),
+      400, 'OPERATION_ID_REQUIRED', 'sin X-Adex-Operation-Id');
+
+    // A1 · aceptar: sube 60,00 y había un abono de 120,00 → se anula y se vuelve a registrar 60,00 (importe exacto).
+    const opA1 = randomUUID();
+    const a1 = await resolve($ana, 'A1', 'accept_source', undefined, opA1);
+    assert.equal(a1.status, 200, JSON.stringify(a1.body));
+    assert.deepEqual([a1.body['reversedMinor'], a1.body['collectedMinor'], a1.body['interestAdjustmentMinor'], a1.body['balanceAfterMinor']], [12_000, 6_000, 0, 66_000]);
+    assert.deepEqual((await resolve($ana, 'A1', 'accept_source', undefined, opA1)).body, a1.body, 'reintento: misma respuesta');
+    expectCode(await resolve($ana, 'A1', 'keep_adex'), 409, 'ROUTE_MIGRATION_NOT_ALLOWED', 'ya corregida');
+    // A2 · aceptar (SuperAdmin): sube 180,00 con solo 120,00 de abonos → se anulan y el resto es ajuste de interés.
+    const a2 = await resolve($bruno, 'A2', 'accept_source', 'El sistema anterior sumó un recargo de 60,00');
+    assert.equal(a2.status, 200, JSON.stringify(a2.body));
+    assert.deepEqual([a2.body['reversedMinor'], a2.body['collectedMinor'], a2.body['interestAdjustmentMinor'], a2.body['balanceAfterMinor']], [12_000, 0, 6_000, 36_000]);
+    // A3 · mantener ADEX: nada cambia; el siguiente cierre descuenta esa diferencia aceptada.
+    assert.equal((await resolve($ana, 'A3', 'keep_adex')).status, 200);
+    // B1 · fue pagado; B2 · nunca debió existir (anulada); C1 · reabrir; C2 · mantener pagado.
+    assert.equal((await resolve($ana, 'B1', 'paid')).status, 200);
+    const b2 = await resolve($ana, 'B2', 'void', 'Crédito digitado dos veces en el sistema anterior');
+    assert.equal(b2.status, 200, JSON.stringify(b2.body));
+    assert.equal(b2.body['principalReturnedMinor'], 10_000);
+    const c1r = await resolve($bruno, 'C1', 'reopen', 'Reabrieron el pago en el sistema anterior');
+    assert.equal(c1r.status, 200, JSON.stringify(c1r.body));
+    assert.deepEqual([c1r.body['reversedMinor'], c1r.body['balanceAfterMinor']], [30_000, 30_000]);
+    assert.equal((await resolve($ana, 'C2', 'keep_paid')).status, 200);
+
+    // Cierre 4: A3 baja 60,00 sobre la diferencia aceptada (abono de 60,00 en ADEX); A4 vuelve a coincidir (se cierra sola);
+    // C1 abona 60,00; C2 sigue activo allá (se respeta «mantener pagado»); B3 sigue sin aparecer (sigue abierta).
+    const l4 = await load(close(day(-1), [['A1', 66_000], ['A2', 36_000], ['A3', 24_000], ['A4', 36_000], ['C1', 24_000], ['C2', 12_000]], ['B1']));
+    assert.equal(l4.status, 201, JSON.stringify(l4.body));
+    assert.deepEqual([l4.body['newDifferences'], l4.body['resolvedDifferences'], l4.body['openDifferences'], l4.body['creditsWithPayments']], [0, 1, 1, 2]);
+    assert.deepEqual((l4.body['differences'] as Body[]).map((d) => d['code']), ['B3']);
+    expectCode(await $bruno(`/v1/routes/${rg}/migration/close`, {}), 409, 'ROUTE_MIGRATION_NOT_ALLOWED', 'falta B3');
+    assert.equal((await resolve($ana, 'B3', 'still_active', 'El cliente sigue pagando: se cobra en ADEX')).status, 200);
+
+    // [estado, saldo, total, capital, anulada]: las ventas migradas son por lo que faltaba cobrar el primer día; A2 sube su total
+    // con el ajuste de interés (300,00 + 60,00) y B2 queda anulada sin nada cobrado.
+    assert.deepEqual(await sales(), {
+      A1: ['activa', 66_000, 72_000, 60_000, false], A2: ['activa', 36_000, 36_000, 25_000, false], A3: ['activa', 18_000, 24_000, 20_000, false],
+      A4: ['activa', 36_000, 36_000, 30_000, false], B1: ['finalizada', 0, 18_000, 15_000, false], B2: ['finalizada', 0, 0, 0, true],
+      B3: ['activa', 24_000, 24_000, 20_000, false], C1: ['activa', 24_000, 30_000, 25_000, false], C2: ['finalizada', 0, 12_000, 10_000, false],
+    });
+    // Ninguna corrección tocó una caja: solo cartera, financiación de la ruta e interés.
+    const touched = (await db.admin.query(`select distinct a.kind from adex.capital_entries e join adex.capital_accounts a on a.id = e.account_id
+        join adex.capital_operations o on o.id = e.operation_id where o.route_id = $1`, [rg])).rows.map((x) => x.kind).sort();
+    assert.deepEqual(touched, ['income', 'portfolio', 'route_funding']);
+    const kinds = (await db.admin.query(`select coalesce(reverses_kind || ' anulado', kind) k, count(*)::int n from adex.capital_operations
+        where route_id = $1 and (kind in ('REVERSAL', 'MIGRATION_ADJUSTMENT')) group by 1 order by 1`, [rg])).rows.map((x) => [x.k, x.n]);
+    assert.deepEqual(kinds, [['MIGRATION_ADJUSTMENT', 1], ['MIGRATION_COLLECTION anulado', 3]]);
+    const audit = (await db.admin.query(`select count(*)::int n from adex.audit_log where route_id = $1 and action = 'ROUTE_MIGRATION_DIFFERENCE_RESOLVED' and reason is not null`, [rg])).rows[0].n;
+    assert.equal(audit, 8);
+    const auto = (await db.admin.query(`select source_code, reason from adex.route_migration_differences where route_id = $1 and action = 'coincide'`, [rg])).rows;
+    assert.deepEqual(auto.map((x) => [x.source_code, x.reason]), [['A4', 'Se corrigió en el sistema anterior']]);
+    const texts = (await db.admin.query(`select note t from adex.payments where route_id = $1 union all select reason from adex.capital_operations where route_id = $1
+        union all select description from adex.audit_log where route_id = $1`, [rg])).rows.map((x) => String(x.t));
+    assert.deepEqual(texts.filter((t) => /listos/i.test(t)), []);
+    const rec = await bruno('GET', '/v1/capital/reconciliation');
+    assert.deepEqual((rec.body['checks'] as Body[]).filter((c) => !c['ok']), [], 'la ruta cuadra después de las correcciones');
+
+    // Terminar con cero abiertas; luego la ruta opera normal.
+    const fin = await $bruno(`/v1/routes/${rg}/migration/close`, { note: 'Diferencias revisadas' });
+    assert.equal(fin.status, 200, JSON.stringify(fin.body));
+    assert.equal(await state(rg), 'normal');
+    assert.equal(await balance(db.admin, c1, 'route_base', null, rg), 0, 'ninguna caja se movió');
   });
 
   test('RM-004 · conciliación limpia', async () => {
