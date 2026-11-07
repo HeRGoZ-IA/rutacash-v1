@@ -92,7 +92,8 @@ function shellServiceWorker(): Plugin {
         .filter((f) => f.fileName !== 'owner.html' && !f.fileName.startsWith('assets/owner-'))
         .map((f) => `/${f.fileName}`)
         .filter((f) => f !== '/index.html' && !f.endsWith('.map'));
-      const precache = ['/index.html', ...files.sort(), '/favicon-32x32.png', '/favicon-16x16.png', '/favicon.ico', '/apple-touch-icon.png'];
+      const precache = ['/index.html', ...files.sort(), '/favicon-32x32.png', '/favicon-16x16.png', '/favicon.ico', '/apple-touch-icon.png',
+        '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png'];
       const version = createHash('sha256').update(JSON.stringify(precache)).digest('hex').slice(0, 16);
       const source = `// Generado en el build (vite.config.ts · shellServiceWorker). No editar.
 const SHELL = 'adex-shell-${version}';
