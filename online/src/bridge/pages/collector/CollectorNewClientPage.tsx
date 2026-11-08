@@ -24,7 +24,7 @@ import { getAuthorizedRouteIds } from '@/lib/roles'
 import { can } from '@/lib/permissions'
 import { ALLOWED_INTEREST_RATES, defaultOriginationRate, originationRateError, originationRatesFor, routeRatePolicyOf } from '@/lib/interestRatePolicy'
 import { generateId } from '@/lib/utils'
-import { formatClientName } from '@/lib/displayName'
+import { formatClientName, formatClientLabel } from '@/lib/displayName'
 import { nowISO, normalizeDoc, formatCurrency, formatDate, today } from '@/lib/formatters'
 import { computeSaleFinancials, createDirectSale, createSaleRequest, directSaleLimit, type SaleInputs } from '@/services/saleRequestService'
 import { useCapitalGuard } from '@/hooks/useCapitalGuard'
@@ -252,15 +252,15 @@ function NewClientForm() {
             <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
             <div className="text-xs text-red-700">
               <p className="font-semibold">Este documento ya está registrado en esta empresa.</p>
-              <p className="mt-0.5"><span className="font-medium">{formatClientName(dup.nombre)}</span> · Ruta: {dupRouteName}</p>
+              <p className="mt-0.5"><span className="font-medium">{formatClientLabel(dup.nombre, dup.negocio)}</span> · Ruta: {dupRouteName}</p>
             </div>
           </div>
         )}
 
         <Input label="Nombre completo" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required />
+        <Input label="Negocio" value={form.negocio} onChange={e => setForm(f => ({ ...f, negocio: e.target.value }))} required placeholder="Ej: Tienda, panadería, venta ambulante" />
         <Input label="Dirección de residencia" value={form.direccionPrincipal} onChange={e => setForm(f => ({ ...f, direccionPrincipal: e.target.value }))} required placeholder="Ej: Cll 45 #23-12" />
         <Input label="Dirección de cobro / negocio" value={form.direccionSecundaria} onChange={e => setForm(f => ({ ...f, direccionSecundaria: e.target.value }))} required placeholder="Ej: Cra 8 #12-30, Local 2" />
-        <Input label="Negocio" value={form.negocio} onChange={e => setForm(f => ({ ...f, negocio: e.target.value }))} required placeholder="Ej: Tienda, panadería, venta ambulante" />
         <div className="grid grid-cols-2 gap-3">
           <Input label="Teléfono" value={form.telefonoPrincipal} onChange={e => setForm(f => ({ ...f, telefonoPrincipal: e.target.value }))} required />
           <Input label="Teléfono adicional" value={form.telefonoSecundario} onChange={e => setForm(f => ({ ...f, telefonoSecundario: e.target.value }))} />

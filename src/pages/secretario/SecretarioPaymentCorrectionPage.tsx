@@ -12,7 +12,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { filterByAccessibleRoute } from '@/lib/permissions'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
-import { formatClientName } from '@/lib/displayName'
+import { formatClientName, formatClientLabel } from '@/lib/displayName'
 import { requestPaymentAdjustment, isPaymentInClosedPeriod } from '@/services/paymentCorrectionService'
 import type { Payment, Client } from '@/models/types'
 
@@ -79,7 +79,7 @@ export default function SecretarioPaymentCorrectionPage() {
     } catch { toast.error('Error al procesar la corrección') } finally { setSaving(false) }
   }
 
-  const clientName = (id: string) => clientMap.get(id)?.nombre ?? 'Cliente'
+  const clientName = (id: string) => (clientMap.has(id) ? formatClientLabel(clientMap.get(id)!.nombre, clientMap.get(id)!.negocio) : 'Cliente')
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return payments.slice(0, 100)

@@ -14,7 +14,7 @@ import { useTenant } from '@/hooks/useTenant'
 import { useAccessibleRoutes } from '@/hooks/useAccessibleRoutes'
 import { can } from '@/lib/permissions'
 import { formatCurrency, formatDate } from '@/lib/formatters'
-import { formatClientName } from '@/lib/displayName'
+import { formatClientName, formatClientLabel } from '@/lib/displayName'
 import { approveSaleRequest, getActiveCreditContext, rejectSaleRequest } from '@/services/saleRequestService'
 import type { ActiveCreditContext } from '@/lib/activeCreditContext'
 import { logAction } from '@/services/auditService'
@@ -186,7 +186,7 @@ export default function SecretarioAuthorizationsPage() {
             return (
               <button key={r.id} onClick={() => openDetail(r)} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-primary-50/40 transition-colors">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-gray-900 truncate">{formatClientName(c?.nombre) || 'Cliente'}</p>
+                  <p className="text-sm font-medium text-gray-900 truncate">{formatClientLabel(c?.nombre, c?.negocio) || 'Cliente'}</p>
                   <p className="text-xs text-gray-500 truncate">{routeMap.get(r.routeId)?.nombre} · {formatDate(r.requestedAt)}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
@@ -217,7 +217,7 @@ export default function SecretarioAuthorizationsPage() {
           <div className="grid gap-5 lg:grid-cols-2">
           <div className="space-y-4">
             <div>
-              <h3 className="text-base font-bold text-gray-900">{formatClientName(detailClient?.nombre) || 'Cliente'}</h3>
+              <h3 className="text-base font-bold text-gray-900">{formatClientLabel(detailClient?.nombre, detailClient?.negocio) || 'Cliente'}</h3>
               <p className="text-sm text-gray-500">{detailClient?.documento} · {routeMap.get(detail.routeId)?.nombre}</p>
             </div>
 

@@ -184,7 +184,7 @@ export async function routeMap(client: pg.PoolClient, ctx: ActiveContext, q: URL
   const routeIds = routes.map((r) => r.id);
 
   const clients = (await client.query<Record<string, unknown>>(
-    `select c.id, c.name, c.route_id, c.address_primary, c.address_secondary, c.status,
+    `select c.id, c.name, c.business, c.route_id, c.address_primary, c.address_secondary, c.status,
             l.id l_id, l.source l_source, l.lat l_lat, l.lng l_lng, l.accuracy_m l_accuracy, l.created_at l_set_at,
             l.set_by_membership_id l_set_by, m.display_name l_set_by_name, l.set_by_role l_set_by_role
        from adex.clients c
@@ -306,7 +306,7 @@ export async function routeMap(client: pg.PoolClient, ctx: ActiveContext, q: URL
     routes: routes.map((r) => ({ id: r.id, name: r.name, status: r.status })),
     workers: workers.map((w) => ({ id: w.id, name: w.name, role: w.role, status: w.status })),
     clients: clients.slice(0, MAX_CLIENTS).map((c) => ({
-      id: c['id'], name: c['name'], routeId: c['route_id'], address: c['address_primary'], addressSecondary: c['address_secondary'] ?? null,
+      id: c['id'], name: c['name'], business: c['business'] ?? null, routeId: c['route_id'], address: c['address_primary'], addressSecondary: c['address_secondary'] ?? null,
       status: c['status'],
       location: c['l_id'] == null ? null : {
         source: c['l_source'], lat: c['l_lat'], lng: c['l_lng'], accuracyM: c['l_accuracy'] ?? null, setAt: (c['l_set_at'] as Date).toISOString(),

@@ -20,6 +20,7 @@
 // VACÍO (cero filas), jamás un acceso.
 // ============================================================
 import { effectivePayments } from '@/services/paymentCorrectionService'
+import { formatClientLabel } from '@/lib/displayName'
 import { formatDate } from '@/lib/formatters'
 import { EXPENSE_SCOPE_LABEL, expenseAttribution } from '@/lib/expenseAttribution'
 import { POOL_STATE_LABEL, expenseFundingOf, poolExpenseStateOf } from '@/lib/expenseFunding'
@@ -90,7 +91,7 @@ function scopeRows<T extends { routeId?: string }>(rows: T[], routeIds: Set<stri
 
 function nameMaps(src: ReportSources) {
   return {
-    clientName: (id: string) => src.clients.find(c => c.id === id)?.nombre ?? id,
+    clientName: (id: string) => { const c = src.clients.find(x => x.id === id); return c ? formatClientLabel(c.nombre, c.negocio) : id },
     routeName: (id: string) => src.routes.find(r => r.id === id)?.nombre ?? id,
     catName: (id: string) => src.categories.find(c => c.id === id)?.nombre ?? id,
   }

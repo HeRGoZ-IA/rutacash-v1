@@ -11,7 +11,7 @@ import { Printer } from 'lucide-react';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 import { useTenant } from '@/hooks/useTenant';
 import { formatDateTime } from '@/lib/formatters';
-import { formatClientName, formatPersonName } from '@/lib/displayName';
+import { formatClientName, formatPersonName, formatClientLabel} from '@/lib/displayName';
 import { serverView } from '../projection.ts';
 import { useRuntime } from '../session.ts';
 import { ROLE_LABEL, STATUS_LABEL, fullDateTime, kindLabel, partyLabel, type Detail } from '../consultasModel.ts';
@@ -61,7 +61,7 @@ export function OperationReceipt() {
     ...(m.route ? [['Ruta', `${m.route.name ?? '—'}${m.toRoute ? ` → ${m.toRoute.name ?? ''}` : ''}`] as [string, string]] : []),
     ...(m.route?.office ? [['Oficina', m.route.office] as [string, string]] : []),
     ...(m.worker ? [['Trabajador', formatPersonName(m.worker.name ?? '') || 'Trabajador'] as [string, string]] : []),
-    ...(m.client ? [['Cliente', formatClientName(m.client.name ?? '') || 'Cliente'] as [string, string]] : []),
+    ...(m.client ? [['Cliente', formatClientLabel(m.client.name ?? '', m.client.business) || 'Cliente'] as [string, string]] : []),
     ...(m.admin && !['GENERAL_EXPENSE_OWN_MONEY', 'ADMIN_REIMBURSEMENT'].includes(base)
       ? [[rb ? 'Responsable de capital' : 'Bolsa / responsable de capital', formatPersonName(m.admin.name ?? '') || 'Administrador'] as [string, string]] : []),
     ...(base === 'ADMIN_REIMBURSEMENT' && m.admin ? [['Pagó', formatPersonName(m.admin.name ?? '') || 'Administrador'] as [string, string]] : []),

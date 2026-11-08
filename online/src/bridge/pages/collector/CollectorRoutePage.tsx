@@ -23,7 +23,7 @@ import { useDataRevision } from '@/hooks/useDataRevision'
 import { effectivePayments } from '@/lib/paymentState'
 import { compareByCreation } from '@/lib/eventOrder'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
-import { formatClientName } from '@/lib/displayName'
+import { formatClientName, formatClientLabel } from '@/lib/displayName'
 import {
   calculateCurrentInstallment, getLastPaidInstallmentNumber, isSaleDueToday, isSaleDisbursed,
   getCollectionStatus, countOverdueInstallments, getMaxOverdueDays,
@@ -146,7 +146,7 @@ export default function CollectorRoutePage() {
   const filtered = items.filter(item => {
     // Sin distinguir mayúsculas ni acentos («joao» encuentra «JOÃO»).
     const q = foldText(search)
-    return !q || foldText(item.client.nombre).includes(q) || item.client.documento.includes(q)
+    return !q || foldText(item.client.nombre).includes(q) || foldText(item.client.negocio ?? '').includes(q) || item.client.documento.includes(q)
   })
 
   // ADEX Online: «—» mientras no hay datos confirmados del servidor.
@@ -246,7 +246,7 @@ function ClientCard({ item, currency, pending, onPayment, onNoPayment, onView }:
           <div className="flex items-center gap-2 min-w-0">
             <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${st.dot}`} />
             <div className="min-w-0">
-              <p className="font-semibold text-gray-900 text-sm truncate">{formatClientName(client.nombre)}</p>
+              <p className="font-semibold text-gray-900 text-sm truncate">{formatClientLabel(client.nombre, client.negocio)}</p>
               <p className="text-xs text-gray-500">{client.documento}</p>
             </div>
           </div>

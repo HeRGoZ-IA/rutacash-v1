@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { formatClientName } from '@/lib/displayName';
+import { formatClientName, formatClientLabel} from '@/lib/displayName';
 import { cn } from '@/lib/utils';
 import { serverView } from './projection.ts';
 import { isRouteBaseUi, useCapitalModel } from './routeBase/api.ts';
@@ -15,7 +15,7 @@ import { STATUS_LABEL, dayHeading, extraCount, kindLabel, person, queryOf, type 
 const PAGE = 50;
 
 function subject(r: ActivityRow): string {
-  if (r.client) return formatClientName(r.client.name ?? '') || 'Cliente';
+  if (r.client) return formatClientLabel(r.client.name ?? '', r.client.business) || 'Cliente';
   if (r.worker) return person(r.worker);
   if (r.route) return r.route.name ?? 'Ruta';
   return '—';

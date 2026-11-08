@@ -105,3 +105,17 @@ export function formatClientName(raw: string | null | undefined): string {
   if (sep < 0) return formatSegment(text, false)
   return formatSegment(text.slice(0, sep), false) + ' - ' + formatSegment(text.slice(sep + 3), true)
 }
+
+/**
+ * «Nombre · Negocio» (pedido de Helmer, 2026-11-08): los cobradores reconocen a los clientes por su
+ * negocio, así que en toda la app el nombre va acompañado del negocio cuando lo tiene. Si el nombre
+ * ya trae el negocio pegado (clientes sin separar), no se repite.
+ */
+export function formatClientLabel(name: string | null | undefined, business?: string | null): string {
+  const person = formatClientName(name)
+  const b = formatBusinessName(business ?? '').trim()
+  if (!b) return person
+  const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  if (fold(person).includes(fold(b))) return person
+  return `${person} · ${b}`
+}

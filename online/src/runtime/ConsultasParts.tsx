@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Check, Copy, ExternalLink, Loader2, SlidersHorizontal, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { formatCurrency } from '@/lib/formatters';
-import { formatClientName } from '@/lib/displayName';
+import { formatClientName, formatClientLabel} from '@/lib/displayName';
 import { cn } from '@/lib/utils';
 import { serverView } from './projection.ts';
 import { isRouteBaseUi, useCapitalModel } from './routeBase/api.ts';
@@ -306,7 +306,7 @@ export function DetailDrawer({ id, timezone, currency, perspectiveLabel, flowHin
                   <Field label="Registró">{m.actor ? `${person(m.actor)}${m.actorRole ? ` · ${ROLE_LABEL[m.actorRole] ?? m.actorRole}` : ''}` : '—'}</Field>
                   {m.route && <Field label="Ruta">{m.route.name ?? '—'}{m.toRoute ? ` → ${m.toRoute.name ?? ''}` : ''}</Field>}
                   {m.route && <Field label="Oficina">{m.route.office ?? 'Sin oficina'}</Field>}
-                  {m.client && <Field label="Cliente">{formatClientName(m.client.name ?? '') || 'Cliente'}</Field>}
+                  {m.client && <Field label="Cliente">{formatClientLabel(m.client.name ?? '', m.client.business) || 'Cliente'}</Field>}
                   {m.worker && <Field label="Trabajador">{person(m.worker)}</Field>}
                   {m.concept && <Field label="Concepto">{m.concept}</Field>}
                 </dl>

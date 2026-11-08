@@ -49,7 +49,7 @@ export async function listMigrations(client: pg.PoolClient, ctx: ActiveContext, 
   // 0048: diferencias de cada migración (abiertas primero), con el valor de ADEX y el del sistema anterior.
   const diffs = r.rows.length === 0 ? [] : (await client.query<DifferenceRow>(
     `select d.*, to_char(d.detected_report_date, 'YYYY-MM-DD') detected_on, to_char(d.source_report_date, 'YYYY-MM-DD') source_on,
-            c.name client_name, v.status current_status, v.balance_minor current_balance
+            c.name client_name, c.business client_business, v.status current_status, v.balance_minor current_balance
        from adex.route_migration_differences d
        join adex.clients c on c.company_id = d.company_id and c.id = d.client_id
        join adex.sales v on v.company_id = d.company_id and v.id = d.sale_id
@@ -65,14 +65,14 @@ export async function listMigrations(client: pg.PoolClient, ctx: ActiveContext, 
 }
 
 interface DifferenceRow {
-  id: string; migration_id: string; sale_id: string; client_id: string; client_name: string; source_code: string; kind: string; status: string;
+  id: string; migration_id: string; sale_id: string; client_id: string; client_name: string; client_business: string | null; source_code: string; kind: string; status: string;
   adex_status: string; adex_balance_minor: string; current_status: string; current_balance: string; source_status: string;
   source_balance_minor: string | null; detected_on: string; source_on: string; action: string | null; reason: string | null;
   resolved_at: Date | null; resolved_by_membership_id: string | null; result: Record<string, unknown>;
 }
 
 const differenceView = (d: DifferenceRow) => ({
-  id: d.id, saleId: d.sale_id, clientId: d.client_id, clientName: d.client_name, code: d.source_code, kind: d.kind, status: d.status,
+  id: d.id, saleId: d.sale_id, clientId: d.client_id, clientName: d.client_name, clientBusiness: d.client_business, code: d.source_code, kind: d.kind, status: d.status,
   adexStatus: d.adex_status, adexBalanceMinor: Number(d.adex_balance_minor), currentStatus: d.current_status, currentBalanceMinor: Number(d.current_balance),
   sourceStatus: d.source_status, sourceBalanceMinor: d.source_balance_minor === null ? null : Number(d.source_balance_minor),
   detectedReportDate: d.detected_on, sourceReportDate: d.source_on, action: d.action, reason: d.reason,

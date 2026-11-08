@@ -25,7 +25,7 @@ import { useRouteCapital } from '@/hooks/useRouteCapital'
 import { ClientCreditHistory } from '@/components/ui/ClientCreditHistory'
 import { generateId } from '@/lib/utils'
 import { nowISO, formatDate, today, formatCurrency, normalizeDoc } from '@/lib/formatters'
-import { formatBusinessName, formatClientName } from '@/lib/displayName'
+import { formatBusinessName, formatClientName, formatClientLabel } from '@/lib/displayName'
 import { foldText } from '@/lib/searchFilter'
 import { logAction } from '@/services/auditService'
 import { createDirectSale } from '@/services/saleRequestService'
@@ -163,7 +163,7 @@ export default function ClientsPage() {
   const filtered = clientsEnAlcance.filter(c => {
     // Sin distinguir mayúsculas ni acentos («joao» encuentra «JOÃO»), como el resto de buscadores.
     const q = foldText(search)
-    const matchSearch = !q || foldText(c.nombre).includes(q) || c.documento.includes(q) || c.telefonoPrincipal.includes(q)
+    const matchSearch = !q || foldText(c.nombre).includes(q) || foldText(c.negocio ?? '').includes(q) || c.documento.includes(q) || c.telefonoPrincipal.includes(q)
     const matchStatus = !filterStatus || c.status === filterStatus
     // La ruta la aplica el filtro Oficina → Ruta compartido (arriba).
     const matchRoute = true
@@ -436,20 +436,20 @@ export default function ClientsPage() {
               <div className="text-xs text-red-700">
                 <p className="font-semibold">Este documento ya está registrado en esta empresa.</p>
                 <p className="mt-0.5">
-                  <span className="font-medium">{formatClientName(dupClient.nombre)}</span>
+                  <span className="font-medium">{formatClientLabel(dupClient.nombre, dupClient.negocio)}</span>
                   {' · '}Ruta: {getRouteName(dupClient.routeId)}
                 </p>
               </div>
             </div>
           )}
           <Input label="Nombre completo" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required />
+          <Input label="Negocio" value={form.negocio} onChange={e => setForm(f => ({ ...f, negocio: e.target.value }))} required={!editing || !!editing.negocio} placeholder="Nombre del negocio o actividad" />
           <div className="grid grid-cols-2 gap-3">
             <Input label="Teléfono principal" value={form.telefonoPrincipal} onChange={e => setForm(f => ({ ...f, telefonoPrincipal: e.target.value }))} required />
             <Input label="Teléfono secundario" value={form.telefonoSecundario} onChange={e => setForm(f => ({ ...f, telefonoSecundario: e.target.value }))} />
           </div>
           <Input label="Dirección de la casa" value={form.direccionPrincipal} onChange={e => setForm(f => ({ ...f, direccionPrincipal: e.target.value }))} required placeholder="Ej: Cll 45 #23-12, Barrio Centro" />
           <Input label="Dirección del negocio" value={form.direccionSecundaria} onChange={e => setForm(f => ({ ...f, direccionSecundaria: e.target.value }))} required placeholder="Ej: Cra 8 #12-30, Local 2" />
-          <Input label="Negocio" value={form.negocio} onChange={e => setForm(f => ({ ...f, negocio: e.target.value }))} required={!editing || !!editing.negocio} placeholder="Nombre del negocio o actividad" />
           {/* Fotos (Paquete 2.5): documento y negocio/lugar de cobro */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <PhotoInput label="Foto del documento" value={form.fotoDocumentoUrl} onChange={url => setForm(f => ({ ...f, fotoDocumentoUrl: url }))} />
@@ -553,7 +553,7 @@ export default function ClientsPage() {
                   {selected.nombre.charAt(0)}
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-lg font-bold text-gray-900 leading-tight">{formatClientName(selected.nombre)}</h3>
+                  <h3 className="text-lg font-bold text-gray-900 leading-tight">{formatClientLabel(selected.nombre, selected.negocio)}</h3>
                   <p className="text-sm text-gray-500">Doc: {selected.documento}</p>
                   <div className="mt-1"><ClientStatusBadge status={selected.status} /></div>
                 </div>
@@ -666,7 +666,7 @@ export default function ClientsPage() {
             <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
             <p className="text-sm text-red-700">Esta acción eliminará el registro de forma permanente. ¿Deseas continuar?</p>
           </div>
-          <p className="text-sm text-gray-600">Cliente: <span className="font-semibold">{formatClientName(deleteTarget?.nombre)}</span></p>
+          <p className="text-sm text-gray-600">Cliente: <span className="font-semibold">{formatClientLabel(deleteTarget?.nombre, deleteTarget?.negocio)}</span></p>
         </div>
       </Modal>
 

@@ -24,7 +24,8 @@ import { useDataRevision } from '@/hooks/useDataRevision'
 import { useRouteCapital } from '@/hooks/useRouteCapital'
 import { generateId } from '@/lib/utils'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
-import { formatClientName, formatPersonName } from '@/lib/displayName'
+import { formatClientName, formatPersonName, formatClientLabel } from '@/lib/displayName'
+import { foldText } from '@/lib/searchFilter'
 import {
   generateInstallments, calculateTotalWithInterest,
   estimateFinalDate, calculateInstallmentValue,
@@ -220,7 +221,8 @@ export default function ActiveSalesPage() {
   const salesEnAlcance = officeFilter.filterRows(sales)
   const filtered = salesEnAlcance.filter(s => {
     const client = clientMap.get(s.clientId)
-    const matchSearch = !search || client?.nombre.toLowerCase().includes(search.toLowerCase()) || client?.documento.includes(search)
+    const q = foldText(search)
+    const matchSearch = !q || foldText(client?.nombre ?? '').includes(q) || foldText(client?.negocio ?? '').includes(q) || !!client?.documento.includes(search)
     // La ruta la aplica el filtro Oficina → Ruta compartido (arriba).
     const matchRoute = true
     return matchSearch && matchRoute
@@ -344,7 +346,7 @@ export default function ActiveSalesPage() {
     const parcelas = installmentRangeLabel(installmentsCoveredBy(detailInstallments, effectivePayments(detailPayments), p.id))
     setAnnulTarget({
       paymentId: p.id,
-      cliente: formatClientName(clientMap.get(detailSale.clientId)?.nombre) || 'Cliente',
+      cliente: formatClientLabel(clientMap.get(detailSale.clientId)?.nombre, clientMap.get(detailSale.clientId)?.negocio) || 'Cliente',
       credito: `${formatCurrency(detailSale.valorVenta, currency)} · ${formatDate(detailSale.fechaInicio)}`,
       valor: p.valor, fecha: p.fecha,
       cobrador: userName(p.collectorId), ruta: routeMap.get(p.routeId)?.nombre,
@@ -460,7 +462,7 @@ export default function ActiveSalesPage() {
                 <button type="button" onClick={() => openDetail(s)} className="w-full text-left bg-white rounded-2xl shadow-card border border-gray-100 p-4 active:bg-primary-50/40">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 [overflow-wrap:anywhere]">{formatClientName(client?.nombre) || 'N/A'}</p>
+                      <p className="text-sm font-semibold text-gray-900 [overflow-wrap:anywhere]">{formatClientLabel(client?.nombre, client?.negocio) || 'N/A'}</p>
                       <p className="text-xs text-gray-500">{client?.documento ?? ''}</p>
                     </div>
                     <SaleStatusBadge status={s.status} />
@@ -503,7 +505,7 @@ export default function ActiveSalesPage() {
                   return (
                     <tr key={s.id} onClick={() => openDetail(s)} className="hover:bg-primary-50/40 cursor-pointer transition-colors">
                       <td className="px-4 py-3">
-                        <p className="text-sm font-medium text-gray-900">{formatClientName(client?.nombre) || 'N/A'}</p>
+                        <p className="text-sm font-medium text-gray-900">{formatClientLabel(client?.nombre, client?.negocio) || 'N/A'}</p>
                         <p className="text-xs text-gray-500">{client?.documento ?? ''}</p>
                       </td>
                       <td className="px-4 py-3 text-right hidden sm:table-cell">
@@ -543,7 +545,7 @@ export default function ActiveSalesPage() {
             <Select label="Ruta" value={form.routeId} onChange={e => handleRouteChange(e.target.value)}
               options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
             <SearchSelect label="Cliente" value={form.clientId} onChange={clientId => setForm(f => ({ ...f, clientId }))}
-              options={clientsForRoute.map(c => ({ value: c.id, label: `${formatClientName(c.nombre)} - ${c.documento}` }))}
+              options={clientsForRoute.map(c => ({ value: c.id, label: `${formatClientLabel(c.nombre, c.negocio)} - ${c.documento}` }))}
               placeholder={form.routeId ? 'Escribe el nombre o el documento' : 'Selecciona primero la ruta'} disabled={!form.routeId} required />
           </div>
           {form.routeId && clientsForRoute.length === 0 && (
@@ -737,7 +739,7 @@ export default function ActiveSalesPage() {
         onCancel={() => setAnnulTarget(null)} onConfirm={confirmAnnul} />
       {detailSale && (
         <ReapplyPaymentModal payment={reapplyTarget} currency={currency}
-          cliente={formatClientName(clientMap.get(detailSale.clientId)?.nombre) || 'Cliente'}
+          cliente={formatClientLabel(clientMap.get(detailSale.clientId)?.nombre, clientMap.get(detailSale.clientId)?.negocio) || 'Cliente'}
           onCancel={() => setReapplyTarget(null)}
           onDone={async () => { setReapplyTarget(null); await refreshDetail(detailSale.id); await load(true) }} />
       )}

@@ -6,6 +6,7 @@
 //     necesita revisión (con su motivo), con «Sincronizar ahora», «Reintentar» y «Ya lo revisé».
 //     Nada se borra desde aquí: lo revisado deja de avisar, pero queda en el dispositivo.
 import { useState, useEffect, useMemo } from 'react'
+import { formatClientLabel } from '@/lib/displayName'
 import { RefreshCw, CheckCircle, Clock, Wifi, WifiOff, Info } from 'lucide-react'
 import { SyncStatusBadge } from '@/components/ui/Badge'
 import { PaymentStateBadge } from '@/components/ui/PaymentAnnulment'
@@ -62,7 +63,7 @@ function OfflinePendingPage() {
   const [names, setNames] = useState<Map<string, string>>(new Map())
   useEffect(() => {
     let alive = true
-    db.clients.toArray().then(cs => { if (alive) setNames(new Map(cs.map(c => [c.id, c.nombre]))) }).catch(() => {})
+    db.clients.toArray().then(cs => { if (alive) setNames(new Map(cs.map(c => [c.id, formatClientLabel(c.nombre, c.negocio)]))) }).catch(() => {})
     return () => { alive = false }
   }, [])
   const groups = useMemo(() => {

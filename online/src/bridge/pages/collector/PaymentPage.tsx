@@ -16,7 +16,7 @@ import { useDataRevision } from '@/hooks/useDataRevision'
 import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { formatCurrency, formatCurrencyInput, parseCurrencyInput, getCurrencySymbol } from '@/lib/formatters'
-import { formatBusinessName, formatClientName } from '@/lib/displayName'
+import { formatBusinessName, formatClientName, formatClientLabel } from '@/lib/displayName'
 import { calculateCurrentInstallment } from '@/services/installmentEngine'
 import {
   registerPayment, quickAmounts, amountForInstallments, pendingInstallments, getUnconfirmedPayment, checkUnconfirmedPayment,
@@ -200,7 +200,7 @@ export default function PaymentPage() {
       const geo: GeoCapture = await captureLocation()
       setPhase('saving')
       const op = await captureOfflinePayment({
-        saleId: sale.id, routeId: sale.routeId, clientId: client.id, clientName: client.nombre, amount: valor,
+        saleId: sale.id, routeId: sale.routeId, clientId: client.id, clientName: formatClientLabel(client.nombre, client.negocio), amount: valor,
         knownBalance: sale.saldo, observacion, location: geo, capturedAt,
       })
       setGeoResult({ status: geo.status, accuracyM: geo.status === 'captured' ? geo.accuracyM : undefined })
@@ -332,7 +332,7 @@ export default function PaymentPage() {
               <div className="space-y-1.5 text-sm text-amber-900">
                 <p className="font-semibold">Recaudo guardado en este dispositivo</p>
                 <p>
-                  <span className="font-semibold tabular-nums">{formatCurrency(toMajor(queuedOp.ref.amountMinor ?? 0), currency)}</span> de {formatClientName(client.nombre)}, capturado el {formatDateTime(queuedOp.capturedAt)}.
+                  <span className="font-semibold tabular-nums">{formatCurrency(toMajor(queuedOp.ref.amountMinor ?? 0), currency)}</span> de {formatClientLabel(client.nombre, client.negocio)}, capturado el {formatDateTime(queuedOp.capturedAt)}.
                 </p>
                 <p>Todavía <span className="font-semibold">no está confirmado por el servidor</span>: se enviará solo cuando haya internet. No lo vuelva a registrar.</p>
               </div>
@@ -508,7 +508,7 @@ export default function PaymentPage() {
             <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm" data-testid="payment-preview">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-gray-500">Cliente</span>
-                <span className="font-medium text-gray-900 text-right truncate">{formatClientName(client.nombre)}</span>
+                <span className="font-medium text-gray-900 text-right truncate">{formatClientLabel(client.nombre, client.negocio)}</span>
               </div>
               <div className="flex items-center justify-between gap-3 mt-1">
                 <span className="text-gray-500">A registrar</span>
@@ -559,7 +559,7 @@ export default function PaymentPage() {
         <div className="flex items-start gap-3 text-sm text-gray-700">
           <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
           <div className="space-y-1.5">
-            <p>Vas a registrar <span className="font-semibold text-gray-900">{formatCurrency(aRegistrar, currency)}</span> de <span className="font-semibold text-gray-900">{formatClientName(client.nombre)}</span>.</p>
+            <p>Vas a registrar <span className="font-semibold text-gray-900">{formatCurrency(aRegistrar, currency)}</span> de <span className="font-semibold text-gray-900">{formatClientLabel(client.nombre, client.negocio)}</span>.</p>
             <p>Es el <span className="font-medium">total de la deuda</span>: el saldo quedará en {formatCurrency(0, currency)} y la venta se dará por terminada.</p>
             {valor > qa.total && <p className="text-xs text-amber-700">Escribiste {formatCurrency(valor, currency)}; solo se registra el saldo pendiente.</p>}
           </div>

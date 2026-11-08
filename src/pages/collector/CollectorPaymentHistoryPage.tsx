@@ -13,7 +13,7 @@ import { effectivePayments, paymentDisplayStateOf, paymentHistoryRows } from '@/
 import { compareByCreation } from '@/lib/eventOrder'
 import { PaymentAnnulmentDetail, PaymentStateBadge } from '@/components/ui/PaymentAnnulment'
 import { formatCurrency, formatDate } from '@/lib/formatters'
-import { formatClientName } from '@/lib/displayName'
+import { formatClientName, formatClientLabel } from '@/lib/displayName'
 import type { Client, Sale, Payment } from '@/models/types'
 
 /**
@@ -129,7 +129,7 @@ export default function CollectorPaymentHistoryPage() {
       </div>
 
       <SearchSelect label="Cliente" value={clientId} onChange={onSelectClient}
-        options={clients.map(c => ({ value: c.id, label: `${formatClientName(c.nombre)} - ${c.documento}` }))} placeholder="Escribe el nombre o el documento" />
+        options={clients.map(c => ({ value: c.id, label: `${formatClientLabel(c.nombre, c.negocio)} - ${c.documento}` }))} placeholder="Escribe el nombre o el documento" />
 
       {clientId && (
         <Select label="Venta" value={saleId} onChange={e => onSelectSale(e.target.value)}

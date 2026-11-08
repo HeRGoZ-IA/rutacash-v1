@@ -15,6 +15,7 @@
 // de la ruta, que la corrigen con motivo. «Terminar migración» queda desactivado mientras haya diferencias abiertas.
 
 import { useEffect, useState } from 'react'
+import { formatClientLabel } from '@/lib/displayName'
 import { AlertTriangle, ArrowRightLeft, CheckCircle2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
@@ -37,7 +38,7 @@ const MESSAGES: Record<string, string> = {
 
 // ---------- 0048 · diferencias ----------
 export interface MigrationDifference {
-  id: string; code: string; clientName: string; kind: 'balance_up' | 'missing' | 'reappeared'; status: 'abierta' | 'resuelta'
+  id: string; code: string; clientName: string; clientBusiness?: string | null; kind: 'balance_up' | 'missing' | 'reappeared'; status: 'abierta' | 'resuelta'
   adexBalanceMinor: number; currentStatus: string; currentBalanceMinor: number
   sourceStatus: 'active' | 'missing' | 'paid'; sourceBalanceMinor: number | null
   detectedReportDate: string; sourceReportDate: string; action: string | null; reason: string | null
@@ -307,7 +308,7 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
                   <p className="mt-1">Esos créditos no cambian en ADEX hasta que se corrijan en «Diferencias por revisar».</p>
                   <ul className="mt-1 list-disc pl-5">
                     {previewDiffs.map((d) => (
-                      <li key={d.id}>Crédito {d.code} ({d.clientName}): {KIND_TEXT[d.kind] ?? d.kind} · ADEX {adexValue(d)} · sistema anterior {sourceValue(d)}</li>
+                      <li key={d.id}>Crédito {d.code} ({formatClientLabel(d.clientName, d.clientBusiness)}): {KIND_TEXT[d.kind] ?? d.kind} · ADEX {adexValue(d)} · sistema anterior {sourceValue(d)}</li>
                     ))}
                   </ul>
                 </div>
@@ -368,7 +369,7 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
           {openDiffs.length === 0 && <p className="text-gray-500">No hay diferencias por revisar.</p>}
           {openDiffs.map((d) => (
             <div key={d.id} className="rounded-xl border border-gray-200 p-3 space-y-1" data-testid={`route-migration-diff-${d.code}`}>
-              <p className="font-semibold text-gray-800">{d.clientName} · crédito {d.code}</p>
+              <p className="font-semibold text-gray-800">{formatClientLabel(d.clientName, d.clientBusiness)} · crédito {d.code}</p>
               <p className="text-amber-700">{KIND_TEXT[d.kind] ?? d.kind}</p>
               <p>Valor en ADEX: <strong>{adexValue(d)}</strong> · Valor en el sistema anterior: <strong>{sourceValue(d)}</strong></p>
               <p className="text-xs text-gray-500">Cierre del {d.detectedReportDate}{d.sourceReportDate !== d.detectedReportDate ? ` · último cierre ${d.sourceReportDate}` : ''}</p>
@@ -385,7 +386,7 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
             data-testid="route-migration-fix-confirm">Guardar corrección</Button></>}>
         {fixing && (
           <div className="space-y-3 text-sm text-gray-700">
-            <p><strong>{fixing.clientName}</strong> · {KIND_TEXT[fixing.kind] ?? fixing.kind}</p>
+            <p><strong>{formatClientLabel(fixing.clientName, fixing.clientBusiness)}</strong> · {KIND_TEXT[fixing.kind] ?? fixing.kind}</p>
             <p>Valor en ADEX: <strong>{adexValue(fixing)}</strong> · Valor en el sistema anterior: <strong>{sourceValue(fixing)}</strong></p>
             <fieldset className="space-y-2">
               <legend className="font-medium text-gray-800">¿Qué hacer?</legend>

@@ -24,7 +24,7 @@ import { Input, Select } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { toast } from '@/components/ui/Toast';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/formatters';
-import { formatClientName, formatPersonName } from '@/lib/displayName';
+import { formatClientName, formatPersonName, formatClientLabel} from '@/lib/displayName';
 import { generateId } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { api } from './session.ts';
@@ -37,7 +37,7 @@ type Kind = 'sale' | 'payment' | 'visit';
 interface Device { status: string; lat: number | null; lng: number | null; accuracyM: number | null; capturedAt: string | null; receivedAt: string | null }
 interface LocationHistory { source: string; setAt: string; setByName: string | null; accuracyM: number | null; note?: string | null }
 interface MapClient {
-  id: string; name: string; routeId: string; address: string; addressSecondary: string | null; status: string;
+  id: string; name: string; business?: string | null; routeId: string; address: string; addressSecondary: string | null; status: string;
   location: null | { source: 'gps_on_site' | 'map_pin'; lat: number; lng: number; accuracyM: number | null; setAt: string; setBy: string; setByName: string | null; setByRole: string };
 }
 interface Activity {
@@ -199,7 +199,7 @@ export default function RouteMapPage() {
       return `<li style="margin:4px 0;padding-top:4px;border-top:1px solid #f3f4f6"><b>${esc(formatDateTime(a.at))}</b> · ${what}<br><span style="color:#6b7280">${esc(workerName.get(a.workerId) ?? 'Trabajador')} · ${esc(dev)}</span></li>`;
     }).join('');
     return `<div style="min-width:220px;max-width:300px;font-size:12px;line-height:1.35">
-      <div style="font-weight:700;font-size:13px">${esc(formatClientName(c.name))}</div>
+      <div style="font-weight:700;font-size:13px">${esc(formatClientLabel(c.name, c.business))}</div>
       <div style="color:#6b7280">${esc(routeName.get(c.routeId) ?? '')} · ${esc(c.address)}</div>
       <div style="margin-top:4px;color:#374151">Ubicación de referencia: ${esc(origin)}${loc.setByName ? `, por ${esc(formatPersonName(loc.setByName))}` : ''} el ${esc(formatDate(loc.setAt))}</div>
       ${acts.length ? `<div style="margin-top:6px;font-weight:600">Actividad en el periodo (${acts.length})</div><ul style="list-style:none;padding:0;margin:0">${rows}</ul>${acts.length > 12 ? `<div style="color:#6b7280">… y ${acts.length - 12} más</div>` : ''}`
@@ -223,7 +223,7 @@ export default function RouteMapPage() {
     }
     for (const c of located) {
       const last = byClient.get(c.id)?.[0];
-      const m = L.marker([c.location!.lat, c.location!.lng], { icon: iconOf(last?.kind ?? 'none', routeColor.get(c.routeId)), title: formatClientName(c.name), keyboard: true })
+      const m = L.marker([c.location!.lat, c.location!.lng], { icon: iconOf(last?.kind ?? 'none', routeColor.get(c.routeId)), title: formatClientLabel(c.name, c.business), keyboard: true })
         .bindPopup(() => popupHtml(c), { maxWidth: 320 });
       m.addTo(layer);
       markersRef.current.set(c.id, m);
@@ -314,7 +314,7 @@ export default function RouteMapPage() {
       const origin = draft?.fromAddress ? `Desde la dirección «${draft.fromAddress.label}» (${PRECISION_LABEL[draft.fromAddress.precision]}), confirmada a mano.` : '';
       const fullNote = [origin, note.trim()].filter(Boolean).join(' ').slice(0, 200);
       await money('POST', `/v1/clients/${pinned.client.id}/location`, { source: 'map_pin', lat: pinned.lat, lng: pinned.lng, ...(fullNote ? { note: fullNote } : {}) }, generateId());
-      toast.success(`Ubicación de ${formatClientName(pinned.client.name)} guardada (marcada en el mapa).`);
+      toast.success(`Ubicación de ${formatClientLabel(pinned.client.name, pinned.client.business)} guardada (marcada en el mapa).`);
       setPinned(null); stopPicking(); setNote('');
       await load();
     } catch (e) {
@@ -375,7 +375,7 @@ export default function RouteMapPage() {
           {picking && (
             <div className="rounded-xl border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-800 space-y-2" data-testid="map-picking">
               <div className="flex items-start justify-between gap-2">
-                <span><Crosshair className="inline w-4 h-4 mr-1" />{draft ? 'Ajuste el marcador azul arrastrándolo (o toque otro punto) y confirme:' : 'Toque en el mapa el lugar donde se atiende a'} <b>{formatClientName(picking.name)}</b>.</span>
+                <span><Crosshair className="inline w-4 h-4 mr-1" />{draft ? 'Ajuste el marcador azul arrastrándolo (o toque otro punto) y confirme:' : 'Toque en el mapa el lugar donde se atiende a'} <b>{formatClientLabel(picking.name, picking.business)}</b>.</span>
                 <Button variant="ghost" size="sm" onClick={stopPicking}>Cancelar</Button>
               </div>
               <p className="text-xs text-primary-900" data-testid="map-picking-address">Dirección registrada: <b>{picking.address}</b>{picking.addressSecondary ? <> · Cobro: <b>{picking.addressSecondary}</b></> : null}</p>
@@ -433,7 +433,7 @@ export default function RouteMapPage() {
                   <ul className="mt-2 max-h-56 overflow-y-auto divide-y divide-gray-50" data-testid="map-missing-list">
                     {missing.map((c) => (
                       <li key={c.id} className="py-1.5 flex items-center justify-between gap-2">
-                        <span className="min-w-0"><span className="block truncate font-medium text-gray-800">{formatClientName(c.name)}</span><span className="block truncate text-xs text-gray-500">{routeName.get(c.routeId)} · {c.address}{(byClient.get(c.id)?.length ?? 0) > 0 ? ` · ${byClient.get(c.id)!.length} actividad(es)` : ''}</span></span>
+                        <span className="min-w-0"><span className="block truncate font-medium text-gray-800">{formatClientLabel(c.name, c.business)}</span><span className="block truncate text-xs text-gray-500">{routeName.get(c.routeId)} · {c.address}{(byClient.get(c.id)?.length ?? 0) > 0 ? ` · ${byClient.get(c.id)!.length} actividad(es)` : ''}</span></span>
                         <Button variant="ghost" size="sm" onClick={() => setPicking(c)} icon={<MapPin className="w-3.5 h-3.5" />}>Ubicar</Button>
                       </li>
                     ))}
@@ -474,7 +474,7 @@ export default function RouteMapPage() {
         footer={<><Button variant="secondary" onClick={() => setPinned(null)} disabled={saving}>Cancelar</Button><Button onClick={() => void savePin()} loading={saving} data-testid="map-pin-save">Guardar ubicación</Button></>}>
         {pinned && (
           <div className="space-y-3 text-sm">
-            <p>Se guardará como ubicación de referencia de <b>{formatClientName(pinned.client.name)}</b> el punto marcado en el mapa
+            <p>Se guardará como ubicación de referencia de <b>{formatClientLabel(pinned.client.name, pinned.client.business)}</b> el punto marcado en el mapa
               ({pinned.lat.toFixed(5)}, {pinned.lng.toFixed(5)}). Queda registrado como «punto marcado en el mapa», con su nombre y la fecha.</p>
             {pinned.client.location && <p className="text-amber-700">Sustituye a la ubicación actual ({pinned.client.location.source === 'gps_on_site' ? 'GPS en el lugar' : 'punto en el mapa'}, {formatDate(pinned.client.location.setAt)}). La anterior queda en el historial.</p>}
             <Input label="Nota (opcional)" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder="Ej.: local en la esquina, portón azul" />

@@ -19,7 +19,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { useCollectorRoute } from '@/hooks/useCollectorRoute'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
-import { formatClientName } from '@/lib/displayName'
+import { formatClientName, formatClientLabel } from '@/lib/displayName'
 import { effectivePayments } from '@/lib/paymentState'
 import { isExpenseOf } from '@/lib/expenseAttribution'
 import type { Client } from '@/models/types'
@@ -98,8 +98,8 @@ export default function CollectorDailyReportPage() {
     const misGastos = expenses.filter(e => isExpenseOf(e, user.id))
 
     const movs: Movement[] = []
-    for (const p of misAbonos) movs.push({ orden: p.createdAt, hora: horaLocal(p.createdAt), cliente: formatClientName(clientMap.get(p.clientId)?.nombre) || 'Cliente', concepto: 'Recaudo', valor: p.valor, tipo: 'abono' })
-    for (const s of misDesembolsos) movs.push({ orden: s.disbursedAt ?? s.createdAt, hora: horaLocal(s.disbursedAt ?? s.createdAt), cliente: formatClientName(clientMap.get(s.clientId)?.nombre) || 'Cliente', concepto: 'Desembolso', valor: s.valorVenta, tipo: 'venta' })
+    for (const p of misAbonos) movs.push({ orden: p.createdAt, hora: horaLocal(p.createdAt), cliente: formatClientLabel(clientMap.get(p.clientId)?.nombre, clientMap.get(p.clientId)?.negocio) || 'Cliente', concepto: 'Recaudo', valor: p.valor, tipo: 'abono' })
+    for (const s of misDesembolsos) movs.push({ orden: s.disbursedAt ?? s.createdAt, hora: horaLocal(s.disbursedAt ?? s.createdAt), cliente: formatClientLabel(clientMap.get(s.clientId)?.nombre, clientMap.get(s.clientId)?.negocio) || 'Cliente', concepto: 'Desembolso', valor: s.valorVenta, tipo: 'venta' })
     for (const e of misGastos) movs.push({ orden: e.createdAt, hora: horaLocal(e.createdAt), cliente: catName(e.categoryId), concepto: 'Gasto', valor: e.valor, tipo: 'gasto' })
     movs.sort((a, b) => a.orden.localeCompare(b.orden))
 

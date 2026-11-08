@@ -12,6 +12,7 @@
 // crea otro desembolso. Nada se presenta como confirmado hasta que el servidor responde.
 
 import { formatCurrency, formatDateTime } from '@/lib/formatters';
+import { formatClientLabel } from '@/lib/displayName'
 import { ApiFailure, UncertainOperation, isUnconfirmed } from '../lib/client.ts';
 import { errorText } from '../lib/format.ts';
 import { toMajor, toMinor } from '../runtime/mappers.ts';
@@ -82,7 +83,8 @@ export async function disburseAsCollector(requestId: string): Promise<Disburseme
   }
   const sale = await pendingSale(requestId);
   const clients = (await table('clients').catch(() => [])) as Row[];
-  const clientName = String(clients.find((c) => c['id'] === sale['clientId'])?.['nombre'] ?? '');
+  const cl = clients.find((c) => c['id'] === sale['clientId']);
+  const clientName = cl ? formatClientLabel(String(cl['nombre'] ?? ''), String(cl['negocio'] ?? '')) : '';
   const amountMinor = toMinor(Number(sale['valorVenta']));
   const routeId = String(sale['routeId']);
   const path = `/v1/credit-requests/${encodeURIComponent(requestId)}/disburse`;

@@ -18,7 +18,7 @@ import { money } from '../../../runtime/commands.ts'
 import { shouldCaptureOffline, useOffline } from '../../../offline/state.ts'
 import { adoptUncertainVisit, captureOfflineVisit, visitBody, type VisitInput } from '../../../offline/captures.ts'
 import { useReachable } from '../../../offline/ui.tsx'
-import { formatClientName } from '@/lib/displayName'
+import { formatClientName, formatClientLabel } from '@/lib/displayName'
 
 const MOTIVOS = [
   { value: 'no_estaba', label: 'No estaba' },
@@ -59,7 +59,7 @@ export default function NoPaymentPage() {
     if (!sale || !user || !client || saving) return
     setSaving(true)
     const input: VisitInput = {
-      saleId: sale.id, routeId: sale.routeId, clientId: sale.clientId, clientName: client.nombre,
+      saleId: sale.id, routeId: sale.routeId, clientId: sale.clientId, clientName: formatClientLabel(client.nombre, client.negocio),
       reason: motivo, promisedPaymentDate: motivo === 'promesa_pago' && fechaPromesa ? fechaPromesa : undefined, note: observacion,
     }
     try {
@@ -98,7 +98,7 @@ export default function NoPaymentPage() {
   return (
     <div className="p-4 space-y-4">
       <div className="bg-red-50 rounded-2xl p-4">
-        <p className="font-bold text-red-900">{formatClientName(client.nombre)}</p>
+        <p className="font-bold text-red-900">{formatClientLabel(client.nombre, client.negocio)}</p>
         <p className="text-sm text-red-500">Registrar visita sin pago</p>
       </div>
 

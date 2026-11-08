@@ -2,7 +2,7 @@
 // periodos en la zona horaria de la empresa, partes legibles y enlaces a comprobantes). Sin React:
 // se prueba aparte y lo comparten Dinero, Actividad y el detalle.
 
-import { formatClientName, formatPersonName } from '@/lib/displayName';
+import { formatClientName, formatPersonName, formatClientLabel} from '@/lib/displayName';
 
 // ---------- Contrato de la API (`/v1/movements/{perspectives,cash,activity,detail}`) ----------
 
@@ -11,11 +11,11 @@ export interface PerspectiveOption { key: string; kind: PerspectiveKind; label: 
 export interface Perspectives { default: string | null; options: PerspectiveOption[]; timezone: string }
 
 export interface Ref { id: string; name: string | null }
-export interface Party { type: string; id?: string | null; name?: string | null; routeId?: string | null; routeName?: string | null }
+export interface Party { type: string; id?: string | null; name?: string | null; business?: string | null; routeId?: string | null; routeName?: string | null }
 interface RowBase {
   id: string; kind: string; reversesKind: string | null; at: string; date: string; localTime: string;
   route: { id: string; name: string | null; office: string | null } | null; toRoute: Ref | null;
-  worker: Ref | null; counterpart: Ref | null; admin: Ref | null; client: Ref | null; actor: (Ref & { role: string | null }) | null;
+  worker: Ref | null; counterpart: Ref | null; admin: Ref | null; client: (Ref & { business?: string | null }) | null; actor: (Ref & { role: string | null }) | null;
   concept: string; status: string; reference: string | null; saleId: string | null; paymentId: string | null; expenseId: string | null; settlementId: string | null;
 }
 export interface CashRow extends RowBase {
@@ -125,7 +125,7 @@ export function partyLabel(p: Party | null | undefined, routeBase = false): stri
     case 'custody': return name || 'Trabajador';
     case 'route_base': return `Base de ${p.routeName ?? p.name ?? 'la ruta'}`;
     case 'company': return 'Empresa';
-    case 'client': return formatClientName(p.name ?? '') || 'Cliente';
+    case 'client': return formatClientLabel(p.name ?? '', p.business) || 'Cliente';
     case 'expense': return `Gasto · ${p.name ?? ''}`.trim();
     case 'external': return 'Fuera de la empresa';
     case 'transit': return routeBase ? `Saldo sin asignar de ${name || 'Administrador'} · en tránsito` : `Bolsa de ${name || 'Administrador'} · en tránsito`;
@@ -273,7 +273,7 @@ export function cashCsv(rows: CashRow[], minorUnits: number, routeBase = false):
   const amount = (minor: number) => (minor === 0 ? '' : (minor / 10 ** minorUnits).toFixed(minorUnits).replace('.', ','));
   const head = ['Fecha', 'Hora', 'Movimiento', 'Estado', 'Cliente o persona', 'Concepto', 'Responsable', 'Ruta', 'Entrada', 'Salida', 'Interno', 'Referencia'];
   const lines = rows.map((r) => [r.date, r.localTime, kindLabel(r.kind, r.reversesKind, routeBase), STATUS_LABEL[r.status] ?? r.status,
-    r.client?.name ?? r.worker?.name ?? r.counterpart?.name ?? '', r.concept, r.actor?.name ?? '', r.route?.name ?? '',
+    (r.client ? formatClientLabel(r.client.name ?? '', r.client.business) : null) ?? r.worker?.name ?? r.counterpart?.name ?? '', r.concept, r.actor?.name ?? '', r.route?.name ?? '',
     amount(r.inMinor), amount(r.outMinor), amount(r.internalMinor), r.reference ?? r.id].map(csvCell).join(';'));
   return '\uFEFF' + [head.join(';'), ...lines].join('\r\n') + '\r\n';
 }

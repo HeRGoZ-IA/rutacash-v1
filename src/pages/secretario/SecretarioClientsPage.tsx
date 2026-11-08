@@ -14,7 +14,7 @@ import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import { logAction } from '@/services/auditService'
 import { nowISO } from '@/lib/formatters'
-import { formatClientName } from '@/lib/displayName'
+import { formatClientName, formatClientLabel } from '@/lib/displayName'
 import { foldText } from '@/lib/searchFilter'
 import type { Client } from '@/models/types'
 
@@ -108,7 +108,7 @@ export default function SecretarioClientsPage() {
     const q = foldText(search)
     // Recorte por Oficina/Ruta ANTES de la búsqueda.
     return officeFilter.filterRows(clients)
-      .filter(c => !q || foldText(c.nombre).includes(q) || c.documento.includes(q))
+      .filter(c => !q || foldText(c.nombre).includes(q) || foldText(c.negocio ?? '').includes(q) || c.documento.includes(q))
       .sort((a, b) => a.nombre.localeCompare(b.nombre))
   }, [clients, search, officeFilter])
 
@@ -148,9 +148,9 @@ export default function SecretarioClientsPage() {
             <div key={c.id} className="flex items-center gap-2 px-4 py-3 hover:bg-primary-50/40 transition-colors">
               <button onClick={() => openEdit(c)} className="flex items-center gap-3 text-left min-w-0 flex-1 md:grid md:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)] md:gap-3">
                 <span className="flex items-center gap-3 min-w-0">
-                  <span className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center text-primary-700 font-bold text-sm flex-shrink-0" aria-hidden>{formatClientName(c.nombre).charAt(0)}</span>
+                  <span className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center text-primary-700 font-bold text-sm flex-shrink-0" aria-hidden>{formatClientLabel(c.nombre, c.negocio).charAt(0)}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium text-gray-900 truncate" title={formatClientName(c.nombre)}>{formatClientName(c.nombre)}</span>
+                    <span className="block text-sm font-medium text-gray-900 truncate" title={formatClientLabel(c.nombre, c.negocio)}>{formatClientLabel(c.nombre, c.negocio)}</span>
                     <span className="block md:hidden text-xs text-gray-500 truncate">{c.documento} · {c.telefonoPrincipal} · {routeName(c.routeId)}</span>
                   </span>
                 </span>
@@ -163,7 +163,7 @@ export default function SecretarioClientsPage() {
               <button
                 onClick={() => setHistoryClient(c)}
                 title="Ver historial de ventas"
-                aria-label={`Ver historial de ventas de ${formatClientName(c.nombre)}`}
+                aria-label={`Ver historial de ventas de ${formatClientLabel(c.nombre, c.negocio)}`}
                 className="flex-shrink-0 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
               >
                 <History className="w-3.5 h-3.5" /> Historial
@@ -175,7 +175,7 @@ export default function SecretarioClientsPage() {
 
       {/* Historial de créditos (solo consulta) */}
       <Modal open={!!historyClient} onClose={() => setHistoryClient(null)} size="xl"
-        title={historyClient ? `Historial de ventas · ${formatClientName(historyClient.nombre)}` : 'Historial de ventas'}
+        title={historyClient ? `Historial de ventas · ${formatClientLabel(historyClient.nombre, historyClient.negocio)}` : 'Historial de ventas'}
         footer={<Button variant="secondary" onClick={() => setHistoryClient(null)}>Cerrar</Button>}>
         {historyClient && (
           <div className="space-y-3">
@@ -194,6 +194,7 @@ export default function SecretarioClientsPage() {
             {hasMovements ? ' (bloqueado: cliente con movimientos)' : ' (no editable aquí)'}
           </div>
           <Input label="Nombre" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required />
+          <Input label="Negocio" value={form.negocio} onChange={e => setForm(f => ({ ...f, negocio: e.target.value }))} />
           <div className="grid grid-cols-2 gap-3">
             <Input label="Teléfono principal" value={form.telefonoPrincipal} onChange={e => setForm(f => ({ ...f, telefonoPrincipal: e.target.value }))} />
             <Input label="Teléfono secundario" value={form.telefonoSecundario} onChange={e => setForm(f => ({ ...f, telefonoSecundario: e.target.value }))} />
@@ -202,7 +203,6 @@ export default function SecretarioClientsPage() {
             <Input label="Dirección" value={form.direccionPrincipal} onChange={e => setForm(f => ({ ...f, direccionPrincipal: e.target.value }))} />
             <Input label="Dirección de negocio" value={form.direccionSecundaria} onChange={e => setForm(f => ({ ...f, direccionSecundaria: e.target.value }))} />
           </div>
-          <Input label="Negocio" value={form.negocio} onChange={e => setForm(f => ({ ...f, negocio: e.target.value }))} />
           <Textarea label="Observaciones" rows={2} value={form.notas} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))} />
         </div>
       </Modal>

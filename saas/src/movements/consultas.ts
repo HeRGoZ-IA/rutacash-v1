@@ -278,12 +278,12 @@ function groupsOf(q: URLSearchParams, known: Record<string, readonly string[]>, 
 
 // ---------- Partes (origen → destino) ----------
 
-export interface Party { type: string; id?: string | null; name?: string | null; routeId?: string | null; routeName?: string | null }
+export interface Party { type: string; id?: string | null; name?: string | null; business?: string | null; routeId?: string | null; routeName?: string | null }
 
 interface NamedRow {
   kind: string; base: string; reversal: boolean; net: number;
   worker_id: string | null; worker_name: string | null; counterpart_id: string | null; counterpart_name: string | null;
-  admin_id: string | null; admin_name: string | null; client_id: string | null; client_name: string | null;
+  admin_id: string | null; admin_name: string | null; client_id: string | null; client_name: string | null; client_business: string | null;
   route_id: string | null; route_name: string | null; to_route_id: string | null; to_route_name: string | null; concept: string;
   expense_category: string | null;
   via_base: boolean;   // la operación toca una cuenta `route_base` (Base por Ruta)
@@ -300,7 +300,7 @@ export function parties(r: NamedRow): { from: Party | null; to: Party | null } {
   const base = (routeId = r.route_id, routeName = r.route_name): Party => ({ type: 'route_base', routeId, routeName, name: routeName });
   const pool = (id: string | null, name: string | null): Party => (r.via_base ? base() : { type: 'pool', id, name });
   const custody = (id: string | null, name: string | null, routeId = r.route_id, routeName = r.route_name): Party => ({ type: 'custody', id, name, routeId, routeName });
-  const client: Party = { type: 'client', id: r.client_id, name: r.client_name };
+  const client: Party = { type: 'client', id: r.client_id, name: r.client_name, business: r.client_business };
   const company: Party = { type: 'company', name: 'Empresa' };
   const payer = r.worker_id ? custody(r.worker_id, r.worker_name) : r.admin_id ? pool(r.admin_id, r.admin_name) : company;
   const expense: Party = { type: 'expense', name: r.expense_category ?? r.concept };
@@ -364,7 +364,7 @@ const NAMES_SQL = `
   left join adex.routes rt on rt.company_id = $1 and rt.id = f.to_route_id
   left join adex.offices ro on ro.company_id = $1 and ro.id = rr.office_id`;
 const NAMES_COLS = `mw.display_name worker_name, mc.display_name counterpart_name, ma.display_name admin_name, mx.display_name actor_name,
-  mx.role actor_role, cl.name client_name, rr.name route_name, rt.name to_route_name, ro.name office_name`;
+  mx.role actor_role, cl.name client_name, cl.business client_business, rr.name route_name, rt.name to_route_name, ro.name office_name`;
 
 const tzOf = `(select c.timezone from adex.companies c where c.id = $1)`;
 
@@ -381,7 +381,7 @@ function baseRow(x: Row) {
     worker: x['worker_id'] ? { id: String(x['worker_id']), name: str(x['worker_name']) } : null,
     counterpart: x['counterpart_id'] ? { id: String(x['counterpart_id']), name: str(x['counterpart_name']) } : null,
     admin: x['admin_id'] ? { id: String(x['admin_id']), name: str(x['admin_name']) } : null,
-    client: x['client_id'] ? { id: String(x['client_id']), name: str(x['client_name']) } : null,
+    client: x['client_id'] ? { id: String(x['client_id']), name: str(x['client_name']), business: str(x['client_business']) } : null,
     actor: x['actor_id'] ? { id: String(x['actor_id']), name: str(x['actor_name']), role: str(x['actor_role']) } : null,
     concept: str(x['concept']) ?? '', status: String(x['status']), reference: str(x['reference']),
     saleId: str(x['sale_id']), paymentId: str(x['payment_id']), expenseId: str(x['expense_id']), settlementId: str(x['settlement_id']),
@@ -392,7 +392,7 @@ function namedOf(x: Row, net: number, viaBase?: boolean): NamedRow {
   return {
     kind: String(x['kind']), base: String(x['reverses_kind'] ?? x['kind']), reversal: x['kind'] === 'REVERSAL', net,
     worker_id: str(x['worker_id']), worker_name: str(x['worker_name']), counterpart_id: str(x['counterpart_id']), counterpart_name: str(x['counterpart_name']),
-    admin_id: str(x['admin_id']), admin_name: str(x['admin_name']), client_id: str(x['client_id']), client_name: str(x['client_name']),
+    admin_id: str(x['admin_id']), admin_name: str(x['admin_name']), client_id: str(x['client_id']), client_name: str(x['client_name']), client_business: str(x['client_business']),
     route_id: str(x['route_id']), route_name: str(x['route_name']), to_route_id: str(x['to_route_id']), to_route_name: str(x['to_route_name']),
     concept: str(x['concept']) ?? '', expense_category: str(x['expense_category']), via_base: viaBase ?? x['via_base'] === true,
   };
@@ -521,7 +521,7 @@ export async function listCashMovements(client: pg.PoolClient, ctx: ActiveContex
   const text = textFilter(q);
   if (text) {
     add((ph) => `(concept ilike ${ph} or reference ilike ${ph} or id ilike ${ph}
-      or exists (select 1 from adex.clients c where c.company_id = $1 and c.id = client_id and c.name ilike ${ph})
+      or exists (select 1 from adex.clients c where c.company_id = $1 and c.id = client_id and (c.name ilike ${ph} or c.business ilike ${ph}))
       or exists (select 1 from adex.memberships m where m.company_id = $1 and m.id in (worker_id, counterpart_id, admin_id, actor_id) and m.display_name ilike ${ph}))`, text);
   }
   const filteredCte = `with ${opsCte}, f as (select * from ops where ${where.join(' and ')})`;
@@ -629,7 +629,7 @@ export async function listActivity(client: pg.PoolClient, ctx: ActiveContext, q:
   const text = textFilter(q);
   if (text) {
     add((ph) => `(concept ilike ${ph} or reference ilike ${ph} or id ilike ${ph}
-      or exists (select 1 from adex.clients c where c.company_id = $1 and c.id = client_id and c.name ilike ${ph})
+      or exists (select 1 from adex.clients c where c.company_id = $1 and c.id = client_id and (c.name ilike ${ph} or c.business ilike ${ph}))
       or exists (select 1 from adex.memberships m where m.company_id = $1 and m.id in (worker_id, counterpart_id, admin_id, actor_id) and m.display_name ilike ${ph}))`, text);
   }
   const base = `with feed as (${await activitySql(client)}), f as (select * from feed ${where.length ? `where ${where.join(' and ')}` : ''})`;

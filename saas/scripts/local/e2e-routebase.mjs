@@ -701,11 +701,15 @@ try {
     await page.evaluate(() => [...document.querySelectorAll('tr')].find((r) => /DIRECTA JO/i.test(r.innerText))?.click());
     const tabsOk = await waitTestid('client-tab-personal', 15_000) && await waitTestid('client-tab-finanzas', 5_000);
     const personalHidesMoney = tabsOk && !(await text()).includes('Total trabajado');
+    // Nombres y negocio (2026-11-08): el encabezado de la ficha muestra «Nombre · Negocio».
+    const header = await page.evaluate(() => [...document.querySelectorAll('[role="dialog"] h3')].map((h) => h.innerText).find((t) => /Directa Jo/i.test(t)) ?? null);
+    const bizRow = await one('select business from adex.clients where name = $1', [c2Client]);
     await tap('client-tab-finanzas');
     const firstShown = await waitTestid('credit-history-first-payment', 20_000) ? await testid('credit-history-first-payment') : null;
     await shot('A-17c-ficha-cliente-finanzas');
-    ok('A-17c', ['C-01'], '3.33: ficha del cliente en dos pestañas; el historial muestra «Primer abono» = cuota 1 real de la venta',
-      tabsOk && personalHidesMoney && !!due333 && firstShown === due333.shown, JSON.stringify({ tabsOk, personalHidesMoney, firstShown, due333 }));
+    ok('A-17c', ['C-01'], '3.33: ficha del cliente en dos pestañas con «Nombre · Negocio»; el historial muestra «Primer abono» = cuota 1 real de la venta',
+      tabsOk && personalHidesMoney && !!due333 && firstShown === due333.shown && !!bizRow?.business && !!header && header.toLowerCase().includes(' · ' + bizRow.business.toLowerCase().split(' ')[0]),
+      JSON.stringify({ tabsOk, personalHidesMoney, firstShown, due333, header, business: bizRow?.business }));
     await page.keyboard.press('Escape').catch(() => undefined);
 
     // Gasto general con un aporte mayor que la Base de su ruta: la pantalla lo impide.
