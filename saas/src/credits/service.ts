@@ -145,13 +145,12 @@ async function companyToday(client: pg.PoolClient, ctx: ActiveContext): Promise<
   return (await client.query<{ d: string }>('select adex.business_today($1)::text d', [ctx.companyId])).rows[0]!.d;
 }
 
-/** Cliente ACTIVO de esa ruta, visible para el actor. */
+/** Cliente de esa ruta, visible para el actor. 0049: su estado (activo/inactivo) ya no impide el crédito. */
 async function activeClient(client: pg.PoolClient, ctx: ActiveContext, clientId: string, routeId: string): Promise<{ id: string; name: string }> {
-  const r = await client.query<{ id: string; name: string; status: string; route_id: string }>(
-    'select id, name, status, route_id from adex.clients where company_id = $1 and id = $2', [ctx.companyId, clientId]);
+  const r = await client.query<{ id: string; name: string; route_id: string }>(
+    'select id, name, route_id from adex.clients where company_id = $1 and id = $2', [ctx.companyId, clientId]);
   const c = r.rows[0];
   if (!c || c.route_id !== routeId) throw new ApiError(404, 'NOT_FOUND');
-  if (c.status !== 'activo') throw new ApiError(409, 'CLIENT_NOT_ACTIVE');
   return { id: c.id, name: c.name };
 }
 

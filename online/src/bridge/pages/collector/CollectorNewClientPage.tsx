@@ -187,7 +187,8 @@ function NewClientForm() {
         direccionPrincipal: form.direccionPrincipal.trim(), direccionSecundaria: form.direccionSecundaria.trim(),
         negocio: form.negocio.trim(), notas: form.notas.trim() || undefined,
         fotoDocumentoUrl: form.fotoDocumentoUrl, fotoNegocioUrl: form.fotoNegocioUrl,
-        status: 'activo', createdAt: nowISO(), updatedAt: nowISO(),
+        // ADEX Online (0049): el estado lo pone el servidor; sin crédito, el cliente nace inactivo.
+        status: 'inactivo', createdAt: nowISO(), updatedAt: nowISO(),
       } as Client
 
       if (!addSale) {

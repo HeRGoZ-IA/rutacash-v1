@@ -98,9 +98,10 @@ describe('Fase 4 · créditos: solicitud, autorización y desembolso', () => {
     assert.equal(await err(gil.call, r1, cl), 'NOT_FOUND', 'ruta fuera de su alcance');
     assert.equal((await request(gabi, r1, cl)).status, 403, 'la Secretaria no solicita');
     assert.equal((await request(fabio, r1, cl)).status, 403, 'el Socio no solicita');
+    // 0049: un cliente sin crédito activo está inactivo y SÍ puede pedir crédito.
     const inactive = await newClient(r1, 'Inactivo');
-    assert.equal((await ana('POST', `/v1/clients/${inactive}/status`, { status: 'inactivo' })).status, 200);
-    assert.equal(await err(carlos.call, r1, inactive), 'CLIENT_NOT_ACTIVE');
+    assert.equal((await db.admin.query('select status from adex.clients where id = $1', [inactive])).rows[0].status, 'inactivo');
+    assert.equal((await request(carlos.call, r1, inactive)).status, 201, 'inactivo no impide la solicitud');
     assert.equal((await request(carlos.call, r1, cl)).status, 201);
     assert.equal(await err(carlos.call, r1, cl), 'PENDING_REQUEST_EXISTS', 'una sola pendiente por cliente');
   });

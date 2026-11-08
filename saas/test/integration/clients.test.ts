@@ -144,20 +144,20 @@ describe('Fase 2 · clientes y DS-10', () => {
     }
     assert.equal((await gabi('POST', `/v1/clients/${id}/status`, { status: 'inactivo' })).status, 403);
     await asApi(db.api, { identityId: identityOf('gabi'), membershipId: M.gabiSec, companyId: companyId('c1') }, async (q) => {
-      await assert.rejects(q.query(`update adex.clients set status = 'inactivo' where id = $1`, [id]), { code: '42501' });
+      await assert.rejects(q.query(`update adex.clients set status = case when status = 'activo' then 'inactivo' else 'activo' end where id = $1`, [id]), { code: '42501' });
     });
     const a = await db.admin.query(`select description, actor_role from adex.audit_log where action = 'UPDATE_CLIENT' and entity_id = $1`, [id]);
     assert.deepEqual(a.rows.map((r) => r.actor_role), ['secretario']);
   });
 
-  test('CLI-011 · estado: activo ↔ inactivo con client.deactivate; moroso/perdido son derivados', async () => {
+  test('CLI-011 · estado (0049): lo deciden los créditos, no se fija a mano', async () => {
     const id = uid('c1:client:1');
     assert.equal((await anaCob('POST', `/v1/clients/${id}/status`, { status: 'inactivo' })).status, 403);
-    assert.equal((await ana('POST', `/v1/clients/${id}/status`, { status: 'inactivo' })).body['status'], 'inactivo');
-    assert.equal((await ana('POST', `/v1/clients/${id}/status`, { status: 'activo' })).body['status'], 'activo');
+    assert.equal((await ana('POST', `/v1/clients/${id}/status`, { status: 'inactivo' })).body['error'], 'STATUS_IS_DERIVED');
     assert.equal((await ana('POST', `/v1/clients/${id}/status`, { status: 'moroso' })).status, 400);
     await db.admin.query(`update adex.clients set status = 'moroso' where id = $1`, [id]);
-    assert.equal((await ana('POST', `/v1/clients/${id}/status`, { status: 'activo' })).body['error'], 'STATUS_IS_DERIVED');
+    const s = (await db.admin.query(`select status, adex.client_derived_status(company_id, id) d from adex.clients where id = $1`, [id])).rows[0];
+    assert.equal(s.status, s.d, 'PostgreSQL vuelve a poner el estado que corresponde');
   });
 
   test('CLI-012 · rutas que no admiten operaciones nuevas: ni altas ni traslados', async () => {

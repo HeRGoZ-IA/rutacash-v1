@@ -47,7 +47,7 @@ const ERRORS: Record<string, string> = {
   PENDING_REQUEST_EXISTS: 'Ese cliente ya tiene una solicitud pendiente.',
   INTEREST_RATE_NOT_ALLOWED: 'Tasa no permitida: solo 10 % o 20 %, y el Cobrador usa la tasa de su ruta salvo que la ruta tenga «Tasa libre».',
   INVALID_CONDITIONS: 'Condiciones no válidas (la fecha de inicio no puede ser anterior a hoy).',
-  CLIENT_NOT_ACTIVE: 'El cliente no está activo.',
+  CLIENT_NOT_ACTIVE: 'El cliente no pertenece a esta ruta.',  // 0049: el estado ya no impide el crédito
   DOCUMENT_DUPLICATE: 'Ya existe un cliente con ese documento en la empresa.',
   INVALID_DOCUMENT: 'El documento no es válido para el tipo elegido.',
   ROUTE_NOT_OPERATIONAL: 'La ruta no admite operaciones nuevas.',

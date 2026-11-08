@@ -173,8 +173,8 @@ describe('Ronda 67 · SuperAdmin: cartera de solo lectura', () => {
   test('SA-RO-005 · el Administrador y los demás roles conservan sus escrituras de cartera', async () => {
     const client = await newClient();
     assert.equal((await ana('PATCH', `/v1/clients/${client}`, { notes: 'Editado por la Administradora' })).status, 200);
-    assert.equal((await ana('POST', `/v1/clients/${client}/status`, { status: 'inactivo' })).status, 200);
-    assert.equal((await ana('POST', `/v1/clients/${client}/status`, { status: 'activo' })).status, 200);
+    // 0049: el estado ya no se fija a mano (lo deciden los créditos): la Administradora llega a la regla, no a un 403.
+    assert.equal((await ana('POST', `/v1/clients/${client}/status`, { status: 'inactivo' })).body['error'], 'STATUS_IS_DERIVED');
     const sale = await credit();
     assert.equal((await carlos.money('/v1/collections', { saleId: sale, amountMinor: 3_000 })).status, 201, 'el Cobrador cobra');
     const req = await carlos.call('POST', '/v1/credit-requests', { ...saleBody(await newClient()), amountMinor: 10_000 });

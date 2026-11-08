@@ -94,7 +94,7 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX501': return new ApiError(409, 'REQUEST_STATE_INVALID');
     case 'AX502': return new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED');
     case 'AX503': return new ApiError(400, 'INVALID_CONDITIONS');
-    case 'AX504': return new ApiError(409, 'CLIENT_NOT_ACTIVE');
+    case 'AX504': return new ApiError(409, 'CLIENT_NOT_ACTIVE');   // 0049: el cliente no es de esa ruta (el estado ya no cuenta)
     case 'AX505': return new ApiError(403, 'SELF_APPROVAL_FORBIDDEN');
     case 'AX506': return new ApiError(409, 'REQUEST_NOT_DISBURSABLE');
     case 'AX507': return new ApiError(409, 'DIRECT_SALE_LIMIT');

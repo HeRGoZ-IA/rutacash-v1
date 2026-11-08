@@ -82,6 +82,10 @@ describe('Fase 0 · contrato de ida y vuelta Dexie v16 ↔ PostgreSQL', () => {
             .filter((r) => (t.dexieTable === 'tenants' ? r['id'] : t.dexieTable === 'installments'
               ? ((snapshot['sales'] ?? []) as DexieRecord[]).find((s) => s['id'] === r['saleId'])?.['tenantId']
               : (r['tenantId'] ?? r['companyId'])) === cid)
+            // 0049: el estado del cliente lo calcula PostgreSQL (activo = venta activa o solicitud aprobada); no viaja tal cual.
+            .map((r) => t.dexieTable !== 'clients' ? r : { ...r, status:
+              ((snapshot['sales'] ?? []) as DexieRecord[]).some((s) => s['clientId'] === r['id'] && s['status'] === 'activa')
+              || ((snapshot['saleRequests'] ?? []) as DexieRecord[]).some((q) => q['clientId'] === r['id'] && q['status'] === 'approved') ? 'activo' : 'inactivo' })
             .map((r) => normalize(t.dexieTable, r, identityEmails)).sort(byId);
           const actual = ((back[t.dexieTable] ?? []) as DexieRecord[]).map((r) => normalize(t.dexieTable, r, identityEmails)).sort(byId);
           assert.ok(original.length > 0, `${spec.key}/${t.dexieTable}: empty fixture`);

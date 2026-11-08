@@ -9,10 +9,11 @@
 //     original se guarda tal cual; nunca se fusiona ni se inventa uno.
 //   · Edición completa: `client.edit`. Edición limitada (Secretario):
 //     `client.editLimited`, solo datos operativos (también lo impone un disparador).
-//   · Estado: `client.deactivate` (activo ↔ inactivo). `moroso` y `perdido` los
-//     derivan los comandos financieros, no se fijan a mano.
+//   · Estado (0049, propietario 2026-11-07): AUTOMÁTICO en PostgreSQL. «activo» si tiene un crédito activo
+//     (venta activa o solicitud aprobada sin entregar), si no «inactivo». No se fija a mano: `POST /status`
+//     responde 409 STATUS_IS_DERIVED. `moroso` y `perdido` ya no se usan.
 //   · DS-11: borrado físico solo sin historia (sin solicitudes, ventas, pagos, visitas…).
-//     Con historia: desactivar.
+//     Con historia: se conserva (queda inactivo cuando no tiene crédito activo).
 
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
@@ -183,19 +184,12 @@ export async function updateClient(client: pg.PoolClient, ctx: ActiveContext, id
   return view(row);
 }
 
+/** 0049: el estado lo calcula PostgreSQL según los créditos del cliente; nadie lo fija a mano. */
 export async function setClientStatus(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Record<string, unknown>) {
-  const status = oneOf(body, 'status', ['activo', 'inactivo'] as const);
+  oneOf(body, 'status', ['activo', 'inactivo'] as const);
   const prev = await load(client, ctx, id, true);
   need(ctx, 'client.deactivate', { routeId: prev.route_id });
-  if (status === 'activo' && prev.status !== 'inactivo' && prev.status !== 'activo') {
-    throw new ApiError(409, 'STATUS_IS_DERIVED', `status ${prev.status} is set by financial commands`);
-  }
-  if (prev.status !== status) {
-    exactlyOne(await client.query('update adex.clients set status = $3, updated_at = now() where company_id = $1 and id = $2', [ctx.companyId, prev.id, status]));
-    await audit(client, ctx, { action: 'BLOCK_CLIENT', entityType: 'client', entityId: prev.id, routeId: prev.route_id,
-      description: `Cliente ${status}: ${prev.name}`, before: { status: prev.status }, after: { status } });
-  }
-  return view({ ...prev, status });
+  throw new ApiError(409, 'STATUS_IS_DERIVED', 'the client status follows its credits: active with an active credit, inactive without one');
 }
 
 export async function deleteClient(client: pg.PoolClient, ctx: ActiveContext, id: string) {
@@ -204,7 +198,7 @@ export async function deleteClient(client: pg.PoolClient, ctx: ActiveContext, id
   need(ctx, 'client.deactivate', { routeId: prev.route_id });
   need(ctx, 'client.edit', { routeId: prev.route_id });
   const refs = (await client.query<{ refs: string[] }>("select adex.protected_references('adex.clients'::regclass, $1, $2) refs", [ctx.companyId, prev.id])).rows[0]!.refs;
-  if (refs.length) throw new ApiError(409, 'HAS_HISTORY', 'the client has history: deactivate it instead', { references: refs });
+  if (refs.length) throw new ApiError(409, 'HAS_HISTORY', 'the client has history and cannot be deleted', { references: refs });
   exactlyOne(await client.query('delete from adex.clients where company_id = $1 and id = $2', [ctx.companyId, prev.id]));
   // Sin `route_id`: la auditoría no debe convertirse en «historia» de la ruta por un borrado.
   await audit(client, ctx, { action: 'DELETE_CLIENT', entityType: 'client', entityId: prev.id, description: `Cliente eliminado: ${prev.name}`,

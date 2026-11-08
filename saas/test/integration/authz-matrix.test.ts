@@ -59,7 +59,7 @@ const COMMANDS: Command[] = [
     run: (c, s, i) => c('POST', '/v1/clients', { routeId: s.route, name: `Matriz ${i}`, documentType: 'PAS', document: `MX${String(i).padStart(6, '0')}`,
       phonePrimary: '1', addressPrimary: 'a', addressSecondary: 'b', business: 'Negocio sintético' }) },
   { name: 'PATCH /v1/clients/:id', caps: ['client.edit', 'client.editLimited'], routeScoped: true, run: (c, s, i) => c('PATCH', `/v1/clients/${s.client}`, { notes: `Matriz ${i}` }) },
-  { name: 'POST /v1/clients/:id/status', caps: ['client.deactivate'], routeScoped: true, run: (c, s) => c('POST', `/v1/clients/${s.client}/status`, { status: 'activo' }) },
+  { name: 'POST /v1/clients/:id/status', caps: ['client.deactivate'], routeScoped: true, allowedAlso: [409], run: (c, s) => c('POST', `/v1/clients/${s.client}/status`, { status: 'activo' }) },
 ];
 
 describe('Fase 2 · puerta `permissions`: la matriz de CLEAN aplicada por el servidor', () => {

@@ -264,7 +264,7 @@ export default function ClientsPage() {
         // 2026-09): la venta se valida en dominio igual que en la App operativa.
         if (!user) return
         // ADEX Online: + tipo de documento.
-        const client = { id: generateId(), tenantId, ...form, documentType: tipoDocumento, status: 'activo', createdAt: nowISO(), updatedAt: nowISO() } as Client
+        const client = { id: generateId(), tenantId, ...form, documentType: tipoDocumento, status: 'inactivo', createdAt: nowISO(), updatedAt: nowISO() } as Client
         await createDirectSale({
           tenantId, routeId: form.routeId, clientId: client.id, createdByUserId: user.id,
           valorVenta: saleForm.valorVenta, tasaInteres: saleForm.tasaInteres, numeroCuotas: saleForm.numeroCuotas,
@@ -274,7 +274,7 @@ export default function ClientsPage() {
         toast.success('Cliente y venta creados')
       } else {
         // ADEX Online: + tipo de documento.
-        const client = { id: generateId(), tenantId, ...form, documentType: tipoDocumento, status: 'activo', createdAt: nowISO(), updatedAt: nowISO() } as Client
+        const client = { id: generateId(), tenantId, ...form, documentType: tipoDocumento, status: 'inactivo', createdAt: nowISO(), updatedAt: nowISO() } as Client
         await db.clients.add(client)
         toast.success('Cliente creado')
       }
@@ -289,7 +289,7 @@ export default function ClientsPage() {
     try {
       const totalSales = await db.sales.where('clientId').equals(client.id).count()
       if (totalSales > 0) {
-        toast.error('No se puede eliminar este cliente porque tiene ventas asociadas. Puedes inactivarlo.')
+        toast.error('No se puede eliminar este cliente porque tiene ventas asociadas: su historia se conserva.')
         return
       }
       setDeleteTarget(client)
@@ -338,7 +338,7 @@ export default function ClientsPage() {
         search={<Input aria-label="Buscar clientes" placeholder="Buscar nombre, doc, teléfono..." value={search} onChange={e => setSearch(e.target.value)} leftIcon={<Search className="w-4 h-4" />} />}
       >
         <Select label="Estado" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-          options={[{ value: 'activo', label: 'Activo' }, { value: 'inactivo', label: 'Inactivo' }, { value: 'moroso', label: 'Moroso' }, { value: 'perdido', label: 'Perdido' }]}
+          options={[{ value: 'activo', label: 'Activo' }, { value: 'inactivo', label: 'Inactivo' }]}
           placeholder="Todos los estados" containerClassName="min-w-0 lg:w-52" />
       </OfficeRouteFilterBar>
 
