@@ -56,6 +56,7 @@ import {
 import {
   APPROVE_FIELDS, CREATE_REQUEST_FIELDS, DIRECT_FIELDS, DISBURSE_FIELDS, RECTIFY_FIELDS, approveRequest, cancelRequest, createRequest, directSale, disburseRequest,
   LATE_SALE_FIELDS, DELIVERY_DATE_FIELDS, lateSale, correctDeliveryDate,
+  WRITE_OFF_FIELDS, WRITE_OFF_UNDO_FIELDS, RECOVERY_FIELDS, writeOffCredit, undoWriteOff, recoverCredit,
   getCredit, getRequest, listCredits, listInstallments, listRectifications, listRequests, rectifyCredit, rejectRequest,
   RECTIFICATION_CASE_FIELDS, listRectificationCases, recordRectificationCase, rectifyCheck,
 } from '../credits/service.ts';
@@ -327,6 +328,13 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: () => async (c, ctx, b, _q, op) => created(await lateSale(c, ctx, b, op)) },
   { method: 'POST', pattern: new RegExp(`^/v1/credits/${ID}/delivery-date$`), fields: DELIVERY_DATE_FIELDS, idempotent: 'credits.delivery_date', requiresOperation: true,
     handler: ([id]) => async (c, ctx, b, _q, op) => ok(await correctDeliveryDate(c, ctx, id!, b, op)) },
+  // 3.28 (0053): «Dar por perdida», deshacer y recuperación (solo el Administrador responsable de la ruta).
+  { method: 'POST', pattern: new RegExp(`^/v1/credits/${ID}/write-off$`), fields: WRITE_OFF_FIELDS, idempotent: 'credits.write_off', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => ok(await writeOffCredit(c, ctx, id!, b, op)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/credits/${ID}/write-off/undo$`), fields: WRITE_OFF_UNDO_FIELDS, idempotent: 'credits.write_off_undo', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => ok(await undoWriteOff(c, ctx, id!, b, op)) },
+  { method: 'POST', pattern: new RegExp(`^/v1/credits/${ID}/recovery$`), fields: RECOVERY_FIELDS, idempotent: 'credits.recovery', requiresOperation: true,
+    handler: ([id]) => async (c, ctx, b, _q, op) => created(await recoverCredit(c, ctx, id!, b, op)) },
   { method: 'GET', pattern: new RegExp(`^/v1/credits$`), fields: null, handler: () => async (c, ctx, _b, q) => ok({ credits: await listCredits(c, ctx, q) }) },
   { method: 'GET', pattern: new RegExp(`^/v1/credits/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getCredit(c, ctx, id!)) },
   // Ronda 73 · SOC-08: Consultas como tabla (una fila por operación lógica + eventos sin dinero), paginada en el servidor.

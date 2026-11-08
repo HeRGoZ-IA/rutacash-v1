@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { CreditLossNote } from '@/components/settlement/CreditLossNote'
 import { CalendarRange, Download, RefreshCw, Lock, LockOpen, History } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
@@ -521,6 +522,9 @@ export default function WeeklySettlementPage() {
               </span>
             </div>
           </div>
+
+          {/* 3.28: pérdida por créditos del periodo, en línea aparte (no es efectivo). */}
+          <CreditLossNote routeId={settlement.routeId} from={settlement.semanaInicio} to={settlement.semanaFin} currency={currency} />
 
           <CapitalFlowDetail breakdown={flujo} currency={currency} />
 

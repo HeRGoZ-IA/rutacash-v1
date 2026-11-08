@@ -42,7 +42,10 @@ export const API_FEATURES: readonly string[] = ['collections-v1', 'settlements-v
   'reset-links-v1',
   // 0042 (propietario 2026-11-04): venta registrada tarde y corrección de la fecha de entrega. Solo si 0042 está aplicada (start.ts).
   // En la puerta de Vercel: sin él, «Venta entregada otro día» y «Corregir fecha de entrega» fallarían.
-  'late-sale-v1'];
+  'late-sale-v1',
+  // 3.28 (0053, propietario 2026-11-08): «Dar por perdida», deshacer y recuperación. Solo si 0053 está aplicada (start.ts).
+  // En la puerta de Vercel: sin él, los botones del detalle de la venta fallarían.
+  'credit-write-off-v1'];
 
 /** Módulos del servicio Owner (servicio aparte, ver controlStart.ts). */
 // Ronda 54: `owner-email-v1` (cambio del correo del SuperAdmin) solo si 0024 está aplicada (controlStart.ts).

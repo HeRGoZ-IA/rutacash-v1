@@ -477,6 +477,67 @@ export async function correctDeliveryDate(client: pg.PoolClient, ctx: ActiveCont
 }
 
 // ============================================================
+// 3.28 · Castigo de créditos (0053, diseño aprobado por el propietario el 2026-11-08)
+// ============================================================
+
+export const WRITE_OFF_FIELDS = ['reasonKind', 'reason'] as const;
+export const WRITE_OFF_UNDO_FIELDS = ['reason'] as const;
+export const RECOVERY_FIELDS = ['amountMinor', 'note'] as const;
+const LOSS_KINDS = ['fallecio', 'se_fue_del_pais', 'otro'] as const;
+const LOSS_LABEL: Record<string, string> = { fallecio: 'Falleció', se_fue_del_pais: 'Se fue del país', otro: 'Otro' };
+
+async function saleForLoss(client: pg.PoolClient, ctx: ActiveContext, id: string): Promise<SaleRow> {
+  pathId(id);
+  const s = (await client.query<SaleRow>('select * from adex.sales where company_id = $1 and id = $2', [ctx.companyId, id])).rows[0];
+  if (!s) throw new ApiError(404, 'NOT_FOUND');
+  need(ctx, 'sale.cancel', { routeId: s.route_id });
+  if (ctx.role !== 'admin') throw new ApiError(403, 'CAPITAL_AUTHORITY_REQUIRED', 'only the administrator in charge of the route writes off a credit');
+  return s;
+}
+
+/** «Dar por perdida»: el capital pendiente sale de la cartera a «Pérdida por créditos». No mueve dinero. */
+export async function writeOffCredit(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Record<string, unknown>, operationId: string | null) {
+  const opId = requireOperationId(operationId);
+  const s = await saleForLoss(client, ctx, id);
+  const kind = body['reasonKind'];
+  if (typeof kind !== 'string' || !(LOSS_KINDS as readonly string[]).includes(kind)) throw new ApiError(400, 'INVALID_FIELD', 'reasonKind');
+  const raw = typeof body['reason'] === 'string' ? (body['reason'] as string).trim() : '';
+  const reason = kind === 'otro' ? textOf(body, 'reason', 10, 300) : raw.slice(0, 300);
+  const out = (await client.query<{ r: Record<string, unknown> }>('select adex.credit_write_off($1, $2, $3, $4) r', [opId, s.id, kind, reason])).rows[0]!.r;
+  await audit(client, ctx, { action: 'WRITE_OFF_CREDIT', entityType: 'sale', entityId: s.id, routeId: s.route_id,
+    description: `Venta dada por perdida (${LOSS_LABEL[kind]})`, reason: String(out['reason']),
+    before: { status: s.status, balanceMinor: Number(s.balance_minor) },
+    after: { status: 'perdida', principalMinor: out['principalMinor'], reasonKind: kind }, metadata: { operationId: opId } });
+  return { ...(await getCredit(client, ctx, s.id)), writeOff: out };
+}
+
+/** «Deshacer pérdida»: la venta vuelve a activa (solo si no tuvo recuperaciones). */
+export async function undoWriteOff(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Record<string, unknown>, operationId: string | null) {
+  const opId = requireOperationId(operationId);
+  const s = await saleForLoss(client, ctx, id);
+  const reason = textOf(body, 'reason', 10, 300);
+  const out = (await client.query<{ r: Record<string, unknown> }>('select adex.credit_write_off_undo($1, $2, $3) r', [opId, s.id, reason])).rows[0]!.r;
+  await audit(client, ctx, { action: 'UNDO_WRITE_OFF', entityType: 'sale', entityId: s.id, routeId: s.route_id,
+    description: 'Pérdida deshecha: la venta vuelve a activa', reason,
+    before: { status: s.status, lossReason: s.lost_reason ?? null }, after: { status: 'activa', principalMinor: out['principalMinor'] },
+    metadata: { operationId: opId } });
+  return { ...(await getCredit(client, ctx, s.id)), undo: out };
+}
+
+/** Recuperación: pago de una venta perdida (solo el Administrador responsable); entra a la Base de la ruta. */
+export async function recoverCredit(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Record<string, unknown>, operationId: string | null) {
+  const opId = requireOperationId(operationId);
+  const s = await saleForLoss(client, ctx, id);
+  const amount = body['amountMinor'];
+  if (typeof amount !== 'number' || !Number.isSafeInteger(amount) || amount <= 0) throw new ApiError(400, 'INVALID_FIELD', 'amountMinor');
+  const note = typeof body['note'] === 'string' ? (body['note'] as string).trim().slice(0, 500) : null;
+  const out = (await client.query<{ r: Record<string, unknown> }>('select adex.credit_recovery_post($1, $2, $3, $4) r', [opId, s.id, amount, note])).rows[0]!.r;
+  await audit(client, ctx, { action: 'CREDIT_RECOVERY', entityType: 'sale', entityId: s.id, routeId: s.route_id,
+    description: 'Recuperación de venta perdida', after: out, metadata: { operationId: opId } });
+  return { ...(await getCredit(client, ctx, s.id)), recovery: out };
+}
+
+// ============================================================
 // Rectificación de un crédito desembolsado (Ronda 73 · SOC-09 · 0030)
 // ============================================================
 
@@ -684,6 +745,10 @@ interface SaleRow {
   disbursement_date: string | Date | null; disbursed_at: Date | null; sale_request_id: string | null; ledger_operation_id: string | null; created_at: Date;
   rectification_count?: number;   // Ronda 73 (0030)
   delivered_on?: string | Date | null;   // 0042: fecha real de entrega (venta registrada tarde o corregida)
+  lost_reason?: string | null;           // 3.28 (0053): castigo vigente
+  lost_kind?: string | null;
+  lost_at?: Date | null;
+  lost_principal_minor?: string | number | null;
 }
 
 function creditView(s: SaleRow) {
@@ -697,6 +762,9 @@ function creditView(s: SaleRow) {
     disbursedAt: iso(s.disbursed_at), saleRequestId: s.sale_request_id, ledgerOperationId: s.ledger_operation_id, createdAt: s.created_at.toISOString(),
     rectificationCount: s.rectification_count ?? 0,
     deliveredOn: s.delivered_on ? ymd(s.delivered_on) : null,
+    // 3.28: «Dar por perdida» (NULL si nunca se castigó o se deshizo).
+    lossReason: s.lost_reason ?? null, lossKind: s.lost_kind ?? null, lostAt: iso(s.lost_at ?? null),
+    lostPrincipalMinor: s.lost_principal_minor == null ? null : Number(s.lost_principal_minor),
   };
 }
 

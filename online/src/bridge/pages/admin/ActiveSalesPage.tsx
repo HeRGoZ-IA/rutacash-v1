@@ -40,7 +40,9 @@ import {
 } from '@/components/ui/PaymentAnnulment'
 import { registerPayment, quickAmounts, amountForInstallments, pendingInstallments } from '@/services/paymentService'
 import { CollectorPicker } from '@/components/ui/CollectorPicker'
-import { createDirectSale, findActiveSaleForClient, markSaleLost } from '@/services/saleRequestService'
+import { createDirectSale, findActiveSaleForClient } from '@/services/saleRequestService'
+// 3.28 (0053): castigo, deshacer y recuperación (funciones nuevas del puente: import relativo).
+import { recoverLostSale, undoWriteOffSale, writeOffSale, type LossKind } from '../../services/saleRequestService.ts'
 import { createLateSaleOnline, correctDeliveryDateOnline } from '../../services/saleRequestService'
 import { getAssignedRouteIds } from '@/lib/roles'
 import { calendar } from '../../../runtime/projection.ts'
@@ -96,6 +98,13 @@ export default function ActiveSalesPage() {
   const [lostOpen, setLostOpen] = useState(false)
   const [lostSale, setLostSale] = useState<Sale | null>(null)
   const [motivoPerdida, setMotivoPerdida] = useState('')
+  const [lossKind, setLossKind] = useState<LossKind>('fallecio')
+  // 3.28: deshacer la pérdida y recuperación (pago de una venta perdida).
+  const [undoOpen, setUndoOpen] = useState(false)
+  const [undoReason, setUndoReason] = useState('')
+  const [recoveryOpen, setRecoveryOpen] = useState(false)
+  const [recoveryAmount, setRecoveryAmount] = useState(0)
+  const [recoveryNote, setRecoveryNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [paymentSale, setPaymentSale] = useState<Sale | null>(null)
   const [paymentValor, setPaymentValor] = useState(0)
@@ -401,19 +410,50 @@ export default function ActiveSalesPage() {
   }
 
   async function markLost() {
-    if (!lostSale || !motivoPerdida) { toast.error('Ingresa el motivo'); return }
-    if (!user) return
-    // El servicio valida permiso, estado vigente y audita (Ronda 6/6B).
+    if (!lostSale || !user) return
+    // 3.28: «Otro» exige explicación; «Falleció» y «Se fue del país» la admiten opcional.
+    if (lossKind === 'otro' && motivoPerdida.trim().length < 10) { toast.error('Explica el motivo (al menos 10 caracteres)'); return }
+    setSaving(true)
     try {
-      await markSaleLost(lostSale.id, user, motivoPerdida)
+      await writeOffSale(lostSale.id, lossKind, motivoPerdida)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudo marcar la venta como perdida')
+      toast.error(e instanceof Error ? e.message : 'No se pudo dar la venta por perdida')
       await load()
       return
-    }
-    toast.success('Venta marcada como perdida')
-    setLostOpen(false)
+    } finally { setSaving(false) }
+    toast.success('Venta dada por perdida')
+    setLostOpen(false); setMotivoPerdida(''); setLossKind('fallecio')
     setDetailSale(null)
+    await load()
+  }
+
+  async function undoLost() {
+    if (!detailSale) return
+    if (undoReason.trim().length < 10) { toast.error('Explica por qué se deshace (al menos 10 caracteres)'); return }
+    setSaving(true)
+    try {
+      await undoWriteOffSale(detailSale.id, undoReason)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo deshacer la pérdida')
+      return
+    } finally { setSaving(false) }
+    toast.success('La venta volvió a activa')
+    setUndoOpen(false); setUndoReason(''); setDetailSale(null)
+    await load()
+  }
+
+  async function registerRecovery() {
+    if (!detailSale) return
+    if (recoveryAmount <= 0) { toast.error('Escribe el valor recibido'); return }
+    setSaving(true)
+    try {
+      await recoverLostSale(detailSale.id, recoveryAmount, recoveryNote)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo registrar la recuperación')
+      return
+    } finally { setSaving(false) }
+    toast.success('Recuperación registrada: el dinero entra a la Base de la ruta')
+    setRecoveryOpen(false); setRecoveryAmount(0); setRecoveryNote(''); setDetailSale(null)
     await load()
   }
 
@@ -653,8 +693,15 @@ export default function ActiveSalesPage() {
               {detailSale.status === 'activa' && (
                 <Button onClick={() => { setPaymentSale(detailSale); setPaymentCuotas(''); setPaymentValor(quickAmounts(detailSale, detailInstallments).parcela) }} icon={<DollarSign className="w-4 h-4" />}>Registrar pago</Button>
               )}
-              {detailSale.status === 'activa' && (
-                <Button variant="danger" onClick={() => { setLostSale(detailSale); setLostOpen(true) }} icon={<XCircle className="w-4 h-4" />}>Marcar perdida</Button>
+              {/* 3.28: solo el Administrador (el servidor exige además que sea el responsable de la ruta). */}
+              {esAdmin && detailSale.status === 'activa' && detailSale.disbursementStatus === 'desembolsado' && (
+                <Button variant="danger" data-testid="write-off-open" onClick={() => { setLostSale(detailSale); setLossKind('fallecio'); setMotivoPerdida(''); setLostOpen(true) }} icon={<XCircle className="w-4 h-4" />}>Dar por perdida</Button>
+              )}
+              {esAdmin && detailSale.status === 'perdida' && (
+                <Button data-testid="recovery-open" onClick={() => { setRecoveryAmount(0); setRecoveryNote(''); setRecoveryOpen(true) }} icon={<DollarSign className="w-4 h-4" />}>Registrar recuperación</Button>
+              )}
+              {esAdmin && detailSale.status === 'perdida' && (
+                <Button variant="secondary" data-testid="write-off-undo-open" onClick={() => { setUndoReason(''); setUndoOpen(true) }}>Deshacer pérdida</Button>
               )}
               {/* Bloque A post-R73: el diálogo se abre aunque haya pagos; el servidor explica si se puede corregir. */}
               {user?.rol === 'admin' && detailSale.status === 'activa' && detailSale.disbursementStatus === 'desembolsado' && (
@@ -761,11 +808,39 @@ export default function ActiveSalesPage() {
       </Modal>
 
       {/* Lost modal */}
-      <Modal open={lostOpen} onClose={() => setLostOpen(false)} title="Marcar venta como perdida"
-        footer={<><Button variant="secondary" onClick={() => setLostOpen(false)}>Cancelar</Button><Button variant="danger" onClick={markLost}>Confirmar</Button></>}>
+      {/* 3.28 (0053): «Dar por perdida», deshacer y recuperación. */}
+      <Modal open={lostOpen} onClose={() => setLostOpen(false)} title="Dar venta por perdida"
+        footer={<><Button variant="secondary" onClick={() => setLostOpen(false)}>Cancelar</Button><Button variant="danger" data-testid="write-off-confirm" loading={saving} onClick={markLost}>Dar por perdida</Button></>}>
         <div className="space-y-3">
-          <p className="text-sm text-gray-600">Esta acción marcará la venta como perdida. Por favor explica el motivo:</p>
-          <Textarea label="Motivo de pérdida" value={motivoPerdida} onChange={e => setMotivoPerdida(e.target.value)} rows={3} required />
+          {lostSale && (
+            <p className="text-sm text-gray-700">Saldo que se da por perdido: <span className="font-bold">{formatCurrency(lostSale.saldo, currency)}</span></p>
+          )}
+          <Select label="Motivo" value={lossKind} onChange={e => setLossKind(e.target.value as LossKind)} data-testid="write-off-kind" required
+            options={[{ value: 'fallecio', label: 'Falleció' }, { value: 'se_fue_del_pais', label: 'Se fue del país' }, { value: 'otro', label: 'Otro' }]} />
+          <Textarea label={lossKind === 'otro' ? 'Explica el motivo' : 'Explicación (opcional)'} value={motivoPerdida} onChange={e => setMotivoPerdida(e.target.value)}
+            rows={3} required={lossKind === 'otro'} data-testid="write-off-reason" />
+          <p className="text-xs text-gray-500 bg-amber-50 border border-amber-100 rounded-lg p-2">
+            El dinero no se mueve: el capital que falta sale de la cartera y se ve como «Pérdida por créditos» en la Liquidación.
+            Si el cliente paga después, el pago se recibe igual como recuperación.
+          </p>
+        </div>
+      </Modal>
+
+      <Modal open={undoOpen} onClose={() => setUndoOpen(false)} title="Deshacer pérdida"
+        footer={<><Button variant="secondary" onClick={() => setUndoOpen(false)}>Cancelar</Button><Button data-testid="write-off-undo-confirm" loading={saving} onClick={undoLost}>Deshacer</Button></>}>
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">La venta vuelve a activa con su calendario y su mora, como si no se hubiera dado por perdida. Solo se puede si no tuvo recuperaciones.</p>
+          <Textarea label="¿Por qué se deshace?" value={undoReason} onChange={e => setUndoReason(e.target.value)} rows={3} required data-testid="write-off-undo-reason" />
+        </div>
+      </Modal>
+
+      <Modal open={recoveryOpen} onClose={() => setRecoveryOpen(false)} title="Registrar recuperación"
+        footer={<><Button variant="secondary" onClick={() => setRecoveryOpen(false)}>Cancelar</Button><Button data-testid="recovery-confirm" loading={saving} onClick={registerRecovery} icon={<DollarSign className="w-4 h-4" />}>Registrar</Button></>}>
+        <div className="space-y-3">
+          {detailSale && <p className="text-sm text-gray-700">Saldo de la venta perdida: <span className="font-bold">{formatCurrency(detailSale.saldo, currency)}</span></p>}
+          <MoneyInput label="Valor recibido" currency={currency} value={recoveryAmount} onValueChange={setRecoveryAmount} required />
+          <Textarea label="Nota (opcional)" value={recoveryNote} onChange={e => setRecoveryNote(e.target.value)} rows={2} />
+          <p className="text-xs text-gray-500">El dinero entra a la Base de la ruta. Un pago de recuperación no se puede anular: revisa el valor antes de registrar.</p>
         </div>
       </Modal>
 

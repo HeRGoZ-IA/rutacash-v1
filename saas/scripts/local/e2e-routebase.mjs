@@ -1748,6 +1748,11 @@ try {
     const lDirect = await lAd1('POST', '/v1/credits/direct', { routeId: C2, clientId: fixClient, amountMinor: 10_000, interestRate: 20, installmentsCount: 10,
       frequency: 'diaria', startDate: lToday, paymentDays: [0, 1, 2, 3, 4, 5, 6] });
     const fixSaleId = lDirect.body?.credit?.id;
+    // 3.28: venta para «Dar por perdida» y «Deshacer pérdida» por la pantalla (creada por la API antes de entrar).
+    const lostClient = await lClient('Cliente E2E Venta Perdida');
+    const lostDirect = await lAd1('POST', '/v1/credits/direct', { routeId: C2, clientId: lostClient, amountMinor: 10_000, interestRate: 20, installmentsCount: 10,
+      frequency: 'diaria', startDate: lToday, paymentDays: [0, 1, 2, 3, 4, 5, 6] });
+    const lostSaleId = lostDirect.body?.credit?.id;
     await login('admin1.norte@example.test');
     const lBase0 = await base(C2);
     await go('/admin/active-sales'); await sleep(2000);
@@ -1810,6 +1815,39 @@ try {
     ok('LT-02', ['C-01'], `Corregir fecha de entrega (ayer): la venta ${lClosed ? 'conserva su fecha y guarda la real' : 'pasa a ayer'}; el asiento conserva la suya; el botón desaparece`,
       Boolean(fixSaleId) && lBtn && lFixToast && lFix?.del === lYesterday && lFix.dd === lExpected && lFix.ed === lToday && lDetail.includes(yTxt) && lBtnGone,
       JSON.stringify({ fixSaleId, lBtn, lFixToast, lFix, lDetail: lDetail.slice(0, 160), lBtnGone, lDiag }));
+
+    // 3.28 (0053): «Dar por perdida» y «Deshacer pérdida» desde el detalle de la venta (Administrador responsable).
+    const openLostRow = async () => {
+      await go('/admin/active-sales'); await sleep(2500);
+      await page.waitForFunction(() => [...document.querySelectorAll('tr, li button')].some((r) => /venta perdida/i.test(r.innerText)), { timeout: 30_000 }).catch(() => undefined);
+      await page.evaluate(() => { const row = [...document.querySelectorAll('tr, li button')].find((r) => /venta perdida/i.test(r.innerText) && r.offsetParent !== null); row?.click(); });
+    };
+    const lossAcct = async () => Number((await one(`select coalesce(sum(balance_minor), 0)::text b from adex.capital_accounts where company_id = $1 and kind = 'credit_loss' and route_id = $2`, [N, C2])).b);
+    const wBase0 = await base(C2);
+    await openLostRow();
+    const wBtn = await waitTestid('write-off-open', 20_000);
+    await tap('write-off-open'); await waitTestid('write-off-confirm', 10_000);
+    await both('WO-01-dar-por-perdida', () => waitTestid('write-off-confirm'));
+    await tap('write-off-confirm');
+    const wToast = await waitToast('Venta dada por perdida');
+    let wSale = null;
+    for (let i = 0; i < 15 && wSale?.status !== 'perdida'; i++) { await sleep(700); wSale = await one('select status, lost_kind k, lost_principal_minor::text p from adex.sales where id = $1', [lostSaleId ?? '']); }
+    const wLoss = await lossAcct();
+    ok('WO-01', ['C-01'], 'Dar por perdida (Falleció): la venta pasa a «perdida», su capital va a «Pérdida por créditos» y la Base no cambia (3.28)',
+      Boolean(lostSaleId) && wBtn && wToast && wSale?.status === 'perdida' && wSale.k === 'fallecio' && wSale.p === '10000' && wLoss === 10_000 && (await base(C2)) === wBase0,
+      JSON.stringify({ lostSaleId, wBtn, wToast, wSale, wLoss, base0: wBase0, base1: await base(C2) }));
+    await openLostRow();
+    const uBtn = await waitTestid('write-off-undo-open', 20_000);
+    await tap('write-off-undo-open'); await waitTestid('write-off-undo-reason', 10_000);
+    await page.evaluate(() => { const el = document.querySelector('[data-testid="write-off-undo-reason"]'); if (!el) return;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, 'Se marcó por error la venta equivocada (prueba E2E)');
+      el.dispatchEvent(new Event('input', { bubbles: true })); });
+    await tap('write-off-undo-confirm');
+    const uToast = await waitToast('La venta volvió a activa');
+    let uSale = null;
+    for (let i = 0; i < 15 && uSale?.status !== 'activa'; i++) { await sleep(700); uSale = await one('select status, lost_operation_id op from adex.sales where id = $1', [lostSaleId ?? '']); }
+    ok('WO-02', ['C-01'], 'Deshacer pérdida: la venta vuelve a activa y «Pérdida por créditos» queda en cero (3.28)',
+      uBtn && uToast && uSale?.status === 'activa' && uSale.op === null && (await lossAcct()) === 0, JSON.stringify({ uBtn, uToast, uSale, loss: await lossAcct() }));
 
     stage = 'TZ';
     for (const [c, name] of [[N, 'Norte'], [T, 'Transición']]) {

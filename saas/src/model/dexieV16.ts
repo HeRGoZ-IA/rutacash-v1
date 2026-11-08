@@ -173,6 +173,9 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       { column: 'rectification_count', reason: 'Ronda 73 (0030): rectificaciones del crédito desembolsado (historial en credit_rectifications; concurrencia optimista)' },
       { column: 'principal_reclassified_minor', reason: 'Ronda 74 (0032): capital reclasificado por rectificaciones con pagos; capital reconocido = Σ pagos.principal_minor + este valor' },
       { column: 'migration_voided_at', reason: '0048: venta migrada anulada al corregir una diferencia de migración («nunca debió existir»); solo del servidor' },
+      { column: 'lost_kind', reason: '3.28 (0053): motivo del castigo (fallecio / se_fue_del_pais / otro); CLEAN solo guardaba el texto libre' },
+      { column: 'lost_principal_minor', reason: '3.28 (0053): capital que salió de la cartera al castigar; solo del servidor (libro de doble entrada)' },
+      { column: 'lost_operation_id', reason: '3.28 (0053): asiento CREDIT_WRITE_OFF del castigo vigente; CLEAN no tiene libro de doble entrada' },
     ],
   },
   {

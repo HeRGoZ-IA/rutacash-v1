@@ -134,11 +134,14 @@ describe('Ronda 33 · RLS con contexto evaluado una vez (0020)', () => {
       + ' drop policy route_migration_items_ctx on adex.route_migration_items;'
       + ' drop policy route_migration_loads_ctx on adex.route_migration_loads;'
       // 0048: diferencias de un cierre de migración.
-      + ' drop policy route_migration_differences_ctx on adex.route_migration_differences;');
+      + ' drop policy route_migration_differences_ctx on adex.route_migration_differences;'
+      // 3.28 (0053): historial de castigos, cuenta «Pérdida por créditos» y sus operaciones.
+      + ' drop policy sale_write_offs_ctx on adex.sale_write_offs;'
+      + ' drop policy capital_accounts_credit_loss_ctx on adex.capital_accounts; drop policy capital_operations_credit_loss_ctx on adex.capital_operations;');
     const LATER = [':client_locations', ':sale_locations', ':payment_locations', ':credit_rectifications', ':credit_rectification_cases',
       ':route_handover_records', ':capital_model_activations', ':general_funding_contributions', ':admin_reimbursements', ':difference_conciliations',
       ':offline_captures', ':sale_delivery_dates', ':route_migrations', ':route_migration_items', ':route_migration_loads',
-      ':route_migration_differences'];
+      ':route_migration_differences', ':sale_write_offs'];
     // 0034 amplía a propósito lo que el Administrador y el Supervisor ven de las cuentas de SUS rutas (cartera, interés,
     // gastos, control, Base) y, con ellas, sus patas: no se comparan esas lecturas.
     const route034 = (k: string) => (k.startsWith('admin/') || k.startsWith('supervisor/')) && (k.endsWith(':capital_accounts') || k.endsWith(':capital_entries'));

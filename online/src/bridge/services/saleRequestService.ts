@@ -4,7 +4,7 @@
 //   · Aprobar NO crea todavía el crédito: queda la solicitud aprobada y el crédito nace al
 //     desembolsar (comando de dinero del Cobrador o del responsable). Para el negocio es
 //     el mismo estado que en CLEAN: «pendiente de desembolso por el cobrador».
-//   · Castigar (marcar perdido) un crédito desembolsado no existe todavía en el servidor.
+//   · Castigar («Dar por perdida», 3.28 · 0053): solo el Administrador responsable, con motivo; deshacer y recuperación.
 //   · Alta de cliente + venta/solicitud en el mismo formulario: el servidor da de alta el
 //     cliente (comando idempotente) y DESPUÉS registra la venta o la solicitud. Son dos
 //     transacciones: si la segunda falla, el cliente queda registrado y se dice así.
@@ -152,8 +152,27 @@ async function confirmDisbursementOnline(saleId: string, _actor: User): Promise<
   await asSaleError(() => money('POST', `/v1/credit-requests/${saleId}/disburse`, {}, generateId()));
 }
 
-async function markSaleLostOnline(): Promise<void> {
-  throw new SaleRuleError('Marcar una venta como perdida (castigo) todavía no está disponible en el servidor de ADEX Online.');
+/** 3.28 · motivo del castigo («Otro» lleva explicación de al menos 10 caracteres). */
+export type LossKind = 'fallecio' | 'se_fue_del_pais' | 'otro';
+
+/** 3.28: «Dar por perdida» (`POST /v1/credits/:id/write-off`). El dinero no se mueve; el capital pendiente pasa a pérdida. */
+export async function writeOffSale(saleId: string, reasonKind: LossKind, reason: string): Promise<void> {
+  await asSaleError(() => money('POST', `/v1/credits/${encodeURIComponent(saleId)}/write-off`, { reasonKind, reason: reason.trim() }, generateId()));
+}
+
+/** 3.28: «Deshacer pérdida» (solo sin recuperaciones). */
+export async function undoWriteOffSale(saleId: string, reason: string): Promise<void> {
+  await asSaleError(() => money('POST', `/v1/credits/${encodeURIComponent(saleId)}/write-off/undo`, { reason: reason.trim() }, generateId()));
+}
+
+/** 3.28: recuperación de una venta perdida (entra a la Base de la ruta). */
+export async function recoverLostSale(saleId: string, amount: number, note: string): Promise<void> {
+  await asSaleError(() => money('POST', `/v1/credits/${encodeURIComponent(saleId)}/recovery`, { amountMinor: toMinor(amount), note: note.trim() }, generateId()));
+}
+
+/** Compatibilidad con la firma de CLEAN (`markSaleLost(id, actor, motivo)`): «Otro» con el motivo escrito. */
+async function markSaleLostOnline(saleId: string, _actor: User, motivo: string): Promise<void> {
+  await writeOffSale(saleId, 'otro', motivo);
 }
 
 /** Ronda 73 · SOC-09: rectificación de una venta desembolsada (Administrador, `POST /v1/credits/:id/rectify`). */

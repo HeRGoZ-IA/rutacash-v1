@@ -633,7 +633,12 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
               {row('Gastos operativos', r.period.expenses.operativoMinor)}
               {row('Otros gastos', r.period.expenses.otroMinor)}
               {row('Bienes duraderos', r.period.expenses.bienDuraderoMinor, { hint: 'Aparte: no cuentan en el resultado operativo' })}
-              {row('Resultado operativo', r.operatingResultMinor, { strong: true, hint: 'Interés cobrado − gastos operativos y otros. No es utilidad contable ni dinero retirable' })}
+              {/* 3.28 (0053): línea aparte; baja el resultado, no el efectivo. */}
+              {(r.period.creditLossMinor ?? 0) !== 0 && row('Pérdida por créditos (capital)', r.period.creditLossMinor ?? 0,
+                { hint: 'Capital de ventas dadas por perdidas en el periodo, menos lo recuperado. No es efectivo' })}
+              {row('Resultado operativo', r.operatingResultMinor, { strong: true, hint: (r.period.creditLossMinor ?? 0) !== 0
+                ? 'Interés cobrado − gastos operativos y otros − pérdida por créditos. No es utilidad contable ni dinero retirable'
+                : 'Interés cobrado − gastos operativos y otros. No es utilidad contable ni dinero retirable' })}
               {row('Flujo operativo', r.operatingFlowMinor, { hint: 'Recaudo − desembolsos − gastos. Puede ser negativo sin ser pérdida' })}
               {r.capitalNeedMinor != null && row('Necesidad de capital', r.capitalNeedMinor)}
             </dl>

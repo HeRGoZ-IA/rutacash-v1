@@ -88,6 +88,8 @@ export interface PanelRoute {
   portfolio: { principalPlacedMinor: number; outstandingWithInterestMinor: number };
   approvedNotDisbursedMinor: number;
   period: { collectionsMinor: number; interestCollectedMinor: number; principalDisbursedMinor: number;
+    /** 3.28 (0053): capital dado por perdido en el periodo, neto de deshacer y de lo recuperado. */
+    creditLossMinor?: number;
     expenses: { operativoMinor: number; bienDuraderoMinor: number; otroMinor: number }; base: BaseBlock | null };
   operatingResultMinor: number; operatingFlowMinor: number; capitalNeedMinor: number | null;
   states: { negativeOperatingResult: boolean; negativeFlowFromGrowth: boolean; insufficientLiquidity: boolean | null };

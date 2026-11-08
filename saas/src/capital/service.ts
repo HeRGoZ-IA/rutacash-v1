@@ -623,12 +623,25 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
     `select count(*)::text n from adex.capital_accounts a
       where a.company_id = $1 and a.kind = 'portfolio'
         and a.balance_minor <> coalesce((select sum(s.sale_value_minor) from adex.sales s
-                                          where s.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null), 0)
+                                          where s.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null
+                                            and s.lost_operation_id is null), 0)
                              - coalesce((select sum(p.principal_minor) from adex.payments p join adex.sales s on s.company_id = p.company_id and s.id = p.sale_id
-                                          where p.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null), 0)
+                                          where p.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null
+                                            and s.lost_operation_id is null), 0)
                              -- Bloque A post-R73 (0032): capital reclasificado por rectificaciones con pagos.
                              - coalesce((select sum(s.principal_reclassified_minor) from adex.sales s
-                                          where s.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null), 0)`);
+                                          where s.company_id = a.company_id and s.route_id = a.route_id and s.ledger_operation_id is not null
+                                            and s.lost_operation_id is null), 0)`);
+  // 3.28 (0053): una venta castigada ya no está en la cartera; su capital está en «Pérdida por créditos»:
+  // castigado vigente − capital recuperado después del castigo.
+  const creditLoss = await q(
+    `select count(*)::text n from adex.capital_accounts a
+      where a.company_id = $1 and a.kind = 'credit_loss'
+        and a.balance_minor <> coalesce((select sum(s.lost_principal_minor) from adex.sales s
+                                          where s.company_id = a.company_id and s.route_id = a.route_id and s.lost_operation_id is not null), 0)
+                             - coalesce((select sum(p.principal_minor) from adex.payments p join adex.capital_operations o
+                                           on o.company_id = p.company_id and o.id = p.ledger_operation_id and o.kind = 'CREDIT_RECOVERY'
+                                          where p.company_id = a.company_id and p.route_id = a.route_id), 0)`);
   // Fase 5 · recaudos: cada crédito con asiento cumple, con sus pagos (originales y anulaciones),
   //   saldo = Σ cuotas = total − Σ pagos; capital reconocido = round(pagado × capital / total);
   //   y cada pago tiene su asiento COLLECTION (o su anulación) por el mismo importe y ruta.
@@ -645,7 +658,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
        join adex.sales s on s.company_id = p.company_id and s.id = p.sale_id
       where p.company_id = $1 and s.ledger_operation_id is not null
         and not exists (select 1 from adex.capital_operations o where o.company_id = p.company_id and o.id = p.ledger_operation_id and o.payment_id = p.id
-                          and o.amount_minor = abs(p.amount_minor) and o.route_id = p.route_id and coalesce(o.reverses_kind, o.kind) in ('COLLECTION', 'MIGRATION_COLLECTION', 'MIGRATION_CASH_COLLECTION'))`);
+                          and o.amount_minor = abs(p.amount_minor) and o.route_id = p.route_id and coalesce(o.reverses_kind, o.kind) in ('COLLECTION', 'MIGRATION_COLLECTION', 'MIGRATION_CASH_COLLECTION', 'CREDIT_RECOVERY'))`);
   // Fase 5 · gastos: cada gasto con asiento coincide con él, y la cuenta de gastos de
   // cada ruta (o de empresa) es la suma de sus gastos netos.
   // R74 (0035): un gasto general con aportes de rutas tiene UNA operación por ruta (todas con su `expense_id`):
@@ -697,6 +710,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
     { name: 'credits-have-disbursement', ok: orphanCredits === 0, detail: orphanCredits },
     { name: 'one-credit-per-request', ok: duplicated === 0, detail: duplicated },
     { name: 'portfolio-matches-credits', ok: portfolio === 0, detail: portfolio },
+    { name: 'credit-loss-matches-write-offs', ok: creditLoss === 0, detail: creditLoss },
     { name: 'negative-custody-only-by-worker-expense', ok: negativeCustody === 0, detail: negativeCustody },
     { name: 'credits-match-installments-and-payments', ok: creditDrift === 0, detail: creditDrift },
     { name: 'payments-have-ledger-entry', ok: unmatchedPayments === 0, detail: unmatchedPayments },

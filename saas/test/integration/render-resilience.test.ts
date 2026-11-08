@@ -153,7 +153,9 @@ describe('ADEX Online · resiliencia para Render Free (proceso real, TLS, reinic
       // 3.20: enlace de restablecimiento (sin migración; en la puerta de Vercel).
       'reset-links-v1',
       // 0042: venta registrada tarde y corrección de la fecha de entrega (en la puerta de Vercel).
-      'late-sale-v1'] }]);
+      'late-sale-v1',
+      // 3.28 (0053): castigo de créditos (en la puerta de Vercel).
+      'credit-write-off-v1'] }]);
     const ready = await call('GET', '/readyz', { membership: null });
     assert.deepEqual([ready.status, ready.body], [200, { status: 'ready' }], 'PostgreSQL over TLS with the CA file');
     assert.equal(health.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
