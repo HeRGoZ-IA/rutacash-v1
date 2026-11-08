@@ -23,13 +23,15 @@ function nextAllowedDay(date: Date, allowed: number[]): Date {
 
 /**
  * Calcula las fechas de vencimiento de las cuotas.
- * - Si paymentDays es undefined/vacío → comportamiento original (compatibilidad con ventas antiguas).
+ * Error 3.33 (2026-11-07): la primera cuota vence UN PERIODO DESPUÉS de fechaInicio (el día del préstamo);
+ * nunca el mismo día del desembolso (antes la cuota 1 caía en fechaInicio y una venta semanal salía
+ * «atrasada» al día siguiente). Diaria: día siguiente; semanal: +1 semana; quincenal: +15 días; mensual: +1 mes.
+ * - Si paymentDays es undefined/vacío → sin restricción de días.
  * - Si paymentDays tiene días → las fechas caen únicamente en esos días (según la frecuencia).
  *
  * Reglas por frecuencia cuando hay paymentDays:
- *  - diaria:    se recorre el calendario y solo se cuentan los días permitidos (saltea no permitidos).
- *  - semanal:   se ancla en el primer día permitido en/después de fechaInicio y se suma 1 semana por cuota.
- *               (si hay varios días seleccionados, el "primer día permitido alcanzado" es el día semanal principal).
+ *  - diaria:    se recorre el calendario desde el día siguiente y solo se cuentan los días permitidos.
+ *  - semanal:   se ancla en el primer día permitido en/después de fechaInicio + 1 semana y se suma 1 semana por cuota.
  *  - quincenal: se mantiene la cadencia de 15 días; si la fecha cae en día no permitido se mueve al siguiente permitido.
  *  - mensual:   se mantiene la cadencia mensual; si la fecha cae en día no permitido se mueve al siguiente permitido.
  */
@@ -45,14 +47,14 @@ export function computeInstallmentDates(params: {
   const dates: Date[] = []
 
   if (!allowed) {
-    // Comportamiento original (sin días de pago)
+    // Sin días de pago: la cuota i vence i periodos después del préstamo.
     for (let i = 1; i <= numeroCuotas; i++) {
       switch (frecuencia) {
-        case 'diaria': dates.push(addDays(fechaBase, i - 1)); break
-        case 'semanal': dates.push(addWeeks(fechaBase, i - 1)); break
-        case 'quincenal': dates.push(addDays(fechaBase, (i - 1) * 15)); break
-        case 'mensual': dates.push(addMonths(fechaBase, i - 1)); break
-        default: dates.push(addDays(fechaBase, i - 1))
+        case 'diaria': dates.push(addDays(fechaBase, i)); break
+        case 'semanal': dates.push(addWeeks(fechaBase, i)); break
+        case 'quincenal': dates.push(addDays(fechaBase, i * 15)); break
+        case 'mensual': dates.push(addMonths(fechaBase, i)); break
+        default: dates.push(addDays(fechaBase, i))
       }
     }
     return dates.map(d => format(d, 'yyyy-MM-dd'))
@@ -60,21 +62,21 @@ export function computeInstallmentDates(params: {
 
   switch (frecuencia) {
     case 'semanal': {
-      const anchor = nextAllowedDay(fechaBase, allowed)
+      const anchor = nextAllowedDay(addWeeks(fechaBase, 1), allowed)
       for (let i = 0; i < numeroCuotas; i++) dates.push(addWeeks(anchor, i))
       break
     }
     case 'quincenal': {
-      for (let i = 0; i < numeroCuotas; i++) dates.push(nextAllowedDay(addDays(fechaBase, i * 15), allowed))
+      for (let i = 1; i <= numeroCuotas; i++) dates.push(nextAllowedDay(addDays(fechaBase, i * 15), allowed))
       break
     }
     case 'mensual': {
-      for (let i = 0; i < numeroCuotas; i++) dates.push(nextAllowedDay(addMonths(fechaBase, i), allowed))
+      for (let i = 1; i <= numeroCuotas; i++) dates.push(nextAllowedDay(addMonths(fechaBase, i), allowed))
       break
     }
     case 'diaria':
     default: {
-      let cursor = nextAllowedDay(fechaBase, allowed)
+      let cursor = nextAllowedDay(addDays(fechaBase, 1), allowed)
       for (let i = 0; i < numeroCuotas; i++) {
         dates.push(cursor)
         cursor = nextAllowedDay(addDays(cursor, 1), allowed)

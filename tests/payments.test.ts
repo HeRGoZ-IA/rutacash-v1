@@ -17,7 +17,7 @@
 import {
   generateInstallments, calculateTotalWithInterest, applyPaymentToInstallments,
   calculateSaleBalance, calculateCurrentInstallment, getLastPaidInstallmentNumber,
-  recalculateSaleFromPayments,
+  recalculateSaleFromPayments, computeInstallmentDates,
 } from '../src/services/installmentEngine'
 import { amountForInstallments, pendingInstallments, quickAmounts, registerPayment, type PaymentDatabase, type AuditSink } from '../src/services/paymentService'
 import {
@@ -234,6 +234,24 @@ await spec('SRC-007', 'Arquitectura', 'el módulo de conciliación es estrictame
 // ############################################################
 // NIVEL A — MOTOR PURO (sin cambios: se conserva como red anti-regresión)
 // ############################################################
+await spec('PAY-000', 'Motor puro', 'la primera cuota vence un periodo después del préstamo, nunca el mismo día (error 3.33)', () => {
+  const lunASab = [1, 2, 3, 4, 5, 6]
+  const eq = (a: string[], b: string[], m: string) => assert(JSON.stringify(a) === JSON.stringify(b), `${m}: ${a.join(',')}`)
+  // Caso real del socio: semanal de 4 cuotas prestado el martes 2026-11-03.
+  eq(computeInstallmentDates({ fechaInicio: '2026-11-03', numeroCuotas: 4, frecuencia: 'semanal', paymentDays: lunASab }),
+    ['2026-11-10', '2026-11-17', '2026-11-24', '2026-12-01'], 'semanal')
+  // Diaria lunes a sábado prestada un sábado: empieza el lunes (salta el domingo).
+  eq(computeInstallmentDates({ fechaInicio: '2026-11-07', numeroCuotas: 3, frecuencia: 'diaria', paymentDays: lunASab }),
+    ['2026-11-09', '2026-11-10', '2026-11-11'], 'diaria')
+  eq(computeInstallmentDates({ fechaInicio: '2026-11-03', numeroCuotas: 2, frecuencia: 'quincenal', paymentDays: lunASab }),
+    ['2026-11-18', '2026-12-03'], 'quincenal')
+  eq(computeInstallmentDates({ fechaInicio: '2026-11-03', numeroCuotas: 2, frecuencia: 'mensual', paymentDays: lunASab }),
+    ['2026-12-03', '2027-01-04'], 'mensual (3 de enero es domingo)')
+  for (const frecuencia of ['diaria', 'semanal', 'quincenal', 'mensual'] as const) {
+    const [first] = computeInstallmentDates({ fechaInicio: '2026-11-03', numeroCuotas: 1, frecuencia })
+    assert(first > '2026-11-03', `${frecuencia} sin días de pago: la cuota 1 cae ${first}`)
+  }
+})
 await spec('PAY-001', 'Motor puro', 'pago parcial mantiene venta activa', () => {
   const { valorTotal } = calculateTotalWithInterest({ valorVenta: ESC_100K.valorVenta, tasaInteres: 20 })
   const insts = generateInstallments({ saleId: 's', valorTotal, numeroCuotas: 5, valorCuota: Math.round(valorTotal / 5), frecuencia: 'diaria', fechaInicio: '2026-08-19' })
