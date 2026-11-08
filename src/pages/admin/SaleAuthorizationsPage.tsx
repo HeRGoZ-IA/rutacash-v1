@@ -337,7 +337,7 @@ export default function SaleAuthorizationsPage() {
               <div><p className="text-xs text-gray-500">N° parcelas</p><p className="font-bold text-gray-900">{detail.installmentsCount}</p></div>
               <div><p className="text-xs text-gray-500">Valor parcela</p><p className="font-bold text-gray-900">{formatCurrency(detail.installmentValue, currency)}</p></div>
               <div><p className="text-xs text-gray-500">Forma de pago</p><p className="font-bold text-gray-900 capitalize">{detail.frequency}</p></div>
-              <div><p className="text-xs text-gray-500">Fecha de inicio</p><p className="font-bold text-gray-900">{formatDate(detail.startDate)}</p></div>
+              <div><p className="text-xs text-gray-500">Fecha de la venta</p><p className="font-bold text-gray-900">{formatDate(detail.startDate)}</p></div>
               {/* Días de pago como badges/chips (no texto corrido) */}
               <div className="col-span-2">
                 <p className="text-xs text-gray-500 mb-1.5">Días de pago</p>
@@ -412,7 +412,7 @@ export default function SaleAuthorizationsPage() {
                               terminar). La fecha REAL de finalización solo existe
                               cuando el crédito se saldó: `fechaFinalizacion`. */}
                           <p className="text-gray-400">
-                            Inicio {formatDate(s.fechaInicio)}
+                            Venta {formatDate(s.fechaInicio)}
                             {s.status !== 'activa' ? ` · Fin estimado ${formatDate(s.fechaFinalEstimada)}` : ''}
                             {s.fechaFinalizacion ? ` · Finalizó ${formatDate(s.fechaFinalizacion)}` : ''}
                           </p>

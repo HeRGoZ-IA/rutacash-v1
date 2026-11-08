@@ -47,6 +47,7 @@ import { filterAccessibleRoutes, filterByAccessibleRoute, canAccessRoute } from 
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter'
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar'
 import type { Sale, Client, Route, Installment, Payment, User } from '@/models/types'
+import { firstPaymentDate } from '@/services/installmentEngine'
 
 // Días de pago (1=lunes ... 6=sábado, 0=domingo)
 const WEEK_DAYS = [
@@ -603,7 +604,7 @@ export default function ActiveSalesPage() {
           )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Select label="Frecuencia de pago" value={form.frecuenciaPago} onChange={e => setForm(f => ({ ...f, frecuenciaPago: e.target.value as any }))} options={freqOptions} />
-            <Input label="Fecha inicio de cobro" type="date" min={late.on && late.deliveredOn ? late.deliveredOn : today()} value={form.fechaInicio} onChange={e => setForm(f => ({ ...f, fechaInicio: e.target.value }))}
+            <Input label="Fecha de la venta" type="date" min={late.on && late.deliveredOn ? late.deliveredOn : today()} value={form.fechaInicio} onChange={e => setForm(f => ({ ...f, fechaInicio: e.target.value }))}
               hint={late.on ? 'No puede ser anterior a la fecha de entrega' : 'No puede ser anterior a hoy'} />
           </div>
           <div>
@@ -635,6 +636,7 @@ export default function ActiveSalesPage() {
               <div><p className="text-xs text-gray-500">Total a pagar</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorTotal, currency)}</p></div>
               <div><p className="text-xs text-gray-500">Valor parcela</p><p className="font-bold text-primary-700">{formatCurrency(calculated.valorCuota, currency)}</p></div>
               <div><p className="text-xs text-gray-500">Fecha estimada fin</p><p className="font-bold text-primary-700">{formatDate(calculated.fechaFinal)}</p></div>
+            <div className="col-span-2" data-testid="first-payment-date"><p className="text-xs text-gray-500">Primer abono</p><p className="font-bold text-primary-700">{formatDate(firstPaymentDate({ fechaInicio: form.fechaInicio, frecuencia: form.frecuenciaPago, paymentDays: form.paymentDays }))}</p></div>
             </div>
           )}
         </div>

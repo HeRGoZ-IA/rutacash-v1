@@ -41,6 +41,7 @@ import {
 import { paymentDisplayStateOf, paymentHistoryRows } from '@/lib/paymentState'
 import { PaymentAnnulmentDetail, PaymentStateBadge } from '@/components/ui/PaymentAnnulment'
 import type { Client, Route, Sale, Payment } from '@/models/types'
+import { firstPaymentDate } from '@/services/installmentEngine'
 
 // Tasa fija seleccionable (igual que en Ventas Activas): solo 10% o 20%
 const TASA_OPTIONS = [
@@ -485,7 +486,7 @@ export default function ClientsPage() {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Select label="Frecuencia de pago" value={saleForm.frecuenciaPago} onChange={e => setSaleForm(f => ({ ...f, frecuenciaPago: e.target.value as Sale['frecuenciaPago'] }))} options={FREQ_OPTIONS} />
-                    <Input label="Fecha inicio de cobro" type="date" min={today()} value={saleForm.fechaInicio} onChange={e => setSaleForm(f => ({ ...f, fechaInicio: e.target.value }))} hint="No puede ser anterior a hoy" />
+                    <Input label="Fecha de la venta" type="date" min={today()} value={saleForm.fechaInicio} onChange={e => setSaleForm(f => ({ ...f, fechaInicio: e.target.value }))} hint="No puede ser anterior a hoy" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Días de pago</label>
@@ -520,6 +521,7 @@ export default function ClientsPage() {
                       <div><p className="text-xs text-gray-500">Total a pagar</p><p className="font-bold text-primary-700">{formatCurrency(saleCalc.valorTotal, currency)}</p></div>
                       <div><p className="text-xs text-gray-500">Valor parcela</p><p className="font-bold text-primary-700">{formatCurrency(saleCalc.valorCuota, currency)}</p></div>
                       <div><p className="text-xs text-gray-500">Fecha estimada fin</p><p className="font-bold text-primary-700">{formatDate(saleCalc.fechaFinal)}</p></div>
+            <div className="col-span-2" data-testid="first-payment-date"><p className="text-xs text-gray-500">Primer abono</p><p className="font-bold text-primary-700">{formatDate(firstPaymentDate({ fechaInicio: saleForm.fechaInicio, frecuencia: saleForm.frecuenciaPago, paymentDays: saleForm.paymentDays }))}</p></div>
                     </div>
                   )}
                 </div>

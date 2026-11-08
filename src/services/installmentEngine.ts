@@ -244,6 +244,11 @@ export function calculateTotalWithInterest(params: {
   }
 }
 
+/** Fecha del primer abono (3.33): un periodo después de la fecha de la venta, según frecuencia y días de cobro. */
+export function firstPaymentDate(params: { fechaInicio: string; frecuencia: PaymentFrequency; paymentDays?: number[] }): string {
+  return computeInstallmentDates({ ...params, numeroCuotas: 1 })[0] ?? params.fechaInicio
+}
+
 export function estimateFinalDate(params: {
   fechaInicio: string
   numeroCuotas: number

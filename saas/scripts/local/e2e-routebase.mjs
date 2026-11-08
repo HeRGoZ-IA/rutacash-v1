@@ -680,11 +680,17 @@ try {
     await shot('B-02-venta-mayor-que-base-1280');
     ok('B-02', ['C-06'], 'Venta mayor que la Base de Centro 2 (con Centro 1 con más dinero): la pantalla la rechaza', overSale && createBtnDisabled === true);
     await setField('Valor de la venta', '200'); await sleep(500);
+    // 3.33: el formulario dice «Fecha de la venta» y muestra el «Primer abono» (un periodo después).
+    const form333 = await page.evaluate(() => ({ label: [...document.querySelectorAll('label')].some((l) => l.innerText.trim() === 'Fecha de la venta'),
+      first: document.querySelector('[data-testid="first-payment-date"]')?.innerText.replace(/ /g, ' ') ?? null }));
     await clickText('button', /^Crear venta$/);
     await sleep(800);
     if (await page.evaluate(() => [...document.querySelectorAll('[role="dialog"]')].some((d) => /otra venta|ya tiene una venta/i.test(d.innerText)))) await clickText('button', /Crear|Confirmar|Sí/);
     const saleOk = await waitToast('Venta creada');
     const saleC2 = await saleOf(c2Client);
+    const due333 = saleC2 ? await one(`select s.start_date::date::text start, i.due_date::date::text due, to_char(i.due_date, 'DD/MM/YYYY') shown from adex.sales s join adex.installments i on i.sale_id = s.id and i.number = 1 where s.id = $1`, [saleC2.id]) : null;
+    ok('A-17b', ['C-01'], '3.33: «Fecha de la venta» + «Primer abono» en el formulario; la cuota 1 vence después del día de la venta y coincide con lo mostrado',
+      form333.label && !!due333 && due333.due > due333.start && (form333.first ?? '').includes(due333.shown), JSON.stringify({ form333, due333 }));
     ok('A-17', ['C-01'], 'Venta directa de R$ 200 en Centro 2: sale de la Base de Centro 2 (y solo de ella)', saleOk && saleC2?.v === 20_000 && (await base(C2)) === bC2 - 20_000 && (await base(C1)) === bC1, JSON.stringify({ saleC2, bC2, after: await base(C2) }));
 
     // Gasto general con un aporte mayor que la Base de su ruta: la pantalla lo impide.

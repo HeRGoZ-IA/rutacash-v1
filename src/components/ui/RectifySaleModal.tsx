@@ -178,7 +178,7 @@ export function RectifySaleModal({ sale, user, currency, open, onClose, onDone }
           <Select label="Tasa" value={String(tasa)} onChange={e => setTasa(Number(e.target.value))}
             options={[{ value: '10', label: '10%' }, { value: '20', label: '20%' }]} />
           <Select label="Frecuencia" value={freq} onChange={e => setFreq(e.target.value as PaymentFrequency)} options={FREQ_OPTIONS} />
-          <Input label="Fecha de inicio" type="date" value={inicio} min={sale.fechaDesembolso} onChange={e => setInicio(e.target.value)} required />
+          <Input label="Fecha de la venta" type="date" value={inicio} min={sale.fechaDesembolso} onChange={e => setInicio(e.target.value)} required />
         </div>
         {delta !== 0 && (
           <p className="text-sm text-gray-700">

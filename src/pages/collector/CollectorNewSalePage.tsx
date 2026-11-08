@@ -21,6 +21,7 @@ import { computeSaleFinancials, createDirectSale, createSaleRequest, findActiveS
 import { useCapitalGuard } from '@/hooks/useCapitalGuard'
 import { decideSaleOrigination } from '@/lib/activeCredit'
 import type { Client, Sale, Route } from '@/models/types'
+import { firstPaymentDate } from '@/services/installmentEngine'
 
 const FREQ_OPTIONS = [
   { value: 'diaria', label: 'Diaria' }, { value: 'semanal', label: 'Semanal' },
@@ -234,7 +235,7 @@ export default function CollectorNewSalePage() {
 
         <div className="grid grid-cols-2 gap-3">
           <Input label="N° de parcelas" type="number" min={1} required value={form.numeroCuotas || ''} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder={`Ej: ${DEFAULT_INSTALLMENTS}`} />
-          <Input label="Fecha de inicio" type="date" min={today()} value={form.fechaInicio} onChange={e => setForm(f => ({ ...f, fechaInicio: e.target.value }))} />
+          <Input label="Fecha de la venta" type="date" min={today()} value={form.fechaInicio} onChange={e => setForm(f => ({ ...f, fechaInicio: e.target.value }))} />
         </div>
 
         <div>
@@ -259,6 +260,7 @@ export default function CollectorNewSalePage() {
             <div><p className="text-xs text-gray-500">Valor parcela</p><p className="font-bold text-primary-700">{formatCurrency(calc.valorCuota, currency)}</p></div>
             <div><p className="text-xs text-gray-500">Interés</p><p className="font-bold text-primary-700">{formatCurrency(calc.valorInteres, currency)}</p></div>
             <div><p className="text-xs text-gray-500">Fecha estimada fin</p><p className="font-bold text-primary-700">{formatDate(calc.fechaFinalEstimada)}</p></div>
+            <div className="col-span-2" data-testid="first-payment-date"><p className="text-xs text-gray-500">Primer abono</p><p className="font-bold text-primary-700">{formatDate(firstPaymentDate({ fechaInicio: form.fechaInicio, frecuencia: form.frecuenciaPago, paymentDays: form.paymentDays }))}</p></div>
           </div>
         )}
 

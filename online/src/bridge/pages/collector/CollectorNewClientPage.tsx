@@ -33,6 +33,7 @@ import { DocumentTypeSelect } from '../../../runtime/DocumentTypeSelect.tsx'
 import type { Client, Route, Sale } from '@/models/types'
 // ADEX Online (Ronda 65-C1).
 import { OfflineOperationBlocked, useNewClientsAndSalesBlocked } from '../../../offline/ui.tsx'
+import { firstPaymentDate } from '@/services/installmentEngine'
 
 const FREQ_OPTIONS = [
   { value: 'diaria', label: 'Diaria' }, { value: 'semanal', label: 'Semanal' },
@@ -299,7 +300,7 @@ function NewClientForm() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <Input label="N° de parcelas" type="number" min={1} value={saleForm.numeroCuotas || ''} onChange={e => { const v = e.target.value; setSaleForm(f => ({ ...f, numeroCuotas: v === '' ? 0 : Math.max(0, parseInt(v, 10) || 0) })) }} placeholder={`Ej: ${DEFAULT_INSTALLMENTS}`} />
-                <Input label="Fecha de inicio" type="date" min={today()} value={saleForm.fechaInicio} onChange={e => setSaleForm(f => ({ ...f, fechaInicio: e.target.value }))} />
+                <Input label="Fecha de la venta" type="date" min={today()} value={saleForm.fechaInicio} onChange={e => setSaleForm(f => ({ ...f, fechaInicio: e.target.value }))} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Días de pago</label>
@@ -332,6 +333,7 @@ function NewClientForm() {
                   <div><p className="text-xs text-gray-500">Valor parcela</p><p className="font-bold text-primary-700">{formatCurrency(saleCalc.valorCuota, currency)}</p></div>
                   <div><p className="text-xs text-gray-500">Interés</p><p className="font-bold text-primary-700">{formatCurrency(saleCalc.valorInteres, currency)}</p></div>
                   <div><p className="text-xs text-gray-500">Fecha estimada fin</p><p className="font-bold text-primary-700">{formatDate(saleCalc.fechaFinalEstimada)}</p></div>
+            <div className="col-span-2" data-testid="first-payment-date"><p className="text-xs text-gray-500">Primer abono</p><p className="font-bold text-primary-700">{formatDate(firstPaymentDate({ fechaInicio: saleForm.fechaInicio, frecuencia: saleForm.frecuenciaPago, paymentDays: saleForm.paymentDays }))}</p></div>
                 </div>
               )}
               {!allowDirect && (
