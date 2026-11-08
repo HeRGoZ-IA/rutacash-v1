@@ -385,7 +385,7 @@ Helmer no quiere ver el nombre del sistema de origen en ADEX. Lo que ven las per
   controles diferidos (`set constraints all immediate`) y los vuelve a encender; al final verifica que no quede ningún texto.
 - Las claves internas (`source_system = 'listos'`, `overdueListos`, `collectedInListosMinor`) no se muestran y no cambian.
 
-## 17. Diferencias en un cierre (3.27, decisión 2.2.2 de Helmer, 2026-11-05) — construido en local (0048, ver §17.7), sin publicar
+## 17. Diferencias en un cierre (3.27, decisión 2.2.2 de Helmer, 2026-11-05) — PUBLICADO 2026-11-05 (39a0d567, 0048 en staging; ver §17.7)
 
 Decisión: si un cierre del sistema anterior no cuadra, **se carga igual** y el Administrador corrige la diferencia en
 ADEX con un movimiento **con motivo**, que queda en la auditoría. Este apartado es la propuesta; no se construye sin el
@@ -463,7 +463,7 @@ motivo. Preguntas originales:
 - Tiempo estimado: un día de trabajo. Mientras no esté publicado, si un cierre del 5 al 7/11 trae una diferencia, se
   espera: los cierres pueden cargarse después, en orden, sin perder nada.
 
-### 17.7 Cómo quedó (construido en local el 2026-11-05, sin publicar)
+### 17.7 Cómo quedó (publicado 2026-11-05: 39a0d567, respaldo adex-20261106T0229, 0048 en staging, Render dep-dbmjp7bm8hqs73alql00)
 
 La migración es la **0048** (`saas/db/migrations/0048_route_migration_differences.sql`): la 0047 ya la usaba 3.29.
 
@@ -494,3 +494,93 @@ La migración es la **0048** (`saas/db/migrations/0048_route_migration_differenc
 **Probado (local, PostgreSQL real):** `route-migration.test.ts` 6/6. RM-006 cubre los 3 casos y las 7 opciones, el cierre
 automático, el bloqueo de «Terminar», quién puede corregir, la idempotencia, que ninguna caja se mueve y la conciliación
 completa de la empresa. **No probado:** la pantalla en un navegador ni con los cierres reales de Valparaíso.
+
+## 18. Rutas sin reportes del sistema anterior: plantilla para el dueño (2026-11-06, sin commit)
+
+- **Plantilla:** `docs/plantillas/ADEX_Plantilla_Migracion_Ruta.html` (un solo archivo con la marca ADEX; se arma con
+  `docs/plantillas/fuente/build.py`). Se envía por WhatsApp; el dueño llena la ruta, los clientes con sus créditos activos
+  y la caja, y con «Guardar archivo» devuelve una copia con los datos dentro (bloque `adex-datos`).
+- **Lector:** `saas/scripts/migracion/plantilla_a_adex.py --plantilla <archivo devuelto> --salida <cierre.json>
+  [--anterior <cierre previo>]`. Arma el mismo JSON que `listos_a_adex.py`, así que se sube igual en «Cargar datos».
+  - Códigos: los identificadores fijos de la plantilla. Una plantilla corregida y reenviada sirve de cierre del día siguiente.
+  - Calendario: cuotas pactadas desde la fecha del préstamo (la cuota k vence k periodos después). En los diarios se salta
+    el domingo si el cobrador no cobra ese día. Lo pagado se descuenta desde la primera cuota.
+  - «Créditos que ya pagó antes» queda en el historial solo como número (sin fechas ni valores).
+  - Modo diario: un crédito que desaparece debe sumarse en «créditos que ya pagó» de su cliente; si no, el cierre se
+    detiene (no se sabe si se pagó o se borró por error). No se quitan clientes durante la migración.
+  - La caja anotada sale en el resumen y en `templateCash` (solo referencia; la caja real se abre con «Inyectar Base»).
+- **Probado:** 22 comprobaciones con datos inventados (las reglas de `route_migration_load` de 0048 reproducidas en Python)
+  y un archivo guardado de verdad desde el navegador. **No probado:** la carga de un archivo de la plantilla en ADEX.
+
+**Cuotas atrasadas (2026-11-07):** ADEX marca una cuota como vencida por su fecha. Si el dueño anota cuántas cuotas lleva atrasadas un crédito, el lector corre las fechas que faltan, con la misma frecuencia, para que exactamente esas queden vencidas el día del reporte. Si anota más de las que le faltan o de las que pudieron vencer desde el préstamo, se limita y avisa. Sin ese dato, quedan las fechas pactadas desde el préstamo. Solo aplica en la primera carga de cada crédito. Probado con datos inventados en el lector y en una carga a PostgreSQL local.
+
+## 19. Corrección de fondo: migración real, no cuadre forzado (Helmer, 2026-11-08) — CONSTRUIDA (0050), sin publicar
+
+### 19.1 Qué estaba mal
+- Las ventas migradas entraron por **lo que faltaba cobrar** (ej.: préstamo de R$ 500 / total R$ 600 con R$ 40 pagados
+  entró como venta de R$ 466,67 / total R$ 560). Helmer: «una venta es del valor que se registró».
+- Los abonos durante la migración no movían caja, no se cargaban gastos ni ingresos de la ruta y la caja se abría al
+  final con «Inyectar Base» por el conteo: el hueco se habría tenido que suponer como gastos.
+
+### 19.2 Reglas (Helmer)
+1. Cada venta con **su valor registrado** (valor, total, cuotas, fecha, todas sus cuotas).
+2. Lo abonado antes del primer cierre: **un solo «abono previo a la migración»** por crédito.
+3. Cada cierre siguiente: los abonos como **«abono durante migración»**, los créditos nuevos con su desembolso y los
+   gastos e ingresos de la ruta.
+4. Al final **TODO cuadra**: saldo de cada crédito, cartera y caja contra el sistema anterior; el conteo físico contra
+   la caja.
+
+### 19.3 Datos (Valparaíso)
+- `Migraciones/Valparaiso/cuadres_listos/`: «Cuadre varias rutas» día por día del 13/01/2025 al 7/11/2026 (664 días,
+  sin huecos). Cada día: total caja = caja anterior + abonos + otros abonos + ingresos − desembolsos − egresos
+  (exacto los 664 días). La columna «Cartera» es la del INICIO del día (cierre del día anterior).
+- Reportes de créditos y clientes de cada cierre: un crédito por fila con su saldo. Los abonos de cada crédito entre dos
+  cierres salen de la baja de su saldo; su suma debe dar los abonos del cuadre de esos días.
+- Fechas reales de los cierres cargados: el «3/11» es el **final del 2/11** (bajado el 3/11 a las 10:54, antes de
+  cobrar); el 4/11 y el 5/11 sí son el final de su día. Un cierre puede abarcar varios días (se comparan las sumas).
+- Del 3/11 al 7/11 no hubo gastos ni ingresos en Valparaíso.
+
+### 19.4 Caja negativa = deuda con el socio (Helmer, 2026-11-08)
+- Las cadenas son acuerdos entre todos los socios dueños de rutas; su pago es sagrado. Cuando la caja del sistema
+  anterior está negativa es porque el socio puso de su dinero para pagar la cadena y lo recupera cuando haya dinero.
+- En Valparaíso ese socio es **Andrew** (Administrador). Al final del 2/11 la caja era **−R$ 1.730** (corregido: −2.248 era el 1/11).
+- En ADEX: la Base de la ruta abre en **R$ 0** y se registra una **deuda con Andrew de R$ 1.730** (la misma cuenta de
+  «dinero propio» de 0035, `admin_payable`), sin gasto nuevo (la cadena se pagó antes de la migración).
+  Desde ahí la Base de ADEX = caja del sistema anterior + deuda (5/11: −1.302 + 1.730 = R$ 428). Si la caja baja de
+  −1.730 (7/11: −1.862), el socio cubrió la diferencia: la deuda sube a 1.862 y la Base queda en 0.
+- Último día: el conteo físico contra la Base. Si da más, el socio puso más (se ajusta la deuda con motivo); si da
+  menos, faltante. Lo decide Helmer con el conteo.
+- Después: «Pago cadena» es un gasto de la ruta; si el socio lo cubre con su dinero, gasto con dinero propio y
+  reembolso; el turno de la cadena que recibe la ruta entra como ingreso.
+
+### 19.5 Cómo cambia la carga (migración nueva, la aplica Helmer)
+- Primera carga (venta real): venta con valor, total y cuotas originales y su calendario completo desde la fecha del
+  préstamo; un abono previo por (total − saldo) con la fecha del cierre, sin caja. Asiento de apertura por el capital
+  pendiente (como hoy), sin tocar caja. Base de la ruta y deuda con el socio de apertura, con motivo.
+- Cierres siguientes: abonos → Base de la ruta + (efectivo, como un recaudo); créditos nuevos → Base − (desembolso);
+  gastos e ingresos del cuadre → gasto o ingreso de la ruta con su categoría (si no hay categoría: «Gasto del sistema
+  anterior» con el concepto). El archivo del cierre lleva los totales del cuadre de esos días.
+- Cada cierre se comprueba: Σ abonos = abonos del cuadre; Σ desembolsos = desembolsos del cuadre; Base de ADEX = total
+  caja + deuda de apertura; cartera = saldo del reporte. Lo que no coincida queda como diferencia (0048) con motivo.
+- Valparaíso se rehace: se borran SOLO sus datos de migración en BlueLine (respaldo previo, permiso de Helmer), se
+  vuelve a abrir la migración y se cargan: final 2/11, 4/11 (abarca 3 y 4), 5/11 y los siguientes.
+- Aguas Claras y Taguatinga: lo mismo cuando haya sus cuadres.
+
+### 19.6 Pendiente de Helmer
+- Aprobar este diseño antes de programar. Fecha del cambio a ADEX: se corre hasta que Valparaíso cuadre.
+
+### 19.7 Cómo quedó (2026-11-08, sin commit)
+- **0050** (`saas/db/migrations/0050_route_migration_real_sales_cash.sql`): asientos `MIGRATION_CASH_COLLECTION`, `MIGRATION_DISBURSEMENT`,
+  `MIGRATION_CASH` y `MIGRATION_PARTNER_DEBT`; carga nueva (calendario completo, abono previo, caja, gastos `ROUTE_EXPENSE`, ingresos,
+  deuda con el socio y su cobertura); «Terminar» exige caja cuadrada; correcciones de 0048 con caja; conciliación con la deuda.
+  **Reinicia las migraciones en curso**: borra solo lo cargado en esas rutas y deja la auditoría (`ROUTE_MIGRATION_RESTARTED`).
+- Lector (`listos_a_adex.py`): todas las cuotas; `--cuadre` (carpeta con «Cuadre varias rutas»): caja de apertura, abonos,
+  desembolsos, ingresos y egresos de los días del cierre; comprueba que `--fecha` es el FINAL de ese día (columna CARTERA).
+  Plantilla (`plantilla_a_adex.py`): todas las cuotas y caja = efectivo de la ruta + del cobrador.
+- Probado: pruebas RM-005/RM-006 nuevas; ensayo del reinicio sobre la copia `adex-20261108T0050` restaurada en local (solo se
+  borran las 3 rutas en migración; el resto idéntico, cuentas cuadradas); ensayo con los cierres REALES de Valparaíso
+  (final 2/11, 4/11, 5/11) en base local: abonos y desembolsos = cuadre, caja diferencia 0, Base 428, conciliación limpia.
+- Valparaíso: cierres nuevos en `Migraciones/Valparaiso/cierres_v2/` (el «3/11» de antes era el final del 2/11).
+- Aguas Claras (primer cierre = final del 4/11, caja −981,50) y Taguatinga (final del 5/11, caja −510,40): faltan los cuadres
+  desde el 6/11 para los cierres siguientes.
+- Falta: autorización de Helmer para commit, push, Render y aplicar 0050 en staging (reinicia las 3 rutas en BlueLine).

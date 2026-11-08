@@ -221,12 +221,19 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
   const dups = Array.isArray(preview?.['duplicateDocuments']) ? (preview['duplicateDocuments'] as unknown[]).length : 0
   const previewDiffs = Array.isArray(preview?.['differences']) ? (preview['differences'] as MigrationDifference[]) : []
   const newDiffs = num(preview?.['newDifferences'])
+  // 0050: caja de la ruta frente al cuadre del sistema anterior.
+  const cash = (preview?.['cash'] ?? null) as Record<string, unknown> | null
+  const lastCash = (last?.summary['cash'] ?? null) as Record<string, unknown> | null
+  const cashOff = (k: Record<string, unknown> | null) => !!k && (num(k['differenceMinor']) !== 0
+    || (k['collectionsDifferenceMinor'] != null && num(k['collectionsDifferenceMinor']) !== 0)
+    || (k['disbursementsDifferenceMinor'] != null && num(k['disbursementsDifferenceMinor']) !== 0))
 
   return (
     <>
       {inMigration && last && (
         <p className="w-full text-xs text-gray-500" data-testid={`route-migration-last-${route.id}`}>
           Último cierre cargado: {last.reportDate} · {num(last.summary['activeCredits'])} créditos activos · saldo {brl(last.summary['balanceMinor'])}
+          {lastCash && <> · Base {brl(lastCash['baseMinor'])}{cashOff(lastCash) ? ' · la caja no cuadra' : ''}</>}
         </p>
       )}
       {inMigration && openDiffs.length > 0 && (
@@ -307,7 +314,24 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
               )}
               {preview['firstLoad'] !== true && (
                 <p>Desde el cierre anterior: {num(preview['newCredits'])} créditos nuevos · {num(preview['creditsWithPayments'])} con abonos ·
-                  {' '}{num(preview['creditsPaidOff'])} pagados · abonos previos a la migración <strong>{brl(preview['collectedInListosMinor'])}</strong></p>
+                  {' '}{num(preview['creditsPaidOff'])} pagados · abonos durante la migración <strong>{brl(preview['collectedInListosMinor'])}</strong></p>
+              )}
+              {preview['firstLoad'] === true && (
+                <p>Lo ya pagado de cada crédito (un abono previo a la migración por crédito): <strong>{brl(preview['paidBeforeMigrationMinor'])}</strong></p>
+              )}
+              {cash && (
+                <div className={`rounded-lg p-2 ${cashOff(cash) ? 'bg-amber-50 text-amber-800' : 'bg-white text-gray-700'}`} data-testid={`route-migration-preview-cash-${route.id}`}>
+                  <p className="font-semibold">Caja de la ruta</p>
+                  <p>Sistema anterior al cierre: {brl(cash['sourceClosingMinor'])} · deuda con el socio: {brl(cash['partnerDebtMinor'])}
+                    {num(cash['partnerCoverMinor']) > 0 && <> (este cierre: {brl(cash['partnerCoverMinor'])})</>}</p>
+                  <p>Base en ADEX: <strong>{brl(cash['baseMinor'])}</strong> · esperada {brl(cash['expectedBaseMinor'])} · diferencia {brl(cash['differenceMinor'])}</p>
+                  {preview['firstLoad'] !== true && (
+                    <p>Cuadre de esos días: abonos {brl(cash['sourceCollectionsMinor'])} (ADEX {brl(cash['collectionsMinor'])}) · créditos entregados
+                      {' '}{brl(cash['sourceDisbursementsMinor'])} (ADEX {brl(cash['disbursementsMinor'])}) · gastos {brl(cash['expensesMinor'])} · ingresos {brl(cash['incomeMinor'])}</p>
+                  )}
+                  {cashOff(cash) && <p className="font-semibold">La caja no coincide con el cuadre del sistema anterior: «Terminar migración» no se podrá usar
+                    hasta que coincida.</p>}
+                </div>
               )}
               <p>Clientes: <strong>{num(preview['clients'])}</strong> ({num(preview['activeClients'])} con crédito activo)</p>
               <p>Créditos activos: <strong>{num(preview['activeCredits'])}</strong> · saldo <strong>{brl(preview['balanceMinor'])}</strong></p>
@@ -319,7 +343,9 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
                 <p className="text-gray-500">Sistema anterior ese día: caja {listos['cajaMinor'] != null ? brl(listos['cajaMinor']) : '—'} · cartera {listos['carteraMinor'] != null ? brl(listos['carteraMinor']) : '—'}</p>
               )}
               <p className="pt-1 text-gray-600">Al guardar, la ruta queda igual que en el sistema anterior ese día y <strong>sigue en migración</strong>
-                (solo lectura). Los abonos de esos días quedan como «Abono previo a la migración»: no entran en ninguna caja.</p>
+                (solo lectura). Cada venta queda por su valor registrado. En el primer cierre, lo ya pagado es un «Abono previo a la migración»; desde
+                el segundo, los abonos («Abono durante la migración»), los créditos entregados, los gastos y los ingresos pasan por la Base de la ruta.
+                Si la caja del sistema anterior es negativa, lo que falta lo puso el socio: queda como deuda con el Administrador responsable.</p>
             </div>
           )}
         </div>
@@ -330,14 +356,15 @@ export function RouteMigrationAction({ route, isSuperadmin, inUse = true }: { ro
         <div className="space-y-3 text-sm text-gray-700">
           <p>La ruta <strong>{route.nombre}</strong> queda en <strong>estado normal</strong> con el último cierre cargado
             ({last?.reportDate ?? '—'}) y empieza a operar en ADEX. Después de esto ya no se cargan más cierres.</p>
-          <p>Luego, el Administrador abre la caja con <strong>Inyectar Base</strong> por el dinero contado al cierre.</p>
+          <p>La Base de la ruta ya tiene la caja del sistema anterior{lastCash ? <> (<strong>{brl(lastCash['baseMinor'])}</strong>; deuda con el socio
+            {' '}{brl(lastCash['partnerDebtMinor'])})</> : null}. Al terminar, el cobrador cuenta el dinero y se compara con esa Base.</p>
         </div>
       </Modal>
       <Modal open={diffsOpen && !fixing} onClose={() => setDiffsOpen(false)} title={`Diferencias por revisar (${openDiffs.length})`} size="lg"
         footer={<Button variant="secondary" onClick={() => setDiffsOpen(false)}>Cerrar</Button>}>
         <div className="space-y-3 text-sm text-gray-700" data-testid={`route-migration-diffs-list-${route.id}`}>
           <p>Estos créditos no coincidieron con el cierre del sistema anterior. En ADEX siguen como estaban, sin mover dinero, hasta que
-            se corrijan. Ninguna corrección toca la caja. «Terminar migración» exige que no quede ninguna.</p>
+            se corrijan. Corregir un abono durante la migración ajusta la Base de la ruta. «Terminar migración» exige que no quede ninguna.</p>
           {openDiffs.length === 0 && <p className="text-gray-500">No hay diferencias por revisar.</p>}
           {openDiffs.map((d) => (
             <div key={d.id} className="rounded-xl border border-gray-200 p-3 space-y-1" data-testid={`route-migration-diff-${d.code}`}>

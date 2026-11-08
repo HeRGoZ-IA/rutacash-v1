@@ -600,9 +600,10 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
   // 0044: la apertura de una ruta migrada (`MIGRATION_OPENING`) hace las veces de desembolso (capital pendiente).
   // Ronda 73: el capital vigente de un crédito rectificado = desembolso + Σ ajustes (pata de la cartera, con signo).
   // 0048: una venta migrada anulada al corregir una diferencia (`MIGRATION_ADJUSTMENT`) cuenta igual.
+  // 0050: el crédito entregado durante la migración (`MIGRATION_DISBURSEMENT`) también.
   const unmatched = await q(
     `select count(*)::text n from adex.capital_operations o
-      where o.company_id = $1 and o.kind in ('LOAN_DISBURSEMENT', 'MIGRATION_OPENING')
+      where o.company_id = $1 and o.kind in ('LOAN_DISBURSEMENT', 'MIGRATION_OPENING', 'MIGRATION_DISBURSEMENT')
         and not exists (select 1 from adex.sales s where s.company_id = o.company_id and s.id = o.sale_id and s.ledger_operation_id = o.id
                           and s.sale_value_minor = o.amount_minor + coalesce((select sum(e.amount_minor) from adex.capital_operations j
                                 join adex.capital_entries e on e.company_id = j.company_id and e.operation_id = j.id
@@ -613,7 +614,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
     `select count(*)::text n from adex.sales s
       where s.company_id = $1 and s.ledger_operation_id is not null
         and not exists (select 1 from adex.capital_operations o where o.company_id = s.company_id and o.id = s.ledger_operation_id
-                          and o.kind in ('LOAN_DISBURSEMENT', 'MIGRATION_OPENING') and o.sale_id = s.id)`);
+                          and o.kind in ('LOAN_DISBURSEMENT', 'MIGRATION_OPENING', 'MIGRATION_DISBURSEMENT') and o.sale_id = s.id)`);
   const duplicated = await q(
     `select count(*)::text n from (select sale_request_id from adex.sales where company_id = $1 and sale_request_id is not null
                                     group by sale_request_id having count(*) > 1) d`);
@@ -644,7 +645,7 @@ export async function capitalReconciliation(client: pg.PoolClient, ctx: ActiveCo
        join adex.sales s on s.company_id = p.company_id and s.id = p.sale_id
       where p.company_id = $1 and s.ledger_operation_id is not null
         and not exists (select 1 from adex.capital_operations o where o.company_id = p.company_id and o.id = p.ledger_operation_id and o.payment_id = p.id
-                          and o.amount_minor = abs(p.amount_minor) and o.route_id = p.route_id and coalesce(o.reverses_kind, o.kind) in ('COLLECTION', 'MIGRATION_COLLECTION'))`);
+                          and o.amount_minor = abs(p.amount_minor) and o.route_id = p.route_id and coalesce(o.reverses_kind, o.kind) in ('COLLECTION', 'MIGRATION_COLLECTION', 'MIGRATION_CASH_COLLECTION'))`);
   // Fase 5 · gastos: cada gasto con asiento coincide con él, y la cuenta de gastos de
   // cada ruta (o de empresa) es la suma de sus gastos netos.
   // R74 (0035): un gasto general con aportes de rutas tiene UNA operación por ruta (todas con su `expense_id`):

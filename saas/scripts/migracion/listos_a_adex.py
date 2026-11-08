@@ -2,9 +2,12 @@
 
 Uso (desde cualquier carpeta; los archivos de Listos y la salida van FUERA del repositorio, tienen datos personales):
 
-    python -I listos_a_adex.py --ruta "VALPARAISO SOC GAJ" --fecha 2026-11-08 \
+    python -I listos_a_adex.py --ruta "VALPARAISO SOC GAJ" --fecha 2026-11-02 \
         --clientes <ReporteExcelClientesActivos.xlsx> --creditos <carpeta o archivos ReporteExcelCreditos*.xlsx> \
-        [--caja -1580] [--cartera 63773] --salida <carga.json>
+        --cuadre <carpeta o archivos ReporteExcelCuadreVariasRutas*.xlsx> --salida <carga.json>
+
+--fecha es el día cuyo FINAL muestran los reportes: si se bajaron por la mañana, antes de cobrar, es el día ANTERIOR.
+El lector lo comprueba con la columna CARTERA del cuadre (la del inicio de cada día).
 
 Modo diario (desde el segundo cierre): --anterior <cierre del día anterior.json> --clientes <clientes activos del día>
     --creditos <«Reporte excel créditos» desde la fecha del cierre anterior> [--clientes-anterior <clientes del día anterior>]
@@ -12,8 +15,11 @@ Modo diario (desde el segundo cierre): --anterior <cierre del día anterior.json
 - Lee los «ReporteExcelCreditos completo» (uno o varios, de la oficina o de la ruta; se unen por CÓDIGO CRÉDITO y gana la
   exportación más reciente) y el «ReporteExcelClientesActivos» de la ruta.
 - Comprueba: encabezados conocidos, ruta correcta, Σ saldos y número de activos por cliente iguales en los dos reportes.
-- Cada crédito ACTIVO: calendario original (frecuencia y cuotas pactadas desde la fecha del crédito), se descuenta lo
-  pagado (TOTAL − SALDO) desde la primera cuota y quedan las cuotas que FALTAN, con sus fechas originales.
+- Cada crédito ACTIVO (0050, venta real): TODAS sus cuotas pactadas con sus fechas originales (frecuencia y cuotas desde
+  la fecha del crédito). ADEX registra lo ya pagado (TOTAL − SALDO) como un abono.
+- Caja (0050): del «Cuadre varias rutas» de la ruta. Primer cierre: TOTAL CAJA de ese día (apertura; negativa = el socio
+  puso de su dinero). Cierres siguientes: abonos, desembolsos, ingresos y egresos de los días que abarca el cierre y el
+  TOTAL CAJA del último; ADEX lo comprueba contra lo que carga.
 - Los créditos PAGADOS quedan como historial. Otros estados se informan y no se cargan.
 - Imprime solo cifras agregadas (sin nombres ni documentos) y escribe el JSON que se sube en ADEX
   (Rutas → «Cargar datos de Listos»), que lo vuelve a comprobar todo en PostgreSQL.
@@ -112,12 +118,95 @@ def full_amounts(c):
     return [quota] * (n - 1) + [total - quota * (n - 1)]
 
 
+def remaining_of(c):
+    """Cuotas que faltan (cuota, lo que falta de ella): lo pagado se descuenta desde la primera."""
+    paid, out = c['totalMinor'] - c['balanceMinor'], []
+    for x in c['schedule']:
+        take = min(paid, x['amountMinor'])
+        paid -= take
+        if x['amountMinor'] - take > 0:
+            out.append((x, x['amountMinor'] - take))
+    return out
+
+
 def overdue_of(c, report):
     """Cuotas atrasadas como las cuenta Listos (comprobado: 37 de 41 en Valparaíso): vencidas hasta el día del reporte
     inclusive, sin contar la cuota con abono parcial. ADEX marca vencida toda cuota con fecha anterior a hoy: es informativo."""
-    sch, amounts = c['schedule'], full_amounts(c)
-    partial = bool(sch) and sch[0]['amountMinor'] != amounts[len(amounts) - len(sch)]
-    return sum(1 for i, x in enumerate(sch) if dt.date.fromisoformat(x['dueDate']) <= report and not (i == 0 and partial))
+    rem = remaining_of(c)
+    partial = bool(rem) and rem[0][1] != rem[0][0]['amountMinor']
+    return sum(1 for i, (x, _) in enumerate(rem) if dt.date.fromisoformat(x['dueDate']) <= report and not (i == 0 and partial))
+
+
+CUADRE_COLS = ['FECHA', 'ABONOS', 'OTROS ABONOS', 'DESEMBOLSOS', 'INGRESOS', 'EGRESOS', 'ANULACIÓN INGRESOS', 'ANULACIÓN EGRESO']
+
+
+def cents(v):
+    return int(round(float(v or 0) * MINOR))
+
+
+def read_cuadre(paths, route):
+    """«Reporte excel cuadre varias rutas» (uno o varios tramos de fechas) → {fecha: fila}. Comprueba la caja día a día."""
+    files = []
+    for p in paths:
+        files += sorted(glob.glob(os.path.join(p, '*CuadreVariasRutas*.xlsx'))) if os.path.isdir(p) else [p]
+    if not files:
+        fail('no hay archivos de cuadre («Reporte excel cuadre varias rutas»)')
+    days = {}
+    for f in files:
+        title, scope, header, rows = rows_of(f)
+        if 'cuadre varias rutas' not in title.lower():
+            fail(f'{os.path.basename(f)} no es el «Reporte excel cuadre varias rutas»')
+        if route not in scope.upper():
+            continue
+        if header[:len(CUADRE_COLS)] != CUADRE_COLS or 'CAJA ANTERIOR' not in header or 'TOTAL CAJA' not in header or 'CARTERA' not in header:
+            fail(f'{os.path.basename(f)} no tiene las columnas conocidas')
+        for r in rows:
+            if isinstance(r['FECHA'], (dt.date, dt.datetime)):
+                days[day(r['FECHA'], 'cuadre')] = r
+    if not days:
+        fail(f'ningún cuadre de la ruta {route}')
+    order = sorted(days)
+    for a, b in zip(order, order[1:]):
+        if (b - a).days != 1:
+            fail(f'faltan días en los cuadres entre {a} y {b}')
+        if cents(days[b]['CAJA ANTERIOR']) != cents(days[a]['TOTAL CAJA']):
+            fail(f'el cuadre del {b} no empieza con la caja del {a}')
+    for d in order:
+        r = days[d]
+        if cents(r['CAJA ANTERIOR']) + cents(r['ABONOS']) + cents(r['OTROS ABONOS']) + cents(r['INGRESOS']) - cents(r['DESEMBOLSOS']) \
+                - cents(r['EGRESOS']) != cents(r['TOTAL CAJA']):
+            fail(f'el cuadre del {d} no cuadra (caja anterior + abonos + ingresos − desembolsos − egresos ≠ total caja)')
+    return days
+
+
+def check_report_date(cuadre, report, total_bal):
+    """La CARTERA del cuadre es la del INICIO del día: la del día siguiente al cierre debe ser Σ saldos."""
+    nxt = report + dt.timedelta(days=1)
+    if nxt not in cuadre:
+        return f'sin cuadre del {nxt}: no se pudo comprobar que los reportes son del final del {report}'
+    if cents(cuadre[nxt]['CARTERA']) == total_bal:
+        return None
+    match = [d - dt.timedelta(days=1) for d in sorted(cuadre) if cents(cuadre[d]['CARTERA']) == total_bal]
+    fail(f'Σ saldos ({total_bal / MINOR:,.2f}) no es la cartera del final del {report} en el cuadre '
+         f'({cents(cuadre[nxt]["CARTERA"]) / MINOR:,.2f})' + (f'; coincide con el final del {match[-1]}: use --fecha {match[-1]}' if match else ''))
+
+
+def cash_block(cuadre, prev_date, report):
+    if report not in cuadre:
+        fail(f'falta el cuadre del {report}')
+    closing = cents(cuadre[report]['TOTAL CAJA'])
+    if prev_date is None:
+        return {'closingMinor': closing}
+    span = [prev_date + dt.timedelta(days=k) for k in range(1, (report - prev_date).days + 1)]
+    if any(d not in cuadre for d in span) or prev_date not in cuadre:
+        fail(f'faltan cuadres entre el {prev_date} y el {report}')
+    expenses = [{'date': d.isoformat(), 'amountMinor': cents(cuadre[d]['EGRESOS']), 'category': 'Otros',
+                 'concept': f'Egresos del {d.strftime("%d/%m/%Y")} en el sistema anterior'} for d in span if cents(cuadre[d]['EGRESOS']) > 0]
+    income = [{'date': d.isoformat(), 'amountMinor': cents(cuadre[d]['INGRESOS']),
+               'concept': f'Ingresos del {d.strftime("%d/%m/%Y")} en el sistema anterior'} for d in span if cents(cuadre[d]['INGRESOS']) > 0]
+    return {'closingMinor': closing, 'openingMinor': cents(cuadre[prev_date]['TOTAL CAJA']),
+            'collectionsMinor': sum(cents(cuadre[d]['ABONOS']) + cents(cuadre[d]['OTROS ABONOS']) for d in span),
+            'disbursementsMinor': sum(cents(cuadre[d]['DESEMBOLSOS']) for d in span), 'expenses': expenses, 'income': income}
 
 
 def active_credit(code, r, ccode, report, warnings):
@@ -134,13 +223,7 @@ def active_credit(code, r, ccode, report, warnings):
     amounts = [quota] * (n - 1) + [last]
     if last != quota:
         warnings.append(f'crédito {code}: última cuota ajustada ({last / MINOR:.2f} en lugar de {quota / MINOR:.2f})')
-    paid = total - bal
-    schedule = []
-    for k, amt in enumerate(amounts, start=1):
-        take = min(paid, amt)
-        paid -= take
-        if amt - take > 0:
-            schedule.append({'number': len(schedule) + 1, 'dueDate': due_date(granted, freq, k).isoformat(), 'amountMinor': amt - take})
+    schedule = [{'number': k, 'dueDate': due_date(granted, freq, k).isoformat(), 'amountMinor': amt} for k, amt in enumerate(amounts, start=1)]
     first_due = due_date(granted, freq, 1)
     days = list(range(7)) if freq == 'diaria' else [(first_due.weekday() + 1) % 7]
     return {'code': code, 'clientCode': ccode, 'grantedOn': granted.isoformat(), 'valueMinor': value, 'totalMinor': total,
@@ -285,13 +368,7 @@ def main_daily(a, report, route):
             if drop < 0:
                 fail(f'crédito {c["code"]}: el saldo subió ({c["balanceMinor"] / MINOR:,.2f} → {rest_bal / MINOR:,.2f}). '
                      'Falta en el reporte de créditos un crédito nuevo o renovado de ese cliente')
-            sch, take = [], drop
-            for x in c['schedule']:
-                cut = min(take, x['amountMinor'])
-                take -= cut
-                if x['amountMinor'] - cut > 0:
-                    sch.append({'number': len(sch) + 1, 'dueDate': x['dueDate'], 'amountMinor': x['amountMinor'] - cut})
-            c['schedule'], c['balanceMinor'] = sch, rest_bal
+            c['balanceMinor'] = rest_bal
             c['lastPaymentOn'] = (rc or {}).get('_ultimo_abono') or c['lastPaymentOn']
             c['overdueListos'] = overdue_of(c, report)
             deduced_pay += 1
@@ -344,11 +421,20 @@ def main_daily(a, report, route):
                    'carteraMinor': int(round(a.cartera * MINOR)) if a.cartera is not None else None},
         'clients': out_clients, 'credits': act, 'history': history,
     }
-    if a.cartera is not None and int(round(a.cartera * MINOR)) != total_bal:
-        warnings.append(f'la CARTERA de Listos ({a.cartera:,.2f}) no es igual a Σ saldos ({total_bal / MINOR:,.2f})')
+    if any(len(c['schedule']) != c['installmentsCount'] for c in prev['credits']):
+        fail('el cierre anterior es del formato viejo (solo cuotas que faltaban): vuelva a generar los cierres desde el primero')
+    cuadre = read_cuadre(a.cuadre, route)
+    note = check_report_date(cuadre, report, total_bal)
+    if note:
+        warnings.append(note)
+    payload['cash'] = cash_block(cuadre, dt.date.fromisoformat(prev['reportDate']), report)
     with open(a.salida, 'w', encoding='utf-8') as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=1)
     print(f'Ruta {route} · cierre del {report.isoformat()} sobre el del {prev["reportDate"]} · {len(files)} archivo(s) de créditos')
+    k = payload['cash']
+    print(f'Cuadre de esos días: abonos {k["collectionsMinor"] / MINOR:,.2f} · desembolsos {k["disbursementsMinor"] / MINOR:,.2f} · '
+          f'ingresos {sum(x["amountMinor"] for x in k["income"]) / MINOR:,.2f} · egresos {sum(x["amountMinor"] for x in k["expenses"]) / MINOR:,.2f} · '
+          f'caja {k["openingMinor"] / MINOR:,.2f} → {k["closingMinor"] / MINOR:,.2f}')
     print(f'Clientes: {len(out_clients)} ({sum(1 for c in out_clients if c["active"])} con crédito activo)')
     print(f'Créditos activos: {len(act)} · saldo {total_bal / MINOR:,.2f} (antes {sum(c["balanceMinor"] for c in prev["credits"]) / MINOR:,.2f})')
     print(f'Del reporte de créditos: {len(touched)} · abonos deducidos: {deduced_pay} · pagados deducidos: {deduced_paid}')
@@ -366,6 +452,7 @@ def main():
     ap.add_argument('--creditos', nargs='+', help='archivos o carpetas con ReporteExcelCreditos')
     ap.add_argument('--anterior', help='cierre anterior (.json): modo diario con el reporte de clientes y los créditos del día')
     ap.add_argument('--clientes-anterior', help='reporte de clientes del cierre anterior (comprueba CANTIDAD PAGADOS)')
+    ap.add_argument('--cuadre', nargs='+', required=True, help='archivos o carpetas con ReporteExcelCuadreVariasRutas (caja día a día)')
     ap.add_argument('--caja', type=float, help='TOTAL CAJA de Listos ese día (referencia)')
     ap.add_argument('--cartera', type=float, help='CARTERA de Listos ese día (referencia)')
     ap.add_argument('--salida', required=True)
@@ -392,17 +479,44 @@ def main():
         files += sorted(glob.glob(os.path.join(p, '*Creditos*.xlsx'))) if os.path.isdir(p) else [p]
     if not files:
         fail('no hay archivos de créditos')
-    credits = {}
+    # El «Reporte excel créditos» corto (sin CÓDIGO CLIENTE) también sirve: el cliente se busca por DOCUMENTO en el
+    # reporte de clientes. Un crédito ACTIVO sin cliente único detiene la carga; un PAGADO sin cliente queda fuera del
+    # historial y se informa.
+    by_doc = defaultdict(set)
+    for r in crow:
+        by_doc[text(r['DOCUMENTO'])].add(text(r['CÓDIGO CLIENTE']))
+    credits, short_files, paid_without_client = {}, 0, set()
     for f in sorted(files, key=export_stamp):
         t, sc, h, rows = rows_of(f)
-        if 'créditos completo' not in t.lower() and 'creditos completo' not in t.lower():
-            fail(f'{os.path.basename(f)} no es el «Reporte excel créditos completo»')
-        if h[:len(CREDIT_COLS)] != CREDIT_COLS or 'ESTADO' not in h:
-            fail(f'{os.path.basename(f)} no tiene las columnas conocidas')
+        full = 'créditos completo' in t.lower() or 'creditos completo' in t.lower()
+        if full:
+            if h[:len(CREDIT_COLS)] != CREDIT_COLS or 'ESTADO' not in h:
+                fail(f'{os.path.basename(f)} no tiene las columnas conocidas')
+        elif 'excel créditos' in t.lower() or 'excel creditos' in t.lower():
+            if not set(DAY_COLS + ['NOMBRE']) <= set(h):
+                fail(f'{os.path.basename(f)} no tiene las columnas conocidas')
+            short_files += 1
+        else:
+            fail(f'{os.path.basename(f)} no es un «Reporte excel créditos»')
         for r in rows:
             if text(r['RUTA']).upper() != route:
                 continue
-            credits[text(r['CÓDIGO CRÉDITO'])] = r
+            code = text(r['CÓDIGO CRÉDITO'])
+            if not full:
+                r = dict(r)
+                owners = by_doc.get(text(r['DOCUMENTO']), set())
+                if len(owners) != 1:
+                    if text(r['ESTADO']).upper() == 'ACTIVO':
+                        fail(f'crédito activo {code}: su documento no está (o está repetido) en el reporte de clientes')
+                    paid_without_client.add(code)
+                    continue
+                r['CÓDIGO CLIENTE'] = next(iter(owners))
+                r['CLIENTE'] = r['NOMBRE']
+            paid_without_client.discard(code)
+            credits[code] = r
+    if short_files:
+        print(f'reporte corto de créditos en {short_files} archivo(s): cliente buscado por documento; '
+              f'{len(paid_without_client)} crédito(s) pagado(s) sin cliente en el reporte quedan fuera del historial')
     if not credits:
         fail('ningún crédito de esa ruta en los archivos de créditos')
 
@@ -475,10 +589,17 @@ def main():
     }
     if a.cartera is not None and int(round(a.cartera * MINOR)) != total_bal:
         warnings.append(f'la CARTERA de Listos ({a.cartera:,.2f}) no es igual a Σ saldos ({total_bal / MINOR:,.2f})')
+    cuadre = read_cuadre(a.cuadre, route)
+    note = check_report_date(cuadre, report, total_bal)
+    if note:
+        warnings.append(note)
+    payload['cash'] = cash_block(cuadre, None, report)
     with open(a.salida, 'w', encoding='utf-8') as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=1)
 
     # ---------- Resumen (solo cifras) ----------
+    print(f'Caja de apertura (TOTAL CAJA del {report}): {payload["cash"]["closingMinor"] / MINOR:,.2f}'
+          + (' (negativa: deuda con el socio en ADEX)' if payload['cash']['closingMinor'] < 0 else ''))
     freqs = defaultdict(int)
     for c in active:
         freqs[c['frequency']] += 1
