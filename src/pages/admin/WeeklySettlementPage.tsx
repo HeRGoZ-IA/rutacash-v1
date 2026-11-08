@@ -136,8 +136,9 @@ export default function WeeklySettlementPage() {
   const [preseleccion] = useState(() => {
     const routeIdParam = searchParams.get('routeId')
     const userIdParam = searchParams.get('userId')
-    return routeIdParam && userIdParam
-      ? { routeId: routeIdParam, userId: userIdParam, accion: searchParams.get('accion') === 'entregar-base' ? 'entregar-base' as const : undefined }
+    // 3.38: desde el detalle de la ruta llega solo `?routeId=` (cierre de la ruta) o con `userId` (cuadre del trabajador).
+    return routeIdParam
+      ? { routeId: routeIdParam, userId: userIdParam ?? undefined, accion: userIdParam && searchParams.get('accion') === 'entregar-base' ? 'entregar-base' as const : undefined }
       : null
   })
   /** Cuadres de trabajadores de la ruta (sección informativa de la liquidación). */
@@ -418,7 +419,7 @@ export default function WeeklySettlementPage() {
           </div>
           {routeId
             ? <WorkerCashSettlementPanel routeId={routeId}
-                preseleccion={preseleccion?.routeId === routeId ? { userId: preseleccion.userId, accion: preseleccion.accion } : undefined} />
+                preseleccion={preseleccion?.routeId === routeId && preseleccion.userId ? { userId: preseleccion.userId, accion: preseleccion.accion } : undefined} />
             : <p className="text-sm text-gray-500">Selecciona la ruta para ver a sus trabajadores.</p>}
         </div>
       )}

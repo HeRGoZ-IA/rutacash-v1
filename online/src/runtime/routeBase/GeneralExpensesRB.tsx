@@ -69,7 +69,7 @@ const canReverseReimbursement = (r: Reimbursement, me: string | undefined, mine:
  * Panel completo: cifras, registro (Administrador), obligaciones y reembolsos. `panel` (route_base) aporta las
  * cifras del periodo y las Bases de las rutas; sin él (modelo de bolsas) el panel lee lo suyo.
  */
-export function GeneralExpensesPanel({ model, panel, periodText }: { model: CapitalModel; panel?: RoutePanel | null; periodText?: string }) {
+export function GeneralExpensesPanel({ model, panel, periodText, focusPending = 0 }: { model: CapitalModel; panel?: RoutePanel | null; periodText?: string; focusPending?: number }) {
   const { tenantId } = useTenant();
   const me = useRuntime((s) => s.ctx);
   const isSa = me?.role === 'superadmin';
@@ -89,6 +89,12 @@ export function GeneralExpensesPanel({ model, panel, periodText }: { model: Capi
   const [error, setError] = useState<string | null>(null);
   const [unsupported, setUnsupported] = useState(false);
   const [tab, setTab] = useState<Tab>('gastos');
+  // 3.36: desde «Obligaciones» de Caja principal se abre la pestaña Reembolsos pendientes.
+  useEffect(() => {
+    if (focusPending <= 0) return;
+    setTab('pendientes');
+    document.getElementById('ge-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [focusPending]);
   const [registering, setRegistering] = useState(false);
   const [reimbursing, setReimbursing] = useState<{ adminId: string; item?: PayableItem } | null>(null);
   const [fixing, setFixing] = useState<CorrectionTarget | null>(null);

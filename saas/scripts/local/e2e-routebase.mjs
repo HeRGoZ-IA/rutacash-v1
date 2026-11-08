@@ -343,6 +343,7 @@ try {
     await rowClick(`rb-route-${rId}`, 'rb-route-detail');
     await waitTestid('rb-route-drawer');
     await sleep(500);
+    await tap('rb-d-tab-responsable'); await sleep(300);
     await tap('rb-change-controller');
     await waitTestid('rb-change-form');
     const picked = await pick('Nuevo responsable', newAdminName);
@@ -688,6 +689,56 @@ try {
     await clickText('button', /^(Descartar|Salir sin guardar|Sí, descartar)$/).catch(() => undefined);
     ok('A-16h', ['C-01'], 'Usuarios: «Nuevo usuario» propone el usuario para entrar desde el nombre (Carlos Andrés Pérez → carlos.perez) (3.31)',
       proposed === 'carlos.perez', JSON.stringify({ proposed, loginLabel }));
+    // 3.36: Caja principal separa «Diferencias» de «Obligaciones (no son efectivo)»; cada obligación lleva a donde se gestiona.
+    await go('/admin/capital'); await waitTestid('rb-consolidated'); await sleep(800);
+    const difTxt = (await testid('rb-total-differences')) ?? '';
+    const oblTxt = (await testid('rb-total-obligations')) ?? '';
+    const payInObl = await page.evaluate(() => !!document.querySelector('[data-testid="rb-total-obligations"] [data-testid="rb-total-payables"]'));
+    await page.evaluate(() => document.querySelector('[data-testid="rb-total-differences"]')?.scrollIntoView({ block: 'center' }));
+    await both('A-16i-caja-bloques', () => waitTestid('rb-total-obligations'));
+    await tap('rb-go-payables'); await sleep(800);
+    const pendTab = await page.$eval('[data-testid="ge-tab-pendientes"]', (e) => e.getAttribute('aria-selected')).catch(() => null);
+    await both('A-16i-caja-diferencias-obligaciones', () => waitTestid('rb-total-obligations'));
+    ok('A-16i', ['C-01'], 'Caja principal: «Diferencias» y «Obligaciones (no son efectivo)» van aparte; «Ver en Gastos generales» abre Reembolsos pendientes (3.36)',
+      difTxt.startsWith('Diferencias') && !difTxt.includes('Reembolsos') && oblTxt.startsWith('Obligaciones (no son efectivo)') && payInObl && pendTab === 'true',
+      JSON.stringify({ dif: difTxt.slice(0, 80), obl: oblTxt.slice(0, 80), payInObl, pendTab }));
+    // 3.38: detalle de la ruta por pestañas, cabecera con 3 cifras, «Efectivo de la ruta» una sola vez, «Responsable» sin «Entrega».
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await rowClick(`rb-route-${C2}`, 'rb-route-detail'); await waitTestid('rb-route-drawer'); await sleep(600);
+    const headTxt = (await testid('rb-d-header')) ?? '';
+    const tabs = await page.$$eval('[data-testid="rb-d-header"] [role="tab"]', (ts) => ts.map((t) => t.textContent.trim()));
+    const efectivoCount = ((await testid('rb-route-drawer')) ?? '').split('Efectivo de la ruta').length - 1;
+    await both('A-16k-detalle-ruta-resumen', () => waitTestid('rb-d-summary'));
+    await tap('rb-d-tab-liquidaciones'); await waitTestid('rb-d-settlements').catch(() => undefined); await sleep(400);
+    const closeHref = await page.$eval('[data-testid="rb-d-go-route-close"]', (e) => e.getAttribute('href')).catch(() => null);
+    await both('A-16k-detalle-ruta-liquidaciones', () => waitTestid('rb-d-settlements'));
+    await tap('rb-d-tab-responsable'); await sleep(400);
+    const respTxt = (await testid('rb-d-controller')) ?? '';
+    await page.keyboard.press('Escape').catch(() => undefined); await sleep(300);
+    ok('A-16k', ['C-01'], 'Detalle de la ruta: cabecera con Base disponible y Cartera activa, pestañas Resumen…Responsable, «Efectivo de la ruta» una vez, Liquidaciones con la ruta elegida y «Responsable» sin «Entrega» (3.38)',
+      headTxt.includes('Base disponible') && headTxt.includes('Cartera activa')
+        && JSON.stringify(tabs) === JSON.stringify(['Resumen', 'Movimientos', 'Resultado', 'Liquidaciones', 'Responsable'])
+        && efectivoCount === 1 && !!closeHref && closeHref.includes(`routeId=${C2}`)
+        && respTxt.startsWith('Responsable de capital') && !/Entrega de la ruta/.test(respTxt),
+      JSON.stringify({ tabs, efectivoCount, closeHref, resp: respTxt.slice(0, 60) }));
+    // 3.38: «Ir a la liquidación de la ruta» abre Liquidación con la ruta ya elegida.
+    await go(`/admin/weekly-settlement?routeId=${C2}`); await sleep(2500);
+    const preselected = await page.evaluate(() => [...document.querySelectorAll('select, input')].some((e) => (e.tagName === 'SELECT' ? e.options[e.selectedIndex]?.textContent : e.value)?.includes('Centro 2')));
+    ok('A-16l', ['C-01'], 'Liquidación abierta desde el detalle de la ruta: la ruta llega elegida (3.38)', preselected);
+    // 3.37: Rutas → «Ver detalle» abre la MISMA ventana del detalle de la ruta.
+    await go('/admin/routes'); await sleep(2500);
+    await both('A-16j-rutas-tarjetas', () => waitTestid('route-card-detail'));
+    const opened = await page.evaluate(() => {
+      const btn = [...document.querySelectorAll('[data-testid="route-card-detail"]')].find((b) => { let n = b; for (let i = 0; i < 6 && n; i++) { n = n.parentElement; if (n && n.innerText.includes('Ruta Centro 2') && n.querySelectorAll('[data-testid="route-card-detail"]').length === 1) return true; } return false; });
+      btn?.click(); return !!btn;
+    });
+    await waitTestid('rb-route-drawer').catch(() => undefined); await sleep(800);
+    const fromRoutesTitle = await page.evaluate(() => [...document.querySelectorAll('[role="dialog"]')].at(-1)?.querySelector('h2')?.textContent?.trim() ?? null);
+    const fromRoutesTabs = await page.$$eval('[data-testid="rb-d-header"] [role="tab"]', (ts) => ts.length).catch(() => 0);
+    await both('A-16j-rutas-ver-detalle', () => waitTestid('rb-route-drawer'));
+    await page.keyboard.press('Escape').catch(() => undefined); await sleep(300);
+    ok('A-16j', ['C-01'], 'Rutas: «Ver detalle» abre el mismo detalle de la ruta que Caja principal (3.37)',
+      opened && fromRoutesTitle === 'Ruta Centro 2' && fromRoutesTabs === 5, JSON.stringify({ opened, fromRoutesTitle, fromRoutesTabs }));
     const bC2 = await base(C2), bC1 = await base(C1);
     await go('/admin/active-sales'); await sleep(2000);
     await clickText('button', /^Nueva venta$/);
@@ -935,6 +986,7 @@ try {
     await go('/admin/capital'); await waitTestid('rb-consolidated');
     await page.waitForSelector(`[data-testid="rb-route-${C2}"]`);
     await rowClick(`rb-route-${C2}`, 'rb-route-detail'); await waitTestid('rb-route-drawer'); await sleep(500);
+    await tap('rb-d-tab-responsable'); await sleep(300);
     await tap('rb-controller-history-open');
     await page.waitForSelector('[data-testid="rb-controller-event"]', { timeout: 20_000 }).catch(() => undefined);
     const histTxt = (await testid('rb-controller-history')) ?? '';

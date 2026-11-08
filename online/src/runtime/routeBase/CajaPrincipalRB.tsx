@@ -13,45 +13,29 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeftRight, ChevronRight, HandCoins, Handshake, History, Info, MapPin, Repeat, Settings2 } from 'lucide-react';
+import { ArrowLeftRight, ChevronRight, Handshake, History, MapPin, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Select, Textarea } from '@/components/ui/Input';
-import { MoneyInput } from '@/components/ui/MoneyInput';
-import { Modal } from '@/components/ui/Modal';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { toast } from '@/components/ui/Toast';
 import { db } from '@/lib/db';
 import { useTenant } from '@/hooks/useTenant';
-import { useAuth } from '@/hooks/useAuth';
 import { useDataRevision } from '@/hooks/useDataRevision';
 import { useOfficeRouteFilter } from '@/hooks/useOfficeRouteFilter';
 import { OfficeRouteFilterBar } from '@/components/ui/OfficeRouteFilterBar';
-import { formatDateTime } from '@/lib/formatters';
 import { formatPersonName } from '@/lib/displayName';
-import { validRouteAdmins } from '@/lib/capitalAllocation';
-import { setRouteCapitalController } from '@/services/capitalControlService';
-import { cn, generateId } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import type { Office, Route, User } from '@/models/types';
 import { todayIn } from '../../lib/format.ts';
 import { useRuntime } from '../session.ts';
 import {
-  fetchControllerEvents, fetchHandovers, fetchPanel, repayPartnerDebt, routeExpenses, type ControllerEvent, sumRows, type CapitalModel, type Handover, type PanelRoute, type RoutePanel,
+  fetchHandovers, fetchPanel, routeExpenses, sumRows, type CapitalModel, type Handover, type PanelRoute, type RoutePanel,
 } from './api.ts';
 import {
-  AlertChip, Notice, PERIOD_LABEL, StateBadge, activeStates, num, otherAlerts, periodDates, stateHelp, stateLabel, useMoney, type PanelPeriod,
+  AlertChip, Notice, PERIOD_LABEL, StateBadge, activeStates, num, otherAlerts, periodDates, stateLabel, useMoney, type PanelPeriod,
 } from './parts.tsx';
 import { HandoverDialog } from './HandoverDialog.tsx';
-import { toMajor, toMinor } from '../mappers.ts';
 import { GeneralExpensesPanel } from './GeneralExpensesRB.tsx';
-
-type Section = 'efectivo' | 'base' | 'cartera' | 'periodo' | 'estados' | 'entrega' | 'deuda';
-
-/** 0052: a quién le debe la ruta («Tú» si es el actor). */
-function debtCreditors(d: { creditors: { adminId: string; name: string | null; outstandingMinor: number }[] }, mine: boolean | string | null | undefined): string {
-  const me = typeof mine === 'string' ? mine : null;
-  const names = d.creditors.filter((c) => c.outstandingMinor > 0).map((c) => (me && c.adminId === me ? 'ti' : formatPersonName(c.name) || 'su Administrador'));
-  return names.length ? names.join(' y ') : 'su Administrador';
-}
+// 3.37/3.38: el detalle de la ruta es UNA sola ventana (también se abre desde Rutas).
+import { RouteDetail, debtCreditors, type Section } from './RouteDetail.tsx';
 
 export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
   const { tenantId } = useTenant();
@@ -75,6 +59,8 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
   const [pendingMine, setPendingMine] = useState<Handover[]>([]);
   const [detail, setDetail] = useState<{ routeId: string; section: Section } | null>(null);
   const [confirming, setConfirming] = useState<{ routeId: string; name: string } | null>(null);
+  /** 3.36: «Ver en Gastos generales» abre la pestaña Reembolsos pendientes del panel de abajo. */
+  const [geFocus, setGeFocus] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -139,7 +125,7 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
           <div key={h.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3" data-testid="rb-handover-banner">
             <p className="text-sm text-violet-900 flex gap-2">
               <Handshake className="w-4 h-4 mt-0.5 flex-shrink-0" aria-hidden />
-              <span><b>{name}</b> está en entrega: ahora eres su responsable. Cuenta la Base y confirma para volver a operar la ruta.</span>
+              <span><b>{name}</b> tiene cambio de responsable: ahora eres su responsable. Cuenta la Base y confirma para volver a operar la ruta.</span>
             </p>
             <Button size="sm" onClick={() => setConfirming({ routeId: h.routeId, name })} data-testid="rb-handover-open">Confirmar conteo</Button>
           </div>
@@ -180,37 +166,55 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
                 </dl>
               </div>
             </div>
-            <div className="rounded-xl border border-gray-100 p-3" data-testid="rb-total-differences">
-              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1.5">
-                <p className="text-xs font-medium text-gray-500">Diferencias y obligaciones (no son efectivo)</p>
-                <Link to="/admin/diferencias" className="text-xs font-medium text-primary-700 hover:underline" data-testid="rb-go-differences">
-                  {t.differences && t.differences.pendingCount > 0 ? `Conciliar ${t.differences.pendingCount} diferencia(s)` : 'Diferencias y conciliaciones'}
-                </Link>
+            {/* 3.36: diferencias de cuadres (se concilian en Diferencias) y, aparte, obligaciones que se gestionan en otro lugar. */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <div className="rounded-xl border border-gray-100 p-3" data-testid="rb-total-differences">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1.5">
+                  <p className="text-xs font-medium text-gray-500">Diferencias</p>
+                  <Link to="/admin/diferencias" className="text-xs font-medium text-primary-700 hover:underline" data-testid="rb-go-differences">
+                    {t.differences && t.differences.pendingCount > 0 ? `Conciliar ${t.differences.pendingCount} diferencia(s)` : 'Ver diferencias y conciliaciones'}
+                  </Link>
+                </div>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  {t.differences ? (
+                    <>
+                      <Mini label="Faltantes pendientes" value={money(t.differences.shortagePendingMinor)} testId="rb-shortage-pending" />
+                      <Mini label="Sobrantes pendientes" value={money(t.differences.surplusPendingMinor)} testId="rb-surplus-pending" />
+                      <Mini label="Faltantes conciliados" value={money(t.differences.shortageConciliatedMinor)} hint="En el periodo" />
+                      <Mini label="Sobrantes conciliados" value={money(t.differences.surplusConciliatedMinor)} hint="En el periodo" />
+                    </>
+                  ) : (
+                    <>
+                      <Mini label="Faltantes arrastrados" value={money(t.shortageMinor)} hint="Reconocidos en cuadres; no es billete" testId="rb-shortage-pending" />
+                      <Mini label="Sobrantes en control" value={money(t.surplusMinor)} hint="Aparte; no es Base disponible" testId="rb-surplus-pending" />
+                    </>
+                  )}
+                </dl>
               </div>
-              <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {t.differences ? (
-                  <>
-                    <Mini label="Faltantes pendientes" value={money(t.differences.shortagePendingMinor)} testId="rb-shortage-pending" />
-                    <Mini label="Sobrantes pendientes" value={money(t.differences.surplusPendingMinor)} testId="rb-surplus-pending" />
-                    <Mini label="Faltantes conciliados" value={money(t.differences.shortageConciliatedMinor)} hint="En el periodo" />
-                    <Mini label="Sobrantes conciliados" value={money(t.differences.surplusConciliatedMinor)} hint="En el periodo" />
-                  </>
-                ) : (
-                  <>
-                    <Mini label="Faltantes arrastrados" value={money(t.shortageMinor)} hint="Reconocidos en cuadres; no es billete" testId="rb-shortage-pending" />
-                    <Mini label="Sobrantes en control" value={money(t.surplusMinor)} hint="Aparte; no es Base disponible" testId="rb-surplus-pending" />
-                  </>
-                )}
-                <Mini label="Reembolsos pendientes a Administradores" value={money(panel.general.pendingAdminReimbursements?.totalMinor ?? 0)} hint="Gastos generales; obligación de la empresa; no es efectivo" testId="rb-total-payables" />
-                {t.partnerDebtMinor > 0 && (
-                  <div className="min-w-0 rounded-lg bg-amber-50 ring-1 ring-inset ring-amber-200 px-2 py-1 -mx-2 -my-1" data-testid="rb-total-partner-debt">
-                    <dt className="text-xs font-medium text-amber-900">Deudas de rutas con su Administrador</dt>
-                    <dd className={cn(num, 'text-sm font-semibold text-amber-900')}>{money(t.partnerDebtMinor)}</dd>
-                    <dd className="text-[11px] leading-tight text-amber-900">Caja cubierta en la migración · cada ruta la paga con su Base</dd>
+              <div className="rounded-xl border border-gray-100 p-3" data-testid="rb-total-obligations">
+                <p className="text-xs font-medium text-gray-500 mb-1.5">Obligaciones (no son efectivo)</p>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  <div className="min-w-0" data-testid="rb-total-payables">
+                    <dt className="text-xs text-gray-500">Reembolsos pendientes a Administradores</dt>
+                    <dd className={cn(num, 'text-sm font-semibold text-gray-900')}>{money(panel.general.pendingAdminReimbursements?.totalMinor ?? 0)}</dd>
+                    <dd><button type="button" onClick={() => setGeFocus((n) => n + 1)} className="text-[11px] font-medium text-primary-700 hover:underline" data-testid="rb-go-payables">Ver en Gastos generales</button></dd>
                   </div>
-                )}
-                <Mini label="Aportes a gastos generales" value={money(t.generalContributionsMinor)} hint={`Salieron de la Base disponible · periodo; reembolsos pagados ${money(t.reimbursementsMinor)}`} />
-              </dl>
+                  {t.partnerDebtMinor > 0 && (
+                    <div className="min-w-0 border-l-2 border-amber-400 pl-2" data-testid="rb-total-partner-debt">
+                      <dt className="text-xs text-amber-900">Deudas de rutas con su Administrador</dt>
+                      <dd className={cn(num, 'text-sm font-semibold text-amber-900')}>{money(t.partnerDebtMinor)}</dd>
+                      <dd className="text-[11px] leading-tight text-gray-500">Caja cubierta en la migración · cada ruta la paga con su Base</dd>
+                      <dd className="flex flex-wrap gap-x-2">
+                        {rows.filter((r) => (r.partnerDebt?.outstandingMinor ?? 0) > 0).map((r) => (
+                          <button key={r.routeId} type="button" onClick={() => setDetail({ routeId: r.routeId, section: 'deuda' })}
+                            className="text-[11px] font-medium text-primary-700 hover:underline" data-testid="rb-go-partner-debt">Ver {r.name}</button>
+                        ))}
+                      </dd>
+                    </div>
+                  )}
+                  <Mini label="Aportes a gastos generales" value={money(t.generalContributionsMinor)} hint={`Salieron de la Base disponible · periodo; reembolsos pagados ${money(t.reimbursementsMinor)}`} />
+                </dl>
+              </div>
             </div>
           </section>
 
@@ -265,7 +269,7 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
 
           {/* ---------- Aparte: gastos generales y reembolsos (0035), saldo sin asignar ---------- */}
           <div data-testid="rb-general">
-            <GeneralExpensesPanel model={model} panel={panel} periodText={periodText} />
+            <GeneralExpensesPanel model={model} panel={panel} periodText={periodText} focusPending={geFocus} />
           </div>
           <section className={`grid grid-cols-1 gap-3 ${hasUnassigned ? 'lg:grid-cols-2' : ''}`} aria-label="Fuera de las rutas">
             <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-4 space-y-2" data-testid="rb-consolidated-result">
@@ -434,7 +438,7 @@ function RouteRow({ r, mine, office, onOpen, onConfirm, canConfirm }: {
         </div>
         <div className="flex flex-wrap gap-2 sm:flex-shrink-0">
           {canConfirm && <Button size="sm" onClick={onConfirm} icon={<Handshake className="w-3.5 h-3.5" />}>Confirmar conteo</Button>}
-          <Button size="sm" variant="ghost" onClick={() => onOpen('efectivo')} data-testid="rb-route-detail">Detalle<ChevronRight className="w-3.5 h-3.5" aria-hidden /></Button>
+          <Button size="sm" variant="ghost" onClick={() => onOpen('efectivo')} data-testid="rb-route-detail">Ver detalle<ChevronRight className="w-3.5 h-3.5" aria-hidden /></Button>
         </div>
       </div>
       <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-x-4 gap-y-3 border-t border-gray-100 pt-3">
@@ -448,302 +452,5 @@ function RouteRow({ r, mine, office, onOpen, onConfirm, canConfirm }: {
         {fig('Resultado operativo', money(r.operatingResultMinor), 'periodo', { negative: r.operatingResultMinor < 0, testId: 'rb-fig-result' })}
       </div>
     </li>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 3.4 · Historial de responsables de una ruta: cada cambio (quién, cuándo, motivo) con el
-// resultado de su entrega (conteo de la Base). Solo lectura; se carga al abrirlo.
-// ---------------------------------------------------------------------------
-
-const CONTROLLER_KIND: Record<ControllerEvent['kind'], string> = {
-  MIGRATION: 'Responsable inicial',
-  FIRST_ADMIN: 'Primer responsable',
-  CHANGE: 'Cambio de responsable',
-  RELEASE: 'Ruta sin responsable',
-};
-
-function ControllerHistory({ routeId, users }: { routeId: string; users: User[] }) {
-  const money = useMoney();
-  const revision = useDataRevision();
-  const [open, setOpen] = useState(false);
-  const [data, setData] = useState<{ events: ControllerEvent[]; handovers: Handover[] } | null>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => { setOpen(false); setData(null); }, [routeId]);
-  useEffect(() => {
-    if (!open) return;
-    let alive = true;
-    setFailed(false);
-    Promise.all([fetchControllerEvents(routeId), fetchHandovers({ routeId })])
-      .then(([events, handovers]) => { if (alive) setData({ events, handovers }); })
-      .catch(() => { if (alive) setFailed(true); });
-    return () => { alive = false; };
-  }, [open, routeId, revision]);
-  const name = (id: string | null) => (id ? formatPersonName(users.find((u) => u.id === id)?.nombre ?? '') || 'Administrador' : 'nadie');
-  // El acta de entrega nace en la misma transacción que el cambio: mismo destino y misma hora.
-  const handoverOf = (e: ControllerEvent) => data?.handovers.find((h) => h.toId === e.toAdminId
-    && Math.abs(new Date(h.startedAt).getTime() - new Date(e.createdAt).getTime()) < 60_000);
-  const result = (h: Handover | undefined) => {
-    if (!h) return null;
-    if (h.status === 'pendiente') return 'Entrega pendiente: falta el conteo del nuevo responsable.';
-    if (h.status === 'sustituida') return 'Entrega sustituida por un cambio posterior.';
-    const diff = h.differenceMinor ?? 0;
-    return `Conteo confirmado${h.confirmedAt ? ` el ${formatDateTime(h.confirmedAt)}` : ''}: esperado ${money(h.expectedBaseMinor ?? 0)}, contado ${money(h.countedMinor ?? 0)}`
-      + (diff < 0 ? `, faltante de ${money(-diff)}.` : diff > 0 ? `, sobrante de ${money(diff)}.` : ', sin diferencia.');
-  };
-  if (!open) {
-    return <button type="button" className="text-sm text-primary-700 hover:underline inline-flex items-center gap-1" onClick={() => setOpen(true)} data-testid="rb-controller-history-open">
-      <History className="w-4 h-4" aria-hidden />Ver historial de responsables</button>;
-  }
-  return (
-    <div className="rounded-xl border border-gray-200 p-3" data-testid="rb-controller-history">
-      <p className="text-sm font-medium text-gray-900 mb-1">Historial de responsables</p>
-      {failed ? <p className="text-sm text-red-700">No se pudo cargar el historial. Inténtalo de nuevo.</p>
-        : !data ? <p className="text-sm text-gray-500" role="status">Cargando…</p>
-        : data.events.length === 0 ? <p className="text-sm text-gray-500">Sin cambios de responsable registrados.</p>
-        : (
-          <ol className="divide-y divide-gray-100">
-            {data.events.map((e) => (
-              <li key={e.id} className="py-2" data-testid="rb-controller-event">
-                <p className="text-sm text-gray-900">{CONTROLLER_KIND[e.kind]}: {name(e.fromAdminId)} → {name(e.toAdminId)}</p>
-                <p className="text-xs text-gray-500">{formatDateTime(e.createdAt)} · registró {e.actorSystem ? 'el sistema' : name(e.actorId)}{e.reason ? ` · Motivo: ${e.reason}` : ''}</p>
-                {result(handoverOf(e)) && <p className="text-xs text-gray-600">{result(handoverOf(e))}</p>}
-              </li>
-            ))}
-          </ol>
-        )}
-      <button type="button" className="mt-1 text-xs text-gray-500 hover:underline" onClick={() => setOpen(false)}>Ocultar historial</button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Detalle de una ruta (drill-down de cada cifra)
-// ---------------------------------------------------------------------------
-
-function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfirm, canConfirm }: {
-  r: PanelRoute | null; section: Section; range: { from: string; to: string }; isSa: boolean; users: User[]; routes: Route[];
-  onClose: () => void; onConfirm: (r: PanelRoute) => void; canConfirm: boolean;
-}) {
-  const money = useMoney();
-  const { tenantId } = useTenant();
-  const { user } = useAuth();
-  const me = useRuntime((s) => s.ctx);
-  const [changing, setChanging] = useState<{ adminId: string; motivo: string } | null>(null);
-  const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    if (!r) { setChanging(null); return; }
-    const t = setTimeout(() => document.getElementById(`rb-d-${section}`)?.scrollIntoView({ block: 'start' }), 60);
-    return () => clearTimeout(t);
-  }, [r?.routeId, section]);  // eslint-disable-line react-hooks/exhaustive-deps
-  if (!r) return null;
-  const b = r.period.base;
-  const route = routes.find((x) => x.id === r.routeId);
-  const candidates = route ? validRouteAdmins(users, route).filter((a) => a.id !== r.controller.id) : [];
-  const states = activeStates(r);
-  const alerts = otherAlerts(r);
-  const row = (label: string, v: number | null | undefined, opts: { sign?: '+' | '−'; strong?: boolean; hint?: string } = {}) => (
-    <div className={cn('flex items-baseline justify-between gap-3 py-1', opts.strong && 'border-t border-gray-200 mt-1 pt-2')}>
-      <dt className={cn('text-sm', opts.strong ? 'font-semibold text-gray-900' : 'text-gray-600')}>{label}{opts.hint && <span className="block text-[11px] text-gray-500">{opts.hint}</span>}</dt>
-      <dd className={cn(num, 'text-sm', opts.strong ? 'font-bold text-gray-900' : 'text-gray-900')}>{opts.sign && v ? `${opts.sign} ` : ''}{money(v ?? 0)}</dd>
-    </div>
-  );
-  const q = `perspectiva=${encodeURIComponent(`route:${r.routeId}`)}&desde=${range.from}&hasta=${range.to}`;
-
-  async function saveController() {
-    if (!changing || !user) return;
-    if (changing.motivo.trim().length < 3) { toast.error('Indica el motivo.'); return; }
-    setSaving(true);
-    try {
-      await setRouteCapitalController({ actor: user, tenantId, routeId: r!.routeId, adminId: changing.adminId, motivo: changing.motivo });
-      toast.success('Responsable de capital cambiado: la ruta queda en entrega hasta que el nuevo responsable confirme el conteo');
-      setChanging(null);
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error'); } finally { setSaving(false); }
-  }
-
-  return (
-    <Modal open onClose={() => { if (!saving) onClose(); }} size="xl" title={`${r.name} · detalle`}
-      footer={<Button variant="secondary" onClick={onClose}>Cerrar</Button>}>
-      <div className="space-y-5" data-testid="rb-route-drawer">
-        <p className="text-sm text-gray-600">
-          Responsable de capital: <b className="text-gray-900">{formatPersonName(r.controller.name) || 'sin responsable'}</b>{!r.controller.valid && r.controller.id ? ' (no válido)' : ''}
-          {' '}· saldos al momento · periodo {range.from === range.to ? range.from : `${range.from} a ${range.to}`}
-        </p>
-        {(states.length > 0 || alerts.length > 0) && (
-          <section id="rb-d-estados" className="space-y-1.5" aria-label="Estados y alertas">
-            {states.map((k) => (
-              <div key={k} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-                <StateBadge k={k} /><span className="text-xs text-gray-600">{stateHelp(k)}{k === 'insufficientLiquidity' && r.capitalNeedMinor ? ` Faltan ${money(r.capitalNeedMinor)}.` : ''}</span>
-              </div>
-            ))}
-            {alerts.length > 0 && <div className="flex flex-wrap gap-1">{alerts.map((a) => <AlertChip key={a} a={a} />)}</div>}
-          </section>
-        )}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <section id="rb-d-efectivo" aria-labelledby="rb-d-ef-h">
-            <h3 id="rb-d-ef-h" className="text-sm font-semibold text-gray-900 mb-1">Efectivo de la ruta</h3>
-            <dl>
-              {row('Base disponible', r.baseMinor)}
-              {row('Base del trabajador (bruto)', r.custody.grossMinor, { hint: `${r.custody.positions} trabajador(es) con efectivo` })}
-              {row('Efectivo de la ruta', r.cashMinor, { strong: true })}
-              {row('Base del trabajador entregable', r.custody.deliverableMinor, { hint: 'Lo que los trabajadores pueden entregar hoy' })}
-              {r.custody.negativeMinor < 0 && row('Base del trabajador negativa', r.custody.negativeMinor, { hint: 'Gastos de trabajadores por encima de su efectivo; no es efectivo' })}
-              {r.custody.carriedShortageMinor > 0 && row('Faltante arrastrado', r.custody.carriedShortageMinor, { hint: 'Reconocido en cuadres; no es billete' })}
-              {r.surplusInControlMinor > 0 && row('Sobrante en control', r.surplusInControlMinor, { hint: 'Aparte; no es Base disponible' })}
-            </dl>
-          </section>
-          <section id="rb-d-base" aria-labelledby="rb-d-b-h">
-            <h3 id="rb-d-b-h" className="text-sm font-semibold text-gray-900 mb-1">Movimiento de la Base en el periodo</h3>
-            {!b ? <p className="text-sm text-gray-500">Sin datos de la Base para este periodo.</p> : (
-              <dl data-testid="rb-d-base-block">
-                {row('Saldo inicial', b.openingMinor)}
-                {b.injectionsMinor > 0 && row('Inyecciones de Base', b.injectionsMinor, { sign: '+' })}
-                {b.unassignedAssignedMinor > 0 && row('Reparto de saldo sin asignar', b.unassignedAssignedMinor, { sign: '+' })}
-                {b.transfersInMinor > 0 && row('Transferencias recibidas', b.transfersInMinor, { sign: '+' })}
-                {b.returnsReceivedMinor > 0 && row('Devoluciones de Cobradores', b.returnsReceivedMinor, { sign: '+' })}
-                {b.collectionsReceivedMinor > 0 && row('Recaudo recibido en la Base disponible', b.collectionsReceivedMinor, { sign: '+' })}
-                {b.withdrawalsMinor > 0 && row('Retiros de Base', b.withdrawalsMinor, { sign: '−' })}
-                {b.transfersOutMinor > 0 && row('Transferencias enviadas', b.transfersOutMinor, { sign: '−' })}
-                {b.deliveredToWorkersMinor > 0 && row('Entregas de Base a Cobradores', b.deliveredToWorkersMinor, { sign: '−' })}
-                {b.disbursedMinor > 0 && row('Desembolsos desde la Base disponible', b.disbursedMinor, { sign: '−' })}
-                {b.routeExpensesMinor > 0 && row('Gastos pagados con la Base', b.routeExpensesMinor, { sign: '−' })}
-                {b.reassignmentsNetMinor !== 0 && row('Reasignaciones entre rutas (neto)', b.reassignmentsNetMinor)}
-                {(b.partnerCoverMinor ?? 0) > 0 && row(`Cubierto por ${debtCreditors(r.partnerDebt ?? { creditors: [] }, me?.membershipId)} (deuda de la ruta)`, b.partnerCoverMinor, { sign: '+', hint: 'Caja negativa del sistema anterior: se le devuelve con la Base de esta ruta' })}
-                {(b.partnerRepaidMinor ?? 0) > 0 && row('Devuelto al Administrador', b.partnerRepaidMinor, { sign: '−' })}
-                {(b.migrationLoadsMinor ?? 0) !== 0 && row('Cierres de la migración (neto)', b.migrationLoadsMinor, { hint: 'Abonos, créditos e ingresos de los cierres del sistema anterior' })}
-                {b.otherMinor !== 0 && row('Otros (anulaciones, cuadres)', b.otherMinor)}
-                {row('Saldo final', b.closingMinor, { strong: true })}
-                {row('Aportes netos acumulados', r.contributionsNetMinor, { hint: 'Inyecciones menos retiros desde la activación' })}
-              </dl>
-            )}
-          </section>
-          <section id="rb-d-cartera" aria-labelledby="rb-d-c-h">
-            <h3 id="rb-d-c-h" className="text-sm font-semibold text-gray-900 mb-1">Cartera (no es efectivo)</h3>
-            <dl>
-              {row('Capital colocado', r.portfolio.principalPlacedMinor, { hint: 'Capital pendiente de las ventas, sin interés' })}
-              {row('Cartera activa', r.portfolio.outstandingWithInterestMinor, { hint: 'Capital + interés aún no cobrado' })}
-              {row('Ventas aprobadas sin desembolsar', r.approvedNotDisbursedMinor)}
-            </dl>
-          </section>
-          <section id="rb-d-periodo" aria-labelledby="rb-d-p-h">
-            <h3 id="rb-d-p-h" className="text-sm font-semibold text-gray-900 mb-1">Periodo y resultado</h3>
-            <dl>
-              {row('Recaudo', r.period.collectionsMinor, { hint: `De ellos, interés cobrado ${money(r.period.interestCollectedMinor)}` })}
-              {row('Capital desembolsado', r.period.principalDisbursedMinor)}
-              {row('Gastos operativos', r.period.expenses.operativoMinor)}
-              {row('Otros gastos', r.period.expenses.otroMinor)}
-              {row('Bienes duraderos', r.period.expenses.bienDuraderoMinor, { hint: 'Aparte: no cuentan en el resultado operativo' })}
-              {/* 3.28 (0053): línea aparte; baja el resultado, no el efectivo. */}
-              {(r.period.creditLossMinor ?? 0) !== 0 && row('Pérdida por créditos (capital)', r.period.creditLossMinor ?? 0,
-                { hint: 'Capital de ventas dadas por perdidas en el periodo, menos lo recuperado. No es efectivo' })}
-              {row('Resultado operativo', r.operatingResultMinor, { strong: true, hint: (r.period.creditLossMinor ?? 0) !== 0
-                ? 'Interés cobrado − gastos operativos y otros − pérdida por créditos. No es utilidad contable ni dinero retirable'
-                : 'Interés cobrado − gastos operativos y otros. No es utilidad contable ni dinero retirable' })}
-              {row('Flujo operativo', r.operatingFlowMinor, { hint: 'Recaudo − desembolsos − gastos. Puede ser negativo sin ser pérdida' })}
-              {r.capitalNeedMinor != null && row('Necesidad de capital', r.capitalNeedMinor)}
-            </dl>
-          </section>
-        </div>
-        {r.partnerDebt && r.partnerDebt.debtMinor > 0 && <PartnerDebtSection r={r} mine={me?.membershipId === r.controller.id && !isSa} myId={me?.membershipId} />}
-        <section id="rb-d-entrega" aria-labelledby="rb-d-e-h" className="space-y-2">
-          <h3 id="rb-d-e-h" className="text-sm font-semibold text-gray-900">Entrega de la ruta</h3>
-          {r.handoverState === 'en_entrega'
-            ? <Notice tone="violet" testId="rb-d-handover">Ruta en entrega: el nuevo responsable debe contar la Base y confirmar. Hasta entonces no hay inyecciones, retiros, entregas ni transferencias de salida.</Notice>
-            : <p className="text-sm text-gray-600">Sin entrega pendiente.</p>}
-          {r.lastHandover && r.lastHandover.status === 'confirmada' && (
-            <p className="text-xs text-gray-600">Última entrega confirmada {r.lastHandover.confirmed_at ? formatDateTime(r.lastHandover.confirmed_at) : ''}: esperado {money(r.lastHandover.expected_base_minor)}, contado {money(r.lastHandover.counted_minor)}{r.lastHandover.difference_minor ? `, diferencia ${money(r.lastHandover.difference_minor)}` : ', sin diferencia'}.</p>
-          )}
-          <ControllerHistory routeId={r.routeId} users={users} />
-          <div className="flex flex-wrap gap-2">
-            {canConfirm && <Button size="sm" onClick={() => onConfirm(r)} icon={<Handshake className="w-3.5 h-3.5" />}>Confirmar conteo</Button>}
-            {isSa && !changing && (
-              <Button size="sm" variant="secondary" onClick={() => setChanging({ adminId: '', motivo: '' })} disabled={candidates.length === 0} icon={<Repeat className="w-3.5 h-3.5" />} data-testid="rb-change-controller">
-                {r.controller.id ? 'Cambiar responsable' : 'Asignar responsable'}
-              </Button>
-            )}
-          </div>
-          {isSa && candidates.length === 0 && !changing && <p className="text-xs text-gray-500">Para cambiar el responsable, asigna antes otro Administrador activo a la ruta (Rutas).</p>}
-          {isSa && changing && (
-            <div className="rounded-xl border border-gray-200 p-3 space-y-3" data-testid="rb-change-form">
-              <Notice tone="sky">La Base no se mueve: sigue siendo de la ruta. La ruta queda <b>en entrega</b> hasta que el nuevo responsable cuente la Base y confirme.</Notice>
-              <Select label="Nuevo responsable" value={changing.adminId} onChange={(e) => setChanging((c) => c && { ...c, adminId: e.target.value })} placeholder="Seleccionar Administrador asignado"
-                options={candidates.map((a) => ({ value: a.id, label: formatPersonName(a.nombre) }))} required />
-              <Textarea label="Motivo" value={changing.motivo} onChange={(e) => setChanging((c) => c && { ...c, motivo: e.target.value })} rows={2} required />
-              <div className="flex gap-2 justify-end">
-                <Button size="sm" variant="secondary" onClick={() => setChanging(null)} disabled={saving}>Cancelar</Button>
-                <Button size="sm" onClick={saveController} loading={saving} disabled={!changing.adminId} data-testid="rb-change-save">Cambiar responsable</Button>
-              </div>
-            </div>
-          )}
-        </section>
-        <section className="flex flex-wrap gap-x-4 gap-y-2 border-t border-gray-100 pt-3 text-sm" aria-label="Ver en Consultas">
-          <Link to={`/admin/consultas?${q}`} className="text-primary-700 hover:underline inline-flex items-center gap-1"><History className="w-4 h-4" aria-hidden />Dinero de la ruta (Base de la ruta y del trabajador)</Link>
-          <Link to={`/admin/consultas?vista=actividad&${q}`} className="text-primary-700 hover:underline inline-flex items-center gap-1"><Info className="w-4 h-4" aria-hidden />Actividad de la ruta</Link>
-          <span className="text-xs text-gray-500 basis-full">«Dinero de la ruta» incluye la Base disponible (inyecciones, retiros, transferencias, aportes a gastos generales y reembolsos) y la Base de sus trabajadores (entregas, devoluciones, recaudos). Cada operación abre su detalle con comprobante.</span>
-        </section>
-      </div>
-    </Modal>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 0052: deuda de la ruta con su Administrador (caja cubierta en la migración)
-// ---------------------------------------------------------------------------
-
-function PartnerDebtSection({ r, mine, myId }: { r: PanelRoute; mine: boolean; myId: string | undefined }) {
-  const money = useMoney();
-  const { currency } = useTenant();
-  const d = r.partnerDebt!;
-  const [open, setOpen] = useState(false);
-  const [amount, setAmount] = useState(0);
-  const [reason, setReason] = useState('');
-  const [opId, setOpId] = useState('');
-  const [saving, setSaving] = useState(false);
-  const who = debtCreditors(d, myId);
-  const max = Math.max(0, Math.min(d.outstandingMinor, r.baseMinor));
-  const amountMinor = toMinor(amount);
-  const problem = amountMinor <= 0 ? 'Escribe el valor.' : amountMinor > d.outstandingMinor ? `La ruta solo debe ${money(d.outstandingMinor)}.`
-    : amountMinor > r.baseMinor ? `La Base disponible de ${r.name} es ${money(r.baseMinor)}.` : reason.trim().length < 3 ? 'Escribe el concepto (mínimo 3 caracteres).' : null;
-  async function save() {
-    if (problem) { toast.error(problem); return; }
-    setSaving(true);
-    try {
-      await repayPartnerDebt({ routeId: r.routeId, amountMinor, reason }, opId);
-      toast.success(`Devolución registrada: ${money(amountMinor)} desde la Base de ${r.name}`);
-      setOpen(false);
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error'); } finally { setSaving(false); }
-  }
-  return (
-    <section id="rb-d-deuda" aria-labelledby="rb-d-dd-h" className="space-y-2" data-testid="rb-d-partner-debt">
-      <h3 id="rb-d-dd-h" className="text-sm font-semibold text-gray-900">Deuda de la ruta {who === 'ti' ? 'contigo' : `con ${who}`}</h3>
-      <p className="text-xs text-gray-600">En la migración, la caja del sistema anterior estaba negativa: {who === 'ti' ? 'tú pusiste' : `${who} puso`} ese dinero.
-        Se devuelve <b>solo con la Base de {r.name}</b>, cuando la ruta tenga dinero. No es efectivo ni gasto de la ruta.</p>
-      <dl className="grid grid-cols-3 gap-2">
-        <div><dt className="text-xs text-gray-500">Deuda</dt><dd className={cn(num, 'text-sm font-semibold')}>{money(d.debtMinor)}</dd></div>
-        <div><dt className="text-xs text-gray-500">Devuelto</dt><dd className={cn(num, 'text-sm font-semibold')}>{money(d.repaidMinor)}</dd></div>
-        <div><dt className="text-xs text-gray-500">Pendiente</dt><dd className={cn(num, 'text-sm font-semibold', d.outstandingMinor > 0 ? 'text-amber-900' : 'text-gray-900')}>{money(d.outstandingMinor)}</dd></div>
-      </dl>
-      {mine && d.outstandingMinor > 0 && !open && (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="secondary" icon={<HandCoins className="w-3.5 h-3.5" />} disabled={max <= 0 || r.handoverState === 'en_entrega'}
-            onClick={() => { setAmount(toMajor(max)); setReason('Devolución de la caja cubierta en la migración'); setOpId(generateId()); setOpen(true); }} data-testid="rb-d-repay">
-            {who === 'ti' ? 'Devolverme con la Base de la ruta' : `Devolver a ${who} con la Base de la ruta`}
-          </Button>
-          {max <= 0 && <span className="text-xs text-gray-500">La Base disponible de la ruta está en {money(r.baseMinor)}: se podrá devolver cuando tenga dinero.</span>}
-        </div>
-      )}
-      {mine && open && (
-        <div className="rounded-xl border border-gray-200 p-3 space-y-3" data-testid="rb-d-repay-form">
-          <Notice tone="sky">Sale de la <b>Base disponible de {r.name}</b> (hoy {money(r.baseMinor)}) y baja la deuda de la ruta. Ninguna otra ruta se toca.</Notice>
-          <MoneyInput label="Valor a devolver" currency={currency} value={amount} onValueChange={(v) => setAmount(v)} required
-            hint={`Máximo ${money(max)} (lo menor entre la deuda y la Base)`} />
-          <Textarea label="Concepto" value={reason} onChange={(e) => setReason(e.target.value)} rows={2} required />
-          <div className="flex gap-2 justify-end">
-            <Button size="sm" variant="secondary" onClick={() => setOpen(false)} disabled={saving}>Cancelar</Button>
-            <Button size="sm" onClick={save} loading={saving} disabled={!!problem} data-testid="rb-d-repay-save">Registrar devolución</Button>
-          </div>
-        </div>
-      )}
-    </section>
   );
 }

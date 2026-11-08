@@ -37,6 +37,8 @@ import { filterAccessibleRoutes, assignableRoles, canManageUser, ROLE_LABELS } f
 import { getAssignedRouteIds } from '@/lib/roles'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import type { Office, Route, User, RouteFinancialSummary } from '@/models/types'
+// 3.37: «Ver detalle» (en ADEX Online abre el detalle de la ruta de Caja principal; en CLEAN no muestra nada).
+import { RouteDetailButton } from '@/components/routes/RouteDetailButton'
 
 export default function RoutesPage() {
   const { user, refreshUser } = useAuth()
@@ -574,7 +576,8 @@ export default function RoutesPage() {
                 <CapitalControllerBadge className="mt-1" route={route} users={allUsers} currentUserId={user?.id} />
               </div>
 
-              <div className="flex gap-2 pt-1">
+              <div className="flex flex-wrap gap-2 pt-1">
+                <RouteDetailButton routeId={route.id} />
                 <Button variant="secondary" size="sm" onClick={() => openEdit(route)} icon={<Edit className="w-3.5 h-3.5" />} className="flex-1">Editar</Button>
                 <Button variant="ghost" size="sm" onClick={() => toggleStatus(route)} className="flex-1"
                   icon={route.status === 'activa' ? <ToggleRight className="w-3.5 h-3.5 text-emerald-500" /> : <ToggleLeft className="w-3.5 h-3.5 text-gray-400" />}>
