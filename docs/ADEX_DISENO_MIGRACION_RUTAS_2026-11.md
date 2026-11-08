@@ -580,7 +580,7 @@ completa de la empresa. **No probado:** la pantalla en un navegador ni con los c
 - Probado: pruebas RM-005/RM-006 nuevas; ensayo del reinicio sobre la copia `adex-20261108T0050` restaurada en local (solo se
   borran las 3 rutas en migración; el resto idéntico, cuentas cuadradas); ensayo con los cierres REALES de Valparaíso
   (final 2/11, 4/11, 5/11) en base local: abonos y desembolsos = cuadre, caja diferencia 0, Base 428, conciliación limpia.
-- Valparaíso: cierres nuevos en `Migraciones/Valparaiso/cierres_v2/` (el «3/11» de antes era el final del 2/11).
+- Valparaíso: cierres nuevos en `Migraciones/Valparaiso/cierres/` (el «3/11» de antes era el final del 2/11).
 - Aguas Claras (primer cierre = final del 4/11, caja −981,50) y Taguatinga (final del 5/11, caja −510,40): faltan los cuadres
   desde el 6/11 para los cierres siguientes.
 - Falta: autorización de Helmer para commit, push, Render y aplicar 0050 en staging (reinicia las 3 rutas en BlueLine).
