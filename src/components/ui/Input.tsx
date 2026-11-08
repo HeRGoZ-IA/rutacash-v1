@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils'
 import { forwardRef, useId } from 'react'
+import { AutoSelect } from '@/components/ui/SearchSelect'
 
 // Ronda 49 · accesibilidad y móvil:
 //   · cada etiqueta apunta a su control (`htmlFor` con un id estable: el de las props o uno
@@ -90,33 +91,42 @@ interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
   ({ label, error, hint, options, placeholder, className, containerClassName, id, ...props }, ref) => {
     const { fieldId, describedBy } = useFieldIds(id, error, hint)
+    // 3.35: con más de 8 opciones se muestra con buscador (AutoSelect). `onChange` recibe un
+    // evento con `target.value`, como antes, así que ninguna pantalla cambia.
+    const { value, defaultValue: _dv, onChange, required, disabled, name, ...rest } = props
+    const dataTestId = (rest as Record<string, unknown>)['data-testid'] as string | undefined
+    const emit = (v: string) => onChange?.({ target: { value: v, name }, currentTarget: { value: v, name } } as unknown as React.ChangeEvent<HTMLSelectElement>)
     return (
       <div className={containerClassName ?? 'w-full'}>
         {label && (
           <label htmlFor={fieldId} className="block text-sm font-medium text-gray-700 mb-1.5">
             {label}
-            {props.required && <span className="text-red-500 ml-1">*</span>}
+            {required && <span className="text-red-500 ml-1">*</span>}
           </label>
         )}
-        <select
-          ref={ref}
+        <AutoSelect
           id={fieldId}
+          options={options}
+          value={value === undefined || value === null ? '' : String(value)}
+          onChange={emit}
+          placeholder={placeholder}
+          required={required}
+          disabled={disabled}
+          name={name}
+          data-testid={dataTestId}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy}
-          className={cn(
+          selectRef={ref}
+          selectProps={rest}
+          selectClassName={cn(
             'w-full h-11 sm:h-9 rounded-lg border bg-white text-gray-900 pl-3 pr-8', FIELD,
             'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-shadow',
             error ? 'border-red-400' : 'border-gray-300',
             'disabled:bg-gray-50 disabled:text-gray-500',
             className
           )}
-          {...props}
-        >
-          {placeholder && <option value="">{placeholder}</option>}
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
+          inputClassName={cn('h-11 sm:h-9 rounded-lg border', error ? 'border-red-400' : 'border-gray-300')}
+        />
         {error && <p id={`${fieldId}-error`} className="mt-1 text-xs text-red-600">{error}</p>}
         {hint && !error && <p id={`${fieldId}-hint`} className="mt-1 text-xs text-gray-500">{hint}</p>}
       </div>

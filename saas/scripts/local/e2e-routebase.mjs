@@ -192,7 +192,8 @@ try {
   const setField = (label, v) => page.evaluate((label, v) => {
     const scope = [...document.querySelectorAll('[role="dialog"]')].at(-1) ?? document;
     const l = [...scope.querySelectorAll('label')].find((x) => x.innerText.replace(/\u00a0/g, ' ').trim().replace(/\s*\*$/, '') === label);
-    const el = l && (l.htmlFor ? document.getElementById(l.htmlFor) : l.parentElement?.querySelector('input,select,textarea'));
+    const el0 = l && (l.htmlFor ? document.getElementById(l.htmlFor) : l.parentElement?.querySelector('input,select,textarea'));
+    const el = el0?.getAttribute('role') === 'combobox' ? document.querySelector(`select[data-search-for="${CSS.escape(el0.id)}"]`) : el0;
     if (!el) return false;
     const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v);
@@ -203,7 +204,9 @@ try {
   const pick = (label, contains) => page.evaluate((label, contains) => {
     const scope = [...document.querySelectorAll('[role="dialog"]')].at(-1) ?? document;
     const l = [...scope.querySelectorAll('label')].find((x) => x.innerText.replace(/\u00a0/g, ' ').trim().replace(/\s*\*$/, '') === label);
-    const el = l && (l.htmlFor ? document.getElementById(l.htmlFor) : l.parentElement?.querySelector('select'));
+    const el0 = l && (l.htmlFor ? document.getElementById(l.htmlFor) : l.parentElement?.querySelector('select'));
+    // 3.35: una lista larga se muestra con buscador; su <select> oculto lleva data-search-for = id del campo.
+    const el = el0 && (el0.tagName === 'SELECT' ? el0 : document.querySelector(`select[data-search-for="${CSS.escape(el0.id)}"]`));
     if (!el) return false;
     const o = [...el.options].find((x) => x.value && x.textContent.includes(contains));
     if (!o) return false;
@@ -235,7 +238,8 @@ try {
   const options = (label) => page.evaluate((label) => {
     const scope = [...document.querySelectorAll('[role="dialog"]')].at(-1) ?? document;
     const l = [...scope.querySelectorAll('label')].find((x) => x.innerText.replace(/\u00a0/g, ' ').trim().replace(/\s*\*$/, '') === label);
-    const el = l && (l.htmlFor ? document.getElementById(l.htmlFor) : l.parentElement?.querySelector('select'));
+    const el0 = l && (l.htmlFor ? document.getElementById(l.htmlFor) : l.parentElement?.querySelector('select'));
+    const el = el0 && (el0.tagName === 'SELECT' ? el0 : document.querySelector(`select[data-search-for="${CSS.escape(el0.id)}"]`));
     return el ? [...el.options].map((o) => o.textContent) : null;
   }, label);
   const setInput = (sel, v) => page.evaluate((sel, v) => {
@@ -664,6 +668,14 @@ try {
     await both('A-16f-cobrador-categorias', () => waitTestid('expense-category'));
     ok('A-16f', ['C-01'], 'Gastos del Cobrador: solo ofrece las categorías marcadas (las 11 de la lista del socio y Honorarios contador)',
       JSON.stringify([...offered].sort()) === JSON.stringify(['Aceite', 'Arriendo funcionario', 'Despinchada moto', 'Gasolina', 'Honorarios contador', 'Impuesto CNPJ', 'Mantenimiento moto', 'Medicamentos', 'Otros', 'Pago cadena', 'Recarga celular', 'Seguro de moto'].sort()), JSON.stringify(offered));
+    // 3.35: con más de 8 categorías la lista lleva buscador: se escribe y se toca Gasolina.
+    const searchBox = await page.$eval('#expense-category-field', (e) => e.getAttribute('role')).catch(() => null);
+    const tapped = searchBox === 'combobox' && await pickSearch('Categoría', 'Gasolina').catch(() => false);
+    await sleep(400);
+    const chosen = await page.evaluate(() => { const s = document.querySelector('[data-testid="expense-category"]'); return s ? s.options[s.selectedIndex]?.textContent.trim() : null; });
+    const shownText = await page.$eval('#expense-category-field', (e) => e.value).catch(() => null);
+    ok('A-16g', ['C-01'], 'Gastos del Cobrador: la lista larga de categorías tiene buscador; escribir y tocar la opción elige Gasolina (3.35)',
+      searchBox === 'combobox' && tapped && chosen === 'Gasolina' && shownText === 'Gasolina', JSON.stringify({ searchBox, tapped, chosen, shownText }));
     await login('admin1.norte@example.test');
     const bC2 = await base(C2), bC1 = await base(C1);
     await go('/admin/active-sales'); await sleep(2000);

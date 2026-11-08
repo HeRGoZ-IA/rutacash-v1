@@ -32,6 +32,10 @@ interface SearchSelectProps {
   emptyText?: string
   containerClassName?: string
   'aria-label'?: string
+  /** Id del campo de texto (para que una etiqueta externa lo señale). */
+  id?: string
+  /** Clases del campo de texto que REEMPLAZAN el alto y el borde por defecto (p. ej. el estilo del Cobrador). */
+  inputClassName?: string
 }
 
 /** Máximo de filas visibles a la vez: con más, se pide seguir escribiendo. */
@@ -39,9 +43,10 @@ const MAX_RESULTS = 60
 
 export function SearchSelect({
   options, value, onChange, label, placeholder = 'Buscar…', required, disabled,
-  emptyText = 'Ningún resultado', containerClassName, 'aria-label': ariaLabel,
+  emptyText = 'Ningún resultado', containerClassName, 'aria-label': ariaLabel, id, inputClassName,
 }: SearchSelectProps) {
-  const fieldId = useId()
+  const autoId = useId()
+  const fieldId = id ?? autoId
   const listId = `${fieldId}-list`
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -117,9 +122,10 @@ export function SearchSelect({
           onChange={e => { setQuery(e.target.value); setOpen(true) }}
           onKeyDown={onKeyDown}
           className={cn(
-            'w-full h-11 sm:h-9 rounded-lg border bg-white text-gray-900 placeholder-gray-400 text-base sm:text-sm pl-9 pr-9',
-            'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-shadow border-gray-300',
+            'w-full bg-white text-gray-900 placeholder-gray-400 text-base sm:text-sm pl-9 pr-9',
+            'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-shadow',
             'disabled:bg-gray-50 disabled:text-gray-500',
+            inputClassName ?? 'h-11 sm:h-9 rounded-lg border border-gray-300',
           )}
         />
         {selected && !disabled ? (
@@ -155,6 +161,78 @@ export function SearchSelect({
           </ul>
         )}
       </div>
+    </div>
+  )
+}
+
+// ============================================================
+// 3.35 · LISTA CORTA O CON BUSCADOR, SEGÚN EL TAMAÑO (petición del socio, 2026-11-08)
+// ------------------------------------------------------------
+// Regla aprobada: toda lista de MÁS DE 8 opciones lleva buscador (en el celular la lista
+// del sistema no deja escribir); las cortas siguen siendo el <select> de siempre.
+// Con buscador se conserva un <select> nativo OCULTO con las mismas opciones y el mismo
+// valor: mantiene `required` (el navegador no deja enviar el formulario vacío), el `name`,
+// el `data-testid` y la lectura de opciones de las pruebas (`data-search-for` = id del campo).
+// ============================================================
+
+/** Más de este número de opciones → buscador. */
+export const SEARCH_THRESHOLD = 8
+
+export interface AutoSelectProps {
+  id: string
+  options: SearchSelectOption[]
+  value: string
+  onChange: (value: string) => void
+  /** Primera opción vacía del <select> («Seleccionar…»); con buscador es el texto de ayuda. */
+  placeholder?: string
+  required?: boolean
+  disabled?: boolean
+  name?: string
+  /** Clases del <select> corto. */
+  selectClassName?: string
+  /** Clases del campo con buscador (ver SearchSelect.inputClassName). */
+  inputClassName?: string
+  'data-testid'?: string
+  'aria-invalid'?: boolean
+  'aria-describedby'?: string
+  /** Para el <select> (corto u oculto): lo usan `forwardRef` y las pruebas. */
+  selectRef?: React.Ref<HTMLSelectElement>
+  /** Resto de atributos del <select> corto (onBlur, autoFocus…). */
+  selectProps?: React.SelectHTMLAttributes<HTMLSelectElement>
+}
+
+export function AutoSelect({
+  id, options, value, onChange, placeholder, required, disabled, name, selectClassName, inputClassName,
+  'data-testid': testId, 'aria-invalid': invalid, 'aria-describedby': describedBy, selectRef, selectProps,
+}: AutoSelectProps) {
+  const native = (hidden: boolean) => (
+    <select
+      {...(hidden ? {} : selectProps)}
+      ref={selectRef}
+      id={hidden ? undefined : id}
+      data-search-for={hidden ? id : undefined}
+      data-testid={testId}
+      name={name}
+      required={required}
+      disabled={disabled}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      aria-invalid={hidden ? undefined : invalid}
+      aria-describedby={hidden ? undefined : describedBy}
+      aria-hidden={hidden || undefined}
+      tabIndex={hidden ? -1 : selectProps?.tabIndex}
+      className={hidden ? 'sr-only' : selectClassName}
+    >
+      {placeholder !== undefined && <option value="">{placeholder}</option>}
+      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  )
+  if (options.length <= SEARCH_THRESHOLD) return native(false)
+  return (
+    <div className="relative">
+      <SearchSelect id={id} options={options} value={value} onChange={onChange} disabled={disabled}
+        placeholder={placeholder || 'Buscar…'} inputClassName={inputClassName} containerClassName="w-full" />
+      {native(true)}
     </div>
   )
 }

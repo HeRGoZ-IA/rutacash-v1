@@ -5,6 +5,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Check, Copy, ExternalLink, Loader2, SlidersHorizontal, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { AutoSelect, SEARCH_THRESHOLD, SearchSelect } from '@/components/ui/SearchSelect';
 import { formatCurrency } from '@/lib/formatters';
 import { formatClientName, formatClientLabel} from '@/lib/displayName';
 import { cn } from '@/lib/utils';
@@ -30,6 +31,19 @@ export function PerspectiveSelect({ options, value, onChange, id }: { options: P
   const rb = isRouteBaseUi(useCapitalModel());
   const groupLabel = rb ? KIND_GROUP_LABEL_RB : KIND_GROUP_LABEL;
   const kinds = (['company', 'route', 'admin', 'custody'] as const).filter((k) => options.some((o) => o.kind === k));
+  const text = (o: PerspectiveOption) => o.kind === 'custody' ? `${person({ name: o.label.replace(/^Custodia de /, '') })}${o.office ? ` · ${o.office}` : ''}`
+    : o.kind === 'admin' ? `${rb ? 'Saldo sin asignar de' : 'Bolsa de'} ${person({ name: o.label.replace(/^(Bolsa de|Saldo sin asignar de) /, '') })}`
+      : `${o.label}${o.office ? ` · ${o.office}` : ''}`;
+  // 3.35: con más de 8 opciones, buscador; cada opción lleva delante su grupo (lo que antes decía el <optgroup>).
+  if (options.length > SEARCH_THRESHOLD) {
+    const short: Record<PerspectiveOption['kind'], string> = { company: 'Empresa', route: 'Ruta', admin: rb ? 'Sin asignar' : 'Bolsa', custody: 'Base del trabajador' };
+    const flat = kinds.flatMap((k) => options.filter((o) => o.kind === k).map((o) => ({ value: o.key, label: o.kind === 'company' ? text(o) : `${short[k]} · ${text(o)}` })));
+    return (
+      <div data-testid="consultas-perspective">
+        <SearchSelect id={id} options={flat} value={value} onChange={(v) => { if (v) onChange(v); }} placeholder="Buscar caja o ruta…" />
+      </div>
+    );
+  }
   return (
     <select id={id} className={cn(FIELD, 'pr-8')} value={value} onChange={(e) => onChange(e.target.value)} data-testid="consultas-perspective">
       {kinds.map((k) => (
@@ -107,10 +121,9 @@ export function FilterBar({ view, filters, set, perspectives, people }: {
           </div>
           <div className="min-w-0">
             <label htmlFor={`${uid}-per`} className={LABEL}>Persona</label>
-            <select id={`${uid}-per`} className={cn(FIELD, 'pr-8')} value={filters.personId} onChange={(e) => set({ personId: e.target.value })}>
-              <option value="">Todas</option>
-              {people.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-            </select>
+            {/* 3.35: con más de 8 personas, con buscador. */}
+            <AutoSelect id={`${uid}-per`} selectClassName={cn(FIELD, 'pr-8')} value={filters.personId} onChange={(v) => set({ personId: v })}
+              placeholder="Todas" options={people} />
           </div>
           <div className="min-w-0">
             <label htmlFor={`${uid}-o`} className={LABEL}>Orden</label>

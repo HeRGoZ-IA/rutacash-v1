@@ -7,6 +7,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { Plus, DollarSign, Image as ImageIcon } from 'lucide-react'
 import { toast } from '@/components/ui/Toast'
 import { PhotoInput } from '@/components/ui/PhotoInput'
+import { AutoSelect } from '@/components/ui/SearchSelect'
 import { db } from '@/lib/db'
 import { useAuth } from '@/hooks/useAuth'
 import { useDataRevision } from '@/hooks/useDataRevision'
@@ -216,18 +217,18 @@ export default function CollectorExpensesPage() {
           ) : (
             // Selector expandible (dropdown): escala bien aunque haya muchas categorías.
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Categoría</label>
-              <select
+              <label htmlFor="expense-category-field" className="block text-xs font-medium text-gray-500 mb-1.5">Categoría</label>
+              {/* 3.35: con más de 8 categorías se escribe para buscar (la lista del celular no deja). */}
+              <AutoSelect
+                id="expense-category-field"
                 data-testid="expense-category"
+                options={usables.map(c => ({ value: c.id, label: c.nombre }))}
                 value={form.categoryId}
-                onChange={e => setForm(f => ({ ...f, categoryId: e.target.value }))}
-                className="w-full h-12 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary-500"
-              >
-                <option value="">Seleccionar categoría…</option>
-                {usables.map(c => (
-                  <option key={c.id} value={c.id}>{c.nombre}</option>
-                ))}
-              </select>
+                onChange={v => setForm(f => ({ ...f, categoryId: v }))}
+                placeholder="Seleccionar categoría…"
+                selectClassName="w-full h-12 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                inputClassName="h-12 rounded-xl border border-gray-200 font-medium"
+              />
             </div>
           )}
           {eligeQuienPaga && (
