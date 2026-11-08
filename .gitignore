@@ -22,3 +22,7 @@ tests/_out*.mjs
 
 # Permisos locales de Claude Code (no se suben)
 .claude/settings.local.json
+
+# Caché de Python (scripts de migración)
+__pycache__/
+*.pyc
