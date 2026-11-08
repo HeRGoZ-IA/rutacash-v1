@@ -38,6 +38,9 @@ from collections import defaultdict
 
 import openpyxl
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from nombres import split_client  # noqa: E402
+
 CREDIT_COLS = ['RUTA', 'FECHA', 'CÓDIGO CLIENTE', 'DOCUMENTO', 'CLIENTE', 'ZONA', 'DIRECCIÓN COBRO', 'BARRIO', 'TELÉFONO', 'CELULAR',
                'CÓDIGO CRÉDITO', 'VALOR CRÉDITO', '% INTERÉS', 'TOTAL CRÉDITO', 'SALDO', 'FORMA PAGO', 'DÍA DE COBRO', 'VALOR CUOTA']
 CLIENT_COLS = ['CÓDIGO CLIENTE', 'DOCUMENTO', 'CLIENTE', 'DIRECCIÓN', 'BARRIO', 'CELULAR', 'CELULAR ADICIONAL', 'ZONA',
@@ -262,9 +265,15 @@ def read_clients(path, route):
     return crow
 
 
-def out_client(c):
+def named(c, route):
+    """Nombre y negocio separados (el sistema anterior los traía juntos); las notas van a observaciones."""
+    name, business, notes = split_client(c['name'], route)
+    return {'name': name or f'CLIENTE {c["code"]}', 'business': business, 'notes': notes}
+
+
+def out_client(c, route):
     doc = re.sub(r'\D', '', c['document'])
-    return {'code': c['code'], 'name': c['name'] or f'CLIENTE {c["code"]}', 'document': c['document'] or c['code'],
+    return {'code': c['code'], **named(c, route), 'document': c['document'] or c['code'],
             'documentType': 'CPF' if len(doc) == 11 and doc == c['document'] else None,
             'phone': c['phone'], 'phone2': c['phone2'], 'address': c['address'], 'address2': c['address2'], 'active': False}
 
@@ -385,7 +394,7 @@ def main_daily(a, report, route):
         counts[c['clientCode']] += 1
     clients = {c['code']: dict(c) for c in prev['clients']}
     for code, rc in rep_clients.items():
-        clients[code] = out_client(rc)
+        clients[code] = out_client(rc, route)
     for c in active.values():
         if c['clientCode'] not in clients:
             fail(f'crédito {c["code"]}: el cliente {c["clientCode"]} no está en ningún reporte')
@@ -576,7 +585,7 @@ def main():
     out_clients = []
     for c in sorted(clients.values(), key=lambda x: x['code']):
         doc = re.sub(r'\D', '', c['document'])
-        out_clients.append({'code': c['code'], 'name': c['name'] or f'CLIENTE {c["code"]}', 'document': c['document'] or c['code'],
+        out_clients.append({'code': c['code'], **named(c, route), 'document': c['document'] or c['code'],
                             'documentType': 'CPF' if len(doc) == 11 and doc == c['document'] else None,
                             'phone': c['phone'], 'phone2': c['phone2'], 'address': c['address'], 'address2': c['address2'],
                             'active': per_client.get(c['code'], [0])[0] > 0})

@@ -30,8 +30,12 @@ import datetime as dt
 import html
 import json
 import math
+import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from nombres import split_client  # noqa: E402
 
 MINOR = 100
 FREQS = ('diaria', 'semanal', 'quincenal', 'mensual')
@@ -283,7 +287,10 @@ def main():
             errors.append(f'{who}: «créditos que ya pagó» no es un número entero')
             before = None
         placeholders[ccode] = placeholders.get(ccode, 0) + int(before or 0)
-        clients.append({'code': ccode, 'name': name, 'document': document, 'documentType': 'CPF' if is_cpf else None,
+        # Nombre y negocio separados (los dueños los suelen escribir juntos); las notas van a observaciones.
+        c_name, c_business, c_notes = split_client(name, route_name)
+        c_business = str(cl.get('negocio') or '').strip() or c_business
+        clients.append({'code': ccode, 'name': c_name, 'business': c_business, 'notes': c_notes, 'document': document, 'documentType': 'CPF' if is_cpf else None,
                         'phone': str(cl.get('celular') or '').strip(), 'phone2': str(cl.get('celular2') or '').strip() or None,
                         'address': str(cl.get('direccion') or '').strip(), 'address2': str(cl.get('barrio') or '').strip() or None,
                         'active': n_active > 0, '_n': i})

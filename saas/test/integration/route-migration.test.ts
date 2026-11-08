@@ -146,7 +146,7 @@ describe('0043 · ruta en migración', () => {
     const sched = (from: number, step: number, amounts: number[]) => amounts.map((a, k) => ({ number: k + 1, dueDate: day(from + k * step), amountMinor: a }));
     const docs = [cpf(), cpf()];
     const clients = [
-      { code: 'C1', name: 'CLIENTE MIGRADO UNO', document: docs[0], documentType: 'CPF', phone: '61999990001', address: 'Rua sintética 1', active: true },
+      { code: 'C1', name: 'CLIENTE MIGRADO UNO', business: 'Pizzaria', notes: 'Recomendado por Renato', document: docs[0], documentType: 'CPF', phone: '61999990001', address: 'Rua sintética 1', active: true },
       { code: 'C2', name: 'CLIENTE MIGRADO DOS', document: docs[1], documentType: 'CPF', phone: '61999990002', address: 'Rua sintética 2', active: true },
       { code: 'C3', name: 'CLIENTE MIGRADO TRES', document: 'X12345', documentType: null, phone: '', address: '', active: false },
     ];
@@ -212,6 +212,13 @@ describe('0043 · ruta en migración', () => {
     assert.equal(l1.status, 201, JSON.stringify(l1.body));
     assert.deepEqual((await load(day1(), op1)).body, l1.body, 'reintento: misma respuesta');
     assert.equal(l1.body['firstLoad'], true);
+    // 0051: nombre y negocio separados; las notas del lector van a observaciones.
+    const cl = (await db.admin.query(`select name, business, notes from adex.clients where route_id = $1 order by name`, [rf])).rows;
+    assert.deepEqual(cl.map((r) => [r.name, r.business, r.notes]), [
+      ['CLIENTE MIGRADO DOS', null, 'Cliente migrado (código C2)'],
+      ['CLIENTE MIGRADO TRES', null, 'Cliente migrado (código C3)'],
+      ['CLIENTE MIGRADO UNO', 'Pizzaria', 'Cliente migrado (código C1)\nRecomendado por Renato'],
+    ]);
     assert.equal(l1.body['paidBeforeMigrationMinor'], 48_000 + 75_000);
     assert.equal(await state(rf), 'en_migracion');
     assert.deepEqual(await sales(), [['K1', 100_000, 120_000, 72_000, 20, 'activa', 4], ['K2', 100_000, 120_000, 45_000, 4, 'activa', 0]]);
