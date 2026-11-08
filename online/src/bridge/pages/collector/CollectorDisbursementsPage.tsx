@@ -22,6 +22,7 @@ import { useOffline } from '../../../offline/state.ts'
 import { OpStatusBadge, useReachable } from '../../../offline/ui.tsx'
 import { formatDateTime } from '@/lib/formatters'
 import { toMajor } from '../../../runtime/mappers.ts'
+import { useDataRevision } from '@/hooks/useDataRevision'
 
 export default function CollectorDisbursementsPage() {
   const { user } = useAuth()
@@ -44,11 +45,13 @@ export default function CollectorDisbursementsPage() {
     return () => { alive = false }
   }, [offlineMode, activeRouteId, ops, reachable, custodyAt])
 
-  useEffect(() => { load() }, [user, activeRouteId])
+  // Error 3.32 (2026-11-07): la pantalla leía las ventas una sola vez; lo que la oficina aprobaba con
+  // la app abierta no aparecía hasta recargar. Ahora se relee con cada cambio que trae el sondeo.
+  const revision = useDataRevision()
+  useEffect(() => { load() }, [user, activeRouteId, revision])
 
   async function load() {
     if (!user || !activeRouteId) { setSales([]); setLoading(false); return }
-    setLoading(true)
     // Ventas aprobadas pendientes por desembolsar de la RUTA ACTIVA (coincide con el badge)
     const all = await db.sales.where('routeId').equals(activeRouteId).toArray()
     const pending = all.filter(s => s.status === 'activa' && s.disbursementStatus === 'pendiente')

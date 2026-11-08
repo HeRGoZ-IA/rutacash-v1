@@ -146,7 +146,7 @@ try {
     return async (method, p, body, { op } = {}) => {
       const headers = { authorization: `Bearer ${t}`, 'x-adex-membership': membership };
       if (body !== undefined) headers['content-type'] = 'application/json';
-      if (method !== 'GET') headers['x-adex-operation-id'] = op ?? randomUUID();
+      if (method !== 'GET' && op !== null) headers['x-adex-operation-id'] = op ?? randomUUID(); // op: null = ruta sin id de operación
       const r = await fetch(API + p, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
       const text = await r.text();
       let json = {}; try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text.slice(0, 200) }; }
@@ -451,6 +451,17 @@ try {
     ok('A-08', ['C-01', 'C-09'], 'RB-D4: la solicitud de devolución (R$ 100) NO mueve dinero', reqSent && reqRow?.state === 'pending' && (await base(C1)) === b0 && (await custody(M.cob1, C1)) === k0, JSON.stringify(reqRow));
 
     // El Cobrador atiende las dos solicitudes (la sembrada de R$ 200 y la nueva de R$ 100): cada entrega mueve el dinero UNA vez.
+    // 3.32 (A-12b): la solicitud del Cobrador se crea por la API ANTES de que entre en el navegador
+    // (un inicio de sesión nuevo cierra la sesión anterior del mismo usuario).
+    const pre332 = await (async () => {
+      const a1 = await apiAs('admin1.norte@example.test', M.ad1);
+      const c1 = await apiAs('cobrador1.norte@example.test', M.cob1);
+      const day = (await one(`select (now() at time zone 'America/Sao_Paulo')::date::text d`)).d;
+      const cliF = await a1('POST', '/v1/clients', { routeId: C1, name: 'Cliente Sintético Centro F (aprobada con la app abierta)', documentType: 'CPF', document: '98800000001',
+        phonePrimary: '11988000001', addressPrimary: 'Rua Sintética, 991', addressSecondary: 'Sala 1', business: 'Comércio sintético' });
+      const reqF = await c1('POST', '/v1/credit-requests', { routeId: C1, clientId: cliF.body.id, amountMinor: 20_000, interestRate: 20, installmentsCount: 10, frequency: 'diaria', startDate: day, paymentDays: [0, 1, 2, 3, 4, 5, 6] });
+      return { cliF, reqF };
+    })();
     await login('cobrador1.norte@example.test');
     await go('/collector/notificaciones');
     await waitTestid('notifications-page');
@@ -481,6 +492,38 @@ try {
     await page.waitForFunction(() => !document.querySelector('.animate-spin'), { timeout: 20_000 }).catch(() => undefined);
     await sleep(1000);
     await both('A-12-cobrador-desembolsos');
+    // Error 3.32 (2026-11-07): con la app del Cobrador abierta en Desembolsos, el Administrador (desde otro aparato)
+    // aprueba una solicitud y le envía Base. Antes la pantalla no mostraba ninguno de los dos cambios hasta recargar.
+    {
+      const { cliF, reqF } = pre332;
+      const a1 = await apiAs('admin1.norte@example.test', M.ad1);
+      await sleep(25_000); // la app ya hizo su sondeo con la solicitud aún pendiente
+      const cashBefore = await testid('offline-cash-amount');
+      const shownBefore = (await text()).includes('Centro F');
+      const polls = []; const onReq = (r) => { if (r.url().includes('/v1/')) polls.push(r.url().replace(API, '').split('?')[0]); }; page.on('request', onReq);
+      const t0 = Date.now();
+      const appr = await a1('POST', `/v1/credit-requests/${reqF.body.id}/approve`, {}, { op: null });
+      const deliv = await a1('POST', '/v1/capital/deliveries', { routeId: C1, workerId: M.cob1, amountMinor: 5_000, reason: 'Base enviada con la app del Cobrador abierta (E2E 3.32)' });
+      const seen = await waitText('Centro F', 70_000);
+      const seenS = Math.round((Date.now() - t0) / 1000);
+      // La Base enviada (R$ 50) debe verse sumada exactamente, sin recargar.
+      const reais = (t) => Number(String(t).replace(/[^0-9,]/g, '').replace(',', '.'));
+      const cashSeen = cashBefore === null ? null : await page.waitForFunction((want) => {
+        const t = document.querySelector('[data-testid="offline-cash-amount"]')?.innerText ?? '';
+        return Number(t.replace(/[^0-9,]/g, '').replace(',', '.')) === want;
+      }, { timeout: 40_000 }, reais(cashBefore) + 50).then(() => true, () => false);
+      const cashAfter = await testid('offline-cash-amount');
+      page.off('request', onReq); await shot('A-12b-tras-espera');
+      const vis = await page.evaluate(() => ({ v: document.visibilityState, path: location.pathname, w: innerWidth, txt: document.body.innerText.slice(0, 300) }));
+      const cancel = await a1('POST', `/v1/credit-requests/${reqF.body.id}/cancel`, { reason: 'Solo para la prueba de actualización (E2E 3.32)' }, { op: null });
+      ok('A-12b', ['C-01'], 'Cobrador con Desembolsos abierto: la venta que el Administrador aprueba y la Base que le envía aparecen solas, sin recargar',
+        cliF.status === 201 && reqF.status === 201 && appr.status < 300 && deliv.status < 300 && !shownBefore && seen && cashSeen !== false && cancel.status < 300,
+        JSON.stringify({ cli: cliF.status, req: reqF.status, appr: appr.status, deliv: deliv.status, shownBefore, seen, seenS, cashBefore, cashAfter, cashSeen, cancel: cancel.status, polls: polls.slice(0, 40), vis, err: [reqF, appr, deliv, cancel].filter((r) => r.status >= 300).map((r) => r.text.slice(0, 160)) }));
+      await go('/collector/disbursements');
+      await page.waitForFunction(() => document.body.innerText.includes('Centro E') && !document.querySelector('.animate-spin'), { timeout: 45_000 }).catch(() => undefined);
+      await sleep(1000);
+      k0 = await custody(M.cob1, C1); // la Base de esta prueba entró a la custodia
+    }
     // Error 2026-11-05: el desembolso llega al servidor y la respuesta se pierde. Antes el botón giraba para siempre;
     // ahora, pasado el tiempo máximo de espera, la app consulta la operación por su id y la da por confirmada (sin repetirla).
     loseReply = (r) => {

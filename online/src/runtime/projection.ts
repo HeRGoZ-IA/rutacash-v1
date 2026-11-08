@@ -330,13 +330,36 @@ function cached<T>(key: string, rawLoad: () => Promise<T>): Promise<T> {
 
 type Listener = (tables: Set<string>) => void;
 const listeners = new Set<Listener>();
+/**
+ * Error 3.32 (2026-11-07): avisos de «la huella del servidor cambió» aunque la pantalla actual no
+ * relea nada distinto (p. ej. Base enviada al Cobrador mientras mira Desembolsos): quien guarda
+ * cifras fuera de la caché (el efectivo del Cobrador) las relee aquí.
+ */
+const serverChangeListeners = new Set<() => void>();
+export function onServerChange(fn: () => void): () => void {
+  serverChangeListeners.add(fn);
+  return () => serverChangeListeners.delete(fn);
+}
 
 export function currentRevision(): number { return revision; }
+
+/**
+ * Error 3.32 (2026-11-07): durante un refresco, las tablas se leen FRESCAS una sola vez por refresco.
+ * Antes, una tabla que se arma con otra (las ventas incluyen las solicitudes aprobadas sin
+ * desembolsar) tomaba esa otra de la caché vieja: lo aprobado con la app abierta no aparecía.
+ */
+let refreshMemo: Map<string, Promise<unknown>> | null = null;
+function loadFresh(name: string): Promise<Row[]> {
+  const memo = refreshMemo!;
+  if (!memo.has(name)) memo.set(name, withOfflineCopy(`table:${name}`, LOADERS[name]!));
+  return memo.get(name) as Promise<Row[]>;
+}
 
 /** Filas de una tabla (cargadas una vez por revisión). */
 export function table(name: string): Promise<Row[]> {
   const loader = LOADERS[name];
   if (!loader) return Promise.reject(new ServerGap(name));
+  if (refreshMemo) return loadFresh(name);
   return cached(`table:${name}`, loader);
 }
 
@@ -390,7 +413,13 @@ export async function refreshIfChanged(somethingChanged = false): Promise<void> 
   const live = current.filter(([, e]) => e.used >= navigatedAt);
   const dropped = current.length - live.length;
   const before = await Promise.all(live.map(([, e]) => e.promise.catch(() => null)));
-  const after = await mapLimit(live, 4, ([, e]) => e.load().catch(() => null));
+  refreshMemo = new Map();
+  let after: unknown[];
+  try {
+    after = await mapLimit(live, 4, ([k, e]) => (k.startsWith('table:') && LOADERS[k.slice('table:'.length)] ? loadFresh(k.slice('table:'.length)) : e.load()).catch(() => null));
+  } finally {
+    refreshMemo = null;
+  }
   if (revision !== rev0 || generation !== gen0) return; // un comando o un cambio de contexto ya publicó otra revisión
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   const changed = live.filter(([, e], i) => after[i] !== null && !same(before[i], after[i])).map(([k]) => k);
@@ -458,6 +487,7 @@ export async function pollOnce(): Promise<void> {
     const changedMarker = !known || marker !== lastMarker;
     await refreshIfChanged(changedMarker);
     if (gen !== generation) return;
+    if (changedMarker) for (const fn of serverChangeListeners) fn();
     if (marker !== undefined) lastMarker = marker;
     lastFullAt = Date.now();
   } finally {

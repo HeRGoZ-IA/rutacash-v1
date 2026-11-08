@@ -19,7 +19,7 @@
 // no cabe, 409 y queda en revisión, sin saldos negativos ni registros parciales).
 
 import { api, useRuntime } from '../runtime/session.ts';
-import { subscribe } from '../runtime/projection.ts';
+import { onServerChange, subscribe } from '../runtime/projection.ts';
 import { getSnapshot, putSnapshot } from './vault.ts';
 import { currentScope, onActivated, useOffline, type PendingOp } from './state.ts';
 
@@ -134,11 +134,14 @@ export function watchCustody(): void {
   if (watching) return;
   watching = true;
   let timer = 0;
-  subscribe(() => {
+  const reread = () => {
     if (useRuntime.getState().ctx?.role !== 'cobrador' || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
     window.clearTimeout(timer);
     timer = window.setTimeout(() => { void refreshCustody(); }, 500);
-  });
+  };
+  subscribe(reread);
+  // Error 3.32: Base enviada por la oficina con la app abierta (la pantalla actual no lo relee).
+  onServerChange(reread);
 }
 
 // Al quedar listo el modo sin conexión para un contexto: fuera la cifra anterior y, con red, la vigente.
