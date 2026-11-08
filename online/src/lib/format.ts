@@ -92,6 +92,8 @@ const ERRORS: Record<string, string> = {
   UNCERTAIN_OPERATION: 'No se pudo confirmar la operación. Compruebe antes de repetirla.',
   // Administración de la empresa (usuarios, oficinas, rutas, categorías, datos).
   INVALID_EMAIL: 'El correo no es válido.',
+  INVALID_USERNAME: 'El usuario debe tener de 3 a 30 caracteres: letras sin acento, números, punto, guion o guion bajo (sin espacios).',
+  USERNAME_TAKEN: 'Ese usuario ya existe en ADEX. Elige otro (por ejemplo, agrega la ruta o un número).',
   INVALID_ROLE: 'Seleccione un rol válido.',
   INVALID_NAME: 'Indique el nombre de la persona.',
   INVALID_ROUTES: 'La selección de rutas no es válida.',

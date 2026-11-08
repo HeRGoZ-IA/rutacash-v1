@@ -8,6 +8,7 @@
 //     respuesta se pierde, se CONSULTA el resultado por ese id antes de repetir nada.
 
 import { AuthError, createSupabaseAuthClient, type AuthClient } from '../../../saas/src/client/serverSession.ts';
+import { loginEmailOf } from '../../../saas/src/client/username.ts';
 import { decideContext, type SelectableMembership, type SelectorDecision } from '../../../saas/src/client/contextSelector.ts';
 import { IndexedDbSessionStore, MemorySessionStore, type SessionStore, type StoredSession } from '../../../saas/src/client/sessionStore.ts';
 
@@ -167,7 +168,8 @@ export class OnlineClient {
 
   async login(email: string, password: string): Promise<SelectorDecision> {
     // La contraseña va SOLO al proveedor y no se guarda en ningún sitio.
-    const t = await this.auth.signInWithPassword(email.trim().toLowerCase(), password);
+    // 3.31: «usuario» (sin arroba) entra con su correo interno (`saas/src/client/username.ts`).
+    const t = await this.auth.signInWithPassword(loginEmailOf(email), password);
     this.session = { ...t, activeMembershipId: null };
     await this.store.save(this.session);
     // Ronda 73 · SOC-01: inicio de sesión EXPLÍCITO → esta es la única sesión vigente de la persona;

@@ -10,7 +10,7 @@
 //      genera un ENLACE de un solo uso para que la persona fije su propia contraseña. El
 //      servidor solo lo emite si nunca ha entrado y no pertenece a otra empresa.
 // Altas, edición del nombre, rutas, activar/desactivar y eliminar van a la API.
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Plus, Users, ToggleLeft, ToggleRight, Trash2, AlertTriangle, Search, KeyRound } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, Select } from '@/components/ui/Input'
@@ -32,6 +32,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useTenant } from '@/hooks/useTenant'
 import { generateId, generateTemporaryPassword } from '@/lib/utils'
 import { validateEmail, sameEmail } from '@/lib/email'
+import { isValidUsername, loginEmailOf, loginLabelOf, suggestUsername, usernameOf } from '../../../../../saas/src/client/username.ts'
 import { nowISO, initials } from '@/lib/formatters'
 import { formatPersonName } from '@/lib/displayName'
 import { foldText } from '@/lib/searchFilter'
@@ -130,6 +131,8 @@ export default function UsersPage() {
   const defaultRole: UserRole = (onlineRoles[0] ?? 'cobrador') as UserRole
 
   // MODELO PURO (#7): ROL BASE + RUTAS AUTORIZADAS. Sin permisos individuales.
+  // 3.31: ¿ya se escribió el usuario a mano? Si no, se propone a partir del nombre.
+  const userTouched = useRef(false)
   const [form, setForm] = useState({
     nombre: '', email: '', password: '', rol: defaultRole,
     authorizedRouteIds: [] as string[],
@@ -172,6 +175,7 @@ export default function UsersPage() {
     // nace con una credencial conocida.
     // ADEX Online: sin contraseña inicial (la gestiona el proveedor de identidad).
     const init = { nombre: '', email: '', password: '', rol: defaultRole, authorizedRouteIds: [] as string[] }
+    userTouched.current = false   // 3.31: el usuario se propone desde el nombre hasta que se escribe a mano
     setForm(init); setOriginal({ ...init })
     setModalOpen(true)
   }
@@ -192,11 +196,18 @@ export default function UsersPage() {
 
   async function handleSave() {
     if (!currentUser) return
-    if (!form.nombre || !form.email) { toast.error('Nombre y email son requeridos'); return }
-    // Validación de correo centralizada (`lib/email`): misma regla en toda la app.
-    const emailCheck = validateEmail(form.email)
-    if (!emailCheck.ok) { toast.error(emailCheck.message); return }
-    const email = emailCheck.email   // forma canónica: se guarda y compara siempre así
+    if (!form.nombre || !form.email) { toast.error('Nombre y usuario son requeridos'); return }
+    // 3.31: sin arroba es un USUARIO (se guarda como correo interno `<usuario>@usuarios.adex.invalid`);
+    // con arroba, un correo real, validado con la regla única de `lib/email`.
+    let email: string
+    if (!form.email.includes('@')) {
+      if (!isValidUsername(form.email)) { toast.error('El usuario debe tener de 3 a 30 caracteres: letras sin acento, números, punto, guion o guion bajo (sin espacios).'); return }
+      email = loginEmailOf(form.email)
+    } else {
+      const emailCheck = validateEmail(form.email)
+      if (!emailCheck.ok) { toast.error(emailCheck.message); return }
+      email = emailCheck.email   // forma canónica: se guarda y compara siempre así
+    }
     // #5 Guard de datos: no editar usuarios de rango superior aunque se manipule el estado.
     if (editing && !canManageUser(currentUser, editing)) {
       toast.error('No tienes permiso para editar este usuario.')
@@ -231,7 +242,7 @@ export default function UsersPage() {
       // nada, de modo que `Admin@Empresa.com` y `admin@empresa.com` convivían.
       const todos = await db.users.toArray()
       const duplicado = todos.find(u => u.id !== userId && sameEmail(u.email, email))
-      if (duplicado) { toast.error('Ya existe un usuario con ese correo'); setSaving(false); return }
+      if (duplicado) { toast.error(usernameOf(email) ? 'Ya existe un usuario con ese nombre de usuario' : 'Ya existe un usuario con ese correo'); setSaving(false); return }
 
       if (editing) {
         // LAST_SUPERADMIN_PROTECTION — degradar al último Super Admin activo dejaría
@@ -417,7 +428,7 @@ export default function UsersPage() {
     // Sin distinguir mayúsculas ni acentos («jose» encuentra «José»).
     const q = foldText(search)
     if (!q) return true
-    return foldText(u.nombre).includes(q) || foldText(u.email).includes(q) || foldText(ROLE_LABELS[u.rol]).includes(q)
+    return foldText(u.nombre).includes(q) || foldText(loginLabelOf(u.email)).includes(q) || foldText(ROLE_LABELS[u.rol]).includes(q)
   })
 
   const showRoutes = form.rol !== 'superadmin'
@@ -448,7 +459,7 @@ export default function UsersPage() {
                     <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center text-primary-700 font-bold text-sm flex-shrink-0">{initials(u.nombre)}</div>
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{formatPersonName(u.nombre)}</p>
-                      <p className="text-xs text-gray-500 truncate">{u.email}</p>
+                      <p className="text-xs text-gray-500 truncate">{loginLabelOf(u.email)}</p>
                     </div>
                   </div>
                   <div className="flex-1 min-w-0 flex flex-wrap gap-1.5">
@@ -477,9 +488,14 @@ export default function UsersPage() {
       <Modal open={modalOpen} onClose={tryCloseModal} guarded title={editing ? 'Editar usuario' : 'Nuevo usuario'}
         footer={<><Button variant="secondary" onClick={tryCloseModal} disabled={saving}>Cancelar</Button><Button onClick={handleSave} loading={saving}>{editing ? 'Actualizar' : 'Crear'}</Button></>}>
         <div className="space-y-4">
-          <Input label="Nombre completo" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} required />
-          {/* ADEX Online: al editar, correo y rol fijos (identidad y membresía). */}
-          <Input label="Email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required disabled={!!editing} />
+          <Input label="Nombre completo" value={form.nombre} required
+            onChange={e => { const nombre = e.target.value; setForm(f => ({ ...f, nombre, ...(!editing && !userTouched.current ? { email: suggestUsername(nombre) } : {}) })) }} />
+          {/* 3.31: usuario para entrar (la app lo propone a partir del nombre) o, si se prefiere, un correo real.
+              ADEX Online: al editar, usuario/correo y rol fijos (identidad y membresía). */}
+          <Input label="Usuario para entrar" value={editing ? loginLabelOf(form.email) : form.email} required disabled={!!editing}
+            autoCapitalize="none" autoCorrect="off" spellCheck={false} data-testid="user-login"
+            hint={editing ? undefined : 'Ejemplo: carlos.centro. Debe ser único en ADEX. También puedes escribir un correo real.'}
+            onChange={e => { userTouched.current = true; setForm(f => ({ ...f, email: e.target.value.trim().toLowerCase() })) }} />
           {/* ADEX Online: sin contraseña en la aplicación (proveedor de identidad). */}
           <p className="text-xs text-gray-500 -mt-2">El acceso lo gestiona el proveedor de identidad: ADEX Online no crea ni conoce contraseñas.</p>
           <Select label="Rol" value={form.rol} onChange={e => setForm(f => ({ ...f, rol: e.target.value as UserRole, grantedCapabilities: [] }))} options={roleOptions} required disabled={!!editing} />
@@ -611,7 +627,7 @@ export default function UsersPage() {
             <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
             <p className="text-sm text-red-700">Solo se permite eliminar usuarios SIN movimientos. Los históricos financieros nunca se borran.</p>
           </div>
-          <p className="text-sm text-gray-600">Usuario: <span className="font-semibold">{formatPersonName(deleteTarget?.nombre)}</span> ({deleteTarget?.email})</p>
+          <p className="text-sm text-gray-600">Usuario: <span className="font-semibold">{formatPersonName(deleteTarget?.nombre)}</span> ({loginLabelOf(deleteTarget?.email)})</p>
         </div>
       </Modal>
 

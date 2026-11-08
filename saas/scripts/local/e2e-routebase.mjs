@@ -266,8 +266,8 @@ try {
     stage = email;
     await session();
     await go('/login');
-    await page.waitForSelector('input[type=email]');
-    await setInput('input[type=email]', email);
+    await page.waitForSelector('input[type=email], #login-identifier');
+    await setInput('input[type=email], #login-identifier', email);
     await setInput('input[type=password]', PASS);
     await page.$eval('form', (f) => f.requestSubmit());
     await page.waitForFunction(() => location.pathname !== '/login', { timeout: 45_000 }).catch(() => undefined);
@@ -677,6 +677,17 @@ try {
     ok('A-16g', ['C-01'], 'Gastos del Cobrador: la lista larga de categorías tiene buscador; escribir y tocar la opción elige Gasolina (3.35)',
       searchBox === 'combobox' && tapped && chosen === 'Gasolina' && shownText === 'Gasolina', JSON.stringify({ searchBox, tapped, chosen, shownText }));
     await login('admin1.norte@example.test');
+    // 3.31: «Nuevo usuario» propone el usuario para entrar a partir del nombre (sin acentos: nombre.apellido).
+    await go('/admin/users'); await sleep(1500);
+    await clickText('button', /^Nuevo usuario$/);
+    await page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"]')].some((d) => d.innerText.includes('Usuario para entrar')), { timeout: 15_000 }).catch(() => undefined);
+    await setField('Nombre completo', 'Carlos Andrés Pérez'); await sleep(300);
+    const proposed = await page.$eval('[data-testid="user-login"]', (e) => e.value).catch(() => null);
+    const loginLabel = await page.evaluate(() => document.querySelector('label[for="login-identifier"]')?.textContent ?? null);
+    await page.keyboard.press('Escape').catch(() => undefined); await sleep(300);
+    await clickText('button', /^(Descartar|Salir sin guardar|Sí, descartar)$/).catch(() => undefined);
+    ok('A-16h', ['C-01'], 'Usuarios: «Nuevo usuario» propone el usuario para entrar desde el nombre (Carlos Andrés Pérez → carlos.perez) (3.31)',
+      proposed === 'carlos.perez', JSON.stringify({ proposed, loginLabel }));
     const bC2 = await base(C2), bC1 = await base(C1);
     await go('/admin/active-sales'); await sleep(2000);
     await clickText('button', /^Nueva venta$/);
@@ -1096,8 +1107,8 @@ try {
     ok('E-15', ['C-11'], 'SuperAdmin: Diferencias en solo lectura (historial; sin «Conciliar»)', ((await testid('dif-history')) ?? '').includes('Incorporar') && !(await page.$('[data-testid="dif-confirm"]')) && !/Conciliar$/m.test(await text()));
     await both('E-15-sa-diferencias', () => waitTestid('dif-history'));
     stage = 'supervisor';
-    await session(); await go('/login'); await page.waitForSelector('input[type=email]');
-    await setInput('input[type=email]', 'supervisor.norte@example.test'); await setInput('input[type=password]', PASS);
+    await session(); await go('/login'); await page.waitForSelector('input[type=email], #login-identifier');
+    await setInput('input[type=email], #login-identifier', 'supervisor.norte@example.test'); await setInput('input[type=password]', PASS);
     await page.$eval('form', (f) => f.requestSubmit());
     await page.waitForFunction(() => location.pathname !== '/login', { timeout: 30_000 }).catch(() => undefined);
     await page.waitForFunction(() => document.body.innerText.includes('Sur'), { timeout: 20_000 }).catch(() => undefined);
@@ -1686,8 +1697,8 @@ try {
     // Entra con la contraseña nueva (y la anterior ya no sirve).
     await session();
     await go('/login');
-    await page.waitForSelector('input[type=email]');
-    await setInput('input[type=email]', K_COB_T);
+    await page.waitForSelector('input[type=email], #login-identifier');
+    await setInput('input[type=email], #login-identifier', K_COB_T);
     await setInput('input[type=password]', PASS);
     await page.$eval('form', (f) => f.requestSubmit());
     const kOldRejected = await waitText('Credenciales', 15_000) || (await pathNow()) === '/login';

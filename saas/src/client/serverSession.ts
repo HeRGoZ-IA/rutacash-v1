@@ -10,6 +10,7 @@
 //   · Recuperar el acceso lo gestiona el proveedor (DS-03): misma respuesta exista o
 //     no el correo.
 
+import { loginEmailOf } from './username.ts';
 import { decideContext, type SelectableMembership, type SelectorDecision } from './contextSelector.ts';
 import type { SessionStore, StoredSession } from './sessionStore.ts';
 
@@ -88,7 +89,8 @@ export class AdexServerSession {
   }
 
   async login(email: string, password: string): Promise<SelectorDecision> {
-    const t = await this.opts.auth.signInWithPassword(email.trim().toLowerCase(), password);
+    // 3.31: «usuario» (sin arroba) se autentica con su correo interno.
+    const t = await this.opts.auth.signInWithPassword(loginEmailOf(email), password);
     this.session = { ...t, activeMembershipId: null };
     await this.opts.store.save(this.session);
     const decision = decideContext(await this.memberships());
@@ -97,7 +99,7 @@ export class AdexServerSession {
   }
 
   async recover(email: string, redirectTo?: string): Promise<void> {
-    await this.opts.auth.recover(email.trim().toLowerCase(), redirectTo);
+    await this.opts.auth.recover(loginEmailOf(email), redirectTo);
   }
 
   async memberships(): Promise<SelectableMembership[]> {

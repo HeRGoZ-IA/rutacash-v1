@@ -14,6 +14,7 @@
 // Cambiar el ROL de una membresía no existe (DS-05: una membresía por empresa y rol):
 // se da de alta otra membresía y se desactiva la anterior, que conserva su historia.
 
+import { isValidUsername, usernameOf } from '../client/username.ts';
 import type pg from 'pg';
 import { applyOfficeRouteSelection } from '@/lib/officeManagement';
 import { ApiError } from '../errors.ts';
@@ -160,7 +161,13 @@ export async function createMember(client: pg.PoolClient, ctx: ActiveContext, in
   assertRoutesAssignable(ctx, routeIds);
   await assertRoutesExist(client, ctx, routeIds);
 
-  const { identityId } = await provider.ensureIdentity(email);
+  // 3.31: usuario sin correo → correo interno `<usuario>@usuarios.adex.invalid`. El usuario es único en
+  // TODO ADEX: si la identidad ya existía (otra persona, de esta u otra empresa), se rechaza en vez de
+  // darle a esa persona una membresía más.
+  const username = usernameOf(email);
+  if (username !== null && !isValidUsername(username)) throw new ApiError(400, 'INVALID_USERNAME');
+  const { identityId, created } = await provider.ensureIdentity(email);
+  if (username !== null && !created) throw new ApiError(409, 'USERNAME_TAKEN');
   // R74 (DS-05): nadie se da de alta a sí mismo otra membresía (otro perfil) en su empresa.
   // Otra persona con autoridad debe hacerlo. PostgreSQL lo repite (política restrictiva, 0033).
   if (identityId === ctx.claims.identityId) throw new ApiError(403, 'SELF_ASSIGNMENT_FORBIDDEN', 'nobody grants themselves another membership');

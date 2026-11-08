@@ -1,6 +1,6 @@
 # 3.28 · Castigo de créditos («Dar por perdida») — diseño para aprobar
 
-**Estado:** BORRADOR (2026-11-08). No se construye nada hasta el «sí» de Helmer.
+**Estado:** APROBADO por Helmer (2026-11-08), con las tres sugerencias de la sección 6: línea aparte en la Liquidación, recuperación solo por el Administrador y deshacer con motivo.
 **Origen:** decisión 2.1.10 (2026-11-05). El socio contó que hay clientes que pagan años después, así que un crédito solo se da por perdido cuando el cliente falleció o se fue del país. Castigo **manual**, sin plazo automático y sin estado «Congelado».
 
 ## 1. Qué ve el Administrador

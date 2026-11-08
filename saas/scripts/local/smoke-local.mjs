@@ -132,8 +132,8 @@ try {
     stage = email;
     await session();
     await go('/login');
-    await page.waitForSelector('input[type=email]');
-    await setInput('input[type=email]', email);
+    await page.waitForSelector('input[type=email], #login-identifier');
+    await setInput('input[type=email], #login-identifier', email);
     await setInput('input[type=password]', password);
     await page.$eval('form', (f) => f.requestSubmit());
     await page.waitForFunction(() => location.pathname !== '/login', { timeout: 30_000 }).catch(() => undefined);
@@ -184,8 +184,8 @@ try {
   await shot('B-12-cobrador1');
   // Supervisor: selector de contexto con dos empresas.
   stage = 'supervisor';
-  await session(); await go('/login'); await page.waitForSelector('input[type=email]');
-  await setInput('input[type=email]', 'supervisor.norte@example.test'); await setInput('input[type=password]', PASS);
+  await session(); await go('/login'); await page.waitForSelector('input[type=email], #login-identifier');
+  await setInput('input[type=email], #login-identifier', 'supervisor.norte@example.test'); await setInput('input[type=password]', PASS);
   await page.$eval('form', (f) => f.requestSubmit());
   await page.waitForFunction(() => location.pathname !== '/login', { timeout: 30_000 }).catch(() => undefined);
   const ctxTxt = (await pathNow()) === '/contexto' ? (await page.waitForFunction(() => document.body.innerText.includes('Sur'), { timeout: 20_000 }).catch(() => undefined), await body()) : '';

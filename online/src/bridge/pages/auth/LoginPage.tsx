@@ -35,8 +35,13 @@ export default function LoginPage() {
   useEffect(() => { void foreignPendingCount(null, ['local', 'sending', 'review', 'rejected']).then(setForeign) }, [])
 
   async function handleRecover() {
-    if (!email) { setError('Escribe tu correo para recuperar el acceso'); return }
+    if (!email) { setError('Escribe tu usuario o correo para recuperar el acceso'); return }
     setError('')
+    // 3.31: quien entra con usuario no tiene correo: su administrador le da un enlace (Usuarios → llave).
+    if (!email.includes('@')) {
+      setRecoverNote('Si entras con usuario, pide a tu administrador un enlace para cambiar tu contraseña.')
+      return
+    }
     try {
       await api().recover(email)
       setRecoverNote('Si el correo está registrado, el proveedor de identidad enviará un enlace para fijar una nueva contraseña. Si no llega en unos minutos, avisa a tu administrador.')
@@ -59,7 +64,7 @@ export default function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!email || !password) {
-      setError('Ingresa tu correo y contraseña')
+      setError('Ingresa tu usuario (o correo) y tu contraseña')
       return
     }
     setLoading(true)
@@ -133,12 +138,18 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Correo electrónico</label>
+              {/* 3.31: usuario (p. ej. carlos.centro) o correo; sin arroba es un usuario. */}
+              <label htmlFor="login-identifier" className="block text-sm font-medium text-gray-700 mb-1.5">Usuario o correo</label>
               <input
-                type="email"
+                id="login-identifier"
+                type="text"
+                inputMode="email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="correo@ejemplo.com"
+                placeholder="usuario o correo@ejemplo.com"
                 className="w-full h-11 rounded-xl border border-gray-300 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 autoComplete="username"
               />
