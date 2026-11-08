@@ -226,7 +226,7 @@ export default function ClientsPage() {
       if (capDisponible != null && saleForm.valorVenta > capDisponible) { toast.error(`La venta supera la Base de la ruta (${formatCurrency(capDisponible, currency)})`); return }
       if (saleForm.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return }
       if (![10, 20].includes(saleForm.tasaInteres)) { toast.error('La tasa de interés debe ser 10% o 20%'); return }
-      if (saleForm.fechaInicio < today()) { toast.error('La fecha de inicio de cobro no puede ser anterior a hoy'); return }
+      if (saleForm.fechaInicio < today()) { toast.error('La fecha de la venta no puede ser anterior a hoy'); return }
       if (saleForm.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
     }
 
@@ -455,7 +455,7 @@ export default function ClientsPage() {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Select label="Frecuencia de pago" value={saleForm.frecuenciaPago} onChange={e => setSaleForm(f => ({ ...f, frecuenciaPago: e.target.value as Sale['frecuenciaPago'] }))} options={FREQ_OPTIONS} />
-                    <Input label="Fecha inicio de cobro" type="date" min={today()} value={saleForm.fechaInicio} onChange={e => setSaleForm(f => ({ ...f, fechaInicio: e.target.value }))} hint="No puede ser anterior a hoy" />
+                    <Input label="Fecha de la venta" type="date" min={today()} value={saleForm.fechaInicio} onChange={e => setSaleForm(f => ({ ...f, fechaInicio: e.target.value }))} hint="No puede ser anterior a hoy" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Días de pago</label>

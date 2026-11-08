@@ -20,6 +20,7 @@ import {
 } from '@/services/saleRequestService'
 import { logAction } from '@/services/auditService'
 import type { Client, PaymentFrequency, SaleRequest, User } from '@/models/types'
+import { firstPaymentDate } from '@/services/installmentEngine'
 
 const FREQ_LABEL: Record<string, string> = {
   diaria: 'Diaria', semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual', personalizada: 'Personalizada',
@@ -171,7 +172,8 @@ export default function CollectorAuthorizationsPage() {
             ['Total a pagar', money(calc.valorTotal)],
             ['Parcelas', `${actual.installmentsCount} × ${money(calc.valorCuota)}`],
             ['Forma de pago', FREQ_LABEL[freq] ?? freq],
-            ['Inicio', formatDate(actual.startDate)],
+            ['Fecha de la venta', formatDate(actual.startDate)],
+            ['Primer abono', formatDate(firstPaymentDate({ fechaInicio: actual.startDate, frecuencia: freq, paymentDays: dias }))],
             ['Fin estimado', formatDate(calc.fechaFinalEstimada)],
           ].map(([k, v]) => (
             <div key={k} className="flex items-center justify-between px-4 py-2.5">

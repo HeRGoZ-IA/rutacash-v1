@@ -69,7 +69,7 @@ export default function CollectorDisbursementsPage() {
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <p className="font-semibold text-gray-900 text-sm">{client?.nombre ?? 'Cliente'}</p>
-                    <p className="text-xs text-gray-500">{client?.documento} · Inicio {formatDate(s.fechaInicio)}</p>
+                    <p className="text-xs text-gray-500">{client?.documento} · Venta {formatDate(s.fechaInicio)}</p>
                   </div>
                   <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Por desembolsar</span>
                 </div>

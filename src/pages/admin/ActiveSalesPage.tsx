@@ -217,7 +217,7 @@ export default function ActiveSalesPage() {
     if (capDisponible != null && form.valorVenta > capDisponible) { toast.error(`La venta supera el dinero disponible (${formatCurrency(capDisponible, currency)})`); return }
     if (form.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return }
     if (![10, 20].includes(form.tasaInteres)) { toast.error('La tasa de interés debe ser 10% o 20%'); return }
-    if (form.fechaInicio < today()) { toast.error('La fecha de inicio de cobro no puede ser anterior a hoy'); return }
+    if (form.fechaInicio < today()) { toast.error('La fecha de la venta no puede ser anterior a hoy'); return }
     if (form.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
     // Si el cliente ya tiene una venta activa, pedir confirmación antes de crear otra.
     if (activeSale) { setConfirmSecondOpen(true); return }
@@ -484,7 +484,7 @@ export default function ActiveSalesPage() {
               <div className="text-xs text-amber-700">
                 <p className="font-semibold">Este cliente ya tiene una venta activa.</p>
                 <p className="mt-0.5">
-                  Venta {formatCurrency(activeSale.valorVenta, currency)} · Saldo {formatCurrency(activeSale.saldo, currency)} · Inicio {formatDate(activeSale.fechaInicio)} · Ruta {routeMap.get(activeSale.routeId)?.nombre ?? '—'}
+                  Venta {formatCurrency(activeSale.valorVenta, currency)} · Saldo {formatCurrency(activeSale.saldo, currency)} · Venta {formatDate(activeSale.fechaInicio)} · Ruta {routeMap.get(activeSale.routeId)?.nombre ?? '—'}
                 </p>
               </div>
             </div>
@@ -502,7 +502,7 @@ export default function ActiveSalesPage() {
           )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Select label="Frecuencia de pago" value={form.frecuenciaPago} onChange={e => setForm(f => ({ ...f, frecuenciaPago: e.target.value as any }))} options={freqOptions} />
-            <Input label="Fecha inicio de cobro" type="date" min={today()} value={form.fechaInicio} onChange={e => setForm(f => ({ ...f, fechaInicio: e.target.value }))} hint="No puede ser anterior a hoy" />
+            <Input label="Fecha de la venta" type="date" min={today()} value={form.fechaInicio} onChange={e => setForm(f => ({ ...f, fechaInicio: e.target.value }))} hint="No puede ser anterior a hoy" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Días de pago</label>
@@ -638,7 +638,7 @@ export default function ActiveSalesPage() {
           </div>
           {activeSale && (
             <p className="text-sm text-gray-600">
-              Venta actual: <span className="font-semibold">{formatCurrency(activeSale.valorVenta, currency)}</span> · Saldo pendiente: <span className="font-semibold text-amber-600">{formatCurrency(activeSale.saldo, currency)}</span> · Inicio {formatDate(activeSale.fechaInicio)}
+              Venta actual: <span className="font-semibold">{formatCurrency(activeSale.valorVenta, currency)}</span> · Saldo pendiente: <span className="font-semibold text-amber-600">{formatCurrency(activeSale.saldo, currency)}</span> · Venta {formatDate(activeSale.fechaInicio)}
             </p>
           )}
         </div>

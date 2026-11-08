@@ -16,7 +16,7 @@
 //     no se sustituyen entre sí. Cuando no hay dato real, se muestra "—".
 // ============================================================
 import { effectivePayments } from '@/lib/paymentState'
-import type { Payment, Sale, SaleStatus } from '@/models/types'
+import type { Payment, Sale, SaleStatus, Installment } from '@/models/types'
 
 /** Etiqueta de negocio de cada estado de crédito. */
 export const CREDIT_STATUS_LABEL: Record<SaleStatus, string> = {
@@ -64,6 +64,8 @@ export interface CreditHistoryEntry {
   fechaInicio: string
   /** Día en que se entregó el dinero (desembolso). `undefined` si aún no se desembolsó. */
   fechaDesembolso?: string
+  /** Vencimiento REAL de la cuota 1 (error 3.33): el primer abono, nunca una fecha supuesta. */
+  fechaPrimerAbono?: string
   /** Cuándo DEBERÍA terminar. */
   fechaFinEstimada: string
   /** Cuándo terminó REALMENTE. `undefined` = no aplica o no determinable. */
@@ -102,6 +104,7 @@ export function buildClientCreditHistory(
   clientId: string,
   sales: Sale[],
   payments: Payment[],
+  installments: Pick<Installment, 'saleId' | 'numero' | 'fechaVencimiento'>[] = [],
 ): ClientCreditHistory {
   const empty: ClientCreditHistory = {
     clientId, total: 0, activos: 0, finalizados: 0, perdidos: 0, refinanciados: 0,
@@ -120,6 +123,8 @@ export function buildClientCreditHistory(
     abonadoPorVenta.set(p.saleId, (abonadoPorVenta.get(p.saleId) ?? 0) + p.valor)
   }
 
+  const primerAbono = new Map(installments.filter(i => i.numero === 1).map(i => [i.saleId, i.fechaVencimiento]))
+
   const entries: CreditHistoryEntry[] = propias
     .map(s => ({
       saleId: s.id,
@@ -131,6 +136,7 @@ export function buildClientCreditHistory(
       numeroCuotas: s.numeroCuotas,
       fechaInicio: s.fechaInicio,
       fechaDesembolso: s.fechaDesembolso || undefined,
+      fechaPrimerAbono: primerAbono.get(s.id),
       fechaFinEstimada: s.fechaFinalEstimada,
       // Solo un crédito FINALIZADO puede tener fecha real de finalización. Un crédito
       // activo NUNCA aparece como finalizado, y uno perdido no inventa fecha.

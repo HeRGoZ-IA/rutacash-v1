@@ -214,7 +214,7 @@ async function assertSaleIntegrity(
     throw new SaleRuleError('Selecciona al menos un día de pago válido.')
   }
   if (opts.checkStartDate && input.fechaInicio < today()) {
-    throw new SaleRuleError('La fecha de inicio no puede ser anterior a hoy.')
+    throw new SaleRuleError('La fecha de la venta no puede ser anterior a hoy.')
   }
   return { route, client }
 }

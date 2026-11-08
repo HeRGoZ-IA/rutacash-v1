@@ -139,7 +139,7 @@ export default function CollectorNewSalePage() {
     if (form.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return false }
     const errorTasa = user ? originationRateError(user.rol, form.tasaInteres, ratePolicy) : null
     if (errorTasa) { toast.error(errorTasa); return false }
-    if (form.fechaInicio < today()) { toast.error('La fecha de inicio no puede ser anterior a hoy'); return false }
+    if (form.fechaInicio < today()) { toast.error('La fecha de la venta no puede ser anterior a hoy'); return false }
     if (form.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return false }
     return true
   }
@@ -217,7 +217,7 @@ export default function CollectorNewSalePage() {
               <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
               <div className="text-xs text-amber-700">
                 <p className="font-semibold">Este cliente ya tiene una venta activa.</p>
-                <p className="mt-0.5">Venta {formatCurrency(activeSale.valorVenta, currency)} · Saldo {formatCurrency(activeSale.saldo, currency)} · Inicio {formatDate(activeSale.fechaInicio)}</p>
+                <p className="mt-0.5">Venta {formatCurrency(activeSale.valorVenta, currency)} · Saldo {formatCurrency(activeSale.saldo, currency)} · Venta {formatDate(activeSale.fechaInicio)}</p>
               </div>
             </div>
           )}

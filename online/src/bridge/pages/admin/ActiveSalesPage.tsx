@@ -250,8 +250,8 @@ export default function ActiveSalesPage() {
     if (late.on) {
       if (!late.deliveredOn || late.deliveredOn >= hoy || late.deliveredOn < shiftDay(hoy, -3)) { toast.error('La fecha de entrega debe estar entre 3 días antes y ayer'); return }
       if (late.reason.trim().length < 10) { toast.error('Escribe el motivo (al menos 10 caracteres)'); return }
-      if (form.fechaInicio < late.deliveredOn) { toast.error('La fecha de inicio de cobro no puede ser anterior a la fecha de entrega'); return }
-    } else if (form.fechaInicio < today()) { toast.error('La fecha de inicio de cobro no puede ser anterior a hoy'); return }
+      if (form.fechaInicio < late.deliveredOn) { toast.error('La fecha de la venta no puede ser anterior a la fecha de entrega'); return }
+    } else if (form.fechaInicio < today()) { toast.error('La fecha de la venta no puede ser anterior a hoy'); return }
     if (form.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
     // Si el cliente ya tiene una venta activa, pedir confirmación antes de crear otra.
     if (activeSale) { setConfirmSecondOpen(true); return }
@@ -556,7 +556,7 @@ export default function ActiveSalesPage() {
               <div className="text-xs text-amber-700">
                 <p className="font-semibold">Este cliente ya tiene una venta activa.</p>
                 <p className="mt-0.5">
-                  Venta {formatCurrency(activeSale.valorVenta, currency)} · Saldo {formatCurrency(activeSale.saldo, currency)} · Inicio {formatDate(activeSale.fechaInicio)} · Ruta {routeMap.get(activeSale.routeId)?.nombre ?? '—'}
+                  Venta {formatCurrency(activeSale.valorVenta, currency)} · Saldo {formatCurrency(activeSale.saldo, currency)} · Venta {formatDate(activeSale.fechaInicio)} · Ruta {routeMap.get(activeSale.routeId)?.nombre ?? '—'}
                 </p>
               </div>
             </div>
@@ -752,7 +752,7 @@ export default function ActiveSalesPage() {
           </div>
           {activeSale && (
             <p className="text-sm text-gray-600">
-              Venta actual: <span className="font-semibold">{formatCurrency(activeSale.valorVenta, currency)}</span> · Saldo pendiente: <span className="font-semibold text-amber-600">{formatCurrency(activeSale.saldo, currency)}</span> · Inicio {formatDate(activeSale.fechaInicio)}
+              Venta actual: <span className="font-semibold">{formatCurrency(activeSale.valorVenta, currency)}</span> · Saldo pendiente: <span className="font-semibold text-amber-600">{formatCurrency(activeSale.saldo, currency)}</span> · Venta {formatDate(activeSale.fechaInicio)}
             </p>
           )}
         </div>

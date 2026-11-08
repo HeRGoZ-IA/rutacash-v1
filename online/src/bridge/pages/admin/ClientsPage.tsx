@@ -85,6 +85,8 @@ export default function ClientsPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
+  // Ficha en dos pestañas (pedido de Helmer, 2026-11-08): información personal y resumen financiero.
+  const [detailTab, setDetailTab] = useState<'personal' | 'finanzas'>('personal')
   const [selected, setSelected] = useState<Client | null>(null)
   // Datos de la ficha del cliente
   const [detailSales, setDetailSales] = useState<Sale[]>([])
@@ -201,6 +203,7 @@ export default function ClientsPage() {
   // Abre la Ficha del Cliente y carga su historial (ventas + abonos).
   async function openDetail(client: Client) {
     setSelected(client)
+    setDetailTab('personal')
     setDetailOpen(true)
     setDetailLoading(true)
     const [sales, payments] = await Promise.all([
@@ -251,7 +254,7 @@ export default function ClientsPage() {
       if (capDisponible != null && saleForm.valorVenta > capDisponible) { toast.error(`La venta supera el dinero disponible (${formatCurrency(capDisponible, currency)})`); return }
       if (saleForm.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return }
       if (![10, 20].includes(saleForm.tasaInteres)) { toast.error('La tasa de interés debe ser 10% o 20%'); return }
-      if (saleForm.fechaInicio < today()) { toast.error('La fecha de inicio de cobro no puede ser anterior a hoy'); return }
+      if (saleForm.fechaInicio < today()) { toast.error('La fecha de la venta no puede ser anterior a hoy'); return }
       if (saleForm.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
     }
 
@@ -555,6 +558,17 @@ export default function ClientsPage() {
                   <div className="mt-1"><ClientStatusBadge status={selected.status} /></div>
                 </div>
               </div>
+
+              <div className="flex gap-1 p-1 bg-gray-100 rounded-xl" role="tablist" aria-label="Secciones de la ficha">
+                {([['personal', 'Información personal'], ['finanzas', 'Resumen financiero']] as const).map(([k, label]) => (
+                  <button key={k} type="button" role="tab" aria-selected={detailTab === k} data-testid={`client-tab-${k}`} onClick={() => setDetailTab(k)}
+                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${detailTab === k ? 'bg-white text-primary-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {detailTab === 'personal' && (<>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-500">Ruta</p><p className="text-sm font-medium text-gray-800">{getRouteName(selected.routeId)}</p></div>
                 <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-500">Registro</p><p className="text-sm font-medium text-gray-800">{selected.createdAt ? formatDate(selected.createdAt) : 'Sin fecha'}</p></div>
@@ -581,10 +595,13 @@ export default function ClientsPage() {
                   <PhotoCard label="Negocio / lugar de cobro" url={selected.fotoNegocioUrl} />
                 </div>
               </div>
+              </>)}
+
+              {detailTab === 'finanzas' && (<>
 
               {/* D. Resumen financiero */}
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Resumen financiero</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Resumen</p>
                 {detailLoading ? (
                   <p className="text-xs text-gray-500">Cargando…</p>
                 ) : (
@@ -635,6 +652,7 @@ export default function ClientsPage() {
                   </div>
                 )}
               </div>
+              </>)}
             </div>
           )
         })()}

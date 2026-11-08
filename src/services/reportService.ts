@@ -147,7 +147,7 @@ export function buildVentasReport(src: ReportSources, f: ReportFilters): ReportR
       Estado: s.status,
       Cuotas: s.numeroCuotas,
       Frecuencia: s.frecuenciaPago,
-      'Fecha inicio': formatDate(s.fechaInicio),
+      'Fecha de la venta': formatDate(s.fechaInicio),
       'Fecha fin estimada': formatDate(s.fechaFinalEstimada),
       // Fecha REAL de finalización: solo existe si el crédito se saldó. "—" cuando
       // no aplica o no se pudo determinar. Nunca se sustituye por la estimada.

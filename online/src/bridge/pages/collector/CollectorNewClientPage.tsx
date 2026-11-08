@@ -156,7 +156,7 @@ function NewClientForm() {
       if (saleForm.numeroCuotas <= 0) { toast.error('La cantidad de parcelas debe ser mayor a 0'); return }
       const errorTasa = user ? originationRateError(user.rol, saleForm.tasaInteres, ratePolicy) : null
       if (errorTasa) { toast.error(errorTasa); return }
-      if (saleForm.fechaInicio < today()) { toast.error('La fecha de inicio no puede ser anterior a hoy'); return }
+      if (saleForm.fechaInicio < today()) { toast.error('La fecha de la venta no puede ser anterior a hoy'); return }
       if (saleForm.paymentDays.length === 0) { toast.error('Selecciona al menos un día de pago'); return }
       // Venta directa no puede superar la Base de la ruta (la solicitud sí puede enviarse).
       // Se decide con la Base VIGENTE, no con la cifra pintada en pantalla.

@@ -43,12 +43,14 @@ export function ClientCreditHistory({ client, title = 'Historial de ventas' }: P
     Promise.all([
       db.sales.where('clientId').equals(client.id).toArray(),
       db.payments.where('clientId').equals(client.id).toArray(),
-    ]).then(([sales, payments]) => {
+    ]).then(async ([sales, payments]) => {
+      // Primer abono = cuota 1 REAL de cada venta (error 3.33), no la fecha de la venta.
+      const installments = sales.length ? await db.installments.where('saleId').anyOf(sales.map(s => s.id)).toArray() : []
       if (!alive) return
       // RESTRICCIÓN POR RUTAS antes de agregar nada.
       const misVentas = filterByAccessibleRoute(user, sales.filter(s => s.tenantId === user.tenantId))
       const misPagos = filterByAccessibleRoute(user, payments.filter(p => p.tenantId === user.tenantId))
-      setHistory(buildClientCreditHistory(client.id, misVentas, misPagos))
+      setHistory(buildClientCreditHistory(client.id, misVentas, misPagos, installments))
       setLoading(false)
     })
     return () => { alive = false }
@@ -96,7 +98,7 @@ export function ClientCreditHistory({ client, title = 'Historial de ventas' }: P
             <tr className="border-b border-gray-100 bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
               <th className="text-left px-3 py-2">Valor de la venta</th>
               <th className="text-left px-3 py-2 whitespace-nowrap">Desembolso</th>
-              <th className="text-left px-3 py-2 whitespace-nowrap">Inicio de cobro</th>
+              <th className="text-left px-3 py-2 whitespace-nowrap">Primer abono</th>
               <th className="text-left px-3 py-2 whitespace-nowrap">Fin estimado</th>
               <th className="text-left px-3 py-2 whitespace-nowrap">Finalización real</th>
               <th className="text-left px-3 py-2">Estado</th>
@@ -109,7 +111,7 @@ export function ClientCreditHistory({ client, title = 'Historial de ventas' }: P
               <tr key={e.saleId} className="hover:bg-gray-50">
                 <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{formatCurrency(e.valorVenta, currency)}</td>
                 <td className="px-3 py-2 text-gray-600 whitespace-nowrap" data-testid="credit-history-disbursed">{e.fechaDesembolso ? formatDate(e.fechaDesembolso) : '—'}</td>
-                <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{formatDate(e.fechaInicio)}</td>
+                <td className="px-3 py-2 text-gray-600 whitespace-nowrap" data-testid="credit-history-first-payment">{e.fechaPrimerAbono ? formatDate(e.fechaPrimerAbono) : '—'}</td>
                 <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{formatDate(e.fechaFinEstimada)}</td>
                 {/* "—" cuando no hay fecha REAL: activo, perdido, refinanciado o
                     histórico sin pago del que inferirla. Nunca se rellena con la estimada. */}

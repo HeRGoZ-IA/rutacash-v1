@@ -692,6 +692,21 @@ try {
     ok('A-17b', ['C-01'], '3.33: «Fecha de la venta» + «Primer abono» en el formulario; la cuota 1 vence después del día de la venta y coincide con lo mostrado',
       form333.label && !!due333 && due333.due > due333.start && (form333.first ?? '').includes(due333.shown), JSON.stringify({ form333, due333 }));
     ok('A-17', ['C-01'], 'Venta directa de R$ 200 en Centro 2: sale de la Base de Centro 2 (y solo de ella)', saleOk && saleC2?.v === 20_000 && (await base(C2)) === bC2 - 20_000 && (await base(C1)) === bC1, JSON.stringify({ saleC2, bC2, after: await base(C2) }));
+    // 3.33 (2026-11-08): la ficha del cliente tiene dos pestañas y el historial muestra el PRIMER ABONO real (cuota 1),
+    // no la fecha de la venta con el nombre «Inicio de cobro».
+    await go('/admin/clients'); await page.waitForSelector('input[aria-label="Buscar clientes"]', { timeout: 30_000 }).catch(() => undefined); await sleep(1500);
+    await page.evaluate(() => { const el = document.querySelector('input[aria-label="Buscar clientes"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'Directa'); el.dispatchEvent(new Event('input', { bubbles: true })); });
+    await page.waitForFunction(() => [...document.querySelectorAll('tr')].some((r) => /DIRECTA JO/i.test(r.innerText)), { timeout: 15_000 }).catch(() => undefined);
+    await page.evaluate(() => [...document.querySelectorAll('tr')].find((r) => /DIRECTA JO/i.test(r.innerText))?.click());
+    const tabsOk = await waitTestid('client-tab-personal', 15_000) && await waitTestid('client-tab-finanzas', 5_000);
+    const personalHidesMoney = tabsOk && !(await text()).includes('Total trabajado');
+    await tap('client-tab-finanzas');
+    const firstShown = await waitTestid('credit-history-first-payment', 20_000) ? await testid('credit-history-first-payment') : null;
+    await shot('A-17c-ficha-cliente-finanzas');
+    ok('A-17c', ['C-01'], '3.33: ficha del cliente en dos pestañas; el historial muestra «Primer abono» = cuota 1 real de la venta',
+      tabsOk && personalHidesMoney && !!due333 && firstShown === due333.shown, JSON.stringify({ tabsOk, personalHidesMoney, firstShown, due333 }));
+    await page.keyboard.press('Escape').catch(() => undefined);
 
     // Gasto general con un aporte mayor que la Base de su ruta: la pantalla lo impide.
     await toPanel();
