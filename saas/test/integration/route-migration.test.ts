@@ -280,6 +280,44 @@ describe('0043 · ruta en migración', () => {
     assert.equal(inj.status, 201, JSON.stringify(inj.body));
     const col = await $ana('/v1/collections', { saleId: saleK1, amountMinor: 6_000 });
     assert.equal(col.status, 201, JSON.stringify(col.body));
+
+    // 0052: la deuda es DE LA RUTA. El Panel la muestra en la ruta (con alerta), lo general no la cuenta ni la paga,
+    // y se devuelve SOLO con la Base de esta misma ruta, nunca más que lo pendiente ni que la Base.
+    const panel = async () => (await ana('GET', '/v1/capital/route-panel')).body;
+    const p1 = await panel();
+    const pr = (p1['routes'] as Body[]).find((x) => x['routeId'] === rf)!;
+    assert.equal((pr['partnerDebt'] as Body)['outstandingMinor'], 52_000, JSON.stringify(pr['partnerDebt']));
+    assert.ok((pr['alerts'] as string[]).includes('PARTNER_DEBT'));
+    const generalOf = (b: Body) => Number((((b['general'] as Body)['pendingAdminReimbursements'] as Body)['admins'] as Body[])
+      .find((x) => x['adminId'] === M.anaAdmin)?.['pendingMinor'] ?? 0);
+    const outstandingAna = Number((await db.admin.query(`select coalesce(sum(case when kind = 'MIGRATION_PARTNER_REPAY' then -amount_minor else amount_minor end), 0) n
+        from adex.capital_operations where company_id = $1 and admin_membership_id = $2 and kind in ('MIGRATION_PARTNER_DEBT', 'MIGRATION_PARTNER_REPAY')`, [c1, M.anaAdmin])).rows[0].n);
+    assert.equal(generalOf(p1), (await debt()) - outstandingAna, 'los reembolsos generales no incluyen la deuda de las rutas');
+    assert.ok(Number((p1['consolidated'] as Body)['routePartnerDebtsMinor']) >= 52_000);
+    expectCode(await $ana('/v1/capital/reimbursements', { adminId: M.anaAdmin, contributions: [{ routeId: rf, amountMinor: generalOf(p1) + 1_000 }],
+      reason: 'Intento de pagar la deuda de la ruta como reembolso general' }), 409, 'REIMBURSEMENT_EXCEEDS_PENDING', 'un reembolso general no paga deuda de rutas');
+    const baseNow = await base();
+    assert.ok(baseNow > 0 && baseNow < 52_000, `Base ${baseNow}`);
+    const repay = (amountMinor: number, who = $ana) => who('/v1/capital/route-partner-debt/repayments', { routeId: rf, amountMinor, reason: 'Devolución a la socia' });
+    expectCode(await repay(baseNow + 1), 409, 'INSUFFICIENT_FUNDS', 'nunca más que la Base de la ruta');
+    expectCode(await repay(1_000, $bruno), 403, 'CAPITAL_AUTHORITY_REQUIRED', 'el SuperAdmin no mueve la Base');
+    const r1 = await repay(baseNow);
+    assert.equal(r1.status, 201, JSON.stringify(r1.body));
+    assert.deepEqual([(r1.body['repayment'] as Body)['outstandingAfterMinor'], await base()], [52_000 - baseNow, 0]);
+    const p2 = await panel();
+    assert.equal(((p2['routes'] as Body[]).find((x) => x['routeId'] === rf)!['partnerDebt'] as Body)['outstandingMinor'], 52_000 - baseNow);
+    assert.equal(generalOf(p2), generalOf(p1), 'la devolución no cambia lo general');
+    const fig = (((p2['routes'] as Body[]).find((x) => x['routeId'] === rf)!['period'] as Body)['base'] as Body);
+    assert.equal(fig['partnerRepaidMinor'], baseNow, JSON.stringify(fig));
+    const inj2 = await $ana('/v1/capital/route-base/injections', { routeId: rf, amountMinor: 80_000, reason: 'Más Base para la prueba' });
+    assert.equal(inj2.status, 201);
+    expectCode(await repay(52_000 - baseNow + 1), 409, 'ROUTE_PARTNER_DEBT_EXCEEDED', 'nunca más que lo pendiente');
+    assert.equal((await repay(52_000 - baseNow)).status, 201);
+    expectCode(await repay(1), 409, 'ROUTE_PARTNER_DEBT_EXCEEDED', 'la ruta ya no debe nada');
+    const p3 = await panel();
+    assert.ok(!(((p3['routes'] as Body[]).find((x) => x['routeId'] === rf)!['alerts']) as string[]).includes('PARTNER_DEBT'));
+    const rec1 = await bruno('GET', '/v1/capital/reconciliation');
+    assert.deepEqual((rec1.body['checks'] as Body[]).filter((c) => !c['ok']), [], 'la conciliación cuadra con la deuda devuelta');
   });
 
   test('RM-006 · 0048/0050: un cierre con diferencias se carga igual; cada caso y cada corrección; terminar exige cero abiertas y caja cuadrada', async () => {

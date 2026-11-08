@@ -38,6 +38,7 @@ export const TRANSFER_FIELDS = ['fromRouteId', 'toRouteId', 'amountMinor', 'reas
 export const ASSIGN_FIELDS = ['routeId', 'amountMinor', 'reason', 'evidence'] as const;
 export const MODEL_FIELDS = ['target', 'evidence', 'backupReference', 'companyBalanceNote'] as const;
 export const HANDOVER_FIELDS = ['countedMinor', 'expectedSeenMinor', 'note'] as const;
+export const PARTNER_REPAY_FIELDS = ['routeId', 'amountMinor', 'reason'] as const;
 
 /** Solo el Administrador mueve la Base (E2). El resto, 403 antes de tocar nada. */
 function requireAdmin(ctx: ActiveContext): void {
@@ -91,6 +92,26 @@ export async function withdrawBase(client: pg.PoolClient, ctx: ActiveContext, bo
   const amount = amountOf(body);
   return post(client, ctx, operationId, { kind: 'ROUTE_BASE_WITHDRAWAL', amount, reason: reasonOf(body), route: route.id },
     `Retiro de Base ${amount} de ${route.name}.`);
+}
+
+/**
+ * 0052: la ruta le devuelve a su Administrador lo que él cubrió en la migración (caja negativa del sistema anterior).
+ * SOLO con la Base de esa misma ruta (regla del propietario: el dinero de cada ruta es suyo); nunca más que lo
+ * pendiente ni que la Base. Lo registra el responsable de capital de la ruta. PostgreSQL valida todo bajo bloqueo.
+ */
+export async function repayPartnerDebt(client: pg.PoolClient, ctx: ActiveContext, body: Body, operationId: string | null) {
+  const route = await controlledRoute(client, ctx, reqId(body, 'routeId'));
+  const amount = amountOf(body);
+  const reason = reasonOf(body);
+  const r = (await client.query<{ r: Record<string, unknown> }>('select adex.route_partner_debt_repay($1, $2, $3, $4) r',
+    [requireOperationId(operationId), route.id, amount, reason])).rows[0]!.r;
+  await audit(client, ctx, {
+    action: 'ROUTE_PARTNER_DEBT_REPAID', entityType: 'capital_operation', entityId: String(r['operationId']), routeId: route.id,
+    description: `Devolución al Administrador ${amount} desde la Base de ${route.name} (deuda de la migración).`, reason,
+    after: { amountMinor: amount, adminId: r['adminId'], outstandingAfterMinor: r['outstandingAfterMinor'], entryDate: r['entryDate'] },
+    metadata: { operationId },
+  });
+  return { repayment: r, entries: await visibleEntries(client, ctx, String(r['operationId'])) };
 }
 
 /**

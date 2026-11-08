@@ -64,12 +64,17 @@ export const isRouteBaseUi = (m: CapitalModel | null) => m === 'route_base' || m
 // ---------------------------------------------------------------------------
 
 export type PanelAlert = 'NO_VALID_CONTROLLER' | 'ROUTE_IN_HANDOVER' | 'HANDOVER_DIFFERENCE' | 'NEGATIVE_CUSTODY' | 'CARRIED_SHORTAGE'
-  | 'SURPLUS_IN_CONTROL' | 'NEGATIVE_OPERATING_RESULT' | 'NEGATIVE_FLOW_GROWTH' | 'INSUFFICIENT_LIQUIDITY' | 'PENDING_DIFFERENCES';
+  | 'SURPLUS_IN_CONTROL' | 'NEGATIVE_OPERATING_RESULT' | 'NEGATIVE_FLOW_GROWTH' | 'INSUFFICIENT_LIQUIDITY' | 'PENDING_DIFFERENCES'
+  | 'PARTNER_DEBT';
 
 export interface BaseBlock {
   openingMinor: number; injectionsMinor: number; withdrawalsMinor: number; transfersInMinor: number; transfersOutMinor: number;
   unassignedAssignedMinor: number; deliveredToWorkersMinor: number; returnsReceivedMinor: number; reassignmentsNetMinor: number;
   collectionsReceivedMinor: number; disbursedMinor: number; routeExpensesMinor: number; otherMinor: number; closingMinor: number; contributionsNetMinor: number;
+  /** 0052: el Administrador cubrió la caja en la migración (entra a la Base como deuda de la ruta) y lo que se le devolvió. */
+  partnerCoverMinor?: number; partnerRepaidMinor?: number;
+  /** 0052: abonos, créditos e ingresos de los cierres cargados durante la migración (neto en la Base). */
+  migrationLoadsMinor?: number;
 }
 
 export interface PanelRoute {
@@ -94,6 +99,13 @@ export interface PanelRoute {
    * SOLO si el servidor lo envía; mientras tanto se ven el faltante arrastrado y el sobrante en control.
    */
   differences?: Partial<DifferenceFigures>;
+  /** 0052: lo que la ruta le debe a su Administrador por cubrir la caja en la migración. Se paga solo con SU Base. */
+  partnerDebt?: PartnerDebt;
+}
+
+export interface PartnerDebt {
+  debtMinor: number; repaidMinor: number; outstandingMinor: number; isCash: false;
+  creditors: { adminId: string; name: string | null; debtMinor: number; repaidMinor: number; outstandingMinor: number }[];
 }
 
 /** Cifras de diferencias de una ruta (0036, `adex.route_difference_summary`). Nunca efectivo ni resultado. */
@@ -129,7 +141,9 @@ export interface RoutePanel {
   totals: { baseMinor: number; custodyMinor: number; deliverableCustodyMinor: number; cashMinor: number; portfolioPrincipalMinor: number;
     operatingResultMinor: number; operatingFlowMinor: number };
   consolidated?: { routesOperatingResultMinor: number; generalOperatingExpensesMinor: number; generalDurableGoodsMinor: number;
-    resultAfterGeneralExpensesMinor: number; pendingAdminReimbursementsMinor: number };
+    resultAfterGeneralExpensesMinor: number; pendingAdminReimbursementsMinor: number;
+    /** 0052: Σ lo que las rutas les deben a sus Administradores (no es reembolso general ni efectivo). */
+    routePartnerDebtsMinor?: number };
 }
 
 export function fetchPanel(from: string, to: string): Promise<RoutePanel> {
@@ -153,6 +167,7 @@ export function sumRows(rows: PanelRoute[]) {
     surplusMinor: s((r) => r.surplusInControlMinor),
     generalContributionsMinor: s((r) => r.generalFunding?.generalExpenseContributionsMinor ?? 0),
     reimbursementsMinor: s((r) => r.generalFunding?.adminReimbursementsMinor ?? 0),
+    partnerDebtMinor: s((r) => r.partnerDebt?.outstandingMinor ?? 0),
     // 0036: solo si el servidor publica el bloque (si ninguna fila lo trae, null).
     differences: rows.some((r) => r.differences) ? {
       pendingCount: s((r) => r.differences?.pendingCount ?? 0),
@@ -210,6 +225,9 @@ export async function fetchDestinations(): Promise<Destination[]> {
 type Op = { operation: { id: string } };
 export const injectBase = (b: { routeId: string; amountMinor: number; reason: string; sourceNote?: string }, opId: string) =>
   money<Op>('POST', '/v1/capital/route-base/injections', { routeId: b.routeId, amountMinor: b.amountMinor, reason: b.reason.trim(), ...(b.sourceNote?.trim() ? { sourceNote: b.sourceNote.trim() } : {}) }, opId);
+/** 0052: la ruta devuelve a su Administrador lo que él cubrió en la migración, SOLO con la Base de esa ruta. */
+export const repayPartnerDebt = (b: { routeId: string; amountMinor: number; reason: string }, opId: string) =>
+  money('POST', '/v1/capital/route-partner-debt/repayments', { ...b, reason: b.reason.trim() }, opId);
 export const withdrawBase = (b: { routeId: string; amountMinor: number; reason: string }, opId: string) =>
   money<Op>('POST', '/v1/capital/route-base/withdrawals', { ...b, reason: b.reason.trim() }, opId);
 export const transferBase = (b: { fromRouteId: string; toRouteId: string; amountMinor: number; reason: string }, opId: string) =>

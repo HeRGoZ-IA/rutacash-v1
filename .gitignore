@@ -19,3 +19,6 @@ tests/_out*.mjs
 # Exportaciones comprimidas y configuración local de herramientas
 *.zip
 .impeccable/
+
+# Permisos locales de Claude Code (no se suben)
+.claude/settings.local.json

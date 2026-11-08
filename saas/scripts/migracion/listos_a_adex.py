@@ -203,8 +203,13 @@ def cash_block(cuadre, prev_date, report):
     span = [prev_date + dt.timedelta(days=k) for k in range(1, (report - prev_date).days + 1)]
     if any(d not in cuadre for d in span) or prev_date not in cuadre:
         fail(f'faltan cuadres entre el {prev_date} y el {report}')
-    expenses = [{'date': d.isoformat(), 'amountMinor': cents(cuadre[d]['EGRESOS']), 'category': 'Otros',
-                 'concept': f'Egresos del {d.strftime("%d/%m/%Y")} en el sistema anterior'} for d in span if cents(cuadre[d]['EGRESOS']) > 0]
+    # Helmer (2026-11-08): los gastos de cada cierre van como UN solo gasto en «Otros» (ADEX antepone «Gasto del sistema anterior:»).
+    days_spent = [d for d in span if cents(cuadre[d]['EGRESOS']) > 0]
+    spent = sum(cents(cuadre[d]['EGRESOS']) for d in days_spent)
+    when = (days_spent[0].strftime('%d/%m/%Y') if len(days_spent) == 1 else
+            f"{days_spent[0].strftime('%d/%m/%Y')} al {days_spent[-1].strftime('%d/%m/%Y')}") if days_spent else ''
+    expenses = [{'date': report.isoformat(), 'amountMinor': spent, 'category': 'Otros',
+                 'concept': f'Egresos del {when} en el sistema anterior'}] if spent > 0 else []
     income = [{'date': d.isoformat(), 'amountMinor': cents(cuadre[d]['INGRESOS']),
                'concept': f'Ingresos del {d.strftime("%d/%m/%Y")} en el sistema anterior'} for d in span if cents(cuadre[d]['INGRESOS']) > 0]
     return {'closingMinor': closing, 'openingMinor': cents(cuadre[prev_date]['TOTAL CAJA']),

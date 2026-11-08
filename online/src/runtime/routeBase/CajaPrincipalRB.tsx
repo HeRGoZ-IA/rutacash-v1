@@ -13,9 +13,10 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeftRight, ChevronRight, Handshake, History, Info, MapPin, Repeat, Settings2 } from 'lucide-react';
+import { ArrowLeftRight, ChevronRight, HandCoins, Handshake, History, Info, MapPin, Repeat, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Select, Textarea } from '@/components/ui/Input';
+import { MoneyInput } from '@/components/ui/MoneyInput';
 import { Modal } from '@/components/ui/Modal';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { toast } from '@/components/ui/Toast';
@@ -29,20 +30,28 @@ import { formatDateTime } from '@/lib/formatters';
 import { formatPersonName } from '@/lib/displayName';
 import { validRouteAdmins } from '@/lib/capitalAllocation';
 import { setRouteCapitalController } from '@/services/capitalControlService';
-import { cn } from '@/lib/utils';
+import { cn, generateId } from '@/lib/utils';
 import type { Office, Route, User } from '@/models/types';
 import { todayIn } from '../../lib/format.ts';
 import { useRuntime } from '../session.ts';
 import {
-  fetchControllerEvents, fetchHandovers, fetchPanel, routeExpenses, type ControllerEvent, sumRows, type CapitalModel, type Handover, type PanelRoute, type RoutePanel,
+  fetchControllerEvents, fetchHandovers, fetchPanel, repayPartnerDebt, routeExpenses, type ControllerEvent, sumRows, type CapitalModel, type Handover, type PanelRoute, type RoutePanel,
 } from './api.ts';
 import {
   AlertChip, Notice, PERIOD_LABEL, StateBadge, activeStates, num, otherAlerts, periodDates, stateHelp, stateLabel, useMoney, type PanelPeriod,
 } from './parts.tsx';
 import { HandoverDialog } from './HandoverDialog.tsx';
+import { toMajor, toMinor } from '../mappers.ts';
 import { GeneralExpensesPanel } from './GeneralExpensesRB.tsx';
 
-type Section = 'efectivo' | 'base' | 'cartera' | 'periodo' | 'estados' | 'entrega';
+type Section = 'efectivo' | 'base' | 'cartera' | 'periodo' | 'estados' | 'entrega' | 'deuda';
+
+/** 0052: a quién le debe la ruta («Tú» si es el actor). */
+function debtCreditors(d: { creditors: { adminId: string; name: string | null; outstandingMinor: number }[] }, mine: boolean | string | null | undefined): string {
+  const me = typeof mine === 'string' ? mine : null;
+  const names = d.creditors.filter((c) => c.outstandingMinor > 0).map((c) => (me && c.adminId === me ? 'ti' : formatPersonName(c.name) || 'su Administrador'));
+  return names.length ? names.join(' y ') : 'su Administrador';
+}
 
 export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
   const { tenantId } = useTenant();
@@ -192,7 +201,14 @@ export function CajaPrincipalRB({ model }: { model: CapitalModel }) {
                     <Mini label="Sobrantes en control" value={money(t.surplusMinor)} hint="Aparte; no es Base disponible" testId="rb-surplus-pending" />
                   </>
                 )}
-                <Mini label="Reembolsos pendientes a Administradores" value={money(panel.general.pendingAdminReimbursements?.totalMinor ?? 0)} hint="Obligación de la empresa; no es efectivo" testId="rb-total-payables" />
+                <Mini label="Reembolsos pendientes a Administradores" value={money(panel.general.pendingAdminReimbursements?.totalMinor ?? 0)} hint="Gastos generales; obligación de la empresa; no es efectivo" testId="rb-total-payables" />
+                {t.partnerDebtMinor > 0 && (
+                  <div className="min-w-0 rounded-lg bg-amber-50 ring-1 ring-inset ring-amber-200 px-2 py-1 -mx-2 -my-1" data-testid="rb-total-partner-debt">
+                    <dt className="text-xs font-medium text-amber-900">Deudas de rutas con su Administrador</dt>
+                    <dd className={cn(num, 'text-sm font-semibold text-amber-900')}>{money(t.partnerDebtMinor)}</dd>
+                    <dd className="text-[11px] leading-tight text-amber-900">Caja cubierta en la migración · cada ruta la paga con su Base</dd>
+                  </div>
+                )}
                 <Mini label="Aportes a gastos generales" value={money(t.generalContributionsMinor)} hint={`Salieron de la Base disponible · periodo; reembolsos pagados ${money(t.reimbursementsMinor)}`} />
               </dl>
             </div>
@@ -380,6 +396,7 @@ function RouteRow({ r, mine, office, onOpen, onConfirm, canConfirm }: {
   const money = useMoney();
   const states = activeStates(r);
   const alerts = otherAlerts(r);
+  const myId = useRuntime((s) => s.ctx)?.membershipId;
   const fig = (label: string, value: string, section: Section, opts: { sub?: string; negative?: boolean; testId?: string } = {}) => (
     <button type="button" onClick={() => onOpen(section)} data-testid={opts.testId}
       className="text-left min-w-0 rounded-lg px-2 py-1.5 -mx-2 -my-1.5 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">
@@ -403,6 +420,11 @@ function RouteRow({ r, mine, office, onOpen, onConfirm, canConfirm }: {
               ? <>Responsable de capital: <span className="font-medium text-gray-800">{mine ? 'Tú' : formatPersonName(r.controller.name) || '—'}</span></>
               : <span className="text-red-700 font-medium">Sin responsable</span>}
           </p>
+          {(r.partnerDebt?.outstandingMinor ?? 0) > 0 && (
+            <button type="button" onClick={() => onOpen('deuda')} className="mt-1 text-left text-xs text-amber-900 hover:underline" data-testid="rb-route-partner-debt">
+              {debtCreditors(r.partnerDebt!, myId) === 'ti' ? 'Te debe' : `Debe a ${debtCreditors(r.partnerDebt!, myId)}`}: <span className={cn(num, 'font-semibold')}>{money(r.partnerDebt!.outstandingMinor)}</span> · caja cubierta en la migración
+            </button>
+          )}
           {(states.length > 0 || alerts.length > 0) && (
             <div className="flex flex-wrap gap-1 mt-1.5" data-testid="rb-route-states">
               {states.map((k) => <StateBadge key={k} k={k} detail={k === 'insufficientLiquidity' && r.capitalNeedMinor ? `faltan ${money(r.capitalNeedMinor)}` : undefined} />)}
@@ -506,6 +528,7 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
   const money = useMoney();
   const { tenantId } = useTenant();
   const { user } = useAuth();
+  const me = useRuntime((s) => s.ctx);
   const [changing, setChanging] = useState<{ adminId: string; motivo: string } | null>(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
@@ -585,6 +608,9 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
                 {b.disbursedMinor > 0 && row('Desembolsos desde la Base disponible', b.disbursedMinor, { sign: '−' })}
                 {b.routeExpensesMinor > 0 && row('Gastos pagados con la Base', b.routeExpensesMinor, { sign: '−' })}
                 {b.reassignmentsNetMinor !== 0 && row('Reasignaciones entre rutas (neto)', b.reassignmentsNetMinor)}
+                {(b.partnerCoverMinor ?? 0) > 0 && row(`Cubierto por ${debtCreditors(r.partnerDebt ?? { creditors: [] }, me?.membershipId)} (deuda de la ruta)`, b.partnerCoverMinor, { sign: '+', hint: 'Caja negativa del sistema anterior: se le devuelve con la Base de esta ruta' })}
+                {(b.partnerRepaidMinor ?? 0) > 0 && row('Devuelto al Administrador', b.partnerRepaidMinor, { sign: '−' })}
+                {(b.migrationLoadsMinor ?? 0) !== 0 && row('Cierres de la migración (neto)', b.migrationLoadsMinor, { hint: 'Abonos, créditos e ingresos de los cierres del sistema anterior' })}
                 {b.otherMinor !== 0 && row('Otros (anulaciones, cuadres)', b.otherMinor)}
                 {row('Saldo final', b.closingMinor, { strong: true })}
                 {row('Aportes netos acumulados', r.contributionsNetMinor, { hint: 'Inyecciones menos retiros desde la activación' })}
@@ -613,6 +639,7 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
             </dl>
           </section>
         </div>
+        {r.partnerDebt && r.partnerDebt.debtMinor > 0 && <PartnerDebtSection r={r} mine={me?.membershipId === r.controller.id && !isSa} myId={me?.membershipId} />}
         <section id="rb-d-entrega" aria-labelledby="rb-d-e-h" className="space-y-2">
           <h3 id="rb-d-e-h" className="text-sm font-semibold text-gray-900">Entrega de la ruta</h3>
           {r.handoverState === 'en_entrega'
@@ -651,5 +678,67 @@ function RouteDetail({ r, section, range, isSa, users, routes, onClose, onConfir
         </section>
       </div>
     </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 0052: deuda de la ruta con su Administrador (caja cubierta en la migración)
+// ---------------------------------------------------------------------------
+
+function PartnerDebtSection({ r, mine, myId }: { r: PanelRoute; mine: boolean; myId: string | undefined }) {
+  const money = useMoney();
+  const { currency } = useTenant();
+  const d = r.partnerDebt!;
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState(0);
+  const [reason, setReason] = useState('');
+  const [opId, setOpId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const who = debtCreditors(d, myId);
+  const max = Math.max(0, Math.min(d.outstandingMinor, r.baseMinor));
+  const amountMinor = toMinor(amount);
+  const problem = amountMinor <= 0 ? 'Escribe el valor.' : amountMinor > d.outstandingMinor ? `La ruta solo debe ${money(d.outstandingMinor)}.`
+    : amountMinor > r.baseMinor ? `La Base disponible de ${r.name} es ${money(r.baseMinor)}.` : reason.trim().length < 3 ? 'Escribe el concepto (mínimo 3 caracteres).' : null;
+  async function save() {
+    if (problem) { toast.error(problem); return; }
+    setSaving(true);
+    try {
+      await repayPartnerDebt({ routeId: r.routeId, amountMinor, reason }, opId);
+      toast.success(`Devolución registrada: ${money(amountMinor)} desde la Base de ${r.name}`);
+      setOpen(false);
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Error'); } finally { setSaving(false); }
+  }
+  return (
+    <section id="rb-d-deuda" aria-labelledby="rb-d-dd-h" className="space-y-2" data-testid="rb-d-partner-debt">
+      <h3 id="rb-d-dd-h" className="text-sm font-semibold text-gray-900">Deuda de la ruta {who === 'ti' ? 'contigo' : `con ${who}`}</h3>
+      <p className="text-xs text-gray-600">En la migración, la caja del sistema anterior estaba negativa: {who === 'ti' ? 'tú pusiste' : `${who} puso`} ese dinero.
+        Se devuelve <b>solo con la Base de {r.name}</b>, cuando la ruta tenga dinero. No es efectivo ni gasto de la ruta.</p>
+      <dl className="grid grid-cols-3 gap-2">
+        <div><dt className="text-xs text-gray-500">Deuda</dt><dd className={cn(num, 'text-sm font-semibold')}>{money(d.debtMinor)}</dd></div>
+        <div><dt className="text-xs text-gray-500">Devuelto</dt><dd className={cn(num, 'text-sm font-semibold')}>{money(d.repaidMinor)}</dd></div>
+        <div><dt className="text-xs text-gray-500">Pendiente</dt><dd className={cn(num, 'text-sm font-semibold', d.outstandingMinor > 0 ? 'text-amber-900' : 'text-gray-900')}>{money(d.outstandingMinor)}</dd></div>
+      </dl>
+      {mine && d.outstandingMinor > 0 && !open && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="secondary" icon={<HandCoins className="w-3.5 h-3.5" />} disabled={max <= 0 || r.handoverState === 'en_entrega'}
+            onClick={() => { setAmount(toMajor(max)); setReason('Devolución de la caja cubierta en la migración'); setOpId(generateId()); setOpen(true); }} data-testid="rb-d-repay">
+            {who === 'ti' ? 'Devolverme con la Base de la ruta' : `Devolver a ${who} con la Base de la ruta`}
+          </Button>
+          {max <= 0 && <span className="text-xs text-gray-500">La Base disponible de la ruta está en {money(r.baseMinor)}: se podrá devolver cuando tenga dinero.</span>}
+        </div>
+      )}
+      {mine && open && (
+        <div className="rounded-xl border border-gray-200 p-3 space-y-3" data-testid="rb-d-repay-form">
+          <Notice tone="sky">Sale de la <b>Base disponible de {r.name}</b> (hoy {money(r.baseMinor)}) y baja la deuda de la ruta. Ninguna otra ruta se toca.</Notice>
+          <MoneyInput label="Valor a devolver" currency={currency} value={amount} onValueChange={(v) => setAmount(v)} required
+            hint={`Máximo ${money(max)} (lo menor entre la deuda y la Base)`} />
+          <Textarea label="Concepto" value={reason} onChange={(e) => setReason(e.target.value)} rows={2} required />
+          <div className="flex gap-2 justify-end">
+            <Button size="sm" variant="secondary" onClick={() => setOpen(false)} disabled={saving}>Cancelar</Button>
+            <Button size="sm" onClick={save} loading={saving} disabled={!!problem} data-testid="rb-d-repay-save">Registrar devolución</Button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

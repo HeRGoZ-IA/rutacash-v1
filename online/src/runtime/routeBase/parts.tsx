@@ -4,7 +4,7 @@
 
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, Droplets, Handshake, Sprout, TrendingDown, UserX, Scale, ShieldQuestion } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Droplets, Handshake, HandCoins, Sprout, TrendingDown, UserX, Scale, ShieldQuestion } from 'lucide-react';
 import { formatCurrency } from '@/lib/formatters';
 import { useTenant } from '@/hooks/useTenant';
 import { cn } from '@/lib/utils';
@@ -71,6 +71,8 @@ const ALERT_META: Partial<Record<PanelAlert, { label: string; icon: typeof Alert
   SURPLUS_IN_CONTROL: { label: 'Sobrante en control', icon: ShieldQuestion, cls: 'bg-gray-100 text-gray-700 ring-gray-200' },
   // 0036: faltantes o sobrantes sin conciliar (se resuelven en «Diferencias»).
   PENDING_DIFFERENCES: { label: 'Diferencias por conciliar', icon: Scale, cls: 'bg-amber-50 text-amber-900 ring-amber-200' },
+  // 0052: la ruta le debe a su Administrador lo que él cubrió en la migración.
+  PARTNER_DEBT: { label: 'Debe al Administrador', icon: HandCoins, cls: 'bg-amber-50 text-amber-900 ring-amber-200' },
 };
 const O9_ALERTS = new Set<PanelAlert>(['NEGATIVE_OPERATING_RESULT', 'NEGATIVE_FLOW_GROWTH', 'INSUFFICIENT_LIQUIDITY']);
 

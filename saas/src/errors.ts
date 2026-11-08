@@ -90,6 +90,7 @@ export function fromPgError(err: unknown): ApiError | null {
     case 'AX443': return new ApiError(409, 'ROUTE_IN_MIGRATION');
     case 'AX444': return new ApiError(409, 'ROUTE_MIGRATION_NOT_ALLOWED');
     case 'AX445': return new ApiError(422, 'ROUTE_MIGRATION_INVALID_DATA');
+    case 'AX447': return new ApiError(409, 'ROUTE_PARTNER_DEBT_EXCEEDED');       // 0052: la ruta no debe tanto a su Administrador
     // Fase 4 · solicitudes y desembolsos.
     case 'AX501': return new ApiError(409, 'REQUEST_STATE_INVALID');
     case 'AX502': return new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED');

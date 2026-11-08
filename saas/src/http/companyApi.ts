@@ -44,8 +44,8 @@ import {
 } from '../capital/requests.ts';
 import { notificationCount, notifications } from '../capital/notifications.ts';
 import {
-  ASSIGN_FIELDS, HANDOVER_FIELDS, INJECT_FIELDS, MODEL_FIELDS, TRANSFER_FIELDS, WITHDRAW_FIELDS, assignUnassigned, capitalModel, confirmHandover, injectBase,
-  listHandovers, modelPrerequisites, routePanel, transferBase, transferDestinations, transitionModel, withdrawBase,
+  ASSIGN_FIELDS, HANDOVER_FIELDS, INJECT_FIELDS, MODEL_FIELDS, PARTNER_REPAY_FIELDS, TRANSFER_FIELDS, WITHDRAW_FIELDS, assignUnassigned, capitalModel, confirmHandover, injectBase,
+  listHandovers, modelPrerequisites, routePanel, transferBase, repayPartnerDebt, transferDestinations, transitionModel, withdrawBase,
 } from '../capital/routeBase.ts';
 import {
   MIGRATION_CANCEL_FIELDS, MIGRATION_CLOSE_FIELDS, MIGRATION_LOAD_FIELDS, MIGRATION_LOAD_MAX_BYTES, MIGRATION_OPEN_FIELDS, MIGRATION_RESOLVE_FIELDS, closeMigration, resolveMigrationDifference, loadMigrationClose, previewMigrationLoad, cancelMigration, listMigrations, openMigration,
@@ -233,6 +233,8 @@ const ENDPOINTS: readonly Endpoint[] = [
     handler: () => async (c, ctx, b, _q, op) => created(await injectBase(c, ctx, b, op)) },
   { method: 'POST', pattern: /^\/v1\/capital\/route-base\/withdrawals$/, fields: WITHDRAW_FIELDS, idempotent: 'capital.route_base_withdrawal', requiresOperation: true,
     handler: () => async (c, ctx, b, _q, op) => created(await withdrawBase(c, ctx, b, op)) },
+  { method: 'POST', pattern: /^\/v1\/capital\/route-partner-debt\/repayments$/, fields: PARTNER_REPAY_FIELDS, idempotent: 'capital.route_partner_debt_repay', requiresOperation: true,
+    handler: () => async (c, ctx, b, _q, op) => created(await repayPartnerDebt(c, ctx, b, op)) },
   { method: 'POST', pattern: /^\/v1\/capital\/route-base\/transfers$/, fields: TRANSFER_FIELDS, idempotent: 'capital.route_transfer', requiresOperation: true,
     handler: () => async (c, ctx, b, _q, op) => created(await transferBase(c, ctx, b, op)) },
   { method: 'GET', pattern: /^\/v1\/capital\/route-base\/transfer-destinations$/, fields: null, handler: () => async (c, ctx) => ok({ routes: await transferDestinations(c, ctx) }) },
