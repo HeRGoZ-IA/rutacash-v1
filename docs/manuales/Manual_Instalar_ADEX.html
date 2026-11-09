@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Instalar ADEX · Manual</title>
+<style>
+:root{
+  --blue:#2563eb;--blue2:#1d4ed8;--ink:#0f172a;--mut:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--card:#fff;
+  --green:#059669;--red:#dc2626;--amber:#d97706;--soft:#eff6ff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);-webkit-text-size-adjust:100%}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;padding:10px 16px;background:linear-gradient(135deg,var(--blue),var(--blue2));color:#fff}
+.top .logo{font-weight:900;font-size:20px;letter-spacing:1px}
+.top .ttl{font-size:14px;opacity:.9;flex:1;line-height:1.2}
+.lang{display:flex;background:rgba(255,255,255,.18);border-radius:999px;padding:3px}
+.lang button{padding:5px 11px;border-radius:999px;font-weight:700;font-size:13px;color:#fff}
+.lang button.on{background:#fff;color:var(--blue)}
+/* ---------- MENÚ ---------- */
+#menu{max-width:720px;margin:0 auto;padding:16px 16px 40px}
+.hero{background:#fff;border-radius:20px;padding:18px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:16px;display:flex;gap:14px;align-items:center}
+.hero img{width:64px;height:64px;border-radius:16px;flex:none;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+.hero h1{font-size:22px;margin-bottom:6px}
+.hero p{color:var(--mut);font-size:15px;line-height:1.45}
+.sec{margin:22px 0 10px;font-size:18px;font-weight:800;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sec small{font-weight:500;color:var(--mut);font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.task{background:#fff;border-radius:16px;padding:14px;text-align:left;box-shadow:0 1px 3px rgba(0,0,0,.06);border:2px solid transparent;display:flex;flex-direction:column;gap:6px;min-height:104px}
+.task:active,.task:hover{border-color:var(--blue)}
+.task .ic{font-size:28px}
+.task b{font-size:15px;line-height:1.25}
+.task span{font-size:12.5px;color:var(--mut);line-height:1.3}
+.gain{background:#fff;border-radius:16px;padding:14px 16px;box-shadow:0 1px 3px rgba(0,0,0,.06);font-size:14.5px;line-height:1.5}
+.gain li{margin-left:18px;margin-bottom:4px}
+.faq details{background:#fff;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:8px;overflow:hidden}
+.faq summary{padding:13px 16px;font-weight:700;font-size:15px;cursor:pointer;list-style:none;display:flex;gap:8px;align-items:flex-start}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::before{content:"▸";color:var(--blue);transition:transform .2s}
+.faq details[open] summary::before{transform:rotate(90deg)}
+.faq .ans{padding:0 16px 14px 34px;font-size:14.5px;line-height:1.5;color:#334155}
+.faq .ans b{color:var(--ink)}
+.tip{background:#fffbeb;border:1px solid #fde68a;border-radius:14px;padding:12px 14px;font-size:14px;line-height:1.45;margin-top:14px}
+code{background:#eef2ff;border-radius:6px;padding:1px 6px;font-size:.95em}
+/* ---------- REPRODUCTOR ---------- */
+#player{display:none;flex-direction:column;height:calc(100dvh - 52px);max-width:720px;margin:0 auto}
+#player.on{display:flex}
+.pbar{display:flex;align-items:center;gap:8px;padding:8px 12px}
+.pbar .back{background:#fff;border-radius:999px;padding:7px 12px;font-weight:700;font-size:14px;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.pbar .name{font-weight:800;font-size:15px;flex:1;line-height:1.2}
+.stagewrap{flex:1;min-height:0;display:flex;justify-content:center;align-items:flex-start;padding:0 8px}
+.stage{position:relative;border-radius:18px;overflow:hidden;box-shadow:0 8px 30px rgba(15,23,42,.18);background:#000}
+.cap{background:#fff;border-radius:18px 18px 0 0;padding:12px 16px calc(10px + env(safe-area-inset-bottom));box-shadow:0 -4px 16px rgba(0,0,0,.06)}
+.prog{display:flex;gap:4px;margin-bottom:8px}
+.prog i{flex:1;height:5px;border-radius:9px;background:var(--line)}
+.prog i.pd{background:#93c5fd}.prog i.pc{background:var(--blue)}
+.stepn{font-size:12px;color:var(--mut);font-weight:700;margin-bottom:3px}
+.txt{font-size:16.5px;line-height:1.42;min-height:3.2em}
+.txt b{color:var(--blue2)}
+.ctrls{display:flex;gap:8px;margin-top:10px}
+.ctrls button{flex:1;padding:11px 6px;border-radius:12px;background:var(--soft);color:var(--blue2);font-weight:800;font-size:15px}
+.ctrls button.main{background:var(--blue);color:#fff;flex:1.4}
+.done{position:absolute;inset:0;z-index:60;background:rgba(15,23,42,.72);display:flex;align-items:center;justify-content:center;padding:24px}
+.done div{background:#fff;border-radius:20px;padding:22px;text-align:center;max-width:300px}
+.done .big{font-size:46px}
+.done h3{margin:6px 0 8px;font-size:20px}
+.done p{color:var(--mut);font-size:15px;line-height:1.4;margin-bottom:14px}
+.done button{display:block;width:100%;padding:12px;border-radius:12px;font-weight:800;margin-top:8px;background:var(--soft);color:var(--blue2)}
+.done button.main{background:var(--blue);color:#fff}
+@media (min-width:900px){
+  #player{flex-direction:row;flex-wrap:wrap;align-content:flex-start;max-width:900px}
+  .pbar{width:100%}
+  .stagewrap{flex:0 0 auto;padding:0 16px}
+  .cap{flex:1;border-radius:18px;margin-right:16px;align-self:flex-start}
+  #player.wide{flex-direction:column;flex-wrap:nowrap}
+  #player.wide .stagewrap{flex:0 0 auto}
+  #player.wide .cap{flex:0 0 auto;margin:12px 16px 0;border-radius:18px;align-self:stretch}
+}
+
+/* ================= DISPOSITIVOS SIMULADOS ================= */
+.app{position:absolute;left:0;top:0;transform-origin:0 0;overflow:hidden;font-size:13px;color:#111827;background:#fff}
+.app img.ai{width:100%;height:100%;display:block;border-radius:inherit}
+/* barra de estado del celular */
+.sb{position:absolute;left:0;right:0;top:0;height:26px;display:flex;justify-content:space-between;align-items:center;padding:0 16px;font-size:11.5px;font-weight:700;z-index:3}
+.sb.lt{color:#fff}.sb.dk{color:#111}
+/* fondo y escritorio del celular */
+.wall{position:absolute;inset:0}
+.wall.and{background:linear-gradient(165deg,#0f766e 0%,#1e3a8a 70%)}
+.wall.ios{background:linear-gradient(165deg,#7c3aed 0%,#2563eb 55%,#0ea5e9 100%)}
+.icons{position:absolute;left:16px;right:16px;top:58px;display:grid;grid-template-columns:repeat(4,1fr);row-gap:20px}
+.dock{position:absolute;left:14px;right:14px;bottom:18px;display:grid;grid-template-columns:repeat(4,1fr);padding:12px 4px;border-radius:26px}
+.dock.ios{background:rgba(255,255,255,.28)}
+.aic{display:flex;flex-direction:column;align-items:center;gap:5px;justify-self:center;border-radius:14px}
+.aic i{width:54px;height:54px;border-radius:15px;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:26px;box-shadow:0 2px 6px rgba(0,0,0,.18)}
+.and .aic i,.aic.round i{border-radius:50%}
+.aic span{font-size:11px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.5);max-width:72px;text-align:center;line-height:1.1}
+.aic.new i{animation:pop .7s ease}
+@keyframes pop{0%{transform:scale(.2);opacity:0}70%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+.toastp{position:absolute;left:24px;right:24px;bottom:110px;background:rgba(17,24,39,.92);color:#fff;border-radius:12px;padding:10px 12px;font-size:12px;text-align:center;z-index:5}
+/* página de ADEX (inicio de sesión) */
+.lg{position:absolute;left:0;right:0;background:linear-gradient(160deg,#1e3a8a,#2563eb);padding:34px 20px;display:flex;flex-direction:column;align-items:center}
+.lg .bi{width:64px;height:64px;border-radius:16px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+.lg b.n{color:#fff;font-size:28px;font-style:italic;font-weight:900;letter-spacing:1px;margin-top:8px}
+.lg span.s{color:#dbeafe;font-size:11px;margin-bottom:18px}
+.lg .card{background:#fff;border-radius:16px;padding:14px;width:100%;max-width:300px}
+.lg .card label{display:block;font-size:11px;font-weight:700;color:#374151;margin:6px 0 3px}
+.lg .card .in{border:1.5px solid #d1d5db;border-radius:10px;height:34px}
+.lg .card .bt{margin-top:12px;background:var(--blue);color:#fff;border-radius:10px;text-align:center;font-weight:800;padding:9px}
+.lg.mini{padding:16px 20px}
+.lg.mini .bi{width:44px;height:44px;border-radius:12px}
+.lg.mini b.n{font-size:20px;margin-top:4px}
+.lg.mini span.s{margin-bottom:8px}
+.lg.mini .card{max-width:240px;padding:10px}
+.lg.mini .card .in{height:24px}
+.lg.mini .card .bt{padding:6px;margin-top:8px}
+/* Chrome Android */
+.cbar{position:absolute;left:0;right:0;top:26px;height:52px;display:flex;align-items:center;gap:8px;padding:0 8px;background:#fff;border-bottom:1px solid #e5e7eb;z-index:2}
+.cbar .hm,.cbar .tb,.cbar .dt{width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:17px;color:#374151;border-radius:50%}
+.cbar .tb span{width:18px;height:18px;border:2px solid #374151;border-radius:4px;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center}
+.url{flex:1;height:36px;border-radius:999px;background:#f1f3f4;display:flex;align-items:center;gap:6px;padding:0 12px;font-size:13px;color:#202124;white-space:nowrap;overflow:hidden}
+.url .ph{color:#80868b}
+.url .lk{font-size:11px;color:#5f6368}
+.ntp{position:absolute;left:0;right:0;top:78px;bottom:0;display:flex;flex-direction:column;align-items:center;padding-top:110px;color:#9ca3af;font-size:13px;background:#fff}
+.ntp .g{font-size:40px;margin-bottom:10px}
+.menu{position:absolute;right:6px;top:30px;width:238px;background:#fff;border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.28);padding:6px 0;z-index:6}
+.menu div{padding:10px 16px;font-size:13px;display:flex;gap:12px;align-items:center;border-radius:6px}
+.menu hr{border:0;border-top:1px solid #eee;margin:4px 0}
+.menu .mi{width:18px;text-align:center;color:#5f6368}
+.dim{position:absolute;inset:0;background:rgba(0,0,0,.45);z-index:5}
+.dlg{position:absolute;z-index:7;background:#fff;border-radius:22px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.3)}
+.dlg h4{font-size:17px;font-weight:600;margin-bottom:14px}
+.dlg .row{display:flex;gap:12px;align-items:center;margin-bottom:18px}
+.dlg .row .ii{width:44px;height:44px;border-radius:50%;overflow:hidden;flex:none}
+.dlg .row b{display:block;font-size:14px}.dlg .row span{font-size:12px;color:#5f6368}
+.dlg .acts{display:flex;justify-content:flex-end;gap:6px}
+.dlg .acts div{padding:9px 14px;border-radius:999px;font-weight:600;color:#1a73e8;font-size:13.5px}
+.dlg .acts div.pri{background:#1a73e8;color:#fff}
+/* Safari iPhone */
+.sfb{position:absolute;left:0;right:0;bottom:0;height:104px;background:#f2f2f7;border-top:1px solid #d1d1d6;z-index:2}
+.sfb .url{position:absolute;left:12px;right:12px;top:10px;height:40px;border-radius:12px;background:#fff;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.sfb .tools{position:absolute;left:0;right:0;top:58px;height:36px;display:flex;justify-content:space-around;align-items:center;color:#007aff;font-size:20px}
+.sfb .tools div{width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:10px}
+.sheet{position:absolute;left:0;right:0;bottom:0;top:150px;background:#f2f2f7;border-radius:14px 14px 0 0;z-index:7;padding:14px 14px 0}
+.sheet .hd{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+.sheet .hd .ii{width:42px;height:42px;border-radius:10px;overflow:hidden}
+.sheet .hd b{display:block;font-size:13.5px}.sheet .hd span{font-size:11.5px;color:#8e8e93}
+.sheet .hd .x{margin-left:auto;width:26px;height:26px;border-radius:50%;background:#e5e5ea;display:flex;align-items:center;justify-content:center;color:#8e8e93;font-size:13px}
+.sheet .ppl{display:flex;gap:14px;margin-bottom:12px;padding:0 2px}
+.sheet .ppl div{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10px;color:#3a3a3c}
+.sheet .ppl i{width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:22px;background:#fff}
+.grp{background:#fff;border-radius:12px;margin-bottom:10px;overflow:hidden}
+.grp div{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;font-size:13.5px;border-bottom:1px solid #e5e5ea}
+.grp div:last-child{border-bottom:0}
+.grp div span{font-size:16px;color:#3a3a3c}
+.grp .hl,.menu .hl{outline-offset:-3px}
+.addp{position:absolute;left:0;right:0;bottom:0;top:40px;background:#f2f2f7;border-radius:14px 14px 0 0;z-index:7;padding:0 14px}
+.addp .nb{display:flex;justify-content:space-between;align-items:center;height:48px;font-size:14px}
+.addp .nb .l{color:#007aff}.addp .nb .r{color:#007aff;font-weight:700;padding:6px 8px;border-radius:8px}
+.addp .nb b{font-size:14px}
+.addp .card{background:#fff;border-radius:12px;padding:12px;display:flex;gap:12px;align-items:center;margin-top:8px}
+.addp .card .ii{width:60px;height:60px;border-radius:14px;overflow:hidden;flex:none}
+.addp .card .nm{border-bottom:1px solid #e5e5ea;padding:6px 0;font-size:15px}
+.addp .card .u{font-size:12px;color:#8e8e93;padding-top:6px}
+.addp .tg{background:#fff;border-radius:12px;padding:12px;margin-top:14px;display:flex;justify-content:space-between;align-items:center;font-size:14px}
+.sw{width:46px;height:28px;border-radius:999px;background:#34c759;position:relative}
+.sw::after{content:"";position:absolute;right:2px;top:2px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.addp .nt{font-size:12px;color:#8e8e93;padding:8px 4px;line-height:1.4}
+/* PC Windows */
+.desk{position:absolute;inset:0;background:linear-gradient(135deg,#1e3a8a 0%,#2563eb 50%,#38bdf8 100%)}
+.dicons{position:absolute;left:10px;top:10px;display:flex;flex-direction:column;gap:12px;z-index:1}
+.dic{width:64px;display:flex;flex-direction:column;align-items:center;gap:3px;padding:4px 2px;border-radius:6px}
+.dic i{width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:24px;border-radius:8px;overflow:hidden}
+.dic span{font-size:9.5px;color:#fff;text-align:center;text-shadow:0 1px 2px rgba(0,0,0,.6);line-height:1.1}
+.dic.new{animation:pop .7s ease}
+.task-b{position:absolute;left:0;right:0;bottom:0;height:34px;background:rgba(241,245,249,.88);display:flex;align-items:center;justify-content:center;gap:10px;z-index:4}
+.task-b div{width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:15px;overflow:hidden}
+.task-b .clk{position:absolute;right:10px;font-size:9.5px;text-align:right;line-height:1.2;width:auto;color:#111}
+.win{position:absolute;left:84px;top:16px;width:540px;height:322px;background:#fff;border-radius:8px;box-shadow:0 12px 34px rgba(0,0,0,.35);overflow:hidden;z-index:2}
+.win .tbar{height:30px;background:#dee1e6;display:flex;align-items:flex-end;padding:0 0 0 8px;position:relative}
+.win .tbar.edge{background:#f3f3f3}
+.win .tab{height:24px;background:#fff;border-radius:8px 8px 0 0;padding:0 10px;display:flex;align-items:center;gap:6px;font-size:10.5px;min-width:150px}
+.win .tab .ti{width:14px;height:14px;border-radius:3px;overflow:hidden}
+.win .wc{position:absolute;right:0;top:0;height:30px;display:flex}
+.win .wc span{width:36px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#333}
+.win .abar{height:34px;display:flex;align-items:center;gap:6px;padding:0 8px;border-bottom:1px solid #e5e7eb}
+.win .abar .nv{font-size:13px;color:#5f6368;width:18px;text-align:center}
+.win .abar .url{height:26px;font-size:11.5px;padding:0 6px 0 12px}
+.win .abar .url .sp{flex:1}
+.ibtn{width:24px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:#3c4043}
+.win .pg{position:absolute;left:0;right:0;top:64px;bottom:0}
+.win.solo .pg{top:30px}
+.win.solo .tbar{align-items:center;gap:8px;font-size:11px;background:#1e40af;color:#fff;padding-left:10px}
+.win.solo .tbar .ti{width:16px;height:16px;border-radius:4px;overflow:hidden}
+.win.solo .wc span{color:#fff}
+.pop{position:absolute;z-index:8;background:#fff;border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.3);padding:14px;width:250px}
+.pop h4{font-size:13px;font-weight:600;margin-bottom:10px}
+.pop .row{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+.pop .row .ii{width:32px;height:32px;border-radius:8px;overflow:hidden;flex:none}
+.pop .row b{display:block;font-size:12px}.pop .row span{font-size:10.5px;color:#5f6368}
+.pop .acts{display:flex;justify-content:flex-end;gap:6px}
+.pop .acts div{padding:6px 12px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #dadce0;color:#1a73e8}
+.pop .acts div.pri{background:#1a73e8;border-color:#1a73e8;color:#fff}
+.pop.edge .acts div{border-radius:4px}
+.pop.edge .acts div.pri{background:#0f6cbd;border-color:#0f6cbd}
+.pop .ck{display:flex;gap:8px;align-items:center;font-size:11.5px;padding:5px 4px;border-radius:6px}
+.pop .ck i{width:15px;height:15px;border:1.5px solid #616161;border-radius:3px;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:10px;color:#fff;flex:none}
+.pop .ck i.on{background:#0f6cbd;border-color:#0f6cbd}
+/* mano / puntero */
+.hand{position:absolute;z-index:50;font-size:34px;left:300px;top:700px;transition:left .75s cubic-bezier(.4,.1,.2,1),top .75s cubic-bezier(.4,.1,.2,1);pointer-events:none;filter:drop-shadow(0 3px 4px rgba(0,0,0,.35));transform:translate(-30%,-8%)}
+.hand.ptr{transform:none;font-size:0;line-height:0}
+.hand.tap{animation:tap .45s ease}
+.hand.ptr.tap{animation:click .45s ease}
+@keyframes tap{50%{transform:translate(-30%,-8%) scale(.82)}}
+@keyframes click{50%{transform:scale(.85)}}
+.rip{position:absolute;z-index:49;width:16px;height:16px;border-radius:50%;background:rgba(37,99,235,.45);pointer-events:none;animation:rip .6s ease-out forwards}
+@keyframes rip{to{transform:scale(4.5);opacity:0}}
+.hl{outline:3px solid #f59e0b;outline-offset:2px;animation:glow 1.2s ease-in-out infinite}
+@keyframes glow{50%{outline-color:#fcd34d}}
+.caret::after{content:"|";animation:blink .8s steps(1) infinite;color:var(--blue)}
+@keyframes blink{50%{opacity:0}}
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="logo">ADEX</div>
+  <div class="ttl" id="topTtl">Instalar ADEX</div>
+  <div class="lang"><button data-l="es" class="on">ES</button><button data-l="pt">PT</button></div>
+</div>
+
+<main id="menu"></main>
+
+<section id="player">
+  <div class="pbar"><button class="back" id="bBack">‹ <span id="bBackT">Menú</span></button><div class="name" id="pName"></div></div>
+  <div class="stagewrap"><div class="stage" id="stage"><div class="app" id="app"></div></div></div>
+  <div class="cap" id="cap">
+    <div class="prog" id="prog"></div>
+    <div class="stepn" id="stepn"></div>
+    <div class="txt" id="txt"></div>
+    <div class="ctrls" id="ctrls">
+      <button id="bPrev">◀</button>
+      <button id="bPlay" class="main">⏸</button>
+      <button id="bNext">▶</button>
+      <button id="bAgain">⟲</button>
+    </div>
+  </div>
+</section>
+
+<script>
+(function(){
+"use strict";
+var ICON="data:image/png;base64,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";
+var URL_APP="adex-online.vercel.app";
+var LANG='es';
+try{var sl=localStorage.getItem('adexManualLang');if(sl==='pt'||sl==='es')LANG=sl;}catch(e){}
+function L(es,pt){return LANG==='pt'?pt:es;}
+var UI={
+ es:{title:'Instalar ADEX',heroH:'Pon ADEX en tu pantalla 📲',
+  heroP:'Instala ADEX una sola vez y tendrás su ícono en el celular o en el escritorio de tu computador, como cualquier otra aplicación. Elige tu equipo y mira cómo se hace, paso a paso.',
+  where:'¿Dónde lo vas a instalar?',whereS:'toca tu equipo',
+  gainH:'¿Qué ganas al instalarla?',
+  gain:['Abres ADEX con <b>un toque</b>, desde su ícono, sin buscar la página.','Se abre a <b>pantalla completa</b>, sin la barra del navegador.','<b>Se actualiza sola.</b> No hay que volver a instalarla.','Es la misma ADEX de siempre: <b>mismo usuario, misma contraseña, mismos datos</b>.'],
+  faqH:'Problemas frecuentes',
+  tip:'💡 <b>Las pantallas de este manual son dibujos de ejemplo.</b> En tu equipo los colores y la posición de los botones pueden cambiar un poco según la marca y la versión, pero los nombres de los botones son los mismos.',
+  menu:'Menú',step:'Paso {a} de {b}',play:'▶',pause:'⏸',
+  doneH:'¡Listo!',doneP:'ADEX ya está instalada. Desde ahora ábrela siempre desde su ícono.',again:'⟲ Ver otra vez',toMenu:'Volver al menú'},
+ pt:{title:'Instalar o ADEX',heroH:'Coloque o ADEX na sua tela 📲',
+  heroP:'Instale o ADEX uma única vez e você terá o ícone no celular ou na área de trabalho do computador, como qualquer outro aplicativo. Escolha o seu aparelho e veja como se faz, passo a passo.',
+  where:'Onde você vai instalar?',whereS:'toque no seu aparelho',
+  gainH:'O que você ganha ao instalar?',
+  gain:['Você abre o ADEX com <b>um toque</b>, pelo ícone, sem procurar a página.','Abre em <b>tela cheia</b>, sem a barra do navegador.','<b>Atualiza sozinho.</b> Não precisa instalar de novo.','É o mesmo ADEX de sempre: <b>mesmo usuário, mesma senha, mesmos dados</b>.'],
+  faqH:'Problemas frequentes',
+  tip:'💡 <b>As telas deste manual são desenhos de exemplo.</b> No seu aparelho as cores e a posição dos botões podem mudar um pouco conforme a marca e a versão, mas os nomes dos botões são os mesmos.',
+  menu:'Menu',step:'Passo {a} de {b}',play:'▶',pause:'⏸',
+  doneH:'Pronto!',doneP:'O ADEX já está instalado. A partir de agora abra sempre pelo ícone.',again:'⟲ Ver de novo',toMenu:'Voltar ao menu'}
+};
+function T(k){return UI[LANG][k];}
+var FAQ=[
+ ['No me aparece «Instalar app» ni el ícono de instalar.','Não aparece «Instalar app» nem o ícone de instalar.',
+  'Espera a que la página de ADEX <b>cargue completa</b> (que veas la pantalla de entrada) y vuelve a abrir el menú. Si sigue sin salir, recarga la página. Asegúrate de usar <b>Chrome</b> o <b>Edge</b> en Android y en el computador, y <b>Safari</b> en iPhone. Si ADEX <b>ya está instalada</b>, la opción no aparece: busca el ícono.',
+  'Espere a página do ADEX <b>carregar por completo</b> (até ver a tela de entrada) e abra o menu de novo. Se continuar sem aparecer, recarregue a página. Use <b>Chrome</b> ou <b>Edge</b> no Android e no computador, e <b>Safari</b> no iPhone. Se o ADEX <b>já estiver instalado</b>, a opção não aparece: procure o ícone.'],
+ ['En iPhone no encuentro el botón Compartir.','No iPhone não encontro o botão Compartilhar.',
+  'Es el <b>cuadrito con una flecha hacia arriba</b>. En las versiones nuevas de iPhone puede estar escondido: toca los <b>tres puntos (···)</b> junto a la dirección y luego <b>Compartir</b>. Si no ves «Agregar a pantalla de inicio», <b>desliza la lista hacia arriba</b>: suele estar más abajo.',
+  'É o <b>quadradinho com uma seta para cima</b>. Nas versões novas do iPhone ele pode estar escondido: toque nos <b>três pontos (···)</b> ao lado do endereço e depois em <b>Compartilhar</b>. Se não vir «Adicionar à Tela de Início», <b>deslize a lista para cima</b>: costuma estar mais abaixo.'],
+ ['En el computador no quedó el ícono en el escritorio.','No computador o ícone não ficou na área de trabalho.',
+  'ADEX igual quedó instalada: búscala en el <b>menú Inicio</b> de Windows escribiendo «ADEX». Para ponerla en el escritorio, en Chrome escribe <code>chrome://apps</code> en la barra de direcciones, haz <b>clic derecho</b> sobre ADEX y elige <b>«Crear accesos directos…»</b> → <b>Escritorio</b>. En Edge, abre ADEX, toca los <b>tres puntos (···)</b> de su ventana y busca la opción de <b>crear acceso directo en el escritorio</b>.',
+  'O ADEX foi instalado mesmo assim: procure no <b>menu Iniciar</b> do Windows digitando «ADEX». Para colocar na área de trabalho, no Chrome digite <code>chrome://apps</code> na barra de endereço, clique com o <b>botão direito</b> no ADEX e escolha <b>«Criar atalhos…»</b> → <b>Área de trabalho</b>. No Edge, abra o ADEX, clique nos <b>três pontos (···)</b> da janela e procure a opção de <b>criar atalho na área de trabalho</b>.'],
+ ['¿Tengo que volver a entrar con mi usuario?','Preciso entrar de novo com o meu usuário?',
+  'Sí, <b>la primera vez</b> que abras ADEX desde el ícono escribe tu usuario y contraseña de siempre. No es una cuenta nueva.',
+  'Sim, <b>na primeira vez</b> que abrir o ADEX pelo ícone digite o seu usuário e senha de sempre. Não é uma conta nova.'],
+ ['¿Cómo se actualiza?','Como ele é atualizado?',
+  '<b>Sola.</b> Cuando hay una versión nueva, ADEX la descarga al abrirla con internet. Nunca hay que desinstalar ni volver a instalar.',
+  '<b>Sozinho.</b> Quando há uma versão nova, o ADEX baixa ao abrir com internet. Nunca precisa desinstalar nem instalar de novo.'],
+ ['¿Cómo la quito si ya no la quiero?','Como removo se não quiser mais?',
+  'En el celular, <b>mantén presionado</b> el ícono de ADEX y elige <b>Desinstalar</b> (Android) o <b>Eliminar app</b> (iPhone). En el computador, abre ADEX, toca los <b>tres puntos</b> de su ventana y elige <b>Desinstalar</b>. Tus datos no se pierden: están guardados en ADEX, no en el equipo.',
+  'No celular, <b>mantenha pressionado</b> o ícone do ADEX e escolha <b>Desinstalar</b> (Android) ou <b>Remover app</b> (iPhone). No computador, abra o ADEX, clique nos <b>três pontos</b> da janela e escolha <b>Desinstalar</b>. Os seus dados não se perdem: ficam guardados no ADEX, não no aparelho.']
+];
+
+/* ===================== PIEZAS ===================== */
+function img(c){return '<img class="ai" src="'+ICON+'" alt="">';}
+function H(k){return ' data-t="'+k+'"';}
+function sb(dark){return '<div class="sb '+(dark?'dk':'lt')+'"><span>9:41</span><span>▂▄▆ 🔋</span></div>';}
+function aic(lbl,ico,bg,key,extra){return '<div class="aic '+(extra||'')+'"'+(key?H(key):'')+'><i style="background:'+bg+'">'+ico+'</i><span>'+lbl+'</span></div>';}
+function adexIc(key,isNew){return '<div class="aic '+(isNew?'new':'')+'"'+H(key||'adexic')+'><i style="background:#fff;overflow:hidden">'+img()+'</i><span>ADEX</span></div>';}
+function login(top,mini){
+  return '<div class="lg'+(mini?' mini':'')+'" style="top:'+top+'px;bottom:0"><div class="bi">'+img()+'</div><b class="n">ADEX</b><span class="s">Soluciones</span>'+
+  '<div class="card"><label>'+L('Usuario','Usuário')+'</label><div class="in"></div><label>'+L('Contraseña','Senha')+'</label><div class="in"></div><div class="bt">'+L('Entrar','Entrar')+'</div></div></div>';
+}
+function homeAndroid(st){
+  var row1=[aic(L('Teléfono','Telefone'),'📞','#16a34a'),aic(L('Mensajes','Mensagens'),'💬','#2563eb'),aic(L('Cámara','Câmera'),'📷','#475569'),aic(L('Galería','Galeria'),'🖼️','#f59e0b')];
+  var row2=[aic(L('Reloj','Relógio'),'⏰','#0f172a'),aic(L('Calendario','Agenda'),'📅','#dc2626'),aic(L('Ajustes','Config.'),'⚙️','#64748b')];
+  if(st.adex)row2.push(adexIc('adexic',st.isNew));
+  var dock=[aic('','📞','#16a34a'),aic('','💬','#2563eb'),aic('Chrome','🌐','#fff','chrome','round'),aic('','📷','#475569')];
+  return '<div class="wall and"></div>'+sb()+'<div class="icons and">'+row1.join('')+row2.join('')+'</div><div class="dock and">'+dock.join('')+'</div>'+(st.toast?'<div class="toastp">'+L(st.toast[0],st.toast[1])+'</div>':'');
+}
+function homeIOS(st){
+  var row1=[aic(L('Mensajes','Mensagens'),'💬','#22c55e'),aic(L('Fotos','Fotos'),'🌼','#fff'),aic(L('Cámara','Câmera'),'📷','#475569'),aic(L('Reloj','Relógio'),'⏰','#0f172a')];
+  var row2=[aic(L('Calendario','Calendário'),'📅','#fff'),aic(L('Notas','Notas'),'📝','#facc15'),aic(L('Ajustes','Ajustes'),'⚙️','#64748b')];
+  if(st.adex)row2.push(adexIc('adexic',st.isNew));
+  var dock=[aic('','📞','#22c55e'),aic('Safari','🧭','#fff','safari'),aic('','✉️','#3b82f6'),aic('','🎵','#ef4444')];
+  return '<div class="wall ios"></div>'+sb()+'<div class="icons">'+row1.join('')+row2.join('')+'</div><div class="dock ios">'+dock.join('')+'</div>';
+}
+function urlField(st,cls){
+  return '<div class="url '+(cls||'')+'"'+H('url')+'>'+(st.url?'<span class="lk">🔒</span><span class="v">'+URL_APP+'</span>':'<span class="v"></span><span class="ph">'+L('Busca o escribe una dirección','Pesquise ou digite um endereço')+'</span>')+'</div>';
+}
+var SHARE='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/></svg>';
+var INSTALL='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/><path d="M12 7v6"/><path d="M9 10l3 3 3-3"/></svg>';
+var EDGEAPP='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M17.5 14v7"/><path d="M14 17.5h7"/></svg>';
+
+/* ===================== PANTALLAS ===================== */
+var S={
+ a_home:function(st){return homeAndroid(st);},
+ a_chrome:function(st){
+  var h=sb(true)+'<div class="cbar"><div class="hm">⌂</div>'+urlField(st)+'<div class="tb"><span>1</span></div><div class="dt"'+H('dots')+'>⋮</div></div>';
+  h+=st.url&&st.loaded?login(78):'<div class="ntp"><div class="g">🌐</div>'+(st.url?L('Cargando…','Carregando…'):'')+'</div>';
+  if(st.menu){
+   h+='<div class="menu">'+
+   '<div><span class="mi">＋</span>'+L('Nueva pestaña','Nova guia')+'</div>'+
+   '<div><span class="mi">🕶</span>'+L('Nueva pestaña de incógnito','Nova guia anônima')+'</div>'+
+   '<div><span class="mi">🕘</span>'+L('Historial','Histórico')+'</div>'+
+   '<div><span class="mi">⬇</span>'+L('Descargas','Downloads')+'</div><hr>'+
+   '<div><span class="mi">⤴</span>'+L('Compartir…','Compartilhar…')+'</div>'+
+   '<div><span class="mi">🔍</span>'+L('Buscar en la página','Localizar na página')+'</div>'+
+   '<div'+H('install')+'><span class="mi">📲</span>'+L('Instalar app','Instalar app')+'</div>'+
+   '<div><span class="mi">🖥</span>'+L('Sitio de escritorio','Site para computador')+'</div>'+
+   '<div><span class="mi">⚙</span>'+L('Configuración','Configurações')+'</div></div>';
+  }
+  if(st.dlg){
+   h+='<div class="dim"></div><div class="dlg" style="left:28px;right:28px;top:220px"><h4>'+L('Instalar app','Instalar app')+'</h4>'+
+   '<div class="row"><div class="ii">'+img()+'</div><div><b>ADEX</b><span>'+URL_APP+'</span></div></div>'+
+   '<div class="acts"><div>'+L('Cancelar','Cancelar')+'</div><div class="pri"'+H('inst')+'>'+L('Instalar','Instalar')+'</div></div></div>';
+  }
+  return h;
+ },
+ a_app:function(){return sb()+login(0);},
+ i_home:function(st){return homeIOS(st);},
+ i_safari:function(st){
+  var h=sb(true);
+  h+=st.url&&st.loaded?'<div style="position:absolute;left:0;right:0;top:0;bottom:104px;overflow:hidden">'+login(26).replace('bottom:0','bottom:0')+'</div>':'<div class="ntp" style="top:26px;bottom:104px;padding-top:150px">'+(st.url?L('Cargando…','Carregando…'):'<div class="g">🧭</div>')+'</div>';
+  h+='<div class="sfb">'+urlField(st)+'<div class="tools"><div>‹</div><div style="color:#c7c7cc">›</div><div'+H('share')+'>'+SHARE+'</div><div>📖</div><div>⧉</div></div></div>';
+  if(st.sheet){
+   h+='<div class="dim"></div><div class="sheet"><div class="hd"><div class="ii">'+img()+'</div><div><b>ADEX</b><span>'+URL_APP+'</span></div><div class="x">✕</div></div>'+
+   '<div class="ppl"><div><i>📡</i>AirDrop</div><div><i style="background:#22c55e">💬</i>'+L('Mensajes','Mensagens')+'</div><div><i style="background:#3b82f6">✉️</i>Mail</div><div><i style="background:#facc15">📝</i>'+L('Notas','Notas')+'</div></div>'+
+   '<div class="grp"><div>'+L('Copiar','Copiar')+'<span>⧉</span></div><div>'+L('Agregar a la lista de lectura','Adicionar à Lista de Leitura')+'<span>👓</span></div><div>'+L('Agregar marcador','Adicionar Favorito')+'<span>📖</span></div></div>'+
+   '<div class="grp"><div'+H('addhome')+'>'+L('Agregar a pantalla de inicio','Adicionar à Tela de Início')+'<span>⊞</span></div><div>'+L('Buscar en la página','Buscar na Página')+'<span>🔍</span></div></div></div>';
+  }
+  if(st.add){
+   h+='<div class="dim"></div><div class="addp"><div class="nb"><span class="l">'+L('Cancelar','Cancelar')+'</span><b>'+L('Agregar a inicio','Adicionar à Tela de Início')+'</b><span class="r"'+H('add')+'>'+L('Agregar','Adicionar')+'</span></div>'+
+   '<div class="card"><div class="ii">'+img()+'</div><div style="flex:1"><div class="nm"'+H('name')+'>ADEX</div><div class="u">https://'+URL_APP+'/</div></div></div>'+
+   '<div class="tg"'+H('webapp')+'><span>'+L('Abrir como app web','Abrir como App Web')+'</span><div class="sw"></div></div>'+
+   '<div class="nt">'+L('Se agregará un ícono a tu pantalla de inicio para acceder rápido a este sitio.','Um ícone será adicionado à sua Tela de Início para acessar este site rapidamente.')+'</div></div>';
+  }
+  return h;
+ },
+ i_app:function(){return sb()+login(0);},
+ p_desk:function(st){
+  var br=st.edge?['Edge','🌊','#0ea5e9','edge']:['Chrome','🌐','#fff','chrome'];
+  var h='<div class="desk"></div><div class="dicons">'+
+   '<div class="dic"><i>🗑️</i><span>'+L('Papelera de reciclaje','Lixeira')+'</span></div>'+
+   '<div class="dic"'+H(br[3])+'><i style="background:'+br[2]+';border-radius:50%">'+br[1]+'</i><span>'+br[0]+'</span></div>'+
+   (st.adex?'<div class="dic '+(st.isNew?'new':'')+'"'+H('adexd')+'><i>'+img()+'</i><span>ADEX</span></div>':'')+'</div>';
+  h+='<div class="task-b"><div style="color:#2563eb">⊞</div><div>🔍</div><div>📁</div><div style="background:'+br[2]+';border-radius:50%">'+br[1]+'</div>'+(st.adex?'<div>'+img()+'</div>':'')+'<div class="clk">9:41<br>09/11/2026</div></div>';
+  return h;
+ },
+ p_browser:function(st){
+  var edge=!!st.edge;
+  var h=S.p_desk({edge:edge});
+  h+='<div class="win"><div class="tbar'+(edge?' edge':'')+'"><div class="tab">'+(st.url&&st.loaded?'<div class="ti">'+img()+'</div>ADEX':L('Nueva pestaña','Nova guia'))+'</div><div class="wc"><span>—</span><span>▢</span><span>✕</span></div></div>'+
+   '<div class="abar"><span class="nv">←</span><span class="nv">→</span><span class="nv">⟳</span>'+
+   '<div class="url"'+H('url')+'>'+(st.url?'<span class="lk">🔒</span><span class="v">'+URL_APP+'</span><span class="sp"></span>':'<span class="v"></span><span class="ph">'+L('Busca o escribe una dirección','Pesquise ou digite um endereço')+'</span><span class="sp"></span>')+
+   (st.url&&st.loaded?'<span class="ibtn"'+H('instic')+'>'+(edge?EDGEAPP:INSTALL)+'</span>':'')+'</div><span class="nv">⋮</span></div>'+
+   '<div class="pg">'+(st.url&&st.loaded?login(0,true):'<div class="ntp" style="top:0;padding-top:90px"><div class="g">'+(edge?'🌊':'🌐')+'</div>'+(st.url?L('Cargando…','Carregando…'):'')+'</div>')+'</div></div>';
+  if(st.pop&&!edge){
+   h+='<div class="pop" style="left:360px;top:74px"><h4>'+L('¿Instalar app?','Instalar app?')+'</h4><div class="row"><div class="ii">'+img()+'</div><div><b>ADEX</b><span>'+URL_APP+'</span></div></div>'+
+   '<div class="acts"><div class="pri"'+H('inst')+'>'+L('Instalar','Instalar')+'</div><div>'+L('Cancelar','Cancelar')+'</div></div></div>';
+  }
+  if(st.pop&&edge){
+   h+='<div class="pop edge" style="left:350px;top:74px"><h4>'+L('Instalar la aplicación ADEX','Instalar o aplicativo ADEX')+'</h4><div class="row"><div class="ii">'+img()+'</div><div><b>ADEX</b><span>'+URL_APP+'</span></div></div>'+
+   '<div class="acts"><div class="pri"'+H('inst')+'>'+L('Instalar','Instalar')+'</div><div>'+L('Ahora no','Agora não')+'</div></div></div>';
+  }
+  return h;
+ },
+ p_app:function(st){
+  var h=S.p_desk({edge:st.edge,adex:st.adex});
+  h+='<div class="win solo"><div class="tbar"><div class="ti">'+img()+'</div>ADEX<div class="wc"><span>⋯</span><span>—</span><span>▢</span><span>✕</span></div></div><div class="pg">'+login(0,true)+'</div></div>';
+  if(st.perm){
+   var c=st.checked;
+   h+='<div class="pop edge" style="left:224px;top:60px;width:260px"><h4>'+L('Aplicación instalada','Aplicativo instalado')+'</h4><div style="font-size:11px;color:#555;margin-bottom:8px">'+L('Permitir que esta aplicación:','Permitir que este aplicativo:')+'</div>'+
+   '<div class="ck"><i>'+''+'</i>'+L('Anclar a la barra de tareas','Fixar na barra de tarefas')+'</div>'+
+   '<div class="ck"><i></i>'+L('Anclar a Inicio','Fixar em Iniciar')+'</div>'+
+   '<div class="ck"'+H('chk')+'><i class="'+(c?'on':'')+'">'+(c?'✓':'')+'</i>'+L('Crear acceso directo de escritorio','Criar atalho na área de trabalho')+'</div>'+
+   '<div class="ck"><i></i>'+L('Inicio automático al iniciar sesión','Iniciar automaticamente ao entrar')+'</div>'+
+   '<div class="acts" style="margin-top:10px"><div class="pri"'+H('allow')+'>'+L('Permitir','Permitir')+'</div><div>'+L('No permitir','Não permitir')+'</div></div></div>';
+  }
+  return h;
+ }
+};
+
+/* ===================== RECORRIDOS ===================== */
+var TASKS=[
+ {ic:'🤖',w:360,h:640,es:['Celular Android','Samsung, Motorola, Xiaomi… con Chrome'],pt:['Celular Android','Samsung, Motorola, Xiaomi… com Chrome'],steps:[
+  {s:'a_home',st:{},t:'chrome',a:'tap',es:'Abre <b>Chrome</b>, el navegador de Google (el ícono redondo de colores).',pt:'Abra o <b>Chrome</b>, o navegador do Google (o ícone redondo colorido).'},
+  {s:'a_chrome',st:{},t:'url',a:'type',v:URL_APP,es:'Toca la barra de arriba y escribe la dirección de ADEX: <b>'+URL_APP+'</b>',pt:'Toque na barra de cima e digite o endereço do ADEX: <b>'+URL_APP+'</b>'},
+  {s:'a_chrome',st:{url:1,loaded:1},es:'Espera a que aparezca la <b>pantalla de entrada de ADEX</b>. No hace falta entrar todavía.',pt:'Espere aparecer a <b>tela de entrada do ADEX</b>. Ainda não precisa entrar.'},
+  {s:'a_chrome',st:{url:1,loaded:1},t:'dots',a:'tap',es:'Toca los <b>tres puntitos (⋮)</b> de arriba a la derecha para abrir el menú de Chrome.',pt:'Toque nos <b>três pontinhos (⋮)</b> no canto de cima à direita para abrir o menu do Chrome.'},
+  {s:'a_chrome',st:{url:1,loaded:1,menu:1},t:'install',a:'tap',es:'Toca <b>Instalar app</b>. En algunos celulares se llama <b>«Agregar a la pantalla principal»</b>.',pt:'Toque em <b>Instalar app</b>. Em alguns celulares se chama <b>«Adicionar à tela inicial»</b>.'},
+  {s:'a_chrome',st:{url:1,loaded:1,dlg:1},t:'inst',a:'tap',es:'Confirma tocando <b>Instalar</b>.',pt:'Confirme tocando em <b>Instalar</b>.'},
+  {s:'a_home',st:{adex:1,isNew:1,toast:['ADEX se agregó a la pantalla principal','ADEX foi adicionado à tela inicial']},t:'adexic',es:'¡Listo! El ícono de <b>ADEX</b> aparece en tu pantalla. Si no lo ves, búscalo entre <b>todas tus aplicaciones</b> (desliza hacia arriba).',pt:'Pronto! O ícone do <b>ADEX</b> aparece na sua tela. Se não aparecer, procure entre <b>todos os aplicativos</b> (deslize para cima).'},
+  {s:'a_home',st:{adex:1},t:'adexic',a:'tap',es:'Desde ahora, abre ADEX tocando <b>su ícono</b>.',pt:'A partir de agora, abra o ADEX tocando <b>no ícone</b>.'},
+  {s:'a_app',es:'Se abre a <b>pantalla completa</b>, sin la barra de Chrome. La primera vez entra con <b>tu usuario y contraseña de siempre</b>.',pt:'Abre em <b>tela cheia</b>, sem a barra do Chrome. Na primeira vez entre com <b>o seu usuário e senha de sempre</b>.'}
+ ]},
+ {ic:'🍎',w:360,h:640,es:['iPhone','con Safari'],pt:['iPhone','com Safari'],steps:[
+  {s:'i_home',st:{},t:'safari',a:'tap',es:'Abre <b>Safari</b> (la brújula azul). En iPhone hazlo <b>con Safari</b>, es lo más seguro.',pt:'Abra o <b>Safari</b> (a bússola azul). No iPhone faça <b>com o Safari</b>, é o mais seguro.'},
+  {s:'i_safari',st:{},t:'url',a:'type',v:URL_APP,es:'Toca la barra de la dirección (abajo) y escribe <b>'+URL_APP+'</b>',pt:'Toque na barra de endereço (embaixo) e digite <b>'+URL_APP+'</b>'},
+  {s:'i_safari',st:{url:1,loaded:1},es:'Espera a que aparezca la <b>pantalla de entrada de ADEX</b>.',pt:'Espere aparecer a <b>tela de entrada do ADEX</b>.'},
+  {s:'i_safari',st:{url:1,loaded:1},t:'share',a:'tap',es:'Toca el botón <b>Compartir</b>: el cuadrito con una flecha hacia arriba. Si no lo ves, toca primero los <b>tres puntos (···)</b>.',pt:'Toque no botão <b>Compartilhar</b>: o quadradinho com uma seta para cima. Se não aparecer, toque antes nos <b>três pontos (···)</b>.'},
+  {s:'i_safari',st:{url:1,loaded:1,sheet:1},t:'addhome',a:'tap',es:'Busca y toca <b>Agregar a pantalla de inicio</b>. Si no aparece, <b>desliza la lista hacia arriba</b>.',pt:'Procure e toque em <b>Adicionar à Tela de Início</b>. Se não aparecer, <b>deslize a lista para cima</b>.'},
+  {s:'i_safari',st:{url:1,loaded:1,add:1},t:'webapp',es:'Si ves <b>«Abrir como app web»</b>, déjalo <b>encendido</b> (verde). El nombre ya dice ADEX.',pt:'Se aparecer <b>«Abrir como App Web»</b>, deixe <b>ligado</b> (verde). O nome já diz ADEX.'},
+  {s:'i_safari',st:{url:1,loaded:1,add:1},t:'add',a:'tap',es:'Toca <b>Agregar</b>, arriba a la derecha.',pt:'Toque em <b>Adicionar</b>, em cima à direita.'},
+  {s:'i_home',st:{adex:1,isNew:1},t:'adexic',es:'¡Listo! El ícono de <b>ADEX</b> ya está en tu pantalla de inicio.',pt:'Pronto! O ícone do <b>ADEX</b> já está na sua Tela de Início.'},
+  {s:'i_home',st:{adex:1},t:'adexic',a:'tap',es:'Desde ahora, abre ADEX tocando <b>su ícono</b>.',pt:'A partir de agora, abra o ADEX tocando <b>no ícone</b>.'},
+  {s:'i_app',es:'Se abre a <b>pantalla completa</b>, sin la barra de Safari. La primera vez entra con <b>tu usuario y contraseña de siempre</b>.',pt:'Abre em <b>tela cheia</b>, sem a barra do Safari. Na primeira vez entre com <b>o seu usuário e senha de sempre</b>.'}
+ ]},
+ {ic:'💻',w:640,h:400,pc:1,es:['Computador con Chrome','Windows'],pt:['Computador com Chrome','Windows'],steps:[
+  {s:'p_desk',st:{},t:'chrome',a:'tap',es:'Abre <b>Google Chrome</b> con doble clic en su ícono.',pt:'Abra o <b>Google Chrome</b> com um clique duplo no ícone.'},
+  {s:'p_browser',st:{},t:'url',a:'type',v:URL_APP,es:'Haz clic en la barra de direcciones y escribe <b>'+URL_APP+'</b>; luego pulsa <b>Enter</b>.',pt:'Clique na barra de endereço e digite <b>'+URL_APP+'</b>; depois aperte <b>Enter</b>.'},
+  {s:'p_browser',st:{url:1,loaded:1},t:'instic',es:'Cuando cargue ADEX, a la derecha de la dirección aparece un <b>iconito de pantalla con una flecha</b>: es «Instalar».',pt:'Quando o ADEX carregar, à direita do endereço aparece um <b>iconezinho de tela com uma seta</b>: é «Instalar».'},
+  {s:'p_browser',st:{url:1,loaded:1},t:'instic',a:'tap',es:'Haz clic en ese icono. Si no lo ves: menú <b>⋮</b> → <b>Transmitir, guardar y compartir</b> → <b>Instalar página como app</b>.',pt:'Clique nesse ícone. Se não aparecer: menu <b>⋮</b> → <b>Transmitir, salvar e compartilhar</b> → <b>Instalar página como app</b>.'},
+  {s:'p_browser',st:{url:1,loaded:1,pop:1},t:'inst',a:'tap',es:'Confirma con <b>Instalar</b>.',pt:'Confirme em <b>Instalar</b>.'},
+  {s:'p_app',st:{},es:'ADEX se abre en <b>su propia ventana</b>, sin pestañas ni barra de direcciones.',pt:'O ADEX abre na <b>sua própria janela</b>, sem abas nem barra de endereço.'},
+  {s:'p_desk',st:{adex:1,isNew:1},t:'adexd',es:'Y queda el ícono de <b>ADEX</b> en el escritorio y en el menú Inicio. Si no está en el escritorio, mira <b>Problemas frecuentes</b> en el menú del manual.',pt:'E fica o ícone do <b>ADEX</b> na área de trabalho e no menu Iniciar. Se não estiver na área de trabalho, veja <b>Problemas frequentes</b> no menu do manual.'},
+  {s:'p_desk',st:{adex:1},t:'adexd',a:'tap',es:'Desde ahora, abre ADEX con <b>doble clic en su ícono</b>.',pt:'A partir de agora, abra o ADEX com <b>clique duplo no ícone</b>.'}
+ ]},
+ {ic:'🖥️',w:640,h:400,pc:1,es:['Computador con Edge','Windows'],pt:['Computador com Edge','Windows'],steps:[
+  {s:'p_desk',st:{edge:1},t:'edge',a:'tap',es:'Abre <b>Microsoft Edge</b>, el navegador que ya viene con Windows.',pt:'Abra o <b>Microsoft Edge</b>, o navegador que já vem no Windows.'},
+  {s:'p_browser',st:{edge:1},t:'url',a:'type',v:URL_APP,es:'Escribe <b>'+URL_APP+'</b> en la barra de direcciones y pulsa <b>Enter</b>.',pt:'Digite <b>'+URL_APP+'</b> na barra de endereço e aperte <b>Enter</b>.'},
+  {s:'p_browser',st:{edge:1,url:1,loaded:1},t:'instic',a:'tap',es:'A la derecha de la dirección aparece <b>«Aplicación disponible»</b> (cuadritos con un +). Haz clic ahí. Si no aparece: menú <b>···</b> → <b>Aplicaciones</b> → <b>Instalar este sitio como una aplicación</b>.',pt:'À direita do endereço aparece <b>«Aplicativo disponível»</b> (quadradinhos com um +). Clique ali. Se não aparecer: menu <b>···</b> → <b>Aplicativos</b> → <b>Instalar este site como um aplicativo</b>.'},
+  {s:'p_browser',st:{edge:1,url:1,loaded:1,pop:1},t:'inst',a:'tap',es:'Confirma con <b>Instalar</b>.',pt:'Confirme em <b>Instalar</b>.'},
+  {s:'p_app',st:{edge:1,perm:1},t:'chk',a:'tap',es:'Edge pregunta qué permitir. Marca <b>Crear acceso directo de escritorio</b> (las otras son opcionales).',pt:'O Edge pergunta o que permitir. Marque <b>Criar atalho na área de trabalho</b> (as outras são opcionais).'},
+  {s:'p_app',st:{edge:1,perm:1,checked:1},t:'allow',a:'tap',es:'Haz clic en <b>Permitir</b>.',pt:'Clique em <b>Permitir</b>.'},
+  {s:'p_desk',st:{edge:1,adex:1,isNew:1},t:'adexd',es:'¡Listo! El ícono de <b>ADEX</b> queda en el escritorio.',pt:'Pronto! O ícone do <b>ADEX</b> fica na área de trabalho.'},
+  {s:'p_desk',st:{edge:1,adex:1},t:'adexd',a:'tap',es:'Desde ahora, abre ADEX con <b>doble clic en su ícono</b>. La primera vez entra con <b>tu usuario y contraseña de siempre</b>.',pt:'A partir de agora, abra o ADEX com <b>clique duplo no ícone</b>. Na primeira vez entre com <b>o seu usuário e senha de sempre</b>.'}
+ ]}
+];
+
+/* ===================== MOTOR ===================== */
+var $=function(id){return document.getElementById(id);};
+var app=$('app'),stage=$('stage'),menu=$('menu'),player=$('player');
+var mode=null,task=null,idx=0,playing=true,timer=null,typer=null,scale=1;
+
+function fit(){
+  if(!task)return;
+  var W=task.w,Hh=task.h,wide=W>400;
+  player.classList.toggle('wide',wide);
+  app.style.width=W+'px';app.style.height=Hh+'px';
+  var wrapW=Math.min(player.clientWidth-16,wide?760:420);
+  var used=$('cap').offsetHeight+player.querySelector('.pbar').offsetHeight+14;
+  var availH=window.innerHeight-52-used;
+  if(window.innerWidth>=900&&!wide) availH=window.innerHeight-52-player.querySelector('.pbar').offsetHeight-30;
+  scale=Math.max(0.35,Math.min(wrapW/W,availH/Hh,wide?1.2:1.25));
+  app.style.transform='scale('+scale+')';
+  stage.style.width=(W*scale)+'px';stage.style.height=(Hh*scale)+'px';
+}
+function renderMenu(){
+  document.documentElement.lang=LANG==='pt'?'pt-BR':'es';
+  $('topTtl').textContent=T('title');document.title=T('title')+' · Manual';
+  var h='<div class="hero"><img src="'+ICON+'" alt="ADEX"><div><h1>'+T('heroH')+'</h1><p>'+T('heroP')+'</p></div></div>';
+  h+='<div class="sec">📲 '+T('where')+' <small>'+T('whereS')+'</small></div><div class="grid">';
+  TASKS.forEach(function(t,i){h+='<button class="task" data-task="'+i+'"><span class="ic">'+t.ic+'</span><b>'+t[LANG][0]+'</b><span>'+t[LANG][1]+'</span></button>';});
+  h+='</div><div class="sec">✨ '+T('gainH')+'</div><ul class="gain">'+T('gain').map(function(x){return '<li>'+x+'</li>';}).join('')+'</ul>';
+  h+='<div class="sec">🛟 '+T('faqH')+'</div><div class="faq">';
+  FAQ.forEach(function(f){var p=LANG==='pt';h+='<details><summary>'+(p?f[1]:f[0])+'</summary><div class="ans">'+(p?f[3]:f[2])+'</div></details>';});
+  h+='</div><div class="tip">'+T('tip')+'</div>';
+  menu.innerHTML=h;
+  $('bBackT').textContent=T('menu');
+}
+menu.addEventListener('click',function(e){var b=e.target.closest('[data-task]');if(b)openTask(+b.dataset.task);});
+function showPlayer(){menu.style.display='none';player.classList.add('on');window.scrollTo(0,0);}
+function toMenu(){stop();mode=null;player.classList.remove('on');menu.style.display='';app.innerHTML='';}
+$('bBack').onclick=toMenu;
+
+function stop(){clearTimeout(timer);clearInterval(typer);timer=null;typer=null;}
+function openTask(i){
+  mode='task';task=TASKS[i];idx=0;playing=true;
+  $('pName').textContent=task.ic+' '+task[LANG][0];
+  stage.style.borderRadius=task.pc?'10px':'18px';
+  showPlayer();fit();runStep();
+}
+var PTR='<svg width="22" height="26" viewBox="0 0 22 26"><path d="M2 2l0 19 5-5 3.5 8 3-1.3-3.5-7.7 7 0z" fill="#fff" stroke="#111" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+function drawScreen(s,st){
+  app.innerHTML=S[s](JSON.parse(JSON.stringify(st||{})))+'<div class="hand'+(task.pc?' ptr':'')+'" id="hand">'+(task.pc?PTR:'👆')+'</div>';
+}
+function el(t){return app.querySelector('[data-t="'+t+'"]');}
+function pos(node){
+  var r=node.getBoundingClientRect(),a=app.getBoundingClientRect();
+  return {x:(r.left-a.left+r.width/2)/scale,y:(r.top-a.top+r.height/2)/scale};
+}
+function runStep(){
+  stop();
+  var st=task.steps[idx];
+  var txt=st[LANG];
+  drawScreen(st.s,st.st);
+  var n=task.steps.length;
+  $('prog').innerHTML=task.steps.map(function(_,k){return '<i class="'+(k<idx?'pd':k===idx?'pc':'')+'"></i>';}).join('');
+  $('stepn').textContent=T('step').replace('{a}',idx+1).replace('{b}',n);
+  $('txt').innerHTML=txt;
+  $('bPlay').textContent=playing?T('pause'):T('play');
+  fit();
+  var hand=$('hand');
+  var target=st.t?el(st.t):null;
+  var extra=0;
+  if(target){
+    var p=pos(target);
+    if(task.pc){p.x-=4;p.y-=2;}
+    requestAnimationFrame(function(){hand.style.left=p.x+'px';hand.style.top=p.y+'px';});
+    setTimeout(function(){
+      if(mode!=='task')return;
+      target.classList.add('hl');
+      if(st.a==='tap'){
+        hand.classList.add('tap');
+        var rp=document.createElement('div');rp.className='rip';rp.style.left=(p.x-8)+'px';rp.style.top=(p.y-8)+'px';app.appendChild(rp);
+      }
+      if(st.a==='type'){
+        var v=target.querySelector('.v');var ph=target.querySelector('.ph');if(ph)ph.remove();
+        if(v){var full=st.v,k=0;v.textContent='';v.classList.add('caret');
+          typer=setInterval(function(){k++;v.textContent=full.slice(0,k);if(k>=full.length){clearInterval(typer);typer=null;v.classList.remove('caret');}},85);}
+      }
+    },800);
+    if(st.a==='type')extra=st.v.length*85;
+    if(!st.a)hand.style.display='none';
+  } else {hand.style.display='none';}
+  var dur=Math.max(4200,txt.replace(/<[^>]+>/g,'').length*62)+extra+(target?800:0);
+  if(playing)timer=setTimeout(next,dur);
+}
+function next(){if(idx<task.steps.length-1){idx++;runStep();}else finish();}
+function prev(){if(idx>0){idx--;runStep();}else runStep();}
+function finish(){
+  stop();
+  var d=document.createElement('div');d.className='done';
+  d.innerHTML='<div><div class="big">🎉</div><h3>'+T('doneH')+'</h3><p>'+T('doneP')+'</p><button class="main" id="dAgain">'+T('again')+'</button><button id="dMenu">'+T('toMenu')+'</button></div>';
+  stage.appendChild(d);
+  $('dAgain').onclick=function(){d.remove();idx=0;playing=true;runStep();};
+  $('dMenu').onclick=function(){d.remove();toMenu();};
+}
+function clearDone(){var d=stage.querySelector('.done');if(d)d.remove();}
+$('bNext').onclick=function(){clearDone();next();};
+$('bPrev').onclick=function(){clearDone();prev();};
+$('bAgain').onclick=function(){clearDone();idx=0;playing=true;runStep();};
+$('bPlay').onclick=function(){clearDone();playing=!playing;if(playing){runStep();}else{stop();$('bPlay').textContent=T('play');}};
+
+/* ---- idioma ---- */
+document.querySelectorAll('.lang button').forEach(function(b){
+  b.onclick=function(){
+    LANG=b.dataset.l;try{localStorage.setItem('adexManualLang',LANG);}catch(e){}
+    document.querySelectorAll('.lang button').forEach(function(x){x.classList.toggle('on',x.dataset.l===LANG);});
+    renderMenu();
+    if(mode==='task'){$('pName').textContent=task.ic+' '+task[LANG][0];runStep();}
+  };
+  b.classList.toggle('on',b.dataset.l===LANG);
+});
+window.addEventListener('resize',function(){if(mode)fit();});
+renderMenu();
+window.__manual={TASKS:TASKS,S:S};
+})();
+</script>
+</body>
+</html>
