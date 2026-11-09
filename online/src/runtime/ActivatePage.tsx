@@ -12,7 +12,8 @@ import { Eye, EyeOff, Loader2, KeyRound, CheckCircle } from 'lucide-react';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 import { api } from './session.ts';
 
-const MIN_LENGTH = 10;
+// 3.39 (2026-11-09, decisión del propietario): mínimo 6, sin bloquear contraseñas obvias. El Owner sigue con 12.
+const MIN_LENGTH = 6;
 
 type Link = { kind: 'token'; tokenHash: string } | { kind: 'session'; accessToken: string };
 

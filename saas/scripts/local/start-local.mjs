@@ -418,7 +418,7 @@ async function authRoute(req, res, u) {
     if (req.method === 'PUT') {
       const b = await readBody(req);
       const pw = String(b.password ?? '');
-      if (pw.length < 8) return sendJson(res, 422, { error_code: 'weak_password' });
+      if (pw.length < 6) return sendJson(res, 422, { error_code: 'weak_password' });  // 3.39: igual que Supabase Auth (6)
       if (pw === passwordOf(claims.identityId)) return sendJson(res, 422, { error_code: 'same_password' });
       state.customPasswords = { ...(state.customPasswords ?? {}), [claims.identityId]: pw };
       saveState(state);
