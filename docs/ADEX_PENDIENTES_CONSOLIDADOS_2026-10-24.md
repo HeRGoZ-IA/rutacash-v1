@@ -224,7 +224,7 @@ Ninguno de estos riesgos fue aceptado expresamente. Se mantienen documentados ha
 | 6.4 | **POSPUESTO por el propietario (2026-11-05).** Reorganización: bloque 0 (respaldo privado de `tmp/`) y bloque 4 (poda de evidencias). También `tmp/accesos/` y capturas con datos reales | Decisión | AUDITORIA_ORGANIZACION §8, §11 |
 | 6.5 | ~~Git: el respaldo guardado de la Ronda 23 (rechazada) sigue en `git stash`. La rama `r74-route-base` ya está incluida en `main` y puede borrarse~~ → **Hecho** (2026-11-03): rama `r74-route-base` borrada (ya estaba en `main`); el respaldo de la Ronda 23 se exportó a `tmp/ronda23-respaldo/` (parche y huella) antes de quitarlo de `git stash` | Orden | Git |
 | 6.6 | ~~Git: sin guardar el informe para ChatGPT, este listado y dos filas del Registro Maestro~~ → **Hecho en R76**: se versionan este listado y el Registro Maestro. El informe del 2026-10-24 se versiona como referencia histórica | Orden | R76 |
-| 6.7 | Vacíos históricos del Registro Maestro: rondas sin documento propio, fechas de despliegue desconocidas | Orden (solo documentación) | Registro §G |
+| 6.7 | **HECHO (2026-11-08):** con los historiales de despliegue de Render y Vercel (solo lectura) se anotaron el primer despliegue (`cc22ba0`, 2026-10-17), los commits de R26, R29, R33, R40, R48–R50, R53–R55, R59, R62, R65 y Fase 6, y la fuente de la decisión «el SaaS empieza de cero» (Fase 3). Queda abierto solo el historial de CLEAN (su proyecto de Vercel ya no existe). ~~Vacíos históricos del Registro Maestro: rondas sin documento propio, fechas de despliegue desconocidas~~ | Orden (solo documentación) | Registro §G |
 
 ## 7. Hallazgos de informes antiguos: pendientes de comprobar vigencia
 

@@ -81,18 +81,18 @@ Las rondas sin documento propio se indican con «—» en la referencia. La corr
 | 2026-10-16 | Fase 4 | Solicitudes, autorización y desembolso (solo en línea) | `a64406e` | 0010 | Sí | Staging | [Fase 4](./SAAS_FASE_4_RESULTADOS.md) |
 | 2026-10-16 | Online v1 | Web privada + API + Empresa Demo; preparación Render | `7f26944`, `cc22ba0` | 0011–0012 | Sí | «Nada publicado» al cerrar | [Online v1](./ADEX_ONLINE_V1_RESULTADOS.md), [Render](./ADEX_ONLINE_RENDER.md) |
 | 2026-10-17 | Fase 5 | Recaudos y gastos | `09f177d`, `186f90d` | 0013 | Sí | Vercel `adex-online` en `186f90d` (constancia en Fase 6) | [Fase 5](./SAAS_FASE_5_RESULTADOS.md) |
-| 2026-10-17 | Fase 6 | Cuadres y cierres; puerta de despliegue por `/healthz` | `03de95a`, `8ffecff` | 0014 | Sí | 0014 aplicada 2026-10-18; publicación del frontend NO VERIFICADA en el doc | [Fase 6](./SAAS_FASE_6_RESULTADOS.md) |
+| 2026-10-17 | Fase 6 | Cuadres y cierres; puerta de despliegue por `/healthz` | `03de95a`, `8ffecff` | 0014 | Sí | 0014 aplicada 2026-10-18; **PUBLICADO** 2026-10-18 (Render y Vercel `8ffecff`; el push de `03de95a` quedó CANCELED por la puerta) | [Fase 6](./SAAS_FASE_6_RESULTADOS.md) |
 | 2026-10-18 | R17 | Pantallas de administración de la empresa | `654f35d` | — | Sí | Indirecta: R20 valida contra la web publicada | [Administración](./ADEX_ONLINE_ADMINISTRACION_RESULTADOS.md) |
 | 2026-10-18 | R20 | Panel Owner (servicio aparte) y Demo única | `095ab5b` | — | Sí | Demo en staging; Owner **no** publicado en R20 | [R20](./ADEX_RONDA_20_OWNER_Y_DEMO.md) |
-| 2026-10-18/19 | R24–R26 | Online compila las pantallas originales de CLEAN | `3c7f9fe`, `09b8a15`, `091aa0f` … `b46188c` | 0015–0019 | Sí | Pendiente de Render al cerrar R26 | [R24](./ADEX_RONDA_24_CLEAN_EN_ONLINE.md), [R25](./ADEX_RONDA_25_CAPITAL_EN_ONLINE.md), [R26](./ADEX_RONDA_26_ONLINE_INTEGRAL.md) |
-| 2026-10-19 | R29 | Corrección de tipos para el build de Vercel | `ae78c2a` | — | Sí | NO VERIFICADO en docs (sin documento de ronda) | — |
-| 2026-10-19 | R33 | Rendimiento: RLS una vez por consulta; marcador de cambios | `a35eb56`, `0fcf580`, `1018391` | 0020 | Sí | Indirecta: R39 ve `changes-v1` publicado | — |
+| 2026-10-18/19 | R24–R26 | Online compila las pantallas originales de CLEAN | `3c7f9fe`, `09b8a15`, `091aa0f` … `b46188c` | 0015–0019 | Sí | Pendiente de Render al cerrar R26; Render `b46188c` 2026-10-19 15:25 UTC; la web salió con R29 | [R24](./ADEX_RONDA_24_CLEAN_EN_ONLINE.md), [R25](./ADEX_RONDA_25_CAPITAL_EN_ONLINE.md), [R26](./ADEX_RONDA_26_ONLINE_INTEGRAL.md) |
+| 2026-10-19 | R29 | Corrección de tipos para el build de Vercel | `ae78c2a` | — | Sí | **PUBLICADO** 2026-10-19 (Vercel `ae78c2a` 15:32 UTC; el build de `b46188c` había fallado por los tipos). Sin documento de ronda | Historial de Vercel |
+| 2026-10-19 | R33 | Rendimiento: RLS una vez por consulta; marcador de cambios | `a35eb56`, `0fcf580`, `1018391` | 0020 | Sí | **PUBLICADO** 2026-10-19 (Render y Vercel `1018391`, ~21:40 UTC). Sin documento de ronda | Historiales de Render y Vercel |
 | 2026-10-19 | R39 | Validación financiera multiusuario; piloto **no** listo | `23abb2e` | — | Doc. | API y web publicadas validadas | [R39](./ADEX_RONDA_39_VALIDACION_FINANCIERA_Y_PILOTO.md) |
 | 2026-10-19/20 | R40 | Plataforma Owner original en Online; primer acceso | `4875ef3`, `faf741e`, `b6b09d3`, `11c26b7`, `9bcca96` | 0021 | Sí | **PUBLICADO** 2026-10-20, E2E 32/32 | [R40](./ADEX_RONDA_40_OWNER_ONLINE.md) |
-| 2026-10-20 | R48 / 48.1 | Confirmaciones, ubicación del cobro, filtros; un id por abono | `5feaca7` … `58bf42c`, `9a2fc6a` | 0022 | Sí | Indirecta: R53 «R48–R50 publicadas» | [R48](./ADEX_RONDA_48_OPTIMIZACION_UX.md) |
-| 2026-10-20 | R49 / R50 | Accesibilidad; Owner responsive, menú agrupado, carga por rol | `f3b3b9f`, `46358be` | — | Sí | Indirecta (ídem) | — |
-| 2026-10-20 | R53 | Retirada de Socio; traspasos entre Administradores; Demo Online retirada | `f3c1fc2`, `0a8d106`, `07ceffe`, `a85e84e` | 0023 | Sí | Indirecta: R59 parte de «R55 publicada» | [R53](./ADEX_RONDA_53_TRANSFERENCIAS_SIN_SOCIO.md) |
-| 2026-10-20 | R54 / R55 | Owner cambia el correo de un SuperAdmin | `80d2db6`, `896d806` | 0024 | Sí | Indirecta (R59) + `owner-email-v1` visible el 2026-10-22 | — |
+| 2026-10-20 | R48 / 48.1 | Confirmaciones, ubicación del cobro, filtros; un id por abono | `5feaca7` … `58bf42c`, `9a2fc6a` | 0022 | Sí | **PUBLICADO** 2026-10-20 (Render y Vercel `9a2fc6a`, 14:59 y 15:29 UTC) | [R48](./ADEX_RONDA_48_OPTIMIZACION_UX.md) |
+| 2026-10-20 | R49 / R50 | Accesibilidad; Owner responsive, menú agrupado, carga por rol | `f3b3b9f`, `46358be` | — | Sí | **PUBLICADO** 2026-10-20 (Vercel `f3b3b9f` 16:24 UTC, incluye `46358be`; la API no cambió). Sin documento de ronda | Historial de Vercel |
+| 2026-10-20 | R53 | Retirada de Socio; traspasos entre Administradores; Demo Online retirada | `f3c1fc2`, `0a8d106`, `07ceffe`, `a85e84e` | 0023 | Sí | **PUBLICADO** 2026-10-20 (Render `adex-online-api` `07ceffe` 20:46 UTC; en Vercel la puerta canceló `07ceffe` y la web salió con `896d806`) | [R53](./ADEX_RONDA_53_TRANSFERENCIAS_SIN_SOCIO.md) |
+| 2026-10-20 | R54 / R55 | Owner cambia el correo de un SuperAdmin | `80d2db6`, `896d806` | 0024 | Sí | **PUBLICADO** (Render `adex-owner-api` `896d806` 2026-10-20 23:58 UTC; Vercel `896d806` 2026-10-21 00:10 UTC). Sin documento de ronda | Historiales de Render y Vercel |
 | 2026-10-21 | R59 | DINERO: entregas voluntarias, solicitudes de capital, notificaciones; retirada de CLEAN | `de8203c` … `05d82ca` | 0025 | Sí | **PUBLICADO** 2026-10-21 | [R59](./ADEX_RONDA_59_DINERO.md) |
 | 2026-10-21 | R62 | Cobrador sin conexión (abonos, visitas, gastos) | `42ede4d`, `6a4e4d6`, `147a8e4` | 0026 | Sí | **PUBLICADO** 2026-10-21 | [R62](./ADEX_RONDA_62_OFFLINE_COBRADOR.md) |
 | 2026-10-21 | R65 / 65-C1 | Desembolsos aprobados sin conexión; clientes y ventas offline retirados | `24ef149`, `448b28c`, `e71d5d0`, `dcb0575` | 0027 | Sí | **PUBLICADO** 2026-10-21 | [R65](./ADEX_RONDA_65_OFFLINE_DESEMBOLSOS.md) |
@@ -189,16 +189,18 @@ El bundle de Vercel **cambia de nombre con cada commit**, aunque el código no c
 |---|---|---|---|---|---|
 | ≤ 2026-10-13 | CLEAN (`rutacash-clean`) | NO VERIFICADO | `index-b05G8Ybt.js` | `verify:deploy` 81/81 | [Fase 0A](./SAAS_FASE_0A_RESULTADOS.md) |
 | 2026-10-16 | CLEAN | `1ebab80` o posterior | `index-C1zR2rb4.js` | build local idéntico al publicado | [Online v1 §7](./ADEX_ONLINE_V1_RESULTADOS.md) |
-| 2026-10-17 | `adex-online` (Vercel) | `186f90d` | NO VERIFICADO | El push de `03de95a` quedó `CANCELED` por la puerta | [Fase 6](./SAAS_FASE_6_RESULTADOS.md) |
-| ≤ 2026-10-18 | `adex-online-api` (Render), primer despliegue | DESCONOCIDO | `settlements-v1` | Pruebas de seguridad 65/66 contra la API publicada | [Administración](./ADEX_ONLINE_ADMINISTRACION_RESULTADOS.md) |
-| 2026-10-18 | Web + API (Demo) | `654f35d` o posterior | NO VERIFICADO | 51/51 con la web de Vercel y la API de Render | [R20 §1.3](./ADEX_RONDA_20_OWNER_Y_DEMO.md) |
-| 2026-10-19 | Web + API | `origin/main` = `1018391` | `index-BBRl2Vjp.js` · `collections, settlements, clean-online, changes` | Validación financiera R39 | [R39](./ADEX_RONDA_39_VALIDACION_FINANCIERA_Y_PILOTO.md) |
-| 2026-10-20 | API + `adex-owner-api` + web | Web `b6b09d3`; API NO VERIFICADO | `access-links-v1` · Owner `owner-v1, owner-clean-v1` · `owner-CWwRkmy3.js` | E2E publicado 32/32 | [R40 §9](./ADEX_RONDA_40_OWNER_ONLINE.md) |
-| 2026-10-20 | Web (R48–R50) | NO VERIFICADO | `index-B43wJZVi.js` | Mención en R53 | [R53](./ADEX_RONDA_53_TRANSFERENCIAS_SIN_SOCIO.md) |
+| 2026-10-17 | `adex-online` (Vercel), primer despliegue | `cc22ba0` 13:36 UTC; después `186f90d` 22:10 UTC | NO VERIFICADO | Historial de Vercel | Vercel (consulta 2026-11-08) |
+| 2026-10-17 | `adex-online-api` (Render), primer despliegue | `cc22ba0` 13:26 UTC (al crear el servicio); después `186f90d` 22:18 UTC | NO VERIFICADO | Historial de Render | Render (consulta 2026-11-08) |
+| 2026-10-18 | API + web (Fase 6) | `8ffecff` (Render 01:24 UTC, Vercel 01:38 UTC); el push de `03de95a` quedó `CANCELED` por la puerta | `settlements-v1` (código de Fase 6) | Pruebas de seguridad 65/66 contra la API publicada | [Fase 6](./SAAS_FASE_6_RESULTADOS.md), [Administración](./ADEX_ONLINE_ADMINISTRACION_RESULTADOS.md), historiales |
+| 2026-10-18 | Web + API (Demo) | Vercel `654f35d` 15:16 UTC y `095ab5b` 17:26 UTC; la API siguió en `8ffecff` | NO VERIFICADO | 51/51 con la web de Vercel y la API de Render | [R20 §1.3](./ADEX_RONDA_20_OWNER_Y_DEMO.md) |
+| 2026-10-19 | API + web (R26, R29) | Render `b46188c` 15:25 UTC; Vercel `b46188c` ERROR (tipos) y `ae78c2a` 15:32 UTC | NO VERIFICADO | Historiales | Render y Vercel (consulta 2026-11-08) |
+| 2026-10-19 | Web + API | `1018391` (Render 21:46 UTC, Vercel 21:39 UTC) | `index-BBRl2Vjp.js` · `collections, settlements, clean-online, changes` | Validación financiera R39 | [R39](./ADEX_RONDA_39_VALIDACION_FINANCIERA_Y_PILOTO.md) |
+| 2026-10-20 | API + `adex-owner-api` + web | `b6b09d3` en los tres: `adex-online-api` 02:23 UTC, `adex-owner-api` 02:52 UTC (su primer despliegue), Vercel 03:18 UTC | `access-links-v1` · Owner `owner-v1, owner-clean-v1` · `owner-CWwRkmy3.js` | E2E publicado 32/32 | [R40 §9](./ADEX_RONDA_40_OWNER_ONLINE.md) |
+| 2026-10-20 | API (R48.1) + web (R48–R50) | Render `9a2fc6a` 14:59 UTC; Vercel `9a2fc6a` 15:29 UTC y `f3b3b9f` 16:24 UTC | `index-B43wJZVi.js` | Mención en R53 | [R53](./ADEX_RONDA_53_TRANSFERENCIAS_SIN_SOCIO.md) |
 | 2026-10-20 | CLEAN | NO VERIFICADO | `index-BFPxK5j8.js` (200) | Mención en R53 | [R53](./ADEX_RONDA_53_TRANSFERENCIAS_SIN_SOCIO.md) |
-| 2026-10-21 | API + web; CLEAN retirada | Git hasta `3b931e1`; commit desplegado NO VERIFICADO | `index-CcMcoY51.js` · `capital-requests-v1`; CLEAN 404 | Lecturas; BlueLine y Owners intactos | [R59 §5](./ADEX_RONDA_59_DINERO.md) |
-| 2026-10-21 | API + web | Web: redespliegue del commit del push (no anotado); API NO VERIFICADO | `index-ktbVB77B.js` · `offline-collector-v1` | E2E 54/54; BlueLine intacta | [R62 §6](./ADEX_RONDA_62_OFFLINE_COBRADOR.md) |
-| 2026-10-21 | API + web | Web `e71d5d0`; API NO VERIFICADO | `index-DrYEAZLA.js` · `offline-disbursements-v1` | Lecturas; BlueLine intacta | [R65 §0](./ADEX_RONDA_65_OFFLINE_DESEMBOLSOS.md) |
+| 2026-10-21 | API + web; CLEAN retirada | Render `f22a1cc` 05:20 UTC y `3b931e1` 05:38 UTC; Vercel `3b931e1` 05:35 UTC y `05d82ca` 05:42 UTC | `index-CcMcoY51.js` · `capital-requests-v1`; CLEAN 404 | Lecturas; BlueLine y Owners intactos | [R59 §5](./ADEX_RONDA_59_DINERO.md) |
+| 2026-10-21 | API + web | Render `6a4e4d6` 12:24 UTC; Vercel `6a4e4d6` 12:26 UTC y `147a8e4` 12:28 UTC | `index-ktbVB77B.js` · `offline-collector-v1` | E2E 54/54; BlueLine intacta | [R62 §6](./ADEX_RONDA_62_OFFLINE_COBRADOR.md) |
+| 2026-10-21 | API + web | `e71d5d0` en Render (2026-10-22 00:12 UTC) y Vercel (00:22 UTC) | `index-DrYEAZLA.js` · `offline-disbursements-v1` | Lecturas; BlueLine intacta | [R65 §0](./ADEX_RONDA_65_OFFLINE_DESEMBOLSOS.md) |
 | 2026-10-22 | API + web | `54944b8` (ambos) | `index-NVUgseqU.js` · `route-map-v1` | Lecturas; BlueLine intacta | [R67 §6](./ADEX_RONDA_67_SUPERADMIN_Y_MAPA.md) |
 | 2026-10-22 | Web (despliegue automático del push documental) | `b44379b` | `index-XNxWREae.js` | Consulta R70 (abajo) | este registro |
 | 2026-10-23 | `adex-online-api` + `adex-owner-api` (Render) + web | `2fa7152` (los tres; Render según su panel) | `index-DyK4-kHp.js` · `credit-rectification-v1, movements-v1, single-session-v1` · Owner sin cambio de funciones | 401 en los endpoints nuevos sin sesión; recuentos idénticos; BlueLine y Owners intactos | [R73 §8](./ADEX_RONDA_73_CORRECCIONES_SOCIO.md) |
@@ -249,7 +251,7 @@ Solo se listan decisiones con aprobación escrita. Donde una decisión sustituye
 | Owner / empresa | API Owner como servicio aparte (`adex-owner-api`) | 2026-10-20 | [R40](./ADEX_RONDA_40_OWNER_ONLINE.md) |
 | Owner / empresa | El Owner cambia el correo de un SuperAdmin sin cambiar su identidad | 2026-10-20 | [`0024`](../saas/db/migrations/0024_superadmin_email_change.sql) |
 | Datos | **DS-10** documento único de cliente; **DS-11** sin borrados físicos con historia | 2026-10-14 | [Fase 2](./SAAS_FASE_2_RESULTADOS.md) |
-| Datos | El SaaS empieza de cero (sin migrar datos de CLEAN) | NO VERIFICADO (sin documento) | — |
+| Datos | El SaaS empieza de cero (sin migrar datos de CLEAN) | 2026-10-16, como condición de la autorización de Fase 3 (sin acta propia) | [Fase 3](./SAAS_FASE_3_RESULTADOS.md) |
 | Capital y custodia | Empresa → bolsa del Administrador → custodia del trabajador por ruta, **sin caja de ruta** (C1). **Sustituye** a las cajas de ruta del plan original y al capital por ruta de v16 | 2026-10-15/16 | [C1](./CAPITAL_CENTRALIZADO_C1_2026-10.md), [Fase 3](./SAAS_FASE_3_RESULTADOS.md) |
 | Capital y custodia | **F5-D01:** imputación capital/interés acumulada y determinista (clasificación interna, no fiscal) | 2026-10-17 | [Fase 5](./SAAS_FASE_5_RESULTADOS.md) |
 | Capital y custodia | **DS-04:** fecha y periodos según la zona horaria de la empresa y el reloj del servidor. **F6-D01:** entregas parciales y varios cuadres por periodo | 2026-10-17 | [Fase 6](./SAAS_FASE_6_RESULTADOS.md) |
@@ -347,12 +349,14 @@ Registro, no plan de trabajo. «Confirmado» = pendiente vigente en el documento
 
 ### Vacíos históricos identificados
 
-1. Publicaciones de la etapa CLEAN (junio–octubre): sin registro en Git de fechas ni bundles, salvo las constancias de octubre.
-2. Rondas sin documento propio: R29, R33, R47 (auditoría UX), R49, R50, R54, R55. Su publicación solo consta de forma indirecta.
-3. Primer despliegue de `adex-online-api` en Render: fecha y commit desconocidos.
-4. Commit desplegado en Render en R40, R59, R62 y R65: no anotado (solo funciones de `/healthz`).
-5. Fase 6: no consta en el documento la publicación del frontend con `settlements-v1`, aunque R17 la da por publicada.
-6. La decisión «el SaaS empieza de cero, sin migrar CLEAN» no tiene documento.
+Revisados el 2026-11-08 (pendiente 6.7) con los historiales de despliegue de Render (`adex-online-api`, `adex-owner-api`) y de Vercel (`adex-online`), consultados en solo lectura. Las horas son UTC (Brasil = UTC−3).
+
+1. **Sigue abierto, sin solución posible:** publicaciones de la etapa CLEAN (junio–octubre). El proyecto de Vercel de CLEAN ya no existe en la cuenta, así que su historial no se puede consultar. Solo quedan las constancias de octubre (§D).
+2. **Resuelto en parte:** R29, R33, R49, R50, R54 y R55 siguen sin documento propio, pero su publicación ya tiene evidencia directa (commit y hora, §B.2 y §D). R47 fue solo diagnóstico: no se publicó nada.
+3. **Resuelto:** primer despliegue de `adex-online-api` en Render: `cc22ba0`, 2026-10-17 13:26 UTC, al crear el servicio. Vercel `adex-online` se creó 10 minutos después con el mismo commit. `adex-owner-api` se desplegó por primera vez con `b6b09d3` el 2026-10-20 02:52 UTC.
+4. **Resuelto:** commit desplegado en Render en R40 (`b6b09d3`), R59 (`f22a1cc` y luego `3b931e1`), R62 (`6a4e4d6`) y R65 (`e71d5d0`).
+5. **Resuelto:** el frontend de Fase 6 se publicó con `8ffecff` (Vercel 2026-10-18 01:38 UTC), después de que la puerta cancelara `03de95a`. La API ya tenía `8ffecff` desde las 01:24 UTC.
+6. **Resuelto en parte:** «el SaaS empieza de cero, sin migrar CLEAN» no tiene acta propia, pero consta como condición de la autorización de Fase 3 ([Fase 3](./SAAS_FASE_3_RESULTADOS.md), 2026-10-16). Ninguna migración posterior importa datos de CLEAN; las rutas reales se cargan desde el sistema anterior del socio (0043–0050).
 
 ---
 
