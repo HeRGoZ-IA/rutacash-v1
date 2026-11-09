@@ -33,6 +33,12 @@ button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
 .task .ic{font-size:28px}
 .task b{font-size:15px;line-height:1.25}
 .task span{font-size:12.5px;color:var(--mut);line-height:1.3}
+.open{display:flex;flex-direction:column;gap:8px;background:#fff;border-radius:18px;padding:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:6px}
+.open a.go{display:flex;align-items:center;justify-content:center;gap:8px;background:var(--blue);color:#fff;text-decoration:none;font-weight:800;font-size:17px;padding:14px;border-radius:14px}
+.open a.go:active{background:var(--blue2)}
+.open .addr{text-align:center;font-size:14px;color:var(--mut)}
+.open .addr b{color:var(--ink);user-select:all}
+.open .wa{font-size:13px;line-height:1.45;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:8px 10px}
 .gain{background:#fff;border-radius:16px;padding:14px 16px;box-shadow:0 1px 3px rgba(0,0,0,.06);font-size:14.5px;line-height:1.5}
 .gain li{margin-left:18px;margin-bottom:4px}
 .faq details{background:#fff;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:8px;overflow:hidden}
@@ -265,6 +271,8 @@ var UI={
   gain:['Abres ADEX con <b>un toque</b>, desde su ícono, sin buscar la página.','Se abre a <b>pantalla completa</b>, sin la barra del navegador.','<b>Se actualiza sola.</b> No hay que volver a instalarla.','Es la misma ADEX de siempre: <b>mismo usuario, misma contraseña, mismos datos</b>.'],
   faqH:'Problemas frecuentes',
   tip:'💡 <b>Las pantallas de este manual son dibujos de ejemplo.</b> En tu equipo los colores y la posición de los botones pueden cambiar un poco según la marca y la versión, pero los nombres de los botones son los mismos.',
+  openB:'Abrir ADEX para instalarla',addr:'o escribe en el navegador:',
+  wa:'📱 Si se abre <b>dentro de WhatsApp</b>, no se puede instalar desde ahí: toca <b>⋮</b> y luego <b>«Abrir en Chrome»</b> (en iPhone, el ícono de la brújula o <b>«Abrir en Safari»</b>). Luego sigue los pasos de tu equipo.',
   menu:'Menú',step:'Paso {a} de {b}',play:'▶',pause:'⏸',
   doneH:'¡Listo!',doneP:'ADEX ya está instalada. Desde ahora ábrela siempre desde su ícono.',again:'⟲ Ver otra vez',toMenu:'Volver al menú'},
  pt:{title:'Instalar o ADEX',heroH:'Coloque o ADEX na sua tela 📲',
@@ -274,6 +282,8 @@ var UI={
   gain:['Você abre o ADEX com <b>um toque</b>, pelo ícone, sem procurar a página.','Abre em <b>tela cheia</b>, sem a barra do navegador.','<b>Atualiza sozinho.</b> Não precisa instalar de novo.','É o mesmo ADEX de sempre: <b>mesmo usuário, mesma senha, mesmos dados</b>.'],
   faqH:'Problemas frequentes',
   tip:'💡 <b>As telas deste manual são desenhos de exemplo.</b> No seu aparelho as cores e a posição dos botões podem mudar um pouco conforme a marca e a versão, mas os nomes dos botões são os mesmos.',
+  openB:'Abrir o ADEX para instalar',addr:'ou digite no navegador:',
+  wa:'📱 Se abrir <b>dentro do WhatsApp</b>, não dá para instalar dali: toque em <b>⋮</b> e depois em <b>«Abrir no Chrome»</b> (no iPhone, o ícone da bússola ou <b>«Abrir no Safari»</b>). Depois siga os passos do seu aparelho.',
   menu:'Menu',step:'Passo {a} de {b}',play:'▶',pause:'⏸',
   doneH:'Pronto!',doneP:'O ADEX já está instalado. A partir de agora abra sempre pelo ícone.',again:'⟲ Ver de novo',toMenu:'Voltar ao menu'}
 };
@@ -488,6 +498,7 @@ function renderMenu(){
   document.documentElement.lang=LANG==='pt'?'pt-BR':'es';
   $('topTtl').textContent=T('title');document.title=T('title')+' · Manual';
   var h='<div class="hero"><img src="'+ICON+'" alt="ADEX"><div><h1>'+T('heroH')+'</h1><p>'+T('heroP')+'</p></div></div>';
+  h+='<div class="open"><a class="go" href="https://'+URL_APP+'/" target="_blank" rel="noopener">🚀 '+T('openB')+'</a><div class="addr">'+T('addr')+' <b>'+URL_APP+'</b></div><div class="wa">'+T('wa')+'</div></div>';
   h+='<div class="sec">📲 '+T('where')+' <small>'+T('whereS')+'</small></div><div class="grid">';
   TASKS.forEach(function(t,i){h+='<button class="task" data-task="'+i+'"><span class="ic">'+t.ic+'</span><b>'+t[LANG][0]+'</b><span>'+t[LANG][1]+'</span></button>';});
   h+='</div><div class="sec">✨ '+T('gainH')+'</div><ul class="gain">'+T('gain').map(function(x){return '<li>'+x+'</li>';}).join('')+'</ul>';
