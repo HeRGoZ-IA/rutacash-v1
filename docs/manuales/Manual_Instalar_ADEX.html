@@ -208,7 +208,7 @@ code{background:#eef2ff;border-radius:6px;padding:1px 6px;font-size:.95em}
 .pop .ck i{width:15px;height:15px;border:1.5px solid #616161;border-radius:3px;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:10px;color:#fff;flex:none}
 .pop .ck i.on{background:#0f6cbd;border-color:#0f6cbd}
 /* mano / puntero */
-.hand{position:absolute;z-index:50;font-size:34px;left:300px;top:700px;transition:left .75s cubic-bezier(.4,.1,.2,1),top .75s cubic-bezier(.4,.1,.2,1);pointer-events:none;filter:drop-shadow(0 3px 4px rgba(0,0,0,.35));transform:translate(-30%,-8%)}
+.hand{position:absolute;z-index:50;font-size:34px;left:300px;top:700px;transition:left .5s cubic-bezier(.4,.1,.2,1),top .5s cubic-bezier(.4,.1,.2,1);pointer-events:none;filter:drop-shadow(0 3px 4px rgba(0,0,0,.35));transform:translate(-30%,-8%)}
 .hand.ptr{transform:none;font-size:0;line-height:0}
 .hand.tap{animation:tap .45s ease}
 .hand.ptr.tap{animation:click .45s ease}
@@ -220,6 +220,8 @@ code{background:#eef2ff;border-radius:6px;padding:1px 6px;font-size:.95em}
 @keyframes glow{50%{outline-color:#fcd34d}}
 .caret::after{content:"|";animation:blink .8s steps(1) infinite;color:var(--blue)}
 @keyframes blink{50%{opacity:0}}
+@keyframes fin{from{opacity:.55}to{opacity:1}}
+.app.fade{animation:fin .22s ease-out}
 </style>
 </head>
 <body>
@@ -467,7 +469,7 @@ var TASKS=[
 /* ===================== MOTOR ===================== */
 var $=function(id){return document.getElementById(id);};
 var app=$('app'),stage=$('stage'),menu=$('menu'),player=$('player');
-var mode=null,task=null,idx=0,playing=true,timer=null,typer=null,scale=1;
+var mode=null,task=null,idx=0,playing=true,timer=null,typer=null,scale=1,last=null;
 
 function fit(){
   if(!task)return;
@@ -502,14 +504,16 @@ $('bBack').onclick=toMenu;
 
 function stop(){clearTimeout(timer);clearInterval(typer);timer=null;typer=null;}
 function openTask(i){
-  mode='task';task=TASKS[i];idx=0;playing=true;
+  last=null;mode='task';task=TASKS[i];idx=0;playing=true;
   $('pName').textContent=task.ic+' '+task[LANG][0];
   stage.style.borderRadius=task.pc?'10px':'18px';
   showPlayer();fit();runStep();
 }
 var PTR='<svg width="22" height="26" viewBox="0 0 22 26"><path d="M2 2l0 19 5-5 3.5 8 3-1.3-3.5-7.7 7 0z" fill="#fff" stroke="#111" stroke-width="1.5" stroke-linejoin="round"/></svg>';
 function drawScreen(s,st){
-  app.innerHTML=S[s](JSON.parse(JSON.stringify(st||{})))+'<div class="hand'+(task.pc?' ptr':'')+'" id="hand">'+(task.pc?PTR:'👆')+'</div>';
+  var hp=last?' style="left:'+last.x+'px;top:'+last.y+'px"':'';
+  app.innerHTML=S[s](JSON.parse(JSON.stringify(st||{})))+'<div class="hand'+(task.pc?' ptr':'')+'" id="hand"'+hp+'>'+(task.pc?PTR:'👆')+'</div>';
+  app.classList.remove('fade');void app.offsetWidth;app.classList.add('fade');
 }
 function el(t){return app.querySelector('[data-t="'+t+'"]');}
 function pos(node){
@@ -533,6 +537,9 @@ function runStep(){
   if(target){
     var p=pos(target);
     if(task.pc){p.x-=4;p.y-=2;}
+    var near=last&&Math.abs(last.x-p.x)<4&&Math.abs(last.y-p.y)<4;
+    var wait=near?150:550;
+    last=p;
     requestAnimationFrame(function(){hand.style.left=p.x+'px';hand.style.top=p.y+'px';});
     setTimeout(function(){
       if(mode!=='task')return;
@@ -544,13 +551,14 @@ function runStep(){
       if(st.a==='type'){
         var v=target.querySelector('.v');var ph=target.querySelector('.ph');if(ph)ph.remove();
         if(v){var full=st.v,k=0;v.textContent='';v.classList.add('caret');
-          typer=setInterval(function(){k++;v.textContent=full.slice(0,k);if(k>=full.length){clearInterval(typer);typer=null;v.classList.remove('caret');}},85);}
+          typer=setInterval(function(){k++;v.textContent=full.slice(0,k);if(k>=full.length){clearInterval(typer);typer=null;v.classList.remove('caret');}},50);}
       }
-    },800);
-    if(st.a==='type')extra=st.v.length*85;
+    },wait);
+    if(st.a==='type')extra=st.v.length*50;
+    extra+=wait;
     if(!st.a)hand.style.display='none';
   } else {hand.style.display='none';}
-  var dur=Math.max(4200,txt.replace(/<[^>]+>/g,'').length*62)+extra+(target?800:0);
+  var dur=Math.max(2600,txt.replace(/<[^>]+>/g,'').length*40)+extra;
   if(playing)timer=setTimeout(next,dur);
 }
 function next(){if(idx<task.steps.length-1){idx++;runStep();}else finish();}
