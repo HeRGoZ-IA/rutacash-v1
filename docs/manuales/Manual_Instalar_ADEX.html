@@ -558,7 +558,9 @@ function runStep(){
     extra+=wait;
     if(!st.a)hand.style.display='none';
   } else {hand.style.display='none';}
-  var dur=Math.max(2600,txt.replace(/<[^>]+>/g,'').length*40)+extra;
+  /* el paso termina poco después de la acción; solo los textos largos dan algo más de tiempo para leer */
+  var chars=txt.replace(/<[^>]+>/g,'').length;
+  var dur=st.a?Math.max(extra+1300,chars*26):Math.max(2000,chars*28)+(target?extra:0);
   if(playing)timer=setTimeout(next,dur);
 }
 function next(){if(idx<task.steps.length-1){idx++;runStep();}else finish();}
