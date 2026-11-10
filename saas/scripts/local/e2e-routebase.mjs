@@ -617,6 +617,39 @@ try {
     ok('A-15d', ['C-01'], 'Informe del día: al elegir ayer muestra ese día (sin los movimientos de hoy); una fecha futura vuelve a hoy',
       pastOk && clamped === bizToday, JSON.stringify({ ayer, past, list: pastView.list.slice(0, 120), clamped }));
 
+    // 0054 (propietario 2026-11-09): con «Venta sin autorización hasta» en su ruta, el Cobrador vende SIN solicitud
+    // (con su efectivo); por encima del monto, la misma pantalla la envía como solicitud. El monto vuelve a 0 al final.
+    {
+      const a1d = await apiAs('admin1.norte@example.test', M.ad1);
+      const capSet = await a1d('PATCH', `/v1/routes/${C1}`, { collectorDirectMaxMinor: 10_000 }, { op: null });
+      const dName = 'Cliente Sintético Centro G (venta sin autorización)';
+      const cliG = await a1d('POST', '/v1/clients', { routeId: C1, name: dName, documentType: 'CPF', document: '98800000002',
+        phonePrimary: '11988000002', addressPrimary: 'Rua Sintética, 992', addressSecondary: 'Sala 2', business: 'Comércio sintético G' });
+      const kG = await custody(M.cob1, C1);
+      const reqsG = async () => Number((await one('select count(*)::int n from adex.sale_requests where client_id = $1', [cliG.body.id])).n);
+      await go(`/collector/new-sale?clientId=${cliG.body.id}`);
+      await page.waitForFunction(() => [...document.querySelectorAll('label')].some((l) => l.innerText.includes('Valor de la venta')), { timeout: 20_000 }).catch(() => undefined);
+      await sleep(1500);
+      const btns = () => page.evaluate(() => [...document.querySelectorAll('button')].map((b) => b.innerText.trim()).filter((t) => /^(Crear venta|Enviar solicitud de venta)$/.test(t)));
+      await setField('Valor de la venta', '200'); await sleep(600);
+      const over = { btns: await btns(), txt: await page.evaluate(() => document.body.innerText.replace(/ /g, ' ')) };
+      await setField('Valor de la venta', '50'); await sleep(600);
+      const within = { btns: await btns(), note: await page.evaluate(() => document.querySelector('[data-testid="collector-direct-note"]')?.innerText.replace(/ /g, ' ') ?? null) };
+      await both('A-15e-cobrador-venta-sin-autorizacion', () => waitTestid('collector-direct-note'));
+      await clickText('button', /^Crear venta$/);
+      const createdG = await waitToast('Venta creada');
+      await sleep(800);
+      const saleG = await one(`select s.id, s.sale_value_minor::int v, s.sale_request_id r, s.disbursed_by_collector_id by from adex.sales s where s.client_id = $1`, [cliG.body.id]);
+      const kG2 = await custody(M.cob1, C1);
+      ok('A-15e', ['C-01'], '0054: con «Venta sin autorización hasta» R$ 100 en la ruta, el Cobrador vende R$ 50 sin solicitud (sale de su efectivo) y R$ 200 se envía como solicitud',
+        capSet.status === 200 && kG >= 5_000 && over.btns.includes('Enviar solicitud de venta') && !over.btns.includes('Crear venta') && over.txt.includes('permite sin autorización')
+          && within.btns.includes('Crear venta') && (within.note ?? '').includes('R$ 100') && createdG && saleG?.v === 5_000 && saleG?.r === null && saleG?.by === M.cob1
+          && kG2 === kG - 5_000 && (await reqsG()) === 0,
+        JSON.stringify({ capSet: capSet.status, kG, kG2, overBtns: over.btns, within, createdG, saleG }));
+      const capOff = await a1d('PATCH', `/v1/routes/${C1}`, { collectorDirectMaxMinor: 0 }, { op: null });
+      if (capOff.status !== 200) throw new Error(`no se pudo volver a 0 el monto de la ruta: ${capOff.text}`);
+    }
+
     // Venta directa del Administrador desde la Base de Centro 2 (ruta sin Cobrador): nuevo cliente y venta.
     await login('admin1.norte@example.test');
     const c2Client = 'Cliente E2E Centro 2 Directa João';   // con tilde: lo usa la búsqueda sin acentos (A-16b)

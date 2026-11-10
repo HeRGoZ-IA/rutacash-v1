@@ -243,6 +243,11 @@ export interface Route {
   tasaInteres: number
   tasaLibre: boolean
   montoMaximoPrestamo: number
+  /**
+   * 0054 (propietario 2026-11-09): «Venta sin autorización hasta». El Cobrador de la ruta vende sin solicitud si el
+   * valor no lo supera (ni el monto máximo de venta) y el cliente no tiene crédito vivo. 0 o ausente = siempre solicita.
+   */
+  ventaDirectaCobradorMax?: number
   capitalInicial: number
   /**
    * @deprecated NO es la Base de la ruta ni un saldo vivo. Se fija al CREAR la ruta

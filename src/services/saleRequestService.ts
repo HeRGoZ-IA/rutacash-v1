@@ -188,6 +188,21 @@ export function directSaleLimit(
 }
 
 /**
+ * 0054 (propietario 2026-11-09): monto hasta el cual el COBRADOR vende sin autorización en esa ruta
+ * («Venta sin autorización hasta», sin pasar el monto máximo de venta). 0 = siempre solicita.
+ * Solo aplica al Cobrador; el cliente con crédito vivo sigue con solicitud (`decideSaleOrigination`).
+ */
+export function collectorDirectSaleLimit(
+  route: Pick<Route, 'montoMaximoPrestamo' | 'ventaDirectaCobradorMax'> | null | undefined,
+  user: Pick<User, 'rol'> | null | undefined,
+): number {
+  if (user?.rol !== 'cobrador' || !route) return 0
+  const cap = route.ventaDirectaCobradorMax ?? 0
+  if (!(cap > 0)) return 0
+  return route.montoMaximoPrestamo > 0 ? Math.min(cap, route.montoMaximoPrestamo) : cap
+}
+
+/**
  * Integridad de una venta o solicitud: empresa, ruta activa, Oficina activa,
  * cliente de ESA ruta y reglas de producto. `newClient` permite validar un cliente
  * que se crea en la MISMA operación (alta de cliente + venta).

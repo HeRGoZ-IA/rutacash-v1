@@ -106,6 +106,8 @@ export interface CreateRouteInput {
   tasaInteres: number
   tasaLibre: boolean
   montoMaximoPrestamo: number
+  /** 0054: «Venta sin autorización hasta» del Cobrador (0 o ausente = siempre solicita). */
+  ventaDirectaCobradorMax?: number
   capitalInicial: number
   codigo: string
   /**
@@ -185,8 +187,8 @@ export async function createRouteWithAdmins(
     id: generateId(), tenantId: input.tenantId, officeId: input.officeId || undefined,
     nombre: input.nombre, codigo: input.codigo, ciudad: input.ciudad,
     tasaInteres: input.tasaInteres, tasaLibre: input.tasaLibre,
-    montoMaximoPrestamo: input.montoMaximoPrestamo, capitalInicial: input.capitalInicial,
-    capitalActual: input.capitalInicial, cobradorId: input.cobradorId,
+    montoMaximoPrestamo: input.montoMaximoPrestamo, ventaDirectaCobradorMax: input.ventaDirectaCobradorMax ?? 0,
+    capitalInicial: input.capitalInicial, capitalActual: input.capitalInicial, cobradorId: input.cobradorId,
     status: 'activa', createdAt: nowISO(), updatedAt: nowISO(),
   }
 
@@ -285,6 +287,8 @@ export interface UpdateRouteInput {
   tasaInteres: number
   tasaLibre: boolean
   montoMaximoPrestamo: number
+  /** 0054: «Venta sin autorización hasta» del Cobrador (0 o ausente = siempre solicita). */
+  ventaDirectaCobradorMax?: number
   cobradorId?: string
   /** Oficina de la ruta. `undefined` = "Sin Oficina" (estado válido). */
   officeId?: string
@@ -322,11 +326,13 @@ export async function updateRouteWithAssignments(
   const beforeGeneral = {
     nombre: prevRoute.nombre, ciudad: prevRoute.ciudad ?? '', tasaInteres: prevRoute.tasaInteres,
     tasaLibre: prevRoute.tasaLibre, montoMaximoPrestamo: prevRoute.montoMaximoPrestamo,
+    ventaDirectaCobradorMax: prevRoute.ventaDirectaCobradorMax ?? 0,
     cobradorId: prevRoute.cobradorId ?? '', officeId: prevRoute.officeId ?? '',
   }
   const afterGeneral = {
     nombre: input.nombre, ciudad: input.ciudad ?? '', tasaInteres: input.tasaInteres,
     tasaLibre: input.tasaLibre, montoMaximoPrestamo: input.montoMaximoPrestamo,
+    ventaDirectaCobradorMax: input.ventaDirectaCobradorMax ?? 0,
     cobradorId: input.cobradorId ?? '', officeId: input.officeId ?? '',
   }
 
@@ -368,6 +374,7 @@ export async function updateRouteWithAssignments(
     await database.routes.update(input.routeId, {
       nombre: input.nombre, ciudad: input.ciudad, tasaInteres: input.tasaInteres,
       tasaLibre: input.tasaLibre, montoMaximoPrestamo: input.montoMaximoPrestamo,
+      ventaDirectaCobradorMax: input.ventaDirectaCobradorMax ?? 0,
       cobradorId: input.cobradorId || undefined,
       // Cambiar de Oficina es UNA escritura: ninguna entidad hija se toca, porque
       // todas derivan la Oficina por `routeId`.

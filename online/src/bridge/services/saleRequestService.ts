@@ -90,6 +90,8 @@ function afterClient(e: unknown, created: boolean, what: string): never {
 async function createDirectSaleOnline(input: Conditions, _actor: User, opts: { newClient?: Client } = {}): Promise<Sale> {
   return asSaleError(async () => {
     refuseWithoutServer();
+    // 0054: el Cobrador vende directo con la tasa de su ruta (D73-01), igual que en una solicitud.
+    await assertCurrentRouteRate(input);
     const location = await saleDeviceLocation();
     const client = await clientFor(input, opts.newClient);
     try {

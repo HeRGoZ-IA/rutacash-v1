@@ -334,6 +334,56 @@ describe('Fase 4 · créditos: solicitud, autorización y desembolso', () => {
     });
   });
 
+  test('CRED-015 · 0054: el Cobrador vende sin autorización hasta el monto de su ruta, con su efectivo y sin crédito vivo', async () => {
+    // Ruta sin monto: sigue prohibido (403) — cubierto en CRED-009. El Administrador fija el monto de la ruta.
+    const set = await ana('PATCH', `/v1/routes/${r1}`, { collectorDirectMaxMinor: 30_000 });
+    assert.equal(set.status, 200, JSON.stringify(set.body));
+    assert.equal(set.body['collectorDirectMaxMinor'], 30_000);
+    assert.equal((await carlos.call('GET', `/v1/routes/${r1}`)).body['collectorDirectMaxMinor'], 30_000, 'el Cobrador lo lee de su ruta');
+    assert.equal((await carlos.call('PATCH', `/v1/routes/${r1}`, { collectorDirectMaxMinor: 90_000 })).status, 403, 'el Cobrador no lo cambia');
+    const audits = await count(db.admin, `select 1 from adex.audit_log where entity_id = $1 and action = 'UPDATE_ROUTE' and after_data ? 'collectorDirectMaxMinor'`, [r1]);
+    assert.ok(audits >= 1, 'el cambio queda auditado');
+
+    assert.equal((await $ana('/v1/capital/deliveries', { routeId: r1, workerId: carlos.membershipId, amountMinor: 40_000, reason: 'Base de Carlos' })).status, 201);
+    const before = await custody(carlos.membershipId, r1);
+    const cl = await newClient(r1, 'Directa Cobrador');
+    const portf = await portfolio(r1);
+    const ok = await carlos.money('/v1/credits/direct', { routeId: r1, clientId: cl, ...cond({ amountMinor: 30_000 }) });
+    assert.equal(ok.status, 201, JSON.stringify(ok.body));
+    const credit = ok.body['credit'] as Body;
+    assert.deepEqual([credit['saleRequestId'], credit['status'], credit['saleValueMinor']], [null, 'activa', 30_000]);
+    assert.equal(await custody(carlos.membershipId, r1), before - 30_000, 'sale de «Mi efectivo»');
+    assert.equal(await portfolio(r1), portf + 30_000);
+    const row = (await db.admin.query(`select disbursed_by_collector_id c, created_by_membership_id b from adex.sales where id = $1`, [credit['id']])).rows[0];
+    assert.deepEqual([row.c, row.b], [carlos.membershipId, carlos.membershipId]);
+    const au = (await db.admin.query(`select description from adex.audit_log where entity_id = $1 and action = 'CREATE_DIRECT_SALE'`, [credit['id']])).rows[0];
+    assert.match(au.description, /^Venta directa del Cobrador/);
+
+    // Por encima del monto, con crédito vivo, con tasa no permitida o sin efectivo: no.
+    assert.equal((await carlos.money('/v1/credits/direct', { routeId: r1, clientId: await newClient(r1, 'Sobre monto'), ...cond({ amountMinor: 30_001 }) })).body['error'], 'DIRECT_SALE_LIMIT');
+    assert.equal((await carlos.money('/v1/credits/direct', { routeId: r1, clientId: cl, ...cond({ amountMinor: 5_000 }) })).body['error'], 'AUTHORIZATION_REQUIRED');
+    assert.equal((await carlos.money('/v1/credits/direct', { routeId: r1, clientId: await newClient(r1, 'Tasa 10'), ...cond({ amountMinor: 5_000, interestRate: 10 }) })).body['error'], 'INTEREST_RATE_NOT_ALLOWED');
+    assert.equal((await carlos.money('/v1/credits/direct', { routeId: r1, clientId: await newClient(r1, 'Sin efectivo Cob'), ...cond({ amountMinor: 20_000 }) })).body['error'], 'INSUFFICIENT_FUNDS');
+    // Otra ruta (sin monto) y otro Cobrador: sigue prohibido.
+    assert.equal((await money(anaCob)('/v1/credits/direct', { routeId: r5, clientId: await newClient(r5, 'Ruta cinco'), ...cond({ amountMinor: 1_000 }) })).status, 403);
+
+    // Segunda barrera (SQL): por encima del monto o con crédito vivo, credit_disburse lo rechaza aunque se salte la API.
+    const sched = (amount: number) => JSON.stringify([{ number: 1, dueDate: today, amountMinor: Math.round(amount * 1.2) }]);
+    await asApi(db.api, { identityId: carlos.identityId, membershipId: carlos.membershipId, companyId: c1 }, async (q) => {
+      for (const [client, amount] of [[await newClient(r1, 'Barrera monto'), 30_001], [cl, 1_000]] as const) {
+        await q.query('savepoint s');
+        await assert.rejects(q.query(`select * from adex.credit_disburse(gen_random_uuid(), null, $1, $2, $3, 20, 1, 'diaria', $4::date, '{1,2,3,4,5,6}', $5::jsonb, 'x')`,
+          [r1, client, amount, today, sched(amount)]), { code: 'AX507' });
+        await q.query('rollback to savepoint s');
+      }
+    });
+
+    // Monto en 0 otra vez: el Cobrador vuelve a solicitar siempre.
+    assert.equal((await ana('PATCH', `/v1/routes/${r1}`, { collectorDirectMaxMinor: 0 })).status, 200);
+    assert.equal((await carlos.money('/v1/credits/direct', { routeId: r1, clientId: await newClient(r1, 'Otra vez cero'), ...cond({ amountMinor: 1_000 }) })).status, 403);
+    assert.equal((await ana('PATCH', `/v1/routes/${r1}`, { collectorDirectMaxMinor: -1 })).status, 400);
+  });
+
   test('CRED-099 · sin errores inesperados en la API', () => {
     assert.deepEqual(api.errors, []);
   });

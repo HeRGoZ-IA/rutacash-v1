@@ -221,6 +221,17 @@ export async function creditWriteOffReady(pool: pg.Pool): Promise<boolean> {
   }
 }
 
+/** 0054 (propietario 2026-11-09): venta directa del Cobrador hasta el monto de su ruta. */
+export async function collectorDirectSaleReady(pool: pg.Pool): Promise<boolean> {
+  try {
+    const r = await pool.query<{ ok: boolean }>(
+      "select exists (select 1 from information_schema.columns where table_schema = 'adex' and table_name = 'routes' and column_name = 'collector_direct_max_minor') as ok");
+    return r.rows[0]?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Bloque A post-R73 (0032): rectificación con pagos y reaplicación de pagos anulados. */
 export async function rectificationPaymentsReady(pool: pg.Pool): Promise<boolean> {
   for (let i = 1; i <= 3; i++) {

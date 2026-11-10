@@ -17,7 +17,7 @@ import { can } from '@/lib/permissions'
 import { ALLOWED_INTEREST_RATES, defaultOriginationRate, originationRateError, originationRatesFor, routeRatePolicyOf } from '@/lib/interestRatePolicy'
 import { formatCurrency, formatDate, today } from '@/lib/formatters'
 import { formatClientName, formatClientLabel } from '@/lib/displayName'
-import { computeSaleFinancials, createDirectSale, createSaleRequest, findActiveSaleForClient, directSaleLimit, type SaleInputs } from '@/services/saleRequestService'
+import { computeSaleFinancials, createDirectSale, createSaleRequest, findActiveSaleForClient, directSaleLimit, collectorDirectSaleLimit, type SaleInputs } from '@/services/saleRequestService'
 import { useCapitalGuard } from '@/hooks/useCapitalGuard'
 import { decideSaleOrigination } from '@/lib/activeCredit'
 import type { Client, Sale, Route } from '@/models/types'
@@ -107,13 +107,16 @@ export default function CollectorNewSalePage() {
   const routeLimit = selectedRoute && selectedRoute.montoMaximoPrestamo > 0 ? selectedRoute.montoMaximoPrestamo : Infinity
   const collectorLimit = user?.maxDirectSaleAmount && user.maxDirectSaleAmount > 0 ? user.maxDirectSaleAmount : Infinity
   // Fuente única compartida con el servicio, que revalida el mismo límite.
-  const effectiveLimit = directSaleLimit(selectedRoute, user) // Infinity si ambos sin límite
+  // 0054 (propietario 2026-11-09): el Cobrador vende sin autorización hasta el monto que fije su ruta.
+  const collectorCap = collectorDirectSaleLimit(selectedRoute, user)
+  const byCollectorCap = collectorCap > 0 && !can(user, 'sale.createDirect', { routeId: selectedClient?.routeId })
+  const effectiveLimit = byCollectorCap ? collectorCap : directSaleLimit(selectedRoute, user) // Infinity si ambos sin límite
   const hasEffectiveLimit = Number.isFinite(effectiveLimit)
   // Venta directa: se resuelve por CAPACIDAD central (no por el flag legacy del cobrador).
   // El Cobrador NO tiene `sale.createDirect` → siempre enviará solicitud. El
   // Supervisor SÍ (autoridad comercial, 2026-09-24): otorga el crédito sin solicitud,
   // salvo que supere el límite de venta directa, en cuyo caso también solicita.
-  const canDirect = can(user, 'sale.createDirect', { routeId: selectedClient?.routeId })
+  const canDirect = can(user, 'sale.createDirect', { routeId: selectedClient?.routeId }) || byCollectorCap
   const withinLimit = !hasEffectiveLimit || form.valorVenta <= effectiveLimit
   // Regla central de crédito activo (la misma que aplica el servicio): un Cobrador
   // con cliente con crédito activo SOLO puede solicitar, aunque tuviera venta directa.
@@ -122,12 +125,15 @@ export default function CollectorNewSalePage() {
     canCreateRequest: can(user, 'sale.createRequest', { routeId: selectedClient?.routeId }),
   }) : { kind: 'forbidden' as const }
   const requiereAutorizacionPorCredito = origen.kind === 'authorization' && origen.reason === 'active-credit'
-  const allowDirect = origen.kind === 'direct' && withinLimit
+  const allowDirectByRules = origen.kind === 'direct' && withinLimit
 
   // La validación de capital se mantiene para todos los roles; el MONTO solo se
   // revela a quien puede ver la caja de la ruta (el Cobrador no lo necesita).
   const { exceeded: capExcedido, available: capDisponible, canSeeAmount: verCapital, recheck: recheckCapital } =
     useCapitalGuard(selectedClient?.routeId, form.valorVenta)
+  // El Cobrador entrega con «Mi efectivo»: si no le alcanza, la venta se envía como solicitud (no se bloquea).
+  const collectorShortOfCash = byCollectorCap && capExcedido
+  const allowDirect = allowDirectByRules && !collectorShortOfCash
 
   const calc = form.valorVenta > 0 && form.numeroCuotas > 0
     ? computeSaleFinancials({ valorVenta: form.valorVenta, tasaInteres: form.tasaInteres, numeroCuotas: form.numeroCuotas, frecuenciaPago: form.frecuenciaPago, fechaInicio: form.fechaInicio, paymentDays: form.paymentDays })
@@ -280,7 +286,12 @@ export default function CollectorNewSalePage() {
         )}
 
         {/* Acción según autorización */}
-        {allowDirect && hasEffectiveLimit && (
+        {allowDirect && byCollectorCap && (
+          <p className="text-xs text-gray-500" data-testid="collector-direct-note">
+            Venta sin autorización: tu ruta lo permite hasta {formatCurrency(effectiveLimit, currency)}. El dinero sale de tu efectivo.
+          </p>
+        )}
+        {allowDirect && hasEffectiveLimit && !byCollectorCap && (
           <p className="text-xs text-gray-500">
             Límite venta directa · Ruta: {routeLimit === Infinity ? 'sin límite' : formatCurrency(routeLimit, currency)} · Cobrador: {collectorLimit === Infinity ? 'sin límite' : formatCurrency(collectorLimit, currency)} · Efectivo aplicado: {formatCurrency(effectiveLimit, currency)}
           </p>
@@ -299,11 +310,15 @@ export default function CollectorNewSalePage() {
                 <p>
                   {requiereAutorizacionPorCredito
                     ? 'El cliente ya tiene un crédito activo: esta venta se enviará como solicitud de autorización.'
+                    : collectorShortOfCash
+                    ? 'No tienes efectivo suficiente para entregar esta venta: se enviará como solicitud de autorización.'
+                    : byCollectorCap && !withinLimit
+                    ? `Esta venta supera ${formatCurrency(effectiveLimit, currency)}, el monto que tu ruta permite sin autorización. Se enviará como solicitud.`
                     : canDirect && !withinLimit
                     ? 'Esta venta supera el límite aprobado para venta directa. Se enviará como solicitud para aprobación.'
                     : 'Esta venta requiere autorización del administrador.'}
                 </p>
-                {canDirect && (
+                {canDirect && !byCollectorCap && (
                   <p className="mt-1 text-amber-600">
                     Límite ruta: {routeLimit === Infinity ? 'sin límite' : formatCurrency(routeLimit, currency)} · Límite cobrador: {collectorLimit === Infinity ? 'sin límite' : formatCurrency(collectorLimit, currency)} · Efectivo: {hasEffectiveLimit ? formatCurrency(effectiveLimit, currency) : 'sin límite'}
                   </p>

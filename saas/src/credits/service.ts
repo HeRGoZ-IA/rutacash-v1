@@ -135,9 +135,20 @@ function financials(c: Conditions) {
 
 /** D73-01: configuración de tasa VIGENTE de la ruta (se lee en cada originación, nunca de la pantalla). */
 async function routeRatePolicy(client: pg.PoolClient, ctx: ActiveContext, routeId: string) {
-  const r = (await client.query<{ rate: string; free: boolean; max: string }>(
-    'select interest_rate rate, free_rate free, max_loan_minor max from adex.routes where company_id = $1 and id = $2', [ctx.companyId, routeId])).rows[0]!;
-  return { tasaInteres: Number(r.rate), tasaLibre: r.free, maxLoanMinor: Number(r.max) };
+  const r = (await client.query<{ rate: string; free: boolean; max: string; cdmax: string }>(
+    `select interest_rate rate, free_rate free, max_loan_minor max, collector_direct_max_minor cdmax
+       from adex.routes where company_id = $1 and id = $2`, [ctx.companyId, routeId])).rows[0]!;
+  return { tasaInteres: Number(r.rate), tasaLibre: r.free, maxLoanMinor: Number(r.max), collectorDirectMaxMinor: Number(r.cdmax) };
+}
+
+/**
+ * 0054 (propietario 2026-11-09): el Cobrador vende SIN solicitud si su ruta tiene «Venta sin autorización hasta»
+ * y el valor no supera ese monto ni el monto máximo de venta. El cliente con crédito vivo sigue con solicitud
+ * (`decideSaleOrigination`). PostgreSQL (`credit_disburse`) vuelve a comprobarlo.
+ */
+function collectorDirectAllowed(ctx: ActiveContext, policy: { maxLoanMinor: number; collectorDirectMaxMinor: number }, amount: number): boolean {
+  return ctx.role === 'cobrador' && policy.collectorDirectMaxMinor > 0 && amount <= policy.collectorDirectMaxMinor
+    && (policy.maxLoanMinor <= 0 || amount <= policy.maxLoanMinor);
 }
 
 async function companyToday(client: pg.PoolClient, ctx: ActiveContext): Promise<string> {
@@ -374,14 +385,23 @@ export const DIRECT_FIELDS = CREATE_REQUEST_FIELDS;
  * Venta directa (`createDirectSale`): solo `sale.createDirect` (SuperAdmin,
  * Administrador, Supervisor). Queda desembolsada en el acto con las mismas reglas de
  * fondos que la confirmación. El Supervisor (sin `route.edit`) respeta el límite de la
- * ruta: por encima, solicitud. El Cobrador NO vende directo (discrepancia pendiente).
+ * ruta: por encima, solicitud. 0054 (propietario 2026-11-09): el Cobrador vende directo SOLO si su ruta tiene
+ * «Venta sin autorización hasta», el valor no lo supera y el cliente no tiene crédito vivo; paga su custodia.
  */
 export async function directSale(client: pg.PoolClient, ctx: ActiveContext, body: Record<string, unknown>, operationId: string | null) {
   const opId = requireOperationId(operationId);
   const route = await routeOf(client, ctx, reqId(body, 'routeId'));
-  need(ctx, 'sale.createDirect', { routeId: route.id });
   const c: Conditions = { amount: amountOf(body), rate: rateOf(body), count: countOf(body), frequency: frequencyOf(body), start: startOf(body), days: daysOf(body) };
-  const rateError = originationRateError(ctx.role, c.rate, await routeRatePolicy(client, ctx, route.id));
+  const policy = await routeRatePolicy(client, ctx, route.id);
+  // 0054: el Cobrador (sin `sale.createDirect`) vende directo solo si su ruta lo permite y dentro de ese monto.
+  // Ruta sin monto (0): como siempre, 403 (el Cobrador solicita).
+  const byCollector = ctx.role === 'cobrador' && policy.collectorDirectMaxMinor > 0 && allowed(ctx, 'sale.createRequest', { routeId: route.id });
+  if (byCollector) {
+    if (!collectorDirectAllowed(ctx, policy, c.amount)) throw new ApiError(409, 'DIRECT_SALE_LIMIT');
+  } else {
+    need(ctx, 'sale.createDirect', { routeId: route.id });
+  }
+  const rateError = originationRateError(ctx.role, c.rate, policy);
   if (rateError) throw new ApiError(400, 'INTEREST_RATE_NOT_ALLOWED', rateError);
   if (c.start < await companyToday(client, ctx)) throw new ApiError(400, 'INVALID_CONDITIONS', 'start date before today');
   const cl = await activeClient(client, ctx, reqId(body, 'clientId'), route.id);
@@ -391,11 +411,12 @@ export async function directSale(client: pg.PoolClient, ctx: ActiveContext, body
   const decision = decideSaleOrigination({ actor: { rol: ctx.role }, canCreateDirect: true, canCreateRequest: allowed(ctx, 'sale.createRequest', { routeId: route.id }),
     activeCredits: active.sales.length + active.approvedRequests.length });
   if (decision.kind !== 'direct') throw new ApiError(409, 'AUTHORIZATION_REQUIRED');
-  const out = await disburse(client, opId, null, route.id, cl.id, c, 'Venta directa');
+  const out = await disburse(client, opId, null, route.id, cl.id, c, byCollector ? 'Venta directa del Cobrador' : 'Venta directa');
   const location = parseLocation(body['location']);
   if (location) await storeSaleLocation(client, ctx, { kind: 'direct_sale', entityId: out.credit_id, routeId: route.id, clientId: cl.id, location });
   await audit(client, ctx, { action: 'CREATE_DIRECT_SALE', entityType: 'sale', entityId: out.credit_id, routeId: route.id,
-    description: `Venta directa ${c.amount} a ${cl.name}`, after: { operationId: out.disbursement_id }, metadata: { operationId: opId } });
+    description: `${byCollector ? 'Venta directa del Cobrador' : 'Venta directa'} ${c.amount} a ${cl.name}`, after: { operationId: out.disbursement_id },
+    metadata: { operationId: opId, ...(byCollector ? { collectorDirectMaxMinor: policy.collectorDirectMaxMinor } : {}) } });
   return getCredit(client, ctx, out.credit_id);
 }
 

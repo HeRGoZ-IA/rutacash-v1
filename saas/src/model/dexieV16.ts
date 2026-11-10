@@ -110,7 +110,8 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
     fields: [
       id('id', 'id'), tenant, id('officeId', 'office_id'), f('nombre', 'name'), f('codigo', 'code'), f('ciudad', 'city'),
       f('email', 'email'), f('telefono', 'phone'), f('tasaInteres', 'interest_rate', 'num'), f('tasaLibre', 'free_rate', 'bool'),
-      money('montoMaximoPrestamo', 'max_loan_minor'), money('capitalInicial', 'initial_capital_minor'),
+      money('montoMaximoPrestamo', 'max_loan_minor'), money('ventaDirectaCobradorMax', 'collector_direct_max_minor'),
+      money('capitalInicial', 'initial_capital_minor'),
       money('capitalActual', 'legacy_capital_actual_minor'), id('cobradorId', 'collector_membership_id'),
       id('capitalControllerAdminId', 'capital_controller_membership_id'), instant('capitalControllerSince', 'capital_controller_since'),
       f('status', 'status'), created, updated,

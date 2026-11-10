@@ -128,7 +128,7 @@ function companyRecords(c: CompanySpec): DexieSnapshot {
   const routes: Required<Omit<Route, 'migrationState'>>[] = ([1, 2, 3] as const).map((n) => ({
     id: r(n), tenantId, officeId: n === 3 ? (undefined as unknown as string) : offices[n === 1 ? 0 : 1]!.id, nombre: `Ruta ${n}`, codigo: `R${n}`,
     ciudad: 'Ciudad Sintética', email: `ruta${n}-${c.key}@example.test`, telefono: '+00 222 2222', tasaInteres: 20, tasaLibre: n === 2,
-    montoMaximoPrestamo: v(2000), capitalInicial: v(5000), capitalActual: v(5000),
+    montoMaximoPrestamo: v(2000), ventaDirectaCobradorMax: n === 3 ? v(300) : 0, capitalInicial: v(5000), capitalActual: v(5000),
     cobradorId: n === 1 ? worker : (undefined as unknown as string),
     capitalControllerAdminId: n === 3 ? (undefined as unknown as string) : admin,
     capitalControllerSince: n === 3 ? (undefined as unknown as string) : at(-28),

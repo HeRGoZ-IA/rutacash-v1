@@ -45,7 +45,10 @@ export const API_FEATURES: readonly string[] = ['collections-v1', 'settlements-v
   'late-sale-v1',
   // 3.28 (0053, propietario 2026-11-08): «Dar por perdida», deshacer y recuperación. Solo si 0053 está aplicada (start.ts).
   // En la puerta de Vercel: sin él, los botones del detalle de la venta fallarían.
-  'credit-write-off-v1'];
+  'credit-write-off-v1',
+  // 0054 (propietario 2026-11-09): «Venta sin autorización hasta» por ruta para el Cobrador. Solo si 0054 está aplicada (start.ts).
+  // En la puerta de Vercel: sin él, el campo de la ruta no se guardaría y la venta directa del Cobrador fallaría.
+  'collector-direct-sale-v1'];
 
 /** Módulos del servicio Owner (servicio aparte, ver controlStart.ts). */
 // Ronda 54: `owner-email-v1` (cambio del correo del SuperAdmin) solo si 0024 está aplicada (controlStart.ts).

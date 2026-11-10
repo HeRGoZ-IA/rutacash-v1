@@ -34,17 +34,17 @@ import { lockMembershipsForRevocation, lockRoutes, reconcileControllers, setRout
 
 interface Row {
   id: string; name: string; code: string; city: string | null; email: string | null; phone: string | null;
-  interest_rate: string; free_rate: boolean; max_loan_minor: string; office_id: string | null;
+  interest_rate: string; free_rate: boolean; max_loan_minor: string; collector_direct_max_minor: string; office_id: string | null;
   collector_membership_id: string | null; capital_controller_membership_id: string | null; capital_controller_since: Date | null;
   status: 'activa' | 'inactiva'; migration_state: 'normal' | 'en_migracion'; created_at: Date; updated_at: Date;
 }
-const COLS = `id, name, code, city, email, phone, interest_rate, free_rate, max_loan_minor, office_id, collector_membership_id,
+const COLS = `id, name, code, city, email, phone, interest_rate, free_rate, max_loan_minor, collector_direct_max_minor, office_id, collector_membership_id,
               capital_controller_membership_id, capital_controller_since, status, migration_state, created_at, updated_at`;
 
 function view(r: Row, members?: string[]) {
   return {
     id: r.id, name: r.name, code: r.code, city: r.city, email: r.email, phone: r.phone, interestRate: Number(r.interest_rate),
-    freeRate: r.free_rate, maxLoanMinor: Number(r.max_loan_minor), officeId: r.office_id, collectorId: r.collector_membership_id,
+    freeRate: r.free_rate, maxLoanMinor: Number(r.max_loan_minor), collectorDirectMaxMinor: Number(r.collector_direct_max_minor), officeId: r.office_id, collectorId: r.collector_membership_id,
     capitalControllerId: r.capital_controller_membership_id, capitalControllerSince: r.capital_controller_since?.toISOString() ?? null,
     status: r.status, migrationState: r.migration_state, createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
     ...(members ? { memberIds: members } : {}),
@@ -124,8 +124,8 @@ function routeAdminIds(adminIds: string[], ctx: ActiveContext): string[] {
   return ids;
 }
 
-export const CREATE_ROUTE_FIELDS = ['name', 'code', 'city', 'email', 'phone', 'interestRate', 'freeRate', 'maxLoanMinor', 'initialCapitalMinor',
-  'officeId', 'adminIds', 'collectorId'] as const;
+export const CREATE_ROUTE_FIELDS = ['name', 'code', 'city', 'email', 'phone', 'interestRate', 'freeRate', 'maxLoanMinor', 'collectorDirectMaxMinor',
+  'initialCapitalMinor', 'officeId', 'adminIds', 'collectorId'] as const;
 
 /** D73-01: la tasa de una ruta es una de las admitidas (10 o 20): el Cobrador la usa al originar. */
 function routeRate(body: Record<string, unknown>): number {
@@ -140,6 +140,8 @@ export async function createRoute(client: pg.PoolClient, ctx: ActiveContext, bod
   const interestRate = routeRate(body);
   const freeRate = bool(body, 'freeRate');
   const maxLoanMinor = minor(body, 'maxLoanMinor');
+  // 0054: «Venta sin autorización hasta» (0 = el Cobrador siempre solicita).
+  const collectorDirectMaxMinor = has(body, 'collectorDirectMaxMinor') ? minor(body, 'collectorDirectMaxMinor') : 0;
   if (has(body, 'initialCapitalMinor') && minor(body, 'initialCapitalMinor') > 0) {
     throw new ApiError(409, 'ROUTE_INITIAL_CAPITAL_NOT_ALLOWED', 'there is no route cash box: the capital controller delivers capital to workers from its pool');
   }
@@ -166,10 +168,11 @@ export async function createRoute(client: pg.PoolClient, ctx: ActiveContext, bod
   const id = randomUUID();
   await client.query(
     `insert into adex.routes (id, company_id, office_id, name, code, city, email, phone, interest_rate, free_rate, max_loan_minor,
-                              initial_capital_minor, legacy_capital_actual_minor, collector_membership_id, status, created_at, updated_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, 0, $12, 'activa', now(), now())`,
+                              initial_capital_minor, legacy_capital_actual_minor, collector_membership_id, status, created_at, updated_at,
+                              collector_direct_max_minor)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, 0, $12, 'activa', now(), now(), $13)`,
     [id, ctx.companyId, officeId, name, code, optText(body, 'city', 120), optText(body, 'email', 160), optText(body, 'phone', 40),
-      interestRate, freeRate, maxLoanMinor, collectorId]);
+      interestRate, freeRate, maxLoanMinor, collectorId, collectorDirectMaxMinor]);
   const assigned = [...adminIds, ...(collectorId && !adminIds.includes(collectorId) ? [collectorId] : [])];
   await audit(client, ctx, {
     action: 'CREATE_ROUTE', entityType: 'route', entityId: id,
@@ -184,7 +187,7 @@ export async function createRoute(client: pg.PoolClient, ctx: ActiveContext, bod
   return { ...view(row, await routeMembers(client, ctx, id)), controllerEvents: events };
 }
 
-export const UPDATE_ROUTE_FIELDS = ['name', 'city', 'email', 'phone', 'interestRate', 'freeRate', 'maxLoanMinor', 'officeId', 'collectorId',
+export const UPDATE_ROUTE_FIELDS = ['name', 'city', 'email', 'phone', 'interestRate', 'freeRate', 'maxLoanMinor', 'collectorDirectMaxMinor', 'officeId', 'collectorId',
   'memberIds', 'capitalControllerId', 'reason'] as const;
 
 /**
@@ -213,6 +216,7 @@ export async function updateRoute(client: pg.PoolClient, ctx: ActiveContext, id:
     interestRate: has(body, 'interestRate') ? routeRate(body) : Number(prev.interest_rate),
     freeRate: has(body, 'freeRate') ? bool(body, 'freeRate') : prev.free_rate,
     maxLoanMinor: has(body, 'maxLoanMinor') ? minor(body, 'maxLoanMinor') : Number(prev.max_loan_minor),
+    collectorDirectMaxMinor: has(body, 'collectorDirectMaxMinor') ? minor(body, 'collectorDirectMaxMinor') : Number(prev.collector_direct_max_minor),
     officeId: has(body, 'officeId') ? optId(body, 'officeId') : prev.office_id,
     collectorId: has(body, 'collectorId') ? optId(body, 'collectorId') : prev.collector_membership_id,
   };
@@ -251,13 +255,15 @@ export async function updateRoute(client: pg.PoolClient, ctx: ActiveContext, id:
   if (diff.added.length || diff.removed.length) await loadMembers(client, ctx, [...diff.added, ...diff.removed], true);
 
   const before = { name: prev.name, city: prev.city, email: prev.email, phone: prev.phone, interestRate: Number(prev.interest_rate), freeRate: prev.free_rate,
-    maxLoanMinor: Number(prev.max_loan_minor), officeId: prev.office_id, collectorId: prev.collector_membership_id };
+    maxLoanMinor: Number(prev.max_loan_minor), collectorDirectMaxMinor: Number(prev.collector_direct_max_minor), officeId: prev.office_id,
+    collectorId: prev.collector_membership_id };
   const changed = (Object.keys(next) as (keyof typeof next)[]).filter((k) => next[k] !== before[k]);
   if (changed.length) {
     await client.query(
       `update adex.routes set name = $3, city = $4, email = $5, phone = $6, interest_rate = $7, free_rate = $8, max_loan_minor = $9, office_id = $10,
-              collector_membership_id = $11, updated_at = now() where company_id = $1 and id = $2`,
-      [ctx.companyId, prev.id, next.name, next.city, next.email, next.phone, next.interestRate, next.freeRate, next.maxLoanMinor, next.officeId, next.collectorId]);
+              collector_membership_id = $11, collector_direct_max_minor = $12, updated_at = now() where company_id = $1 and id = $2`,
+      [ctx.companyId, prev.id, next.name, next.city, next.email, next.phone, next.interestRate, next.freeRate, next.maxLoanMinor, next.officeId, next.collectorId,
+        next.collectorDirectMaxMinor]);
     await audit(client, ctx, { action: 'UPDATE_ROUTE', entityType: 'route', entityId: prev.id, description: `Ruta actualizada: ${next.name}`,
       before: Object.fromEntries(changed.map((k) => [k, before[k]])), after: Object.fromEntries(changed.map((k) => [k, next[k]])) });
   }

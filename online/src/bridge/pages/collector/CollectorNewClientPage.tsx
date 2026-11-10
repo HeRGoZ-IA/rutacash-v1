@@ -26,7 +26,7 @@ import { ALLOWED_INTEREST_RATES, defaultOriginationRate, originationRateError, o
 import { generateId } from '@/lib/utils'
 import { formatClientName, formatClientLabel } from '@/lib/displayName'
 import { nowISO, normalizeDoc, formatCurrency, formatDate, today } from '@/lib/formatters'
-import { computeSaleFinancials, createDirectSale, createSaleRequest, directSaleLimit, type SaleInputs } from '@/services/saleRequestService'
+import { computeSaleFinancials, createDirectSale, createSaleRequest, directSaleLimit, collectorDirectSaleLimit, type SaleInputs } from '@/services/saleRequestService'
 import { useCapitalGuard } from '@/hooks/useCapitalGuard'
 // ADEX Online: tipo de documento (DS-10).
 import { DocumentTypeSelect } from '../../../runtime/DocumentTypeSelect.tsx'
@@ -101,10 +101,14 @@ function NewClientForm() {
   // Reglas de venta directa del cobrador
   // Venta directa por CAPACIDAD central (no por el flag legacy): Cobrador y Supervisor
   // NUNCA la tienen → siempre solicitud pendiente de autorización.
-  const canDirect = can(user, 'sale.createDirect', { routeId: form.routeId })
+  // 0054 (propietario 2026-11-09): el Cobrador vende sin autorización hasta el monto que fije su ruta
+  // (el cliente es nuevo: no tiene crédito vivo). El dinero sale de su efectivo.
+  const collectorCap = collectorDirectSaleLimit(routes.find(r => r.id === form.routeId), user)
+  const byCollectorCap = collectorCap > 0 && !can(user, 'sale.createDirect', { routeId: form.routeId })
+  const canDirect = can(user, 'sale.createDirect', { routeId: form.routeId }) || byCollectorCap
   // Mismo límite que Nueva venta y que revalida el servicio: el menor entre el de la
   // RUTA y el del usuario (antes aquí solo se miraba el del usuario).
-  const limiteDirecto = directSaleLimit(routes.find(r => r.id === form.routeId), user)
+  const limiteDirecto = byCollectorCap ? collectorCap : directSaleLimit(routes.find(r => r.id === form.routeId), user)
   // D73-01: tasas que se pueden originar en la ruta elegida (Cobrador: la de la ruta, o 10%/20% con
   // «Tasa libre»). El servidor vuelve a comprobarlo con la configuración vigente.
   const rutaElegida = routes.find(r => r.id === form.routeId)
@@ -119,7 +123,7 @@ function NewClientForm() {
   }, [user, rutaElegida?.id, rutaElegida?.tasaInteres, rutaElegida?.tasaLibre])
   const maxAmount = Number.isFinite(limiteDirecto) ? limiteDirecto : null
   const withinLimit = !maxAmount || saleForm.valorVenta <= maxAmount
-  const allowDirect = canDirect && withinLimit
+  const allowDirectByRules = canDirect && withinLimit
 
   // Base de la ruta seleccionada (bloquea venta directa si se supera).
   // Igual que en Nueva venta: la regla de capital se conserva; el monto solo se
@@ -127,6 +131,9 @@ function NewClientForm() {
   const { exceeded, available: capDisponible, canSeeAmount: verCapital, recheck: recheckCapital } =
     useCapitalGuard(addSale ? form.routeId : null, saleForm.valorVenta)
   const capExcedido = addSale && exceeded
+  // Sin efectivo suficiente, el Cobrador envía solicitud (no se bloquea el registro).
+  const collectorShortOfCash = byCollectorCap && capExcedido
+  const allowDirect = allowDirectByRules && !collectorShortOfCash
 
   const saleCalc = addSale && saleForm.valorVenta > 0 && saleForm.numeroCuotas > 0
     ? computeSaleFinancials({ valorVenta: saleForm.valorVenta, tasaInteres: saleForm.tasaInteres, numeroCuotas: saleForm.numeroCuotas, frecuenciaPago: saleForm.frecuenciaPago, fechaInicio: saleForm.fechaInicio, paymentDays: saleForm.paymentDays })
@@ -336,11 +343,20 @@ function NewClientForm() {
             <div className="col-span-2" data-testid="first-payment-date"><p className="text-xs text-gray-500">Primer abono</p><p className="font-bold text-primary-700">{formatDate(firstPaymentDate({ fechaInicio: saleForm.fechaInicio, frecuencia: saleForm.frecuenciaPago, paymentDays: saleForm.paymentDays }))}</p></div>
                 </div>
               )}
+              {allowDirect && byCollectorCap && (
+                <p className="text-xs text-gray-500" data-testid="collector-direct-note">
+                  Venta sin autorización: tu ruta lo permite hasta {formatCurrency(maxAmount ?? 0, currency)}. El dinero sale de tu efectivo.
+                </p>
+              )}
               {!allowDirect && (
                 <div className="flex items-start gap-2 p-3 bg-amber-50 rounded-xl border border-amber-100">
                   <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
                   <p className="text-xs text-amber-700">
-                    {canDirect && !withinLimit
+                    {collectorShortOfCash
+                      ? 'No tienes efectivo suficiente para entregar esta venta: se enviará como solicitud de autorización.'
+                      : byCollectorCap && !withinLimit
+                      ? `Esta venta supera ${formatCurrency(maxAmount ?? 0, currency)}, el monto que tu ruta permite sin autorización. Se enviará como solicitud.`
+                      : canDirect && !withinLimit
                       ? `El valor supera tu límite de venta directa (${formatCurrency(maxAmount ?? 0, currency)}). Se enviará una solicitud al administrador.`
                       : 'Esta venta requiere autorización del administrador. Se enviará una solicitud.'}
                   </p>

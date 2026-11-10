@@ -28,7 +28,7 @@ import { createDemoHandler } from '../http/demoApi.ts';
 import { createDemoService } from '../demo/service.ts';
 import { API_FEATURES, createOnlineServer } from './app.ts';
 import { collectorCategoriesReady } from '../structure/categories.ts';
-import { adminTransfersReady, capitalRequestsReady, offlineCollectorReady, offlineDisbursementsReady, paymentLocationsReady, routeMapReady, creditRectificationReady, rectificationPaymentsReady, routeBaseReady, singleSessionReady, generalExpensesReady, adminAuthorityReady, controllerAuthorityReady, lateSaleReady, creditWriteOffReady } from '../collections/location.ts';
+import { adminTransfersReady, capitalRequestsReady, offlineCollectorReady, offlineDisbursementsReady, paymentLocationsReady, routeMapReady, creditRectificationReady, rectificationPaymentsReady, routeBaseReady, singleSessionReady, generalExpensesReady, adminAuthorityReady, controllerAuthorityReady, lateSaleReady, creditWriteOffReady, collectorDirectSaleReady } from '../collections/location.ts';
 
 /** Configuración común a los dos servicios (empresa y Owner): TLS, CORS, proveedor, límites. */
 export function readCommonConfig(env: NodeJS.ProcessEnv) {
@@ -126,6 +126,8 @@ export async function start(env: NodeJS.ProcessEnv = process.env) {
   // 3.28: castigo de créditos, solo si 0053 está aplicada. Igual que 0042: si la anterior ya falta (base inalcanzable o
   // migraciones atrasadas) no se suma otro intento de conexión al arranque.
   if (missing.has('late-sale-v1') || !(await creditWriteOffReady(apiPool))) missing.add('credit-write-off-v1');
+  // 0054: venta directa del Cobrador hasta el monto de su ruta. Mismo criterio de un solo intento.
+  if (missing.has('credit-write-off-v1') || !(await collectorDirectSaleReady(apiPool))) missing.add('collector-direct-sale-v1');
   const features = API_FEATURES.filter((f) => !missing.has(f));
   const server = createOnlineServer({
     company: createCompanyHandler(companyOpts), demo, readinessPool: apiPool, allowedOrigins: cfg.origins, trustProxy: cfg.trustProxy, rateLimit: cfg.rateLimit,

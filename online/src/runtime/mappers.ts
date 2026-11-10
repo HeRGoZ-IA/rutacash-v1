@@ -72,6 +72,8 @@ export function routeFrom(r: V): Route {
     id: r.id, tenantId: tenantId(), officeId: r.officeId ?? undefined, nombre: r.name, codigo: r.code ?? '', ciudad: s(r.city),
     email: s(r.email), telefono: s(r.phone), tasaInteres: Number(r.interestRate), tasaLibre: r.freeRate === true,
     montoMaximoPrestamo: toMajor(r.maxLoanMinor),
+    // 0054: sin la columna (servidor anterior) = 0 → el Cobrador siempre solicita.
+    ventaDirectaCobradorMax: r.collectorDirectMaxMinor == null ? 0 : toMajor(r.collectorDirectMaxMinor),
     // Sin caja de ruta en el SaaS (capital centralizado): no hay capital inicial ni actual.
     capitalInicial: 0, capitalActual: 0,
     cobradorId: r.collectorId ?? undefined, capitalControllerAdminId: r.capitalControllerId ?? undefined,

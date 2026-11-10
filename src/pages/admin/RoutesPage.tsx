@@ -72,7 +72,7 @@ export default function RoutesPage() {
     nombre: '', ciudad: '', cobradorId: '', officeId: '', adminIds: [] as string[],
     // BORRADOR de asignaciones de usuarios (edición): NO persiste hasta "Actualizar".
     assignedUserIds: [] as string[],
-    tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0,
+    tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, ventaDirectaCobradorMax: 0, capitalInicial: 0,
     /** Responsable de capital (v16). Solo el SuperAdmin lo cambia desde el editor. */
     capitalControllerAdminId: '',
   })
@@ -179,7 +179,7 @@ export default function RoutesPage() {
     const officePorDefecto = officePreseleccionada && offices.some(o => o.id === officePreseleccionada)
       ? officePreseleccionada
       : (officeFilter !== ALL_OFFICES && offices.some(o => o.id === officeFilter) ? officeFilter : '')
-    const init = { nombre: '', ciudad: '', cobradorId: '', officeId: officePorDefecto, adminIds: preselect, assignedUserIds: [], tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, capitalInicial: 0, capitalControllerAdminId: '' }
+    const init = { nombre: '', ciudad: '', cobradorId: '', officeId: officePorDefecto, adminIds: preselect, assignedUserIds: [], tasaInteres: 20, tasaLibre: false, montoMaximoPrestamo: 500000, ventaDirectaCobradorMax: 0, capitalInicial: 0, capitalControllerAdminId: '' }
     setForm(init)
     setOriginal({ ...init })   // snapshot para dirty-check
     setModalOpen(true)
@@ -196,7 +196,8 @@ export default function RoutesPage() {
       nombre: route.nombre, ciudad: route.ciudad ?? '',
       cobradorId: route.cobradorId ?? '', officeId: route.officeId ?? '', adminIds: [] as string[], assignedUserIds,
       tasaInteres: route.tasaInteres, tasaLibre: route.tasaLibre,
-      montoMaximoPrestamo: route.montoMaximoPrestamo, capitalInicial: route.capitalInicial,
+      montoMaximoPrestamo: route.montoMaximoPrestamo, ventaDirectaCobradorMax: route.ventaDirectaCobradorMax ?? 0,
+      capitalInicial: route.capitalInicial,
       capitalControllerAdminId: route.capitalControllerAdminId ?? '',
     }
     setForm(init)
@@ -342,6 +343,7 @@ export default function RoutesPage() {
         await updateRouteWithAssignments({
           routeId: editing.id, tenantId, nombre: form.nombre, ciudad: form.ciudad,
           tasaInteres: form.tasaInteres, tasaLibre: form.tasaLibre, montoMaximoPrestamo: form.montoMaximoPrestamo,
+          ventaDirectaCobradorMax: form.ventaDirectaCobradorMax,
           cobradorId: form.cobradorId || undefined,
           officeId: form.officeId || undefined,
           assignedUserIds: form.assignedUserIds,
@@ -356,7 +358,8 @@ export default function RoutesPage() {
         await createRouteWithAdmins({
           tenantId, nombre: form.nombre, ciudad: form.ciudad,
           tasaInteres: form.tasaInteres, tasaLibre: form.tasaLibre,
-          montoMaximoPrestamo: form.montoMaximoPrestamo, capitalInicial: form.capitalInicial,
+          montoMaximoPrestamo: form.montoMaximoPrestamo, ventaDirectaCobradorMax: form.ventaDirectaCobradorMax,
+          capitalInicial: form.capitalInicial,
           codigo: nextRouteCode(routes), adminIds: form.adminIds, cobradorId: form.cobradorId || undefined,
           officeId: form.officeId || undefined,
         }, user)
@@ -684,6 +687,12 @@ export default function RoutesPage() {
           <div className="flex items-center gap-3">
             <input type="checkbox" id="tasaLibre" checked={form.tasaLibre} onChange={e => setForm(f => ({ ...f, tasaLibre: e.target.checked }))} className="w-4 h-4 text-primary-600" />
             <label htmlFor="tasaLibre" className="text-sm text-gray-700">Tasa libre (el cobrador puede variar la tasa)</label>
+          </div>
+          {/* 0054 (propietario 2026-11-09): el Cobrador vende sin solicitud hasta este monto. 0 = siempre pide autorización. */}
+          <div data-testid="route-collector-direct-max">
+            <MoneyInput label="Venta sin autorización hasta" currency={currency} value={form.ventaDirectaCobradorMax}
+              onValueChange={v => setForm(f => ({ ...f, ventaDirectaCobradorMax: v }))}
+              hint="El Cobrador vende sin pedir autorización si la venta no supera este monto y el cliente no tiene un crédito vivo. Déjalo en 0 para que siempre pida autorización." />
           </div>
 
           {/* Usuarios asignados a esta ruta — BORRADOR: no persiste hasta "Actualizar".

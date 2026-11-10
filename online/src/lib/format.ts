@@ -45,6 +45,9 @@ const ERRORS: Record<string, string> = {
   CREDIT_CHANGED: 'La venta cambió mientras la corregía. Vuelva a abrirla y revise los datos.',
   NOTHING_TO_RECTIFY: 'No hay cambios que corregir.',
   PENDING_REQUEST_EXISTS: 'Ese cliente ya tiene una solicitud pendiente.',
+  // 0054 · venta directa del Cobrador hasta el monto de su ruta.
+  DIRECT_SALE_LIMIT: 'La venta supera el monto que la ruta permite sin autorización: envíala como solicitud.',
+  AUTHORIZATION_REQUIRED: 'Esta venta necesita autorización (por ejemplo, el cliente ya tiene un crédito activo): envíala como solicitud.',
   INTEREST_RATE_NOT_ALLOWED: 'Tasa no permitida: solo 10 % o 20 %, y el Cobrador usa la tasa de su ruta salvo que la ruta tenga «Tasa libre».',
   INVALID_CONDITIONS: 'Condiciones no válidas (la fecha de la venta no puede ser anterior a hoy).',
   CLIENT_NOT_ACTIVE: 'El cliente no pertenece a esta ruta.',  // 0049: el estado ya no impide el crédito
@@ -149,7 +152,7 @@ const ERRORS: Record<string, string> = {
 
 const FIELD: Record<string, string> = {
   name: 'Nombre', code: 'Código', city: 'Ciudad', email: 'Correo', phone: 'Teléfono', interestRate: 'Tasa de interés', freeRate: 'Tasa libre',
-  maxLoanMinor: 'Venta máxima', officeId: 'Oficina', collectorId: 'Cobrador', memberIds: 'Personas asignadas', adminIds: 'Administradores',
+  maxLoanMinor: 'Venta máxima', collectorDirectMaxMinor: 'Venta sin autorización hasta', officeId: 'Oficina', collectorId: 'Cobrador', memberIds: 'Personas asignadas', adminIds: 'Administradores',
   capitalControllerId: 'Responsable de capital', membershipId: 'Responsable de capital', reason: 'Motivo', displayName: 'Nombre', icon: 'Icono',
   legalName: 'Razón social', taxId: 'Identificación tributaria', address: 'Dirección', contactName: 'Persona de contacto', routeIds: 'Rutas',
   selectedRouteIds: 'Rutas', status: 'Estado',

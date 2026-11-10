@@ -23,7 +23,8 @@ async function createRouteWithAdminsOnline(input: CreateRouteInput, _actor: User
   }
   const body: Record<string, unknown> = {
     name: input.nombre, city: text(input.ciudad), interestRate: input.tasaInteres, freeRate: input.tasaLibre,
-    maxLoanMinor: toMinor(input.montoMaximoPrestamo ?? 0), officeId: input.officeId ?? null, adminIds: input.adminIds,
+    maxLoanMinor: toMinor(input.montoMaximoPrestamo ?? 0), collectorDirectMaxMinor: toMinor(input.ventaDirectaCobradorMax ?? 0),
+    officeId: input.officeId ?? null, adminIds: input.adminIds,
   };
   if (input.cobradorId) body['collectorId'] = input.cobradorId;
   const r = await money<Record<string, unknown>>('POST', '/v1/routes', body, generateId());
@@ -33,7 +34,7 @@ async function createRouteWithAdminsOnline(input: CreateRouteInput, _actor: User
 async function updateRouteWithAssignmentsOnline(input: UpdateRouteInput, _actor: User): Promise<{ added: string[]; removed: string[] }> {
   const body: Record<string, unknown> = {
     name: input.nombre, city: text(input.ciudad), interestRate: input.tasaInteres, freeRate: input.tasaLibre,
-    maxLoanMinor: toMinor(input.montoMaximoPrestamo ?? 0),
+    maxLoanMinor: toMinor(input.montoMaximoPrestamo ?? 0), collectorDirectMaxMinor: toMinor(input.ventaDirectaCobradorMax ?? 0),
     // En CLEAN «sin valor» = sin Oficina / sin Cobrador; en el servidor hay que decirlo con null.
     officeId: input.officeId ?? null, collectorId: input.cobradorId ?? null,
     memberIds: input.assignedUserIds,
