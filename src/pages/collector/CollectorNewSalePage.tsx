@@ -55,11 +55,13 @@ export default function CollectorNewSalePage() {
 
   // D73-01: si cambia la configuración de una ruta (tasa / «Tasa libre»), se relee y el formulario la aplica.
   const routesRevision = useDataRevision(['routes'])
-  useEffect(() => { load() }, [user, routesRevision])
+  useEffect(() => { load() }, [user, routesRevision, activeRouteId])
 
   async function load() {
     if (!user) return
-    const ids = getAuthorizedRouteIds(user)
+    // 3.42 (Helmer 2026-11-10): solo los clientes de la RUTA ELEGIDA (con varias rutas asignadas, la que está trabajando).
+    const assigned = getAuthorizedRouteIds(user)
+    const ids = activeRouteId && assigned.includes(activeRouteId) ? [activeRouteId] : assigned
     setRouteIds(ids)
     const [all, rts] = await Promise.all([
       db.clients.where('tenantId').equals(user.tenantId).toArray(),

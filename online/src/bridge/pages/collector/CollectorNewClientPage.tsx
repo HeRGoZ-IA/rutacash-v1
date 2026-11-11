@@ -79,13 +79,15 @@ function NewClientForm() {
 
   // D73-01: si cambia la configuración de una ruta (tasa / «Tasa libre»), se relee y el formulario la aplica.
   const routesRevision = useDataRevision(['routes'])
-  useEffect(() => { load() }, [user, routesRevision])
+  useEffect(() => { load() }, [user, routesRevision, activeRouteId])
 
   async function load() {
     if (!user) return
     const authorizedIds = getAuthorizedRouteIds(user)
     const all = await db.routes.where('tenantId').equals(user.tenantId).toArray()
-    const mine = all.filter(r => authorizedIds.includes(r.id))
+    // 3.42 (Helmer 2026-11-10): el cliente nuevo queda en la RUTA ELEGIDA; para otra ruta, el Cobrador la cambia arriba.
+    const assigned = all.filter(r => authorizedIds.includes(r.id))
+    const mine = activeRouteId && assigned.some(r => r.id === activeRouteId) ? assigned.filter(r => r.id === activeRouteId) : assigned
     setRoutes(mine)
     const defaultRoute = (activeRouteId && mine.some(r => r.id === activeRouteId)) ? activeRouteId : (mine[0]?.id ?? '')
     setForm(f => ({ ...f, routeId: defaultRoute }))
@@ -272,8 +274,13 @@ function NewClientForm() {
           <Input label="Teléfono" value={form.telefonoPrincipal} onChange={e => setForm(f => ({ ...f, telefonoPrincipal: e.target.value }))} required />
           <Input label="Teléfono adicional" value={form.telefonoSecundario} onChange={e => setForm(f => ({ ...f, telefonoSecundario: e.target.value }))} />
         </div>
-        <Select label="Ruta" value={form.routeId} onChange={e => setForm(f => ({ ...f, routeId: e.target.value }))}
-          options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
+        {routes.length === 1 ? (
+          <Input label="Ruta" value={routes[0]!.nombre} readOnly tabIndex={-1} className="bg-gray-50" data-testid="new-client-route"
+            hint="El cliente queda en la ruta que estás trabajando. Para otra ruta, cámbiala arriba." />
+        ) : (
+          <Select label="Ruta" value={form.routeId} onChange={e => setForm(f => ({ ...f, routeId: e.target.value }))}
+            options={routes.map(r => ({ value: r.id, label: r.nombre }))} placeholder="Seleccionar ruta" required />
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <PhotoInput label="Foto del documento" value={form.fotoDocumentoUrl} onChange={url => setForm(f => ({ ...f, fotoDocumentoUrl: url }))} />

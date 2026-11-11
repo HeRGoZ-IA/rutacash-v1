@@ -1210,6 +1210,32 @@ try {
     const supTxt = await text();
     ok('E-17', ['C-01', 'C-11'], 'Supervisor (Norte): Diferencias en solo lectura, sin resolver', supTxt.includes('solo lectura') && !(await page.$('[data-testid="dif-confirm"]')));
     await both('E-17-supervisor-diferencias', () => waitTestid('dif-page'));
+    // 3.42 (Helmer 2026-11-10): con varias rutas asignadas, «Nueva venta» y «Nuevo cliente» solo usan la ruta ELEGIDA.
+    {
+      const supRoutes = await q(`select r.id, r.name from adex.membership_routes mr join adex.routes r on r.id = mr.route_id and r.company_id = mr.company_id
+                                  where mr.membership_id = $1`, [M.sup]);
+      const header = await page.evaluate(() => document.querySelector('header')?.innerText ?? '');
+      const active = supRoutes.find((r) => header.includes(r.name));
+      const docsOf = async (ids) => (await q(`select document from adex.clients where route_id = any($1::text[])`, [ids])).map((r) => r.document);
+      const mineDocs = active ? await docsOf([active.id]) : [];
+      const otherDocs = active ? await docsOf(supRoutes.filter((r) => r.id !== active.id).map((r) => r.id)) : [];
+      await go('/supervisor/new-sale');
+      await page.waitForFunction(() => [...document.querySelectorAll('label')].some((l) => l.innerText.includes('Valor de la venta')), { timeout: 20_000 }).catch(() => undefined);
+      await sleep(1500);
+      await page.evaluate(() => document.querySelector('[role="combobox"]')?.focus());
+      await sleep(600);
+      const opts = await page.$$eval('[role="option"]', (os) => os.map((o) => o.textContent.trim()));
+      const docOf = (t) => (t.match(/ - ([^ ]+)$/) ?? [])[1];
+      const shownDocs = opts.map(docOf).filter(Boolean);
+      const leaked = shownDocs.filter((d) => otherDocs.includes(d));
+      await shot('E-17b-supervisor-nueva-venta-ruta-elegida');
+      await go('/supervisor/clients/new');
+      await page.waitForSelector('[data-testid="new-client-route"]', { timeout: 20_000 }).catch(() => undefined);
+      const routeField = await page.$eval('[data-testid="new-client-route"]', (el) => el.value).catch(() => null);
+      ok('E-17b', ['C-01'], '3.42: con dos rutas asignadas, «Nueva venta» lista solo clientes de la ruta elegida y «Nuevo cliente» la deja fija',
+        supRoutes.length >= 2 && !!active && otherDocs.length > 0 && shownDocs.length === Math.min(60, mineDocs.length) && leaked.length === 0 && routeField === active.name,
+        JSON.stringify({ routes: supRoutes.map((r) => r.name), active: active?.name, shown: shownDocs.length, mine: mineDocs.length, others: otherDocs.length, leaked: leaked.length, routeField }));
+    }
     const switched = await page.click('[aria-label="Cambiar empresa o rol"]').then(() => true, () => false);
     await page.waitForFunction(() => location.pathname === '/contexto', { timeout: 15_000 }).catch(() => undefined);
     await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.innerText.includes('Préstamos Sintéticos Sur'))?.click());
