@@ -32,7 +32,7 @@ import {
 } from '../structure/routes.ts';
 import { createCategory, deleteCategory, listCategories, updateCategory } from '../structure/categories.ts';
 import {
-  CLIENT_FIELDS, createClient, deleteClient, documentTypes, getClient, listClients, setClientStatus, updateClient,
+  CLIENT_FIELDS, createClient, deleteClient, documentOwner, documentTypes, getClient, listClients, setClientStatus, updateClient,
 } from '../structure/clients.ts';
 import {
   allocateToAdmin, capitalReconciliation, capitalSummary, companyDeposit, companyWithdrawal, deliverToWorker, getOperation, listControllerEvents, listCustody,
@@ -185,6 +185,8 @@ const ENDPOINTS: readonly Endpoint[] = [
   { method: 'GET', pattern: /^\/v1\/clients$/, fields: null, handler: () => async (c, ctx, _b, q) => ok({ clients: await listClients(c, ctx, q) }) },
   { method: 'POST', pattern: /^\/v1\/clients$/, fields: CLIENT_FIELDS, idempotent: 'clients.create',
     handler: () => async (c, ctx, b) => created(await createClient(c, ctx, b)) },
+  // 0055: aviso temprano de documento ya registrado (antes de /v1/clients/:id).
+  { method: 'GET', pattern: /^\/v1\/clients\/document-owner$/, fields: null, handler: () => async (c, ctx, _b, q) => ok(await documentOwner(c, ctx, q)) },
   { method: 'GET', pattern: new RegExp(`^/v1/clients/${ID}$`), fields: null, handler: ([id]) => async (c, ctx) => ok(await getClient(c, ctx, id!)) },
   { method: 'PATCH', pattern: new RegExp(`^/v1/clients/${ID}$`), fields: CLIENT_FIELDS, handler: ([id]) => async (c, ctx, b) => ok(await updateClient(c, ctx, id!, b)) },
   { method: 'POST', pattern: new RegExp(`^/v1/clients/${ID}/status$`), fields: ['status'], handler: ([id]) => async (c, ctx, b) => ok(await setClientStatus(c, ctx, id!, b)) },

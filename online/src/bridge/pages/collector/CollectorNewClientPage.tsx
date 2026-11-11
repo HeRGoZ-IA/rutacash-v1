@@ -30,6 +30,7 @@ import { computeSaleFinancials, createDirectSale, createSaleRequest, directSaleL
 import { useCapitalGuard } from '@/hooks/useCapitalGuard'
 // ADEX Online: tipo de documento (DS-10).
 import { DocumentTypeSelect } from '../../../runtime/DocumentTypeSelect.tsx'
+import { api } from '../../../runtime/session.ts'
 import type { Client, Route, Sale } from '@/models/types'
 // ADEX Online (Ronda 65-C1).
 import { OfflineOperationBlocked, useNewClientsAndSalesBlocked } from '../../../offline/ui.tsx'
@@ -61,6 +62,8 @@ function NewClientForm() {
   const { activeRouteId } = useCollectorRoute()
   const [routes, setRoutes] = useState<Route[]>([])
   const [dup, setDup] = useState<Client | null>(null)
+  // 0055 (Helmer 2026-11-10): el documento ya es de un cliente de OTRA ruta que este usuario no ve.
+  const [remoteDup, setRemoteDup] = useState<{ routeName: string } | null>(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
     documento: '', nombre: '', direccionPrincipal: '', direccionSecundaria: '',
@@ -142,12 +145,30 @@ function NewClientForm() {
     : null
 
   // Validación global de documento duplicado (mismo tenant, sin importar ruta/oficina).
+  // 0055: lo que este usuario no ve (clientes de otras rutas) se pregunta al servidor, que solo dice la ruta.
+  async function serverOwner(doc: string): Promise<{ routeName: string } | null> {
+    if (!tipoDocumento || !normalizeDoc(doc)) return null
+    try {
+      const r = await api().get<{ exists: boolean; routeName?: string }>(
+        `/v1/clients/document-owner?documentType=${encodeURIComponent(tipoDocumento)}&document=${encodeURIComponent(doc.trim())}`)
+      return r.exists ? { routeName: r.routeName ?? 'otra ruta' } : null
+    } catch { return null }   // sin respuesta: decide el servidor al guardar
+  }
   async function checkDuplicate(doc: string) {
     const norm = normalizeDoc(doc)
-    if (!norm || !user) { setDup(null); return }
+    if (!norm || !user) { setDup(null); setRemoteDup(null); return }
     const all = await db.clients.where('tenantId').equals(user.tenantId).toArray()
-    setDup(all.find(c => normalizeDoc(c.documento) === norm) ?? null)
+    const local = all.find(c => normalizeDoc(c.documento) === norm) ?? null
+    setDup(local)
+    setRemoteDup(local ? null : await serverOwner(doc))
   }
+  // Aviso temprano: se comprueba al dejar de escribir (y al cambiar el tipo), sin esperar a llenar todo.
+  useEffect(() => {
+    if (!form.documento.trim()) { setDup(null); setRemoteDup(null); return }
+    const t = setTimeout(() => { void checkDuplicate(form.documento) }, 700)
+    return () => clearTimeout(t)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.documento, tipoDocumento])
 
   async function handleSave() {
     if (!user) return
@@ -184,6 +205,8 @@ function NewClientForm() {
     const all = await db.clients.where('tenantId').equals(user.tenantId).toArray()
     const existing = all.find(c => normalizeDoc(c.documento) === norm)
     if (existing) { setDup(existing); toast.error('Este documento ya está registrado en esta empresa.'); return }
+    const owner = await serverOwner(form.documento)
+    if (owner) { setRemoteDup(owner); toast.error(`Este documento ya es de un cliente de la ruta «${owner.routeName}».`); return }
 
     setSaving(true)
     try {
@@ -251,9 +274,9 @@ function NewClientForm() {
         <Input
           label="Número de documento"
           value={form.documento}
-          onChange={e => { setForm(f => ({ ...f, documento: e.target.value })); if (dup) setDup(null) }}
+          onChange={e => { setForm(f => ({ ...f, documento: e.target.value })); if (dup) setDup(null); if (remoteDup) setRemoteDup(null) }}
           onBlur={e => checkDuplicate(e.target.value)}
-          error={dup ? 'Este documento ya está registrado en esta empresa.' : undefined}
+          error={dup || remoteDup ? 'Este documento ya está registrado en esta empresa.' : undefined}
           required autoFocus
         />
         {dup && (
@@ -262,6 +285,15 @@ function NewClientForm() {
             <div className="text-xs text-red-700">
               <p className="font-semibold">Este documento ya está registrado en esta empresa.</p>
               <p className="mt-0.5"><span className="font-medium">{formatClientLabel(dup.nombre, dup.negocio)}</span> · Ruta: {dupRouteName}</p>
+            </div>
+          </div>
+        )}
+        {remoteDup && (
+          <div className="flex items-start gap-2 p-3 bg-red-50 rounded-xl border border-red-100" data-testid="document-other-route">
+            <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+            <div className="text-xs text-red-700">
+              <p className="font-semibold">Este documento ya es de un cliente de la ruta «{remoteDup.routeName}».</p>
+              <p className="mt-0.5">Un cliente solo puede estar en una ruta. No hace falta llenar el resto: pide al Administrador que lo revise.</p>
             </div>
           </div>
         )}
@@ -375,7 +407,7 @@ function NewClientForm() {
 
         <button
           onClick={handleSave}
-          disabled={saving || !!dup || (allowDirect && capExcedido)}
+          disabled={saving || !!dup || !!remoteDup || (allowDirect && capExcedido)}
           className="w-full h-12 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white rounded-2xl text-base font-bold flex items-center justify-center gap-2"
         >
           {saving ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-5 h-5" />}

@@ -650,6 +650,29 @@ try {
       if (capOff.status !== 200) throw new Error(`no se pudo volver a 0 el monto de la ruta: ${capOff.text}`);
     }
 
+    // 0055 (Helmer 2026-11-10): aviso temprano. El documento ya es de un cliente de OTRA ruta (Centro 2, que el Cobrador
+    // no ve): al escribirlo, «Nuevo cliente» avisa en qué ruta está, sin esperar a llenar todo, y no deja guardar.
+    {
+      const a1h = await apiAs('admin1.norte@example.test', M.ad1);
+      const docH = '85278530600';
+      const cliH = await a1h('POST', '/v1/clients', { routeId: C2, name: 'Cliente Sintético Centro H (documento en otra ruta)', documentType: 'CPF', document: docH,
+        phonePrimary: '11988000003', addressPrimary: 'Rua Sintética, 993', addressSecondary: 'Sala 3', business: 'Comércio sintético H' });
+      const before = Number((await one('select count(*)::int n from adex.clients where document_normalized = $1', [docH])).n);
+      await go('/collector/clients/new');
+      await page.waitForFunction(() => [...document.querySelectorAll('label')].some((l) => l.innerText.includes('Número de documento')), { timeout: 20_000 }).catch(() => undefined);
+      await sleep(1200);
+      await setField('Número de documento', '852.785.306-00');
+      const warned = await page.waitForSelector('[data-testid="document-other-route"]', { timeout: 15_000 }).then(() => true, () => false);
+      const warnTxt = await page.evaluate(() => document.querySelector('[data-testid="document-other-route"]')?.innerText.replace(/ /g, ' ') ?? '');
+      const saveDisabled = await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /^Guardar cliente/.test(b.innerText.trim()))?.disabled ?? null);
+      await both('A-15f-aviso-documento-otra-ruta', () => waitTestid('document-other-route'));
+      const leaks = warnTxt.includes('Centro H') || warnTxt.includes('Comércio sintético H');
+      const after = Number((await one('select count(*)::int n from adex.clients where document_normalized = $1', [docH])).n);
+      ok('A-15f', ['C-01'], '0055: al escribir un documento de un cliente de otra ruta, «Nuevo cliente» avisa enseguida la ruta (Centro 2) sin mostrar sus datos y no deja guardar',
+        cliH.status === 201 && warned && warnTxt.includes('Ruta Centro 2') && !leaks && saveDisabled === true && before === 1 && after === 1,
+        JSON.stringify({ created: cliH.status, warned, warnTxt, saveDisabled, before, after }));
+    }
+
     // Venta directa del Administrador desde la Base de Centro 2 (ruta sin Cobrador): nuevo cliente y venta.
     await login('admin1.norte@example.test');
     const c2Client = 'Cliente E2E Centro 2 Directa João';   // con tilde: lo usa la búsqueda sin acentos (A-16b)

@@ -187,6 +187,35 @@ describe('Fase 2 · clientes y DS-10', () => {
     assert.equal((await anaCob('GET', `/v1/clients?routeId=${routeId('c1', 2)}`)).status, 403);
   });
 
+  test('CLI-030 · 0055: aviso temprano — el documento ya es de un cliente de otra ruta: solo se dice la ruta', async () => {
+    // Ruta nueva de Ana (Administradora) a la que Ana Cobradora NO está asignada.
+    const nr = await bruno('POST', '/v1/routes', { name: 'Ruta Aviso Documento', interestRate: 20, freeRate: false, maxLoanMinor: 0, adminIds: [M.anaAdmin] });
+    assert.equal(nr.status, 201, JSON.stringify(nr.body));
+    const r2 = nr.body['id'] as string;
+    const made = await ana('POST', '/v1/clients', base(r2, 'CPF', '852.785.306-00', 'Cliente de otra ruta'));
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    const ask = (who: Caller, type: string, doc: string) => who('GET', `/v1/clients/document-owner?documentType=${encodeURIComponent(type)}&document=${encodeURIComponent(doc)}`);
+    // El Cobrador de la ruta 1 no ve la ruta 2: sabe que existe y en qué ruta, nada más.
+    for (const variant of ['85278530600', '852.785.306-00', ' 852 785 306 00 ']) {
+      const r = await ask(anaCob, 'CPF', variant);
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const routeName = (await db.admin.query('select name from adex.routes where id = $1', [r2])).rows[0].name;
+      assert.deepEqual(r.body, { exists: true, routeName, accessible: false }, variant);
+    }
+    // Quien sí ve esa ruta recibe también su id.
+    assert.deepEqual((await ask(ana, 'cpf', '85278530600')).body, { exists: true, routeName: (await db.admin.query('select name from adex.routes where id = $1', [r2])).rows[0].name, accessible: true, routeId: r2 });
+    // No existe, otro tipo, tipo desconocido u otra empresa: no hay coincidencia.
+    assert.deepEqual((await ask(anaCob, 'CPF', '00000000191')).body, { exists: false });
+    assert.deepEqual((await ask(anaCob, 'RG', '85278530600')).body, { exists: false });
+    assert.deepEqual((await ask(anaCob, 'XX', '85278530600')).body, { exists: false });
+    assert.deepEqual((await ask(hugo, 'CC', '85278530600')).body, { exists: false }, 'otra empresa no ve los documentos de c1');
+    // Sin permiso de alta (Secretario de solo consulta) o sin datos: no.
+    assert.equal((await ask(fabio, 'CPF', '85278530600')).status, 403);
+    assert.equal((await anaCob('GET', '/v1/clients/document-owner?documentType=CPF')).status, 400);
+    // Y el alta sigue rechazándose al guardar (la barrera de siempre).
+    assert.equal((await anaCob('POST', '/v1/clients', base(r1, 'CPF', '85278530600', 'Intento'))).body['error'], 'DOCUMENT_DUPLICATE');
+  });
+
   test('CLI-099 · sin errores inesperados en el servidor', () => {
     assert.deepEqual(api.errors, []);
   });

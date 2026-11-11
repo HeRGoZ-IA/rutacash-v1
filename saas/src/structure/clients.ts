@@ -135,6 +135,22 @@ export async function createClient(client: pg.PoolClient, ctx: ActiveContext, bo
   return view(row);
 }
 
+/**
+ * 0055 (Helmer 2026-11-10): aviso temprano al registrar un cliente. ¿Ese documento ya es de un cliente de la
+ * empresa? Devuelve solo la ruta (y si quien pregunta la ve), nunca los datos del cliente de una ruta ajena.
+ */
+export async function documentOwner(client: pg.PoolClient, ctx: ActiveContext, q: URLSearchParams) {
+  need(ctx, 'client.create');
+  const documentType = (q.get('documentType') ?? '').trim().toUpperCase();
+  const document = (q.get('document') ?? '').trim();
+  if (!documentType || !document || documentType.length > 16 || document.length > 40) throw new ApiError(400, 'INVALID_INPUT', 'documentType and document are required');
+  const r = await client.query<{ route_id: string; route_name: string; accessible: boolean }>(
+    'select route_id, route_name, accessible from adex.client_document_owner($1, $2)', [documentType, document]);
+  const row = r.rows[0];
+  if (!row) return { exists: false };
+  return { exists: true, routeName: row.route_name, accessible: row.accessible, ...(row.accessible ? { routeId: row.route_id } : {}) };
+}
+
 export async function updateClient(client: pg.PoolClient, ctx: ActiveContext, id: string, body: Record<string, unknown>) {
   const prev = await load(client, ctx, id, true);
   const full = allowed(ctx, 'client.edit', { routeId: prev.route_id });
