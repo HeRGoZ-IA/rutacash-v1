@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Manual de Liquidaciones · ADEX</title>
+<style>
+:root{
+  --blue:#2563eb;--blue2:#1d4ed8;--ink:#0f172a;--mut:#475569;--line:#e2e8f0;--bg:#f1f5f9;--card:#fff;
+  --green:#059669;--greenL:#d1fae5;--red:#dc2626;--redL:#fee2e2;--amber:#b45309;--amberL:#fef3c7;--soft:#eff6ff;--violet:#6d28d9;--violetL:#ede9fe;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5;-webkit-text-size-adjust:100%}
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;padding:10px 16px;background:linear-gradient(135deg,var(--blue),var(--blue2));color:#fff}
+.top .logo{font-weight:900;font-size:20px;letter-spacing:1px}
+.top .ttl{font-size:14px;opacity:.9;line-height:1.2}
+main{max-width:820px;margin:0 auto;padding:16px 16px 60px}
+.hero{background:#fff;border-radius:20px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:14px}
+.hero h1{font-size:24px;margin-bottom:8px}
+.hero p{color:#334155;font-size:15.5px}
+.toc{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
+.toc a{background:var(--soft);color:var(--blue2);text-decoration:none;font-weight:600;font-size:13.5px;padding:6px 12px;border-radius:999px}
+section{background:#fff;border-radius:20px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-top:14px;scroll-margin-top:64px}
+h2{font-size:20px;margin-bottom:10px;display:flex;align-items:center;gap:10px}
+h2 .n{flex:none;width:30px;height:30px;border-radius:50%;background:var(--blue);color:#fff;font-size:15px;display:flex;align-items:center;justify-content:center}
+h3{font-size:16.5px;margin:18px 0 8px}
+p{margin:8px 0;font-size:15px}
+ul,ol{margin:8px 0 8px 22px;font-size:15px}
+li{margin:4px 0}
+b{font-weight:700}
+.ui{display:inline-block;background:#f1f5f9;border:1px solid var(--line);border-radius:6px;padding:0 6px;font-weight:600;font-size:13.5px;white-space:nowrap}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0}
+@media (max-width:640px){.two{grid-template-columns:1fr}}
+.card{border:2px solid var(--line);border-radius:16px;padding:14px}
+.card.a{border-color:#bfdbfe;background:#f8fbff}
+.card.b{border-color:#ddd6fe;background:#fbfaff}
+.card h4{font-size:16px;margin-bottom:6px;display:flex;gap:8px;align-items:center}
+.card .big{font-size:14.5px;color:#334155}
+.tip,.warn,.ok,.info{border-radius:12px;padding:10px 12px;margin:10px 0;font-size:14.5px}
+.tip{background:var(--soft);color:#1e3a8a}
+.warn{background:var(--amberL);color:#78350f}
+.ok{background:var(--greenL);color:#064e3b}
+.info{background:var(--violetL);color:#3b0764}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:14px}
+th,td{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;vertical-align:top}
+th{background:#f8fafc;font-size:13px;color:#475569}
+.wrap{overflow-x:auto}
+/* Pasos del orden */
+.steps{display:flex;flex-direction:column;gap:10px;margin:12px 0}
+.step{display:flex;gap:12px;align-items:flex-start;border:2px solid var(--line);border-radius:14px;padding:12px}
+.step .num{flex:none;width:34px;height:34px;border-radius:50%;background:var(--blue);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center}
+.step.s2 .num{background:#475569}.step.s3 .num{background:var(--violet)}
+/* Pantallas simuladas */
+.screen{border:1px solid #cbd5e1;border-radius:14px;background:#f8fafc;margin:12px 0;overflow:hidden;font-size:13px}
+.screen .bar{background:#fff;border-bottom:1px solid var(--line);padding:8px 12px;font-weight:700;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.screen .bar small{font-weight:500;color:var(--mut)}
+.screen .in{padding:12px}
+.tabs{display:flex;gap:6px;margin-bottom:10px}
+.tabs span{padding:6px 10px;border-radius:8px;background:#e2e8f0;font-weight:600}
+.tabs span.on{background:var(--blue);color:#fff}
+.fields{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.fld{background:#fff;border:1px solid #cbd5e1;border-radius:8px;padding:4px 8px;min-width:110px}
+.fld i{display:block;font-style:normal;font-size:11px;color:var(--mut)}
+.fld.ro{background:#f1f5f9;color:#64748b}
+.btns{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.btn{padding:6px 10px;border-radius:8px;font-weight:700;background:#fff;border:1px solid #cbd5e1}
+.btn.p{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.g{background:var(--green);border-color:var(--green);color:#fff}
+.rows{background:#fff;border:1px solid var(--line);border-radius:10px;padding:4px 10px;margin:8px 0}
+.r{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--line)}
+.r:last-child{border-bottom:0}
+.r.t{font-weight:800}
+.plus{color:#047857}.minus{color:var(--red)}
+.banner{border-radius:8px;padding:6px 10px;font-weight:800;text-align:center;margin:8px 0}
+.banner.ex{background:var(--greenL);color:#047857}.banner.fa{background:var(--redL);color:#b91c1c}.banner.so{background:var(--amberL);color:#92400e}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:700;background:var(--greenL);color:#047857}
+.lbl{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#b45309;color:#fff;font-size:11.5px;font-weight:800;margin-right:4px;flex:none}
+.legend li{list-style:none;margin-left:-22px;display:flex;gap:6px;align-items:flex-start}
+details{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:8px 0;background:#fff}
+summary{font-weight:700;cursor:pointer;font-size:15px}
+details p{margin-top:8px}
+.foot{color:var(--mut);font-size:12.5px;text-align:center;margin-top:20px}
+@media print{.top{position:static}.toc{display:none}section{box-shadow:none;border:1px solid #ddd;break-inside:avoid-page}body{background:#fff}}
+</style>
+</head>
+<body>
+<div class="top"><div class="logo">ADEX</div><div class="ttl">Manual de Liquidaciones<br><small>Para Administradores y Supervisores</small></div></div>
+<main>
+
+<div class="hero">
+  <h1>📅 Liquidaciones, explicadas fácil</h1>
+  <p>En <b>Liquidación</b> hay dos cosas distintas, y cada una tiene su pestaña:</p>
+  <div class="two">
+    <div class="card a"><h4>💵 Cuadre por trabajador</h4><div class="big">Es <b>contar el dinero</b> que te entrega <b>una persona</b> (el cobrador o el supervisor) y compararlo con lo que el sistema dice que debía traer.</div></div>
+    <div class="card b"><h4>🔒 Cierre de ruta</h4><div class="big">Es <b>sellar un periodo de la ruta</b> (un día o una semana): sus cifras quedan <b>congeladas</b> y ya no entran más movimientos con esas fechas.</div></div>
+  </div>
+  <p>👉 Orden recomendado: <b>primero los cuadres de cada trabajador, después el cierre de la ruta.</b></p>
+  <div class="toc">
+    <a href="#s1">1. Diferencias</a><a href="#s2">2. ¿Qué va primero?</a><a href="#s3">3. Dónde y quién</a>
+    <a href="#s4">4. Cuadre paso a paso</a><a href="#s5">5. Cierre paso a paso</a><a href="#s6">6. Después del cierre</a>
+    <a href="#s7">7. El cobrador</a><a href="#s8">8. Preguntas</a>
+  </div>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+  <h2><span class="n">1</span>Cuadre y cierre: en qué se diferencian</h2>
+  <div class="wrap"><table>
+    <tr><th></th><th>💵 Cuadre por trabajador</th><th>🔒 Cierre de ruta</th></tr>
+    <tr><td><b>¿De quién?</b></td><td>De <b>una persona</b>: un cobrador o un supervisor</td><td>De <b>toda la ruta</b></td></tr>
+    <tr><td><b>¿Qué se hace?</b></td><td>Escribes cuánto dinero te entregó y el sistema dice si está <b>exacto</b>, si <b>falta</b> o si <b>sobra</b></td><td>Revisas el resumen del periodo y lo <b>congelas</b></td></tr>
+    <tr><td><b>¿Mueve dinero?</b></td><td><b>Sí:</b> lo entregado vuelve a la <b>Base disponible</b> de la ruta</td><td><b>No.</b> Solo deja constancia y congela las cifras</td></tr>
+    <tr><td><b>¿Qué periodo cubre?</b></td><td>Desde su <b>último cuadre</b> hasta ahora</td><td>Las fechas que elijas en «Desde» y «Hasta»</td></tr>
+    <tr><td><b>¿Cada cuánto?</b></td><td>Cada vez que el trabajador te entrega el dinero, normalmente al final del día</td><td>Como lo maneje tu operación: <b>diario</b> o <b>semanal</b></td></tr>
+    <tr><td><b>¿Se puede deshacer?</b></td><td>Sí, con <span class="ui">Reabrir</span> y un motivo (solo el último cuadre)</td><td>Sí, con <span class="ui">Reabrir</span> y un motivo</td></tr>
+  </table></div>
+  <div class="tip">💡 Piénsalo así: el <b>cuadre</b> es el conteo de billetes con cada cobrador. El <b>cierre</b> es firmar el cuaderno de la ruta al final del periodo.</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+  <h2><span class="n">2</span>¿Qué se hace primero?</h2>
+  <div class="steps">
+    <div class="step"><div class="num">1</div><div><b>Cuadre por trabajador</b>, con cada cobrador y cada supervisor que tenga dinero de la ruta. Recibes el dinero, lo cuentas y cierras su cuadre.</div></div>
+    <div class="step s2"><div class="num">2</div><div><b>Revisa</b> que no quede nadie sin cuadrar. En la pestaña «Cierre de ruta», el recuadro <span class="ui">Cuadres de trabajadores (informativo)</span> te dice cuántos cuadres hubo y si quedaron faltantes o sobrantes.</div></div>
+    <div class="step s3"><div class="num">3</div><div><b>Cierre de ruta</b>: generas el resumen del periodo y lo cierras.</div></div>
+  </div>
+  <div class="warn">⚠️ <b>¿Por qué en ese orden?</b> ADEX no te obliga, pero si cierras la ruta <b>hasta hoy</b> antes de cuadrar, ese día queda congelado. Ya no podrás registrar <b>ese día</b> el cuadre de un trabajador, ni un recaudo, un gasto o una entrega de Base: tendría que quedar para mañana.</div>
+  <div class="ok">✅ <b>Rutina sugerida al final del día:</b> los cobradores llegan → cuadras a cada uno → cuando todos estén cuadrados, haces el cierre de la ruta (si cierras diario) o lo dejas para el final de la semana (si cierras semanal).</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+  <h2><span class="n">3</span>Desde dónde se hace y quién puede</h2>
+  <h3>Caminos para entrar</h3>
+  <ol>
+    <li><b>Menú principal:</b> grupo <span class="ui">Control</span> → <span class="ui">Liquidación</span>. Es el camino principal.</li>
+    <li><b>Desde la ruta:</b> <span class="ui">Rutas</span> → en la tarjeta de la ruta, <span class="ui">Ver detalle</span> → pestaña <span class="ui">Liquidaciones</span>. Ahí ves el último cierre de la ruta y el último cuadre de cada trabajador, con dos atajos:
+      <ul>
+        <li><span class="ui">Ir a la liquidación de la ruta</span>: abre Liquidación con esa ruta ya elegida.</li>
+        <li><span class="ui">Cuadrar</span>, junto a cada trabajador: abre su cuadre directamente.</li>
+      </ul></li>
+    <li><b>Desde Transferencias:</b> después de entregar Base a un trabajador, el enlace <span class="ui">Ver su cuadre</span> lleva a su cuadre.</li>
+    <li><b>Desde una Oficina:</b> en su detalle, el enlace <span class="ui">Ver liquidaciones</span>.</li>
+    <li><b>Supervisor (desde su celular):</b> en su app tiene <span class="ui">Cuadre de trabajadores</span> para cuadrar a los cobradores de su ruta.</li>
+  </ol>
+  <h3>Quién puede hacer qué</h3>
+  <div class="wrap"><table>
+    <tr><th>Persona</th><th>Cuadre por trabajador</th><th>Cierre de ruta</th></tr>
+    <tr><td><b>Administrador responsable de capital</b> de la ruta</td><td>✅ Cuadra, reabre, entrega Base</td><td>✅ Cierra y reabre</td></tr>
+    <tr><td><b>Supervisor</b> de esa ruta</td><td>✅ Cuadra a los cobradores, recibe devoluciones y hace traspasos. ❌ No reabre ni entrega Base</td><td>❌</td></tr>
+    <tr><td><b>Otro Administrador</b> (no responsable)</td><td>👁️ Solo consulta</td><td>👁️ Solo consulta</td></tr>
+    <tr><td><b>SuperAdmin</b></td><td>👁️ Solo consulta</td><td>👁️ Solo consulta</td></tr>
+    <tr><td><b>Cobrador</b></td><td colspan="2">No ve Liquidación; ve su dinero en <span class="ui">Mi efectivo</span> (sección 7)</td></tr>
+  </table></div>
+  <div class="info">🔐 <b>Nadie cuadra su propio dinero.</b> Si un supervisor también tiene efectivo, su cuadre lo cierra otra persona autorizada. El sistema avisa: «Este es tu propio cuadre: debe cerrarlo otra persona autorizada».</div>
+  <p>¿Quién es el responsable de capital? Lo ves en <span class="ui">Rutas</span>, en «Usuarios asignados»: el Administrador marcado como <i>(responsable de capital)</i>.</p>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+  <h2><span class="n">4</span>Cuadre por trabajador, paso a paso</h2>
+  <p><b>Liquidación</b> → pestaña <span class="ui">Cuadre por trabajador</span> → elige la <b>Ruta</b> y luego el <b>Trabajador</b>.</p>
+
+  <div class="screen">
+    <div class="bar">Liquidaciones <small>Cierre de ruta y cuadre por trabajador</small></div>
+    <div class="in">
+      <div class="tabs"><span>Cierre de ruta</span><span class="on">Cuadre por trabajador</span></div>
+      <div class="fields"><div class="fld"><i>Ruta</i>Ruta Centro ▾</div><div class="fld"><i>Trabajador</i>Carlos Souza · Cobrador ▾</div></div>
+      <div style="font-size:12px;color:#64748b"><span class="lbl">A</span>Desde el último cuadre: 10/11 18:40 · Hasta: ahora</div>
+      <div class="rows">
+        <div class="r"><span><span class="lbl">B</span>Arrastre pendiente (faltante anterior)</span><b>R$ 0</b></div>
+        <div class="r"><span><span class="lbl">C</span>(+) Base recibida</span><b class="plus">R$ 500</b></div>
+        <div class="r"><span>(−) Base devuelta / traspasada</span><b class="minus">R$ 0</b></div>
+        <div class="r"><span><span class="lbl">D</span>(+) Recaudo</span><b class="plus">R$ 450</b></div>
+        <div class="r"><span>(−) Desembolsado</span><b class="minus">R$ 0</b></div>
+        <div class="r"><span>(−) Gastos</span><b class="minus">R$ 30</b></div>
+        <div class="r t"><span><span class="lbl">E</span>Esperado a entregar</span><b style="color:#1d4ed8">R$ 920</b></div>
+      </div>
+      <div class="btns"><span class="btn g"><span class="lbl">F</span>Entregar Base</span><span class="btn">Recibir devolución</span><span class="btn">Traspasar a otro trabajador</span></div>
+      <div class="fields"><div class="fld" style="min-width:160px"><i><span class="lbl">G</span>Entregado</i>R$ 920</div></div>
+      <div class="banner ex">CUADRE EXACTO</div>
+      <div class="btns"><span class="btn p"><span class="lbl">H</span>Cerrar cuadre</span></div>
+    </div>
+  </div>
+
+  <ul class="legend">
+    <li><span class="lbl">A</span><span><b>Periodo del cuadre.</b> Va desde el último cuadre de esa persona hasta este momento; no se eligen fechas.</span></li>
+    <li><span class="lbl">B</span><span><b>Arrastre pendiente:</b> lo que <b>le faltó</b> en el cuadre anterior. Se le vuelve a sumar hasta que se resuelva.</span></li>
+    <li><span class="lbl">C</span><span><b>Base recibida / devuelta:</b> dinero que la ruta le dio para trabajar (para prestar o para gastos) y lo que ya devolvió o pasó a otro trabajador.</span></li>
+    <li><span class="lbl">D</span><span><b>Recaudo, desembolsado y gastos:</b> lo que cobró, lo que entregó en préstamos nuevos y lo que gastó, según lo que registró en su app.</span></li>
+    <li><span class="lbl">E</span><span><b>Esperado a entregar:</b> el dinero que <b>debería tener en la mano</b>. Arrastre + Base recibida − devuelta + recaudo − desembolsado − gastos.</span></li>
+    <li><span class="lbl">F</span><span><b>Botones de Base</b> (no son el cuadre):
+      <ul>
+        <li><span class="ui">Entregar Base</span>: le das dinero de la ruta para salir a trabajar. Solo lo hace el responsable de capital.</li>
+        <li><span class="ui">Recibir devolución</span>: te devuelve parte de la Base sin hacer el cuadre.</li>
+        <li><span class="ui">Traspasar a otro trabajador</span>: pasa dinero de un trabajador a otro de la misma ruta.</li>
+      </ul>
+      Los tres piden valor y motivo, y cambian el «Esperado a entregar».</span></li>
+    <li><span class="lbl">G</span><span><b>Entregado:</b> escribe lo que <b>contaste de verdad</b> en billetes.</span></li>
+    <li><span class="lbl">H</span><span><b>Cerrar cuadre</b> → sale el resumen <span class="ui">Confirmar cuadre</span> → <span class="ui">Confirmar cierre</span>. Listo: el cuadre queda guardado y el dinero entregado vuelve a la <b>Base disponible</b> de la ruta.</span></li>
+  </ul>
+
+  <h3>Los tres resultados posibles</h3>
+  <div class="banner ex">CUADRE EXACTO</div>
+  <p>Entregó justo lo esperado. No hay nada más que hacer.</p>
+  <div class="banner fa">FALTANTE R$ 20</div>
+  <p>Entregó <b>menos</b>. Debes escribir el <b>motivo de la diferencia</b> (mínimo 10 letras). El faltante <b>no se pierde</b>: aparece como «Arrastre pendiente» en su próximo cuadre y también en el menú <span class="ui">Diferencias</span>, donde decides qué pasa con él.</p>
+  <div class="banner so">SOBRANTE R$ 15</div>
+  <p>Entregó <b>más</b>. También pide motivo. El sobrante queda registrado aparte: <b>no</b> se vuelve saldo a favor del trabajador ni Base de la ruta. Se resuelve en <span class="ui">Diferencias</span>.</p>
+
+  <h3>Otras cosas de esta pestaña</h3>
+  <ul>
+    <li><b>Tarjeta «Base del trabajador»</b>, arriba: cuánto dinero tienen hoy en la mano todos los trabajadores de la ruta, persona por persona.
+      <ul>
+        <li>Dice <span class="ui">Cuadra</span> si todo coincide o <span class="ui">Revisar</span> si hay algo pendiente.</li>
+        <li>Muestra también los faltantes pendientes y los sobrantes registrados.</li>
+        <li>La «Cartera activa» que aparece ahí <b>no es efectivo</b>: es lo que los clientes todavía deben.</li>
+      </ul></li>
+    <li><b>Aviso «N trabajador(es) con faltante pendiente»</b>: te recuerda a quién le falta dinero de cuadres anteriores.</li>
+    <li><b>Lista «Cuadres de trabajadores en esta ruta»</b>: el historial con fecha, esperado, entregado, diferencia, quién cerró y motivo.</li>
+    <li><b><span class="ui">Reabrir</span> un cuadre</b>: solo el responsable de capital, solo el <b>último</b> cuadre de esa persona y con motivo. No se puede si ese día ya quedó dentro de un <b>cierre de ruta</b>.</li>
+    <li>Si mientras cuadras el cobrador registra algo nuevo, ADEX avisa «Las cifras cambiaron desde la vista previa» y recalcula. Vuelve a revisar el esperado.</li>
+  </ul>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+  <h2><span class="n">5</span>Cierre de ruta, paso a paso</h2>
+  <p><b>Liquidación</b> → pestaña <span class="ui">Cierre de ruta</span> → elige la <b>Ruta</b>.</p>
+
+  <div class="screen">
+    <div class="bar">Liquidaciones <small><span class="btn" style="padding:2px 8px">CSV</span> <span class="btn" style="padding:2px 8px"><span class="lbl">C</span>Generar</span> <span class="btn p" style="padding:2px 8px"><span class="lbl">E</span>Hacer cierre</span></small></div>
+    <div class="in">
+      <div class="tabs"><span class="on">Cierre de ruta</span><span>Cuadre por trabajador</span></div>
+      <div class="fields"><div class="fld"><i>Ruta</i>Ruta Centro ▾</div><div class="fld ro"><i><span class="lbl">B</span>Desde</i>08/11/2026 🔒</div><div class="fld"><i>Hasta</i>11/11/2026</div></div>
+      <div class="banner" style="background:#eff6ff;color:#1d4ed8;font-weight:600;text-align:left"><span class="lbl">A</span>Último cierre: 01/11 – 07/11</div>
+      <div class="rows">
+        <div class="r"><span><span class="lbl">D</span>Base del trabajador al inicio</span><b>R$ 900</b></div>
+        <div class="r"><span>(+) Entregas de Base</span><b class="plus">R$ 1.500</b></div>
+        <div class="r"><span>(+) Recaudo</span><b class="plus">R$ 4.210</b></div>
+        <div class="r"><span>(+) Transferencias entrantes</span><b class="plus">R$ 0</b></div>
+        <div class="r"><span>(−) Desembolsos</span><b class="minus">R$ 3.000</b></div>
+        <div class="r"><span>(−) Gastos</span><b class="minus">R$ 190</b></div>
+        <div class="r"><span>(−) Transferencias salientes</span><b class="minus">R$ 0</b></div>
+        <div class="r"><span>(−) Devoluciones de Base</span><b class="minus">R$ 2.320</b></div>
+        <div class="r t"><span>Base del trabajador al cierre</span><b>R$ 1.100</b></div>
+      </div>
+      <div class="rows" style="background:#f8fafc"><div class="r"><span><b>Cuadres de trabajadores (informativo)</b><br>3 cuadre(s) · entregado R$ 2.320 · faltantes R$ 0 · sobrantes R$ 0</span></div></div>
+      <div style="font-weight:700;margin-top:10px"><span class="lbl">F</span>Cierres realizados</div>
+      <div class="rows">
+        <div class="r"><span>01/11 – 07/11 (v1)</span><span><span class="tag">Período cerrado</span> CSV · Reabrir</span></div>
+        <div class="r"><span>25/10 – 31/10 (v1)</span><span><span class="tag">Período cerrado</span> CSV · Reabrir</span></div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="legend">
+    <li><span class="lbl">A</span><span><b>Último cierre:</b> hasta qué fecha quedó cerrada la ruta la última vez.</span></li>
+    <li><span class="lbl">B</span><span><b>Desde / Hasta:</b>
+      <ul>
+        <li>«Desde» se pone solo, en el día siguiente al último cierre, y <b>no se puede cambiar</b>, para que no queden días sin cerrar ni días cerrados dos veces.</li>
+        <li>«Hasta» propone <b>hoy</b>; puedes elegir otro día anterior.</li>
+        <li>Si la ruta nunca se ha cerrado, «Desde» propone el lunes de esta semana y sí se puede cambiar.</li>
+      </ul></span></li>
+    <li><span class="lbl">C</span><span><span class="ui">Generar</span>: muestra el resumen del periodo. <b>No guarda nada</b>: es solo para revisar, y puedes generarlo las veces que quieras.</span></li>
+    <li><span class="lbl">D</span><span><b>El resumen</b> cuenta el dinero que estuvo <b>en manos de los trabajadores</b> durante el periodo:
+      <ul>
+        <li><b>Al inicio:</b> lo que tenían cuando empezó el periodo.</li>
+        <li><b>(+)</b> la Base que les entregaste, lo que cobraron y las transferencias que recibieron.</li>
+        <li><b>(−)</b> lo que prestaron (desembolsos), lo que gastaron, lo que transfirieron y lo que te devolvieron, por ejemplo en los cuadres.</li>
+        <li><b>Al cierre:</b> lo que todavía queda en sus manos. Si cuadraste a todos y te entregaron todo, esta cifra se acerca a cero o queda en la Base que les dejaste para el día siguiente.</li>
+      </ul>
+      Arriba aparecen además tres cifras rápidas: Recaudo, Gastos y Base del trabajador al cierre.</span></li>
+    <li><span class="lbl">E</span><span><span class="ui">Hacer cierre</span>: abre una ventana de confirmación con la ruta, las fechas, el estado y las cifras. Revisa y toca <span class="ui">Hacer cierre y congelar cifras</span>. Sale «Cierre realizado (versión 1). Las cifras quedan congeladas.»</span></li>
+    <li><span class="lbl">F</span><span><b>Cierres realizados:</b> el historial.
+      <ul>
+        <li><span class="ui">CSV</span> descarga el documento de ese cierre tal como quedó guardado.</li>
+        <li><span class="ui">Reabrir</span> lo deshace; ver la sección 6.</li>
+        <li>La versión (v1, v2…) aumenta cada vez que un periodo se reabre y se vuelve a cerrar.</li>
+      </ul></span></li>
+  </ul>
+
+  <h3>¿Por qué el botón «Hacer cierre» está gris o no aparece?</h3>
+  <div class="wrap"><table>
+    <tr><th>Lo que pasa</th><th>Qué hacer</th></tr>
+    <tr><td>El botón <b>no aparece</b></td><td>No eres el Administrador responsable de capital de esa ruta, o eres SuperAdmin. Solo puedes consultar.</td></tr>
+    <tr><td>«La ruta ya está cerrada en esas fechas…» o «Las fechas se solapan con un cierre ya realizado…»</td><td>Esos días ya se cerraron. Elige otras fechas o reabre ese cierre primero.</td></tr>
+    <tr><td>«La fecha de fin no puede ser anterior a la de inicio.»</td><td>Corrige «Hasta».</td></tr>
+    <tr><td>«El periodo termina el … y podrá cerrarse a partir del …»</td><td>No se cierran días futuros. Puedes cerrar hasta hoy, como máximo.</td></tr>
+    <tr><td>«La ruta no tiene Administrador responsable de capital válido.»</td><td>Pide al SuperAdmin que asigne el responsable de la ruta.</td></tr>
+  </table></div>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+  <h2><span class="n">6</span>Qué pasa después de cerrar</h2>
+  <ul>
+    <li><b>Las fechas cerradas quedan congeladas.</b> Nadie puede registrar recaudos, gastos, ventas, entregas de Base ni cuadres <b>con fecha dentro del periodo cerrado</b>. Si alguien lo intenta, ve: «El periodo de esta ruta está cerrado: no admite movimientos de esa fecha. Si se cerró hoy, regístralo mañana y entrará en el próximo cierre.»</li>
+    <li><b>Si cerraste hasta hoy,</b> lo que llegue tarde hoy se registra <b>mañana</b> y entra en el próximo cierre.</li>
+    <li><b>El cierre no mueve dinero:</b> la Base disponible y la Base de los trabajadores siguen igual que antes de cerrar.</li>
+    <li><b>Faltantes y sobrantes de los cuadres</b> se resuelven en el menú <span class="ui">Diferencias</span>, aunque la ruta ya esté cerrada.</li>
+  </ul>
+  <h3>¿Te equivocaste? Reabrir un cierre</h3>
+  <ol>
+    <li>En <span class="ui">Cierres realizados</span>, toca <span class="ui">Reabrir</span> en ese periodo.</li>
+    <li>Escribe el <b>motivo</b> (obligatorio, mínimo 10 letras; queda guardado para siempre).</li>
+    <li>Corrige lo que haga falta. Las fechas vuelven a admitir correcciones.</li>
+    <li>Vuelve a hacer el cierre: queda como <b>versión 2</b>, y la versión 1 se ve como «sustituida». Nada se borra.</li>
+  </ol>
+  <div class="tip">💡 Para corregir <b>un solo abono</b> de un día cerrado no hace falta reabrir: usa <span class="ui">Ajustes de pago</span>.</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+  <h2><span class="n">7</span>Qué ve el cobrador</h2>
+  <p>El cobrador <b>no ve</b> la pantalla de Liquidación. En su app tiene <span class="ui">Mi efectivo</span>, que es su lado del cuadre:</p>
+  <ul>
+    <li>«Dinero bajo tu responsabilidad desde tu último cuadre», con el faltante anterior, la Base recibida y devuelta, su recaudo, sus desembolsos y sus gastos.</li>
+    <li>El total, <b>«Efectivo a entregar»</b>, debe coincidir con el «Esperado a entregar» que tú ves al cuadrarlo. Así los dos cuentan lo mismo.</li>
+    <li>Sus <b>últimos cuadres</b>, marcados como Exacto, Faltante o Sobrante.</li>
+    <li>En <span class="ui">Gastos</span> separa los gastos nuevos de los «Ya incluidos en cierres».</li>
+  </ul>
+  <div class="ok">✅ <b>Consejo:</b> antes de contar el dinero, pídele al cobrador que abra <b>Mi efectivo</b> y comparen los dos números. Si coinciden, el cuadre sale exacto.</div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+  <h2><span class="n">8</span>Preguntas frecuentes</h2>
+  <details><summary>¿Tengo que cerrar la ruta todos los días?</summary><p>No. Puedes cerrar un día o una semana completa: el rango es libre. Lo importante es no dejar días sin cerrar (ADEX ya propone el «Desde» para eso). Los <b>cuadres</b>, en cambio, conviene hacerlos cada vez que el trabajador entrega el dinero.</p></details>
+  <details><summary>¿Puedo cerrar la ruta si un cobrador no ha cuadrado?</summary><p>El sistema lo permite y en la confirmación te avisa de los faltantes. Pero si cierras <b>hasta hoy</b>, ese cobrador ya no podrá cuadrar hoy: tendrá que ser mañana. Por eso el orden recomendado es <b>cuadres primero</b>.</p></details>
+  <details><summary>¿El cierre de ruta toma el dinero o lo pasa a algún lado?</summary><p>No. El dinero se mueve en los <b>cuadres</b> (lo entregado vuelve a la Base disponible) y en las entregas o devoluciones de Base. El cierre solo deja constancia y congela.</p></details>
+  <details><summary>Un cobrador me entregó de menos. ¿Qué hago?</summary><p>Cierra el cuadre con lo que realmente entregó y escribe el motivo. El faltante queda pendiente: aparece en su próximo cuadre como «Arrastre pendiente» y en <span class="ui">Diferencias</span>, donde decides cómo se resuelve.</p></details>
+  <details><summary>Me equivoqué al escribir el valor entregado.</summary><p>El responsable de capital puede <span class="ui">Reabrir</span> el último cuadre de esa persona, con un motivo, y hacerlo de nuevo. Solo se puede si ese día todavía no está dentro de un cierre de ruta; si lo está, primero hay que reabrir el cierre.</p></details>
+  <details><summary>El cobrador registró un abono tarde y dice «El periodo de esta ruta está cerrado».</summary><p>Ese día ya se cerró. Regístralo al día siguiente: entra en el próximo cierre. Si de verdad debe quedar con la fecha anterior, el responsable puede reabrir el cierre.</p></details>
+  <details><summary>Soy SuperAdmin y no veo los botones.</summary><p>Es a propósito. El SuperAdmin ve todo, pero no opera el dinero de las rutas. Lo hace el Administrador responsable de capital de cada ruta.</p></details>
+  <details><summary>¿Qué es el «CSV»?</summary><p>Un archivo para abrir en Excel con el resumen del cierre. El de la tabla «Cierres realizados» es el documento guardado al cerrar y ya no cambia.</p></details>
+</section>
+
+<section>
+  <h2>📖 Palabras clave</h2>
+  <div class="wrap"><table>
+    <tr><td><b>Base disponible</b></td><td>Dinero de la ruta guardado por el Administrador, listo para entregar a los trabajadores.</td></tr>
+    <tr><td><b>Base del trabajador</b></td><td>Dinero de la ruta que tiene en la mano un cobrador o supervisor.</td></tr>
+    <tr><td><b>Recaudo</b></td><td>Lo que se cobró a los clientes.</td></tr>
+    <tr><td><b>Desembolso</b></td><td>Dinero entregado a un cliente por un préstamo nuevo.</td></tr>
+    <tr><td><b>Faltante / Sobrante</b></td><td>Diferencia entre lo esperado y lo que se entregó en un cuadre.</td></tr>
+    <tr><td><b>Responsable de capital</b></td><td>El Administrador que maneja el dinero de esa ruta. Es el único que cierra la ruta.</td></tr>
+  </table></div>
+</section>
+
+<p class="foot">ADEX Soluciones · Manual de Liquidaciones · noviembre 2026 · Los nombres y valores de los ejemplos son ficticios.</p>
+</main>
+</body>
+</html>
