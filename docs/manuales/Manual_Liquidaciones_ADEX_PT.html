@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Manual de Liquidações · ADEX</title>
+<style>
+:root{
+  --blue:#2563eb;--blue2:#1d4ed8;--ink:#0f172a;--mut:#475569;--line:#e2e8f0;--bg:#f1f5f9;--card:#fff;
+  --green:#059669;--greenL:#d1fae5;--red:#dc2626;--redL:#fee2e2;--amber:#b45309;--amberL:#fef3c7;--soft:#eff6ff;--violet:#6d28d9;--violetL:#ede9fe;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5;-webkit-text-size-adjust:100%}
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;padding:10px 16px;background:linear-gradient(135deg,var(--blue),var(--blue2));color:#fff}
+.top .logo{font-weight:900;font-size:20px;letter-spacing:1px}
+.top .ttl{font-size:14px;opacity:.9;line-height:1.35}
+main{max-width:820px;margin:0 auto;padding:16px 16px 60px}
+.hero{background:#fff;border-radius:20px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:14px}
+.hero h1{font-size:27px;margin-bottom:8px}
+.hero p{color:#334155;font-size:15.5px}
+.toc{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
+.toc a{background:var(--soft);color:var(--blue2);text-decoration:none;font-weight:600;font-size:13.5px;padding:6px 12px;border-radius:999px}
+section{background:#fff;border-radius:20px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.06);margin-top:14px;scroll-margin-top:64px}
+h2{font-size:21px;margin-bottom:10px;display:flex;align-items:center;gap:10px}
+h2 .n{flex:none;width:30px;height:30px;border-radius:50%;background:var(--blue);color:#fff;font-size:15px;display:flex;align-items:center;justify-content:center}
+h3{font-size:16px;margin:18px 0 8px}
+p{margin:8px 0;font-size:15px}
+ul,ol{margin:8px 0 8px 22px;font-size:15px}
+li{margin:4px 0}
+b{font-weight:700}
+.ui{display:inline-block;background:#f1f5f9;border:1px solid var(--line);border-radius:6px;padding:0 6px;font-weight:600;font-size:13.5px;white-space:nowrap}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0}
+@media (max-width:640px){.two{grid-template-columns:1fr}}
+.card{border:2px solid var(--line);border-radius:16px;padding:14px}
+.card.a{border-color:#bfdbfe;background:#f8fbff}
+.card.b{border-color:#ddd6fe;background:#fbfaff}
+.card h2{font-size:16px;margin-bottom:6px;display:flex;gap:8px;align-items:center}
+.card .big{font-size:14.5px;color:#334155}
+.tip,.warn,.ok,.info{border-radius:12px;padding:10px 12px;margin:10px 0;font-size:14.5px}
+.tip{background:var(--soft);color:#1e3a8a}
+.warn{background:var(--amberL);color:#78350f}
+.ok{background:var(--greenL);color:#064e3b}
+.info{background:var(--violetL);color:#3b0764}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:14px}
+th,td{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;vertical-align:top}
+th{background:#f8fafc;font-size:13px;color:#475569}
+.wrap{overflow-x:auto}
+/* Pasos del orden */
+.steps{display:flex;flex-direction:column;gap:10px;margin:12px 0}
+.step{display:flex;gap:12px;align-items:flex-start;border:2px solid var(--line);border-radius:14px;padding:12px}
+.step .num{flex:none;width:34px;height:34px;border-radius:50%;background:var(--blue);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center}
+.step.s2 .num{background:#475569}.step.s3 .num{background:var(--violet)}
+/* Pantallas simuladas */
+.screen{border:1px solid #cbd5e1;border-radius:14px;background:#f8fafc;margin:12px 0;overflow:hidden;font-size:13px}
+.screen .bar{background:#fff;border-bottom:1px solid var(--line);padding:8px 12px;font-weight:700;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.screen .bar small{font-weight:500;color:var(--mut)}
+.screen .in{padding:12px}
+.tabs{display:flex;gap:6px;margin-bottom:10px}
+.tabs span{padding:6px 10px;border-radius:8px;background:#e2e8f0;font-weight:600}
+.tabs span.on{background:var(--blue);color:#fff}
+.fields{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.fld{background:#fff;border:1px solid #cbd5e1;border-radius:8px;padding:4px 8px;min-width:110px}
+.fld i{display:block;font-style:normal;font-size:11px;color:var(--mut)}
+.fld.ro{background:#f1f5f9;color:#64748b}
+.btns{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.btn{padding:6px 10px;border-radius:8px;font-weight:700;background:#fff;border:1px solid #cbd5e1}
+.btn.p{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.g{background:var(--green);border-color:var(--green);color:#fff}
+.rows{background:#fff;border:1px solid var(--line);border-radius:10px;padding:4px 10px;margin:8px 0}
+.r{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--line)}
+.r:last-child{border-bottom:0}
+.r.t{font-weight:800}
+.r b{white-space:nowrap}
+.plus{color:#047857}.minus{color:var(--red)}
+.banner{border-radius:8px;padding:6px 10px;font-weight:800;text-align:center;margin:8px 0}
+.banner.ex{background:var(--greenL);color:#047857}.banner.fa{background:var(--redL);color:#b91c1c}.banner.so{background:var(--amberL);color:#92400e}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:700;background:var(--greenL);color:#047857}
+.lbl{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#b45309;color:#fff;font-size:11.5px;font-weight:800;margin-right:4px;flex:none}
+.legend li{list-style:none;margin-left:-22px;display:flex;gap:6px;align-items:flex-start}
+details{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:8px 0;background:#fff}
+summary{font-weight:700;cursor:pointer;font-size:15px}
+details p{margin-top:8px}
+.foot{color:var(--mut);font-size:12.5px;text-align:center;margin-top:20px}
+@media print{.top{position:static}.toc{display:none}section{box-shadow:none;border:1px solid #ddd;break-inside:avoid-page}body{background:#fff}}
+</style>
+</head>
+<body>
+<div class="top"><div class="logo">ADEX</div><div class="ttl">Manual de Liquidações<br><small>Para Administradores e Supervisores</small></div></div>
+<main>
+
+<div class="hero">
+  <h1>📅 Liquidações, explicadas de forma simples</h1>
+  <p>Em <b>Liquidación</b> há duas coisas diferentes, cada uma com sua aba:</p>
+  <div class="two">
+    <div class="card a"><h2>💵 Acerto por trabalhador</h2><div class="big">É <b>contar o dinheiro</b> que <b>uma pessoa</b> (o cobrador ou o supervisor) te entrega e comparar com o que o sistema diz que ela deveria trazer.</div></div>
+    <div class="card b"><h2>🔒 Fechamento da rota</h2><div class="big">É <b>fechar um período da rota</b> (um dia ou uma semana): os números ficam <b>congelados</b> e não entram mais movimentos com essas datas.</div></div>
+  </div>
+  <p>👉 Ordem recomendada: <b>primeiro os acertos de cada trabalhador, depois o fechamento da rota.</b></p>
+  <div class="tip">🇪🇸 No app, os botões e as telas aparecem em espanhol. Neste manual eles aparecem <span class="ui">assim</span>, exatamente como você vai vê-los. «Cuadre por trabajador» = acerto por trabalhador; «Cierre de ruta» = fechamento da rota.</div>
+  <div class="toc">
+    <a href="#s1">1. Diferenças</a><a href="#s2">2. O que vem primeiro?</a><a href="#s3">3. Onde e quem</a>
+    <a href="#s4">4. Acerto passo a passo</a><a href="#s5">5. Fechamento passo a passo</a><a href="#s6">6. Depois do fechamento</a>
+    <a href="#s7">7. O cobrador</a><a href="#s8">8. Perguntas</a>
+  </div>
+</div>
+
+<!-- 1 -->
+<section id="s1">
+  <h2><span class="n">1</span>Acerto e fechamento: qual a diferença</h2>
+  <div class="wrap"><table>
+    <tr><th></th><th>💵 Acerto por trabalhador</th><th>🔒 Fechamento da rota</th></tr>
+    <tr><td><b>De quem?</b></td><td>De <b>uma pessoa</b>: um cobrador ou um supervisor</td><td>Da <b>rota inteira</b></td></tr>
+    <tr><td><b>O que se faz?</b></td><td>Você digita quanto dinheiro ela entregou e o sistema diz se está <b>exato</b>, se <b>falta</b> ou se <b>sobra</b></td><td>Você revisa o resumo do período e o <b>congela</b></td></tr>
+    <tr><td><b>Movimenta dinheiro?</b></td><td><b>Sim:</b> o valor entregue volta para a <b>Base disponible</b> da rota</td><td><b>Não.</b> Só registra e congela os números</td></tr>
+    <tr><td><b>Que período cobre?</b></td><td>Desde o <b>último acerto</b> até agora</td><td>As datas que você escolher em «Desde» e «Hasta»</td></tr>
+    <tr><td><b>Com que frequência?</b></td><td>Sempre que o trabalhador entrega o dinheiro, normalmente no fim do dia</td><td>Como funcionar a sua operação: <b>diário</b> ou <b>semanal</b></td></tr>
+    <tr><td><b>Dá para desfazer?</b></td><td>Sim, com <span class="ui">Reabrir</span> e um motivo (só o último acerto)</td><td>Sim, com <span class="ui">Reabrir</span> e um motivo</td></tr>
+  </table></div>
+  <div class="tip">💡 Pense assim: o <b>acerto</b> é a contagem das notas com cada cobrador. O <b>fechamento</b> é assinar o caderno da rota no fim do período.</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+  <h2><span class="n">2</span>O que se faz primeiro?</h2>
+  <div class="steps">
+    <div class="step"><div class="num">1</div><div><b>Acerto por trabalhador</b>, com cada cobrador e cada supervisor que tenha dinheiro da rota. Você recebe o dinheiro, conta e fecha o acerto dele.</div></div>
+    <div class="step s2"><div class="num">2</div><div><b>Confira</b> se ninguém ficou sem acerto. Na aba «Cierre de ruta», o quadro <span class="ui">Cuadres de trabajadores (informativo)</span> mostra quantos acertos foram feitos e se ficaram faltas ou sobras.</div></div>
+    <div class="step s3"><div class="num">3</div><div><b>Fechamento da rota</b>: você gera o resumo do período e fecha.</div></div>
+  </div>
+  <div class="warn">⚠️ <b>Por que nessa ordem?</b> O ADEX não obriga, mas se você fechar a rota <b>até hoje</b> antes de fazer os acertos, esse dia fica congelado. Não será possível registrar <b>nesse dia</b> o acerto de um trabalhador, nem um recebimento, uma despesa ou uma entrega de Base: teria que ficar para amanhã.</div>
+  <div class="ok">✅ <b>Rotina sugerida no fim do dia:</b> os cobradores chegam → você faz o acerto de cada um → quando todos estiverem acertados, fecha a rota (se fecha diário) ou deixa para o fim da semana (se fecha semanal).</div>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+  <h2><span class="n">3</span>Por onde se faz e quem pode</h2>
+  <h3>Caminhos para entrar</h3>
+  <ol>
+    <li><b>Menu principal:</b> grupo <span class="ui">Control</span> → <span class="ui">Liquidación</span>. É o caminho principal.</li>
+    <li><b>Pela rota:</b> <span class="ui">Rutas</span> → no cartão da rota, <span class="ui">Ver detalle</span> → aba <span class="ui">Liquidaciones</span>. Ali aparecem o último fechamento da rota e o último acerto de cada trabalhador, com dois atalhos:
+      <ul>
+        <li><span class="ui">Ir a la liquidación de la ruta</span>: abre Liquidación com essa rota já escolhida.</li>
+        <li><span class="ui">Cuadrar</span>, ao lado de cada trabalhador: abre o acerto dele direto.</li>
+      </ul></li>
+    <li><b>Por Transferencias:</b> depois de entregar Base a um trabalhador, o link <span class="ui">Ver su cuadre</span> leva ao acerto dele.</li>
+    <li><b>Por um Escritório (Oficina):</b> no detalhe, o link <span class="ui">Ver liquidaciones</span>.</li>
+    <li><b>Supervisor (pelo celular):</b> no app dele existe <span class="ui">Cuadre de trabajadores</span> para fazer o acerto dos cobradores da rota dele.</li>
+  </ol>
+  <h3>Quem pode fazer o quê</h3>
+  <div class="wrap"><table>
+    <tr><th>Pessoa</th><th>Acerto por trabalhador</th><th>Fechamento da rota</th></tr>
+    <tr><td><b>Administrador responsável pelo capital</b> da rota</td><td>✅ Faz o acerto, reabre, entrega Base</td><td>✅ Fecha e reabre</td></tr>
+    <tr><td><b>Supervisor</b> dessa rota</td><td>✅ Faz o acerto dos cobradores, recebe devoluções e faz repasses. ❌ Não reabre nem entrega Base</td><td>❌</td></tr>
+    <tr><td><b>Outro Administrador</b> (não responsável)</td><td>👁️ Só consulta</td><td>👁️ Só consulta</td></tr>
+    <tr><td><b>SuperAdmin</b></td><td>👁️ Só consulta</td><td>👁️ Só consulta</td></tr>
+    <tr><td><b>Cobrador</b></td><td colspan="2">Não vê Liquidación; vê o dinheiro dele em <span class="ui">Mi efectivo</span> (seção 7)</td></tr>
+  </table></div>
+  <div class="info">🔐 <b>Ninguém faz o acerto do próprio dinheiro.</b> Se um supervisor também tem dinheiro, o acerto dele é fechado por outra pessoa autorizada. O sistema avisa: «Este es tu propio cuadre: debe cerrarlo otra persona autorizada».</div>
+  <p>Quem é o responsável pelo capital? Veja em <span class="ui">Rutas</span>, em «Usuarios asignados»: é o Administrador marcado como <i>(responsable de capital)</i>.</p>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+  <h2><span class="n">4</span>Acerto por trabalhador, passo a passo</h2>
+  <p><b>Liquidación</b> → aba <span class="ui">Cuadre por trabajador</span> → escolha a <b>Rota (Ruta)</b> e depois o <b>Trabalhador (Trabajador)</b>.</p>
+
+  <div class="screen">
+    <div class="bar">Liquidaciones <small>Cierre de ruta y cuadre por trabajador</small></div>
+    <div class="in">
+      <div class="tabs"><span>Cierre de ruta</span><span class="on">Cuadre por trabajador</span></div>
+      <div class="fields"><div class="fld"><i>Ruta</i>Rota Centro ▾</div><div class="fld"><i>Trabajador</i>Carlos Souza · Cobrador ▾</div></div>
+      <div style="font-size:12px;color:#475569"><span class="lbl">A</span>Desde el último cuadre: 10/11 18:40 · Hasta: ahora</div>
+      <div class="rows">
+        <div class="r"><span><span class="lbl">B</span>Arrastre pendiente (faltante anterior)</span><b>R$ 0</b></div>
+        <div class="r"><span><span class="lbl">C</span>(+) Base recibida</span><b class="plus">R$ 500</b></div>
+        <div class="r"><span>(−) Base devuelta / traspasada</span><b class="minus">R$ 0</b></div>
+        <div class="r"><span><span class="lbl">D</span>(+) Recaudo</span><b class="plus">R$ 450</b></div>
+        <div class="r"><span>(−) Desembolsado</span><b class="minus">R$ 0</b></div>
+        <div class="r"><span>(−) Gastos</span><b class="minus">R$ 30</b></div>
+        <div class="r t"><span><span class="lbl">E</span>Esperado a entregar</span><b style="color:#1d4ed8">R$ 920</b></div>
+      </div>
+      <div class="btns"><span class="btn g"><span class="lbl">F</span>Entregar Base</span><span class="btn">Recibir devolución</span><span class="btn">Traspasar a otro trabajador</span></div>
+      <div class="fields"><div class="fld" style="min-width:160px"><i><span class="lbl">G</span>Entregado</i>R$ 920</div></div>
+      <div class="banner ex">CUADRE EXACTO</div>
+      <div class="btns"><span class="btn p"><span class="lbl">H</span>Cerrar cuadre</span></div>
+    </div>
+  </div>
+
+  <ul class="legend">
+    <li><span class="lbl">A</span><span><b>Período do acerto.</b> Vai do último acerto dessa pessoa até este momento; não se escolhem datas.</span></li>
+    <li><span class="lbl">B</span><span><b>Arrastre pendiente (falta pendente):</b> o que <b>faltou</b> no acerto anterior. Volta a ser somado até ser resolvido.</span></li>
+    <li><span class="lbl">C</span><span><b>Base recebida / devolvida:</b> dinheiro que a rota deu para ele trabalhar (para emprestar ou para despesas) e o que ele já devolveu ou passou para outro trabalhador.</span></li>
+    <li><span class="lbl">D</span><span><b>Recebido (Recaudo), desembolsado e despesas (Gastos):</b> o que ele cobrou, o que entregou em empréstimos novos e o que gastou, conforme registrou no app.</span></li>
+    <li><span class="lbl">E</span><span><b>Esperado a entregar:</b> o dinheiro que ele <b>deveria ter na mão</b>. Falta anterior + Base recebida − devolvida + recebido − desembolsado − despesas.</span></li>
+    <li><span class="lbl">F</span><span><b>Botões de Base</b> (não são o acerto):
+      <ul>
+        <li><span class="ui">Entregar Base</span>: você dá dinheiro da rota para ele sair para trabalhar. Só o responsável pelo capital faz isso.</li>
+        <li><span class="ui">Recibir devolución</span>: ele devolve parte da Base sem fazer o acerto.</li>
+        <li><span class="ui">Traspasar a otro trabajador</span>: passa dinheiro de um trabalhador para outro da mesma rota.</li>
+      </ul>
+      Os três pedem valor e motivo, e mudam o «Esperado a entregar».</span></li>
+    <li><span class="lbl">G</span><span><b>Entregado:</b> digite o que você <b>contou de verdade</b> em notas.</span></li>
+    <li><span class="lbl">H</span><span><b>Cerrar cuadre</b> → aparece o resumo <span class="ui">Confirmar cuadre</span> → <span class="ui">Confirmar cierre</span>. Pronto: o acerto fica salvo e o dinheiro entregue volta para a <b>Base disponible</b> da rota.</span></li>
+  </ul>
+
+  <h3>Os três resultados possíveis</h3>
+  <div class="banner ex">CUADRE EXACTO</div>
+  <p>Entregou exatamente o esperado. Não há mais nada a fazer.</p>
+  <div class="banner fa">FALTANTE R$ 20</div>
+  <p>Entregou <b>menos</b>. Você precisa escrever o <b>motivo da diferença</b> (mínimo 10 letras). A falta <b>não se perde</b>: aparece como «Arrastre pendiente» no próximo acerto dele e também no menu <span class="ui">Diferencias</span>, onde você decide o que fazer com ela.</p>
+  <div class="banner so">SOBRANTE R$ 15</div>
+  <p>Entregou <b>mais</b>. Também pede motivo. A sobra fica registrada à parte: <b>não</b> vira saldo a favor do trabalhador nem Base da rota. Ela é resolvida em <span class="ui">Diferencias</span>.</p>
+
+  <h3>Outras coisas desta aba</h3>
+  <ul>
+    <li><b>Cartão «Base del trabajador»</b>, no alto: quanto dinheiro todos os trabalhadores da rota têm na mão hoje, pessoa por pessoa.
+      <ul>
+        <li>Mostra <span class="ui">Cuadra</span> se tudo bate ou <span class="ui">Revisar</span> se há algo pendente.</li>
+        <li>Mostra também as faltas pendentes e as sobras registradas.</li>
+        <li>A «Cartera activa» que aparece ali <b>não é dinheiro em espécie</b>: é o que os clientes ainda devem.</li>
+      </ul></li>
+    <li><b>Aviso «N trabajador(es) con faltante pendiente»</b>: lembra quem ainda tem falta de acertos anteriores.</li>
+    <li><b>Lista «Cuadres de trabajadores en esta ruta»</b>: o histórico com data, esperado, entregue, diferença, quem fechou e motivo.</li>
+    <li><b><span class="ui">Reabrir</span> um acerto</b>: só o responsável pelo capital, só o <b>último</b> acerto dessa pessoa e com motivo. Não é possível se esse dia já entrou num <b>fechamento da rota</b>.</li>
+    <li>Se, enquanto você faz o acerto, o cobrador registrar algo novo, o ADEX avisa «Las cifras cambiaron desde la vista previa» e recalcula. Confira o esperado de novo.</li>
+  </ul>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+  <h2><span class="n">5</span>Fechamento da rota, passo a passo</h2>
+  <p><b>Liquidación</b> → aba <span class="ui">Cierre de ruta</span> → escolha a <b>Rota (Ruta)</b>.</p>
+
+  <div class="screen">
+    <div class="bar">Liquidaciones <small><span class="btn" style="padding:2px 8px">CSV</span> <span class="btn" style="padding:2px 8px"><span class="lbl">C</span>Generar</span> <span class="btn p" style="padding:2px 8px"><span class="lbl">E</span>Hacer cierre</span></small></div>
+    <div class="in">
+      <div class="tabs"><span class="on">Cierre de ruta</span><span>Cuadre por trabajador</span></div>
+      <div class="fields"><div class="fld"><i>Ruta</i>Rota Centro ▾</div><div class="fld ro"><i><span class="lbl">B</span>Desde</i>08/11/2026 🔒</div><div class="fld"><i>Hasta</i>11/11/2026</div></div>
+      <div class="banner" style="background:#eff6ff;color:#1d4ed8;font-weight:600;text-align:left"><span class="lbl">A</span>Último cierre: 01/11 – 07/11</div>
+      <div class="rows">
+        <div class="r"><span><span class="lbl">D</span>Base del trabajador al inicio</span><b>R$ 900</b></div>
+        <div class="r"><span>(+) Entregas de Base</span><b class="plus">R$ 1.500</b></div>
+        <div class="r"><span>(+) Recaudo</span><b class="plus">R$ 4.210</b></div>
+        <div class="r"><span>(+) Transferencias entrantes</span><b class="plus">R$ 0</b></div>
+        <div class="r"><span>(−) Desembolsos</span><b class="minus">R$ 3.000</b></div>
+        <div class="r"><span>(−) Gastos</span><b class="minus">R$ 190</b></div>
+        <div class="r"><span>(−) Transferencias salientes</span><b class="minus">R$ 0</b></div>
+        <div class="r"><span>(−) Devoluciones de Base</span><b class="minus">R$ 2.320</b></div>
+        <div class="r t"><span>Base del trabajador al cierre</span><b>R$ 1.100</b></div>
+      </div>
+      <div class="rows" style="background:#f8fafc"><div class="r"><span><b>Cuadres de trabajadores (informativo)</b><br>3 cuadre(s) · entregado R$ 2.320 · faltantes R$ 0 · sobrantes R$ 0</span></div></div>
+      <div style="font-weight:700;margin-top:10px"><span class="lbl">F</span>Cierres realizados</div>
+      <div class="rows">
+        <div class="r"><span>01/11 – 07/11 (v1)</span><span><span class="tag">Período cerrado</span> CSV · Reabrir</span></div>
+        <div class="r"><span>25/10 – 31/10 (v1)</span><span><span class="tag">Período cerrado</span> CSV · Reabrir</span></div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="legend">
+    <li><span class="lbl">A</span><span><b>Último cierre:</b> até que data a rota foi fechada da última vez.</span></li>
+    <li><span class="lbl">B</span><span><b>Desde / Hasta (de / até):</b>
+      <ul>
+        <li>«Desde» é preenchido sozinho com o dia seguinte ao último fechamento e <b>não pode ser alterado</b>, para não ficarem dias sem fechar nem dias fechados duas vezes.</li>
+        <li>«Hasta» sugere <b>hoje</b>; você pode escolher um dia anterior.</li>
+        <li>Se a rota nunca foi fechada, «Desde» sugere a segunda-feira desta semana e pode ser alterado.</li>
+      </ul></span></li>
+    <li><span class="lbl">C</span><span><span class="ui">Generar</span>: mostra o resumo do período. <b>Não salva nada</b>: é só para conferir, e você pode gerar quantas vezes quiser.</span></li>
+    <li><span class="lbl">D</span><span><b>O resumo</b> conta o dinheiro que esteve <b>nas mãos dos trabalhadores</b> durante o período:
+      <ul>
+        <li><b>No início:</b> o que eles tinham quando o período começou.</li>
+        <li><b>(+)</b> a Base que você entregou, o que eles receberam dos clientes e as transferências que chegaram.</li>
+        <li><b>(−)</b> o que emprestaram (desembolsos), o que gastaram, o que transferiram e o que devolveram para você, por exemplo nos acertos.</li>
+        <li><b>No fechamento:</b> o que ainda está nas mãos deles. Se você fez o acerto de todos e eles entregaram tudo, esse número fica perto de zero ou na Base que você deixou para o dia seguinte.</li>
+      </ul>
+      No alto aparecem também três números rápidos: Recaudo, Gastos e Base del trabajador al cierre.</span></li>
+    <li><span class="lbl">E</span><span><span class="ui">Hacer cierre</span>: abre uma janela de confirmação com a rota, as datas, a situação e os números. Confira e toque em <span class="ui">Hacer cierre y congelar cifras</span>. Aparece «Cierre realizado (versión 1). Las cifras quedan congeladas.»</span></li>
+    <li><span class="lbl">F</span><span><b>Cierres realizados (fechamentos feitos):</b> o histórico.
+      <ul>
+        <li><span class="ui">CSV</span> baixa o documento desse fechamento tal como foi salvo.</li>
+        <li><span class="ui">Reabrir</span> desfaz o fechamento; veja a seção 6.</li>
+        <li>A versão (v1, v2…) aumenta cada vez que um período é reaberto e fechado de novo.</li>
+      </ul></span></li>
+  </ul>
+
+  <h3>Por que o botão «Hacer cierre» está cinza ou não aparece?</h3>
+  <div class="wrap"><table>
+    <tr><th>O que acontece</th><th>O que fazer</th></tr>
+    <tr><td>O botão <b>não aparece</b></td><td>Você não é o Administrador responsável pelo capital dessa rota, ou é SuperAdmin. Só pode consultar.</td></tr>
+    <tr><td>«La ruta ya está cerrada en esas fechas…» ou «Las fechas se solapan con un cierre ya realizado…»</td><td>Esses dias já foram fechados. Escolha outras datas ou reabra esse fechamento primeiro.</td></tr>
+    <tr><td>«La fecha de fin no puede ser anterior a la de inicio.»</td><td>Corrija o «Hasta».</td></tr>
+    <tr><td>«El periodo termina el … y podrá cerrarse a partir del …»</td><td>Não se fecham dias futuros. Você pode fechar até hoje, no máximo.</td></tr>
+    <tr><td>«La ruta no tiene Administrador responsable de capital válido.»</td><td>Peça ao SuperAdmin para definir o responsável da rota.</td></tr>
+  </table></div>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+  <h2><span class="n">6</span>O que acontece depois de fechar</h2>
+  <ul>
+    <li><b>As datas fechadas ficam congeladas.</b> Ninguém pode registrar recebimentos, despesas, vendas, entregas de Base nem acertos <b>com data dentro do período fechado</b>. Quem tentar vê: «El periodo de esta ruta está cerrado: no admite movimientos de esa fecha. Si se cerró hoy, regístralo mañana y entrará en el próximo cierre.»</li>
+    <li><b>Se você fechou até hoje,</b> o que chegar tarde hoje é registrado <b>amanhã</b> e entra no próximo fechamento.</li>
+    <li><b>O fechamento não movimenta dinheiro:</b> a Base disponible e a Base dos trabalhadores continuam iguais ao que eram antes de fechar.</li>
+    <li><b>Faltas e sobras dos acertos</b> são resolvidas no menu <span class="ui">Diferencias</span>, mesmo com a rota já fechada.</li>
+  </ul>
+  <h3>Errou? Reabrir um fechamento</h3>
+  <ol>
+    <li>Em <span class="ui">Cierres realizados</span>, toque em <span class="ui">Reabrir</span> nesse período.</li>
+    <li>Escreva o <b>motivo</b> (obrigatório, mínimo 10 letras; fica salvo para sempre).</li>
+    <li>Corrija o que for preciso. As datas voltam a aceitar correções.</li>
+    <li>Faça o fechamento de novo: ele fica como <b>versão 2</b>, e a versão 1 aparece como «sustituida». Nada é apagado.</li>
+  </ol>
+  <div class="tip">💡 Para corrigir <b>um único pagamento</b> de um dia fechado não é preciso reabrir: use <span class="ui">Ajustes de pago</span>.</div>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+  <h2><span class="n">7</span>O que o cobrador vê</h2>
+  <p>O cobrador <b>não vê</b> a tela de Liquidación. No app dele existe <span class="ui">Mi efectivo</span>, que é o lado dele do acerto:</p>
+  <ul>
+    <li>«Dinero bajo tu responsabilidad desde tu último cuadre», com a falta anterior, a Base recebida e devolvida, o que ele recebeu, os desembolsos e as despesas.</li>
+    <li>O total, <b>«Efectivo a entregar»</b>, deve bater com o «Esperado a entregar» que você vê ao fazer o acerto. Assim os dois contam a mesma coisa.</li>
+    <li>Os <b>últimos acertos</b> dele, marcados como Exacto, Faltante ou Sobrante.</li>
+    <li>Em <span class="ui">Gastos</span>, as despesas novas aparecem separadas das «Ya incluidos en cierres» (já incluídas em fechamentos).</li>
+  </ul>
+  <div class="ok">✅ <b>Dica:</b> antes de contar o dinheiro, peça ao cobrador para abrir <b>Mi efectivo</b> e comparem os dois números. Se baterem, o acerto sai exato.</div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+  <h2><span class="n">8</span>Perguntas frequentes</h2>
+  <details><summary>Preciso fechar a rota todos os dias?</summary><p>Não. Você pode fechar um dia ou uma semana inteira: o intervalo é livre. O importante é não deixar dias sem fechar (o ADEX já sugere o «Desde» para isso). Já os <b>acertos</b> convém fazer sempre que o trabalhador entrega o dinheiro.</p></details>
+  <details><summary>Posso fechar a rota se um cobrador ainda não fez o acerto?</summary><p>O sistema permite e, na confirmação, avisa das faltas. Mas se você fechar <b>até hoje</b>, esse cobrador não poderá fazer o acerto hoje: terá que ser amanhã. Por isso a ordem recomendada é <b>acertos primeiro</b>.</p></details>
+  <details><summary>O fechamento da rota pega o dinheiro ou manda para algum lugar?</summary><p>Não. O dinheiro se movimenta nos <b>acertos</b> (o valor entregue volta para a Base disponible) e nas entregas ou devoluções de Base. O fechamento só registra e congela.</p></details>
+  <details><summary>Um cobrador me entregou a menos. O que eu faço?</summary><p>Feche o acerto com o que ele realmente entregou e escreva o motivo. A falta fica pendente: aparece no próximo acerto dele como «Arrastre pendiente» e em <span class="ui">Diferencias</span>, onde você decide como resolver.</p></details>
+  <details><summary>Errei ao digitar o valor entregue.</summary><p>O responsável pelo capital pode <span class="ui">Reabrir</span> o último acerto dessa pessoa, com um motivo, e fazê-lo de novo. Só é possível se esse dia ainda não estiver dentro de um fechamento da rota; se estiver, primeiro é preciso reabrir o fechamento.</p></details>
+  <details><summary>O cobrador registrou um pagamento atrasado e aparece «El periodo de esta ruta está cerrado».</summary><p>Esse dia já foi fechado. Registre no dia seguinte: ele entra no próximo fechamento. Se realmente precisar ficar com a data anterior, o responsável pode reabrir o fechamento.</p></details>
+  <details><summary>Sou SuperAdmin e não vejo os botões.</summary><p>É de propósito. O SuperAdmin vê tudo, mas não opera o dinheiro das rotas. Quem faz isso é o Administrador responsável pelo capital de cada rota.</p></details>
+  <details><summary>O que é o «CSV»?</summary><p>Um arquivo para abrir no Excel com o resumo do fechamento. O da tabela «Cierres realizados» é o documento salvo no momento do fechamento e não muda mais.</p></details>
+</section>
+
+<section>
+  <h2>📖 Palavras-chave</h2>
+  <div class="wrap"><table>
+    <tr><td><b>Base disponible</b></td><td>Dinheiro da rota guardado pelo Administrador, pronto para entregar aos trabalhadores.</td></tr>
+    <tr><td><b>Base del trabajador</b></td><td>Dinheiro da rota que um cobrador ou supervisor tem na mão.</td></tr>
+    <tr><td><b>Recaudo</b></td><td>O que foi recebido dos clientes.</td></tr>
+    <tr><td><b>Desembolso</b></td><td>Dinheiro entregue a um cliente num empréstimo novo.</td></tr>
+    <tr><td><b>Faltante / Sobrante</b></td><td>Falta ou sobra: a diferença entre o esperado e o que foi entregue num acerto.</td></tr>
+    <tr><td><b>Responsable de capital</b></td><td>O Administrador que cuida do dinheiro dessa rota. É o único que fecha a rota.</td></tr>
+  </table></div>
+</section>
+
+<p class="foot">ADEX Soluciones · Manual de Liquidações · novembro de 2026 · Os nomes e valores dos exemplos são fictícios.</p>
+</main>
+</body>
+</html>
