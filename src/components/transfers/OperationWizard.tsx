@@ -21,7 +21,7 @@ import { db } from '@/lib/db'
 import { registerCapital, registerTransfer, registerWithdrawal } from '@/services/routeFundsService'
 import { getRouteCashReconciliation } from '@/services/routeCashReconciliation'
 import { getAdminAvailableCapital } from '@/services/capitalControlService'
-import type { Route, SaleRequest, User } from '@/models/types'
+import type { Route, User } from '@/models/types'
 
 type Paso = 'tipo' | 'datos' | 'confirmar' | 'resultado'
 
@@ -81,9 +81,6 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial,
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [resultado, setResultado] = useState<Resultado | null>(null)
-  /** Entrega de capital: solicitud de venta para la que se anticipa (opcional; no crea venta). */
-  const [solicitudId, setSolicitudId] = useState('')
-  const [solicitudes, setSolicitudes] = useState<SaleRequest[]>([])
 
   const disponibles = availableOperations(user, routes, users, tenantId, modo)
   const rutas = kind ? routesForOperation(kind, user, routes, users, tenantId, modo) : []
@@ -113,7 +110,7 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial,
     const rs = k ? routesForOperation(k, user, routes, users, tenantId, modo) : []
     setRouteId(inicial?.routeId && rs.some(r => r.id === inicial.routeId) ? inicial.routeId : rs.length === 1 ? rs[0].id : '')
     setTrabajadorId(inicial?.trabajadorId ?? '')
-    setDestinoId(''); setImporte(0); setConcepto(''); setConfirmado(false); setError(null); setResultado(null); setSolicitudId('')
+    setDestinoId(''); setImporte(0); setConcepto(''); setConfirmado(false); setError(null); setResultado(null)
     setOperationId(generateId())
   }, [open])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -141,17 +138,6 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial,
     return () => { alive = false }
   }, [open, kind, user, tenantId])
 
-  // Solicitudes de venta del trabajador en la ruta (referencia opcional de la entrega).
-  useEffect(() => {
-    let alive = true
-    setSolicitudes([]); setSolicitudId('')
-    if (!open || kind !== 'entregar-capital' || !routeId || !trabajadorId) return
-    db.saleRequests.where('routeId').equals(routeId).toArray().then(list => {
-      if (alive) setSolicitudes(list.filter(r => r.tenantId === tenantId && r.collectorId === trabajadorId && (r.status === 'pending' || r.status === 'approved')))
-    })
-    return () => { alive = false }
-  }, [open, kind, routeId, trabajadorId, tenantId])
-
   const necesitaTrabajador = !!kind && (entregaKinds.includes(kind) || devolucionKinds.includes(kind))
   const nombres = {
     ruta: rutaNombre(routeId), rutaDestino: destinoId ? rutaNombre(destinoId) : '',
@@ -171,7 +157,7 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial,
     setKind(k)
     const rs = routesForOperation(k, user, routes, users, tenantId, modo)
     setRouteId(rs.length === 1 ? rs[0].id : '')
-    setDestinoId(''); setTrabajadorId(''); setImporte(0); setConcepto(''); setConfirmado(false); setError(null); setSolicitudId('')
+    setDestinoId(''); setTrabajadorId(''); setImporte(0); setConcepto(''); setConfirmado(false); setError(null)
     setOperationId(generateId())
     setPaso('datos')
   }
@@ -183,7 +169,7 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial,
       let id = ''
       let createdAt = ''
       if (kind === 'entregar-capital') {
-        const d = await deliverCapitalToWorker({ actor: user, tenantId, routeId, recipientUserId: trabajadorId, amount: importe, motivo: concepto, operationId, saleRequestId: solicitudId || undefined })
+        const d = await deliverCapitalToWorker({ actor: user, tenantId, routeId, recipientUserId: trabajadorId, amount: importe, motivo: concepto, operationId })
         id = d.capital.id; createdAt = d.capital.createdAt
       } else if (kind === 'devolver-capital') {
         const d = await returnCapitalFromWorker({ actor: user, tenantId, routeId, fromUserId: trabajadorId, amount: importe, motivo: concepto, operationId })
@@ -285,11 +271,7 @@ export function OperationWizard({ open, onClose, onDone, routes, users, inicial,
                 options={trabajadores.map(u => ({ value: u.id, label: `${formatPersonName(u.nombre)} · ${rol(u)}` }))}
                 placeholder={!routeId ? 'Primero elige la ruta' : trabajadores.length ? 'Seleccionar trabajador' : devolucionKinds.includes(kind) ? 'Nadie tiene efectivo a cargo en esta ruta' : 'Sin trabajadores activos en la ruta'} />
             )}
-            {kind === 'entregar-capital' && solicitudes.length > 0 && (
-              <Select label="¿Para qué solicitud de venta? (opcional)" value={solicitudId} onChange={e => setSolicitudId(e.target.value)}
-                options={solicitudes.map(r => ({ value: r.id, label: `${money(r.amount)} · ${r.status === 'approved' ? 'aprobada' : 'pendiente'} · ${r.startDate}` }))}
-                placeholder="Sin referencia" hint="Solo deja constancia: la entrega no crea la venta ni una deuda del cliente." />
-            )}
+            {/* 3.44 (Helmer 2026-11-11): se quitó la referencia opcional a una solicitud de venta (solo era una nota que nadie veía). */}
             {kind === 'ruta-ruta' && receptoresDestino.length > 0 && (
               <Select label="¿Quién recibe el efectivo en la ruta destino? (opcional)" value={trabajadorId}
                 onChange={e => setTrabajadorId(e.target.value)}
