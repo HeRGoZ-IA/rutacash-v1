@@ -98,6 +98,7 @@ export const DEXIE_V16_TABLES: readonly TableMap[] = [
       { column: 'retired_at', reason: 'ADEX Online v1 (0011): retirada definitiva de una Empresa Demo (reinicio = recreación). Solo Demos; NULL en toda empresa importada' },
       { column: 'capital_model', reason: 'R74 Base por Ruta (0034): modelo de capital de la empresa (admin_pool | migrating | route_base); lo cambia solo el SuperAdmin con adex.capital_model_transition. Toda importación es admin_pool' },
       { column: 'route_base_since', reason: 'R74 Base por Ruta (0034): instante del corte al modelo route_base (NULL en los demás modelos)' },
+      { column: 'collector_pin', reason: '3.45 (0056): derivación PBKDF2 del PIN de bloqueo de la app del Cobrador (NULL = 0000). No existe en Dexie; toda importación es NULL' },
     ],
   },
   {

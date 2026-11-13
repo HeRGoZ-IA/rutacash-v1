@@ -23,7 +23,7 @@ import { capabilitiesOf } from '../authz/cleanRules.ts';
 import {
   claimSession, createMember, deleteMember, listMembers, logout, memberAccessLink, memberResetLink, setMemberOfficeRoutes, setMemberRoutes, setMemberStatus, updateMember,
 } from '../identity/service.ts';
-import { COMPANY_FIELDS, getCompany, updateCompany } from '../structure/company.ts';
+import { COMPANY_FIELDS, getCollectorLock, getCompany, setCollectorPin, updateCompany } from '../structure/company.ts';
 import {
   assignOfficeRoutes, createOffice, deleteOffice, getOffice, listOffices, setOfficeStatus, updateOffice,
 } from '../structure/offices.ts';
@@ -134,6 +134,9 @@ const ENDPOINTS: readonly Endpoint[] = [
   // ---------- Empresa ----------
   { method: 'GET', pattern: /^\/v1\/company$/, fields: null, handler: () => async (c, ctx) => ok(await getCompany(c, ctx)) },
   { method: 'PATCH', pattern: /^\/v1\/company$/, fields: COMPANY_FIELDS, handler: () => async (c, ctx, b) => ok(await updateCompany(c, ctx, b)) },
+  // 3.45 (0056): PIN de bloqueo de la app del Cobrador (lo fija la oficina; el Cobrador se copia su derivación).
+  { method: 'PUT', pattern: /^\/v1\/company\/collector-pin$/, fields: ['pin'], handler: () => async (c, ctx, b) => ok(await setCollectorPin(c, ctx, b)) },
+  { method: 'GET', pattern: /^\/v1\/collector-lock$/, fields: null, handler: () => async (c, ctx) => ok(await getCollectorLock(c, ctx)) },
   // ---------- Oficinas ----------
   { method: 'GET', pattern: /^\/v1\/offices$/, fields: null, handler: () => async (c, ctx) => ok({ offices: await listOffices(c, ctx) }) },
   { method: 'POST', pattern: /^\/v1\/offices$/, fields: ['name', 'code'], idempotent: 'offices.create',

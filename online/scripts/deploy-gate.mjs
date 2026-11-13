@@ -36,7 +36,9 @@ const REQUIRED = ['settlements-v1', 'clean-online-v1', 'access-links-v1', 'payme
   // 3.28 (0053): «Dar por perdida», deshacer y recuperación (0053 → API → frontend).
   'credit-write-off-v1',
   // 0054: venta directa del Cobrador hasta el monto de su ruta (0054 → API → frontend).
-  'collector-direct-sale-v1'];
+  'collector-direct-sale-v1',
+  // 3.45 (0056): PIN de bloqueo de la app del Cobrador.
+  'collector-lock-v1'];
 // Ronda 40: si este despliegue activa la Plataforma Owner (VITE_ADEX_CONTROL_URL), el
 // servicio Owner publicado tiene que servir la versión que usan las pantallas originales.
 const CONTROL = (process.env.VITE_ADEX_CONTROL_URL ?? '').replace(/\/$/, '');

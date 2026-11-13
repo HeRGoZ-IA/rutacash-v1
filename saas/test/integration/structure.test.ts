@@ -51,6 +51,35 @@ describe('Fase 2 · estructura de empresa, Oficinas, rutas y categorías', () =>
     assert.notEqual(c2.rows[0].phone, '+55 11 0000-0000', 'la otra empresa no cambia');
   });
 
+  test('STR-002 · 3.45 PIN de bloqueo del Cobrador: inicial 0000, lo cambia la oficina, el Cobrador se copia la derivación y nunca el PIN', async () => {
+    assert.equal((await anaCob('GET', '/v1/collector-lock')).body['pin'], null, 'valor inicial: 0000 (null)');
+    assert.equal((await ana('GET', '/v1/company')).body['collectorPinIsDefault'], true);
+    for (const pin of ['123', '12345', 'abcd', 1234]) {
+      assert.equal((await ana('PUT', '/v1/company/collector-pin', { pin })).body['error'], 'INVALID_PIN', String(pin));
+    }
+    assert.equal((await anaCob('PUT', '/v1/company/collector-pin', { pin: '1111' })).status, 403, 'el Cobrador no lo cambia');
+    assert.equal((await fabio('PUT', '/v1/company/collector-pin', { pin: '1111' })).status, 403, 'el Secretario no lo cambia');
+    assert.equal((await ana('GET', '/v1/collector-lock')).status, 403, 'solo el Cobrador lo lee');
+    const set = await ana('PUT', '/v1/company/collector-pin', { pin: '4821' });
+    assert.equal(set.status, 200, JSON.stringify(set.body));
+    assert.deepEqual(set.body, { collectorPinIsDefault: false });
+    assert.equal((await bruno('GET', '/v1/company')).body['collectorPinIsDefault'], false);
+    const lock = (await anaCob('GET', '/v1/collector-lock')).body;
+    const parts = String(lock['pin']).split('$');
+    assert.equal(parts[0], 'pbkdf2-sha256');
+    const { pbkdf2Sync } = await import('node:crypto');
+    const derive = (pin: string) => pbkdf2Sync(pin, Buffer.from(parts[2]!, 'base64'), Number(parts[1]), 32, 'sha256').toString('base64');
+    assert.equal(derive('4821'), parts[3], 'la derivación comprueba el PIN');
+    assert.notEqual(derive('0000'), parts[3]);
+    assert.equal(lock['idleMinutes'], 10);
+    assert.equal(lock['maxAttempts'], 5);
+    const raw = JSON.stringify((await db.admin.query(`select description, before_data, after_data from adex.audit_log where action = 'UPDATE_COLLECTOR_PIN' and company_id = $1`, [companyId('c1')])).rows);
+    assert.ok(raw.includes('collectorPinIsDefault') && !raw.includes('4821'), 'la auditoría registra el cambio sin el PIN');
+    assert.equal((await db.admin.query('select collector_pin from adex.companies where id = $1', [companyId('c2')])).rows[0].collector_pin, null, 'la otra empresa no cambia');
+    assert.equal((await ana('PUT', '/v1/company/collector-pin', { pin: '0000' })).body['collectorPinIsDefault'], true, 'elegir 0000 vuelve al valor inicial');
+    assert.equal((await anaCob('GET', '/v1/collector-lock')).body['pin'], null);
+  });
+
   test('STR-010 · Oficinas: alta, nombre y código únicos por empresa (sin mayúsculas ni espacios), también en paralelo', async () => {
     const created = await bruno('POST', '/v1/offices', { name: 'Oficina Sur', code: 'OF-S' });
     assert.equal(created.status, 201, JSON.stringify(created.body));

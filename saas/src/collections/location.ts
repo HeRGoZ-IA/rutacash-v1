@@ -232,6 +232,17 @@ export async function collectorDirectSaleReady(pool: pg.Pool): Promise<boolean> 
   }
 }
 
+/** 3.45 (0056): PIN de bloqueo de la app del Cobrador. */
+export async function collectorLockReady(pool: pg.Pool): Promise<boolean> {
+  try {
+    const r = await pool.query<{ ok: boolean }>(
+      "select exists (select 1 from information_schema.columns where table_schema = 'adex' and table_name = 'companies' and column_name = 'collector_pin') as ok");
+    return r.rows[0]?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Bloque A post-R73 (0032): rectificación con pagos y reaplicación de pagos anulados. */
 export async function rectificationPaymentsReady(pool: pg.Pool): Promise<boolean> {
   for (let i = 1; i <= 3; i++) {

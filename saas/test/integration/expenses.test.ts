@@ -439,6 +439,13 @@ describe('Fase 5 · gastos', () => {
         assert.doesNotMatch(text, /localStorage|sessionStorage|openDatabase|balance|saldo/i, 'sin saldos ni otros almacenes');
         continue;
       }
+      // 3.45: el bloqueo con PIN del Cobrador guarda en el dispositivo SOLO la derivación del PIN de la empresa y su
+      // propio estado (última actividad, bloqueado, intentos), en dos claves por membresía. Nada de dinero.
+      if (rel === 'runtime/CollectorLock.tsx') {
+        assert.deepEqual([...text.matchAll(/`(adex-[a-z-]+):\$\{m\}`/g)].map((m) => m[1]), ['adex-collector-lock-cfg', 'adex-collector-lock'], 'solo dos claves');
+        assert.doesNotMatch(text, /sessionStorage|openDatabase|indexedDB|balance|saldo|amount|minor/i, 'nada de dinero ni otros almacenes');
+        continue;
+      }
       if (/localStorage|sessionStorage|openDatabase/.test(text)) hits.push(f);
       // Ronda 24/25: el puente (`bridge/`) SUSTITUYE la base local de CLEAN y por eso lleva sus
       // nombres (`RutaCashDB`, el sustituto bloqueante de `dexie`); fuera del puente siguen prohibidos.

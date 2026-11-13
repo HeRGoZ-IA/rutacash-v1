@@ -21,6 +21,8 @@ import { nowISO, today } from '@/lib/formatters'
 import { logAction } from '@/services/auditService'
 import { can } from '@/lib/permissions'
 import type { Tenant, TenantStatus } from '@/models/types'
+// 3.45: PIN de bloqueo de la app del Cobrador.
+import { CollectorPinCard } from '../../../runtime/CollectorPinCard.tsx'
 
 // Monedas de Suramérica y Centroamérica (Paquete 2.5).
 // La moneda guardada sigue siendo el código ISO (string), 100% compatible
@@ -233,6 +235,9 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+      {/* ADEX Online (3.45): PIN de bloqueo de la app del Cobrador (SuperAdmin y Administrador). */}
+      {showEmpresaForm && <CollectorPinCard />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Datos del sistema */}

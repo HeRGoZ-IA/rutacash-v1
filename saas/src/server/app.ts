@@ -48,7 +48,10 @@ export const API_FEATURES: readonly string[] = ['collections-v1', 'settlements-v
   'credit-write-off-v1',
   // 0054 (propietario 2026-11-09): «Venta sin autorización hasta» por ruta para el Cobrador. Solo si 0054 está aplicada (start.ts).
   // En la puerta de Vercel: sin él, el campo de la ruta no se guardaría y la venta directa del Cobrador fallaría.
-  'collector-direct-sale-v1'];
+  'collector-direct-sale-v1',
+  // 3.45 (0056): PIN de bloqueo de la app del Cobrador. Solo si 0056 está aplicada (start.ts).
+  // En la puerta de Vercel: sin él, el Cobrador no podría copiarse el PIN ni el Administrador cambiarlo.
+  'collector-lock-v1'];
 
 /** Módulos del servicio Owner (servicio aparte, ver controlStart.ts). */
 // Ronda 54: `owner-email-v1` (cambio del correo del SuperAdmin) solo si 0024 está aplicada (controlStart.ts).

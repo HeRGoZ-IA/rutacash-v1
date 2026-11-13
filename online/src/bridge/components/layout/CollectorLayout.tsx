@@ -33,6 +33,8 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { OfflineBanners, OfflineIndicator } from '../../../offline/ui.tsx';
 import { summary, useOffline } from '../../../offline/state.ts';
+// 3.45: bloqueo con PIN tras 10 minutos sin uso (solo Cobrador).
+import { CollectorLock } from '../../../runtime/CollectorLock.tsx';
 
 /**
  * Layout OPERATIVO compartido (App Cobrador y App Supervisor).
@@ -215,6 +217,9 @@ export function CollectorLayout() {
       <main className={cn('flex-1 overflow-y-auto', onSelectPage ? '' : 'pb-16')}>
         <Outlet />
       </main>
+
+      {/* ADEX Online (3.45): pantalla de bloqueo neutra; tapa la app sin desmontarla (los envíos pendientes siguen). */}
+      {isCollector && <CollectorLock onExhausted={doLogout} />}
 
       {/* ADEX Online (Ronda 62): cerrar sesión con operaciones sin sincronizar. */}
       <Modal open={confirmLogout} onClose={() => setConfirmLogout(false)} title="Operaciones sin sincronizar" size="sm"

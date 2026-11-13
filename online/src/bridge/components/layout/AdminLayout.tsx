@@ -35,6 +35,8 @@ import { BrandLogo } from '@/components/ui/BrandLogo'
 // ADEX Online: contexto y sesión del servidor.
 import { Repeat, Loader2 } from 'lucide-react'
 import { leaveContext, useRuntime } from '../../../runtime/session.ts'
+// 3.45: aviso mientras el PIN de bloqueo del Cobrador siga en 0000.
+import { CollectorPinNotice } from '../../../runtime/CollectorPinCard.tsx'
 import { useNotificationCount } from '../../../runtime/capitalRequests.ts'
 import { isRouteBaseUi, useCapitalModel } from '../../../runtime/routeBase/api.ts'
 
@@ -272,6 +274,9 @@ export function AdminLayout() {
             Empresa Demo · todos los clientes y movimientos son ficticios
           </div>
         )}
+
+        {/* ADEX Online (3.45): PIN de bloqueo del Cobrador todavía en 0000. */}
+        <CollectorPinNotice settingsPath="/admin/settings" />
 
         {/* Offline banner */}
         {!isOnline && (
